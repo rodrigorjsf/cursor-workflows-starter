@@ -421,7 +421,12 @@ export default defineWorkflow<Args>({
           "",
           "### Fatias (uma por ciclo red → green)",
           "",
-          ...plan.slices.map((s, i) => `${i + 1}. ${s.behavior} (seam: ${s.seam}; teste: ${s.testIdea})`),
+          ...plan.slices.map(
+            (s, i) => `${i + 1}. ${s.behavior} (seam: ${s.seam}; teste: ${s.testIdea})${i >= SLICE_CAP[tier] ? " (adiada)" : ""}`,
+          ),
+          ...(plan.slices.length > SLICE_CAP[tier]
+            ? ["", `As fatias marcadas como adiadas ficam fora pelo limite do tier ${tier} (${SLICE_CAP[tier]} fatias): o PR só referencia a issue, sem fechá-la.`]
+            : []),
           "",
           `Comando de teste: \`${ctx.args.testCommand ?? plan.testCommand}\``,
           ...(plan.rationale ? ["", `### Por que este desenho\n\n${plan.rationale}`] : []),

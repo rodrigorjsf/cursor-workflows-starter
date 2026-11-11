@@ -203,3 +203,15 @@ test("globToRegExp: ** atravessa pastas, * não", () => {
   assert.ok(!globToRegExp("test/*").test("test/x/y.js"));
   assert.ok(!globToRegExp("**/*.test.*").test("src/math.js"));
 });
+
+test("o comentário das seams avisa quais fatias ficam fora pelo limite do tier", async () => {
+  issue(["complexity:medium"]);
+  const slice = (n: number) => ({ behavior: `comportamento ${n}`, seam: "math.subtract", testIdea: `ideia ${n}` });
+  fx.handlers.planejar = (o) => submit(o, { ...PLAN, slices: [1, 2, 3, 4, 5].map(slice) });
+  const r = await run({});
+  assert.equal((r.result as any).status, "seams-proposed");
+  const comment = gh().comments[0]!;
+  assert.match(comment, /4\. comportamento 4 .*\(adiada/);
+  assert.match(comment, /limite do tier MED \(3 fatias\)/);
+  assert.doesNotMatch(comment, /3\. comportamento 3 .*\(adiada/);
+});
