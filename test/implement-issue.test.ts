@@ -70,10 +70,21 @@ test("trava de segredos: bloqueia auth.json, .env, chaves crsr_/sk- e a chave sa
   }
 });
 
-import { reviewFixPrompt } from "../workflows/implement-issue.js";
+import { CODE_INSTRUCTIONS, FIX_INSTRUCTIONS, REFACTOR_INSTRUCTIONS, SCOPE_RULE, TEST_INSTRUCTIONS } from "../workflows/implement-issue/prompts.js";
 
-test("toda etapa que escreve leva a regra de escopo, inclusive a correção de review", () => {
-  const prompt = reviewFixPrompt([{ severity: "blocking", issue: "x" }]);
-  assert.match(prompt, /Altere apenas arquivos dentro deste repositório/);
-  assert.match(prompt, /"severity": "blocking"/);
+test("toda etapa que escreve leva a regra de escopo: teste, código, correção e refactor", () => {
+  for (const p of [TEST_INSTRUCTIONS, CODE_INSTRUCTIONS, FIX_INSTRUCTIONS, REFACTOR_INSTRUCTIONS]) assert.ok(p.includes(SCOPE_RULE));
+  assert.match(SCOPE_RULE, /Altere apenas arquivos dentro deste repositório/);
+});
+
+test("runTests não se engana com node --test aninhado (NODE_TEST_CONTEXT do runner)", () => {
+  // Medido: dentro de um runner, `node --test` herda NODE_TEST_CONTEXT=child-v8 e sai com 0 mesmo com teste falhando.
+  const dir = mkdtempSync(join(tmpdir(), "wf-nested-"));
+  mkdirSync(join(dir, "test"));
+  writeFileSync(join(dir, "test", "a.test.mjs"), 'import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("falha", () => assert.equal(1, 2));\n');
+  try {
+    assert.equal(runTests("node --test", dir).ok, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
