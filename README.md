@@ -24,16 +24,17 @@ Cursor, que não tem esse runtime nativo. O porquê e a comparação completa es
 > - **Medido:** login sem navegador local; catálogo de modelos; saída estruturada; o que `settingSources` carrega
 >   (`AGENTS.md`, hooks do Cursor e do Claude Code, `.cursor/mcp.json`); guarda contra recursão; cache entre agentes;
 >   tokens por tipo; dashboard só em localhost; Claude Code lista as tools MCP e lê `CLAUDE.md` → `@AGENTS.md`.
-> - **Ponta a ponta:** só o caminho **LOW** da versão anterior do `implement-issue` (implementar → testes → commit →
->   PR → resume sem repetir), rodado a partir da árvore publicada na 0.1.0. O fluxo atual (TDD fatia a fatia e
->   review em três eixos em todo tier; plano e checkpoint de seams em MED e HIGH) ainda não rodou contra a API real.
+> - **Ponta a ponta:** caminhos **LOW** e **MED** do `implement-issue` (TDD fatia a fatia conferido pelo código,
+>   review em três eixos, PR no template; no MED, seams aprovadas em dois runs e fatias além do teto adiadas):
+>   339 mil tokens no LOW e 887 mil no MED, resume sem repetir etapas (§13 das verificações). O HIGH ("Design it
+>   twice") e o review que bloqueia só têm testes offline.
 > - **Custo:** nesta conta o `getUsage()` do SDK responde `feature_unavailable` para agentes locais, então o kit não
 >   lê o custo real: o teto em centavos fica cego e só o de tokens protege.
 > - **Incidente:** num teste anterior, uma etapa sem sandbox editou um arquivo fora do repositório. Foi corrigido e
 >   retestado, mas leia [SECURITY.md](SECURITY.md) antes de usar.
-> - **Pendente:** Cursor IDE (MCP, skills, `/run-workflow`), sandbox, caminhos MED e HIGH, hooks do time e MDM,
+> - **Pendente:** Cursor IDE (MCP, skills, `/run-workflow`), sandbox, caminho HIGH, hooks do time e MDM,
 >   políticas de admin, macOS e Windows. Lista completa no §12 das verificações.
-> - 74 testes offline (SDK falso), rodados no Node 22.13.0 e no 22.23.4.
+> - 79 testes offline (SDK falso), rodados no Node 22.13.0 e no 22.23.4.
 
 ## Estrutura
 

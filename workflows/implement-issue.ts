@@ -54,15 +54,16 @@
 //   LOW   típico 6  (1 fatia + 3 reviews + PR)                     pior caso ~26
 //   MED   típico 11 (plano; até 3 fatias + 3 reviews + PR)          pior caso ~39
 //   HIGH  típico 20 (3 designers + juiz; até 5 fatias + ...)        pior caso ~55
-// Tokens: o LOW antigo (sem TDD nem review) mediu ~80 mil; meça este com --max-tokens baixo e anote aqui.
+// Tokens medidos (docs/research/verificacoes-locais.md §13): LOW 339 mil (6 agentes); MED 887 mil nos dois runs
+// (11 agentes, 3 fatias e 2 adiadas).
 // Fora de agentes (zero tokens): leitura da issue, roteamento, git, testes, diff, comentário, commit e PR.
 //
 // IDs de modelo: confirme os seus com `npm run models`. Os defaults são modelos do Cursor (Composer e Grok), que os
 // planos pagos da The X Subscription incluem na franquia semanal; modelos de terceiros exigem crédito pré-pago
 // (medido). Em planos legados e no Enterprise, troque por WF_MODEL_* (só o ID; os params ficam de fora).
 //
-// STATUS: o fluxo TDD + review em três eixos + PR no template ainda não rodou contra a API real; a versão anterior
-// (implementar → testes → PR) foi verificada no caminho LOW (docs/research/verificacoes-locais.md §9).
+// STATUS: LOW e MED verificados contra a API real em 2026-11-11 (docs/research/verificacoes-locais.md §13). HIGH, o
+// review que bloqueia e o alreadySatisfied só têm testes offline.
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

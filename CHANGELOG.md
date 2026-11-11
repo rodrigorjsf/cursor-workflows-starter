@@ -22,10 +22,20 @@
 - **Etapa red descarta o que não é teste.** No run real da issue #7, o `composer-2.5` implementou junto com o teste
   nas duas tentativas e o run parou em `tdd-violation`. Agora o código descarta a mudança fora dos testes e confere
   o red só com o teste; `tdd-violation` e `test-not-red` trazem o motivo em `reason`.
+- **Logs do SDK fora do stdout do CLI.** O SDK escreve linhas `INFO` por `console.log`, que sujavam o JSON do `wf run`;
+  o desvio para o stderr, que só o servidor MCP tinha, virou um módulo comum.
+- **Comentário das seams marca as fatias adiadas** pelo teto do tier, e a Evidence do PR começa numa linha inteira
+  (os dois vistos nos runs reais).
 - **`approveSeams` sem plano proposto** no progresso do run (outro `runId` ou outro `--cwd`) para com
   `seams-not-proposed`, em vez de aprovar um plano recalculado que ninguém viu.
 - **Teto padrão por workflow:** `budget` na definição vale quando o run não informa `--max-tokens`/`--max-cents`;
   o `implement-issue` declara 3 milhões de tokens.
+
+### Verificado
+
+- Caminhos LOW e MED contra a API real ([PR #9](https://github.com/rodrigorjsf/wf-sandbox/pull/9) e
+  [PR #10](https://github.com/rodrigorjsf/wf-sandbox/pull/10) no `wf-sandbox`): 339 mil e 887 mil tokens, dentro das
+  estimativas; resume sem refazer etapas; nada escrito fora do repositório (`docs/research/verificacoes-locais.md` §13).
 
 ### Corrigido
 
