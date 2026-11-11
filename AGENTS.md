@@ -30,5 +30,8 @@ Leem este arquivo:
 - Ao rodar um workflow pelo chat, use `/run-workflow`: dispare e acompanhe, sem refazer etapas nem editar arquivos
   enquanto o job roda.
 - Commit, push e PR são feitos pelo código do workflow, não por você.
+- Testes contra a API real: prefira os modelos incluídos no plano (`composer-2.5`, Grok, `default`). Modelos que
+  consomem cota paga são permitidos quando o teste precisar deles. Sempre com `--max-tokens` e `--max-cents`.
+  Política completa em `CONTRIBUTING.md`.
 - Métricas ficam em `~/.cursor-workflows/metrics.db` (`npm run stats`, `npm run dash`). Não envie o banco nem um
   export feito com `--no-anonymize` para fora da máquina do usuário.

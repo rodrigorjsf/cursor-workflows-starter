@@ -114,6 +114,7 @@ antes ([01 §6](docs/01-instalacao.md#6-habilitar-no-cursor-ide)). Depois, digit
 | [Relatório de pesquisa](docs/research/relatorio-pesquisa.md) | Por que o kit existe: Workflow do Claude Code × Cursor SDK, autenticação e cobrança, paridade |
 | [Verificações locais](docs/research/verificacoes-locais.md) | O que foi testado contra a doc ao vivo e a API real, com evidência, e o que ficou pendente |
 | [Segurança](SECURITY.md) · [Proveniência](PROVENANCE.md) · [Mudanças](CHANGELOG.md) | Riscos e como reportar; de onde o kit veio; o que mudou na 0.1.0 |
+| [Contribuindo](CONTRIBUTING.md) | Testes antes do PR e a política de custo dos testes contra a API real |
 
 ## Transparência: o que este kit faz por baixo
 

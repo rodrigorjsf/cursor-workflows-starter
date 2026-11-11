@@ -291,7 +291,9 @@ aponta onde o texto corrigido está agora: docs do kit (`docs 0N`), relatório d
 
 ## 12. Não executado (pendências)
 
-O que ficou sem teste nesta sessão. Cada linha diz por que e como testar.
+O que ficou sem teste nesta sessão. Cada linha diz por que e como testar. Para os itens que exigem modelos que
+consomem cota paga (crédito pré-pago, uso além da franquia), o uso está autorizado: veja a
+[política de custo](../../CONTRIBUTING.md#testes-contra-a-api-real-política-de-custo).
 
 | Item | Por quê | Como testar |
 |---|---|---|
