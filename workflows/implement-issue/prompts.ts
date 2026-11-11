@@ -64,6 +64,8 @@ export const TEST_INSTRUCTIONS = `Escreva UM teste que falha para a fatia abaixo
 - O valor esperado vem de uma fonte independente (literal conhecido, exemplo do enunciado), nunca recalculado do jeito
   que o código calcularia: teste tautológico passa por construção e não prova nada.
 - O nome do teste diz O QUE o comportamento é, não COMO.
+- Se o teste falha no import porque o símbolo ainda não existe, isso já é o red: deixe o código como está. O
+  workflow descarta qualquer mudança fora dos arquivos de teste nesta etapa.
 - Se o pedido muda um comportamento que testes existentes fixam, atualize esses testes agora: eles fazem parte do
   red, e depois desta etapa só o código muda.
 - Altere só arquivos de teste. ${NO_GIT}

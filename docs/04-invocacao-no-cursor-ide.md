@@ -73,12 +73,20 @@ verificados. Também há relatos, não verificados, de falhas em execuções hea
 mesmo tempo; nem a doc do CLI nem os tópicos do fórum consultados tratam disso. Os dois pontos seguem em aberto.
 Por isso `wait` usa um timeout menor que 300 s, e `start` roda destacado.
 
-### 3. Skill explícita
+### 3. Skill `run-workflow` e a trava de disparo
 
-`.agents/skills/run-workflow/SKILL.md` usa `disable-model-invocation: true`. Ela só entra no contexto quando o
-usuário digita `/run-workflow`, então o modelo não decide sozinho se o workflow roda
-([DOC](https://cursor.com/docs/skills)). A skill instrui o agente a
-apenas disparar e acompanhar: não refazer etapas nem editar arquivos enquanto o job roda.
+`.agents/skills/run-workflow/SKILL.md` é invocável pelo modelo: a descrição dela fica no contexto e o agente a
+carrega antes de chamar `start_workflow`, pelo `/run-workflow` ou por um pedido em prosa ("implementa a issue 7").
+A skill ensina a disparar, acompanhar e repassar: tratar checkpoint, custo desconhecido e `secret-blocked`, e não
+mexer nos arquivos enquanto o job roda.
+
+Ela já foi só do usuário (`disable-model-invocation: true`), mas isso não travava nada: o servidor MCP anuncia
+`start_workflow` com o `whenToUse` de cada workflow, e um pedido em prosa chegava à tool sem passar pela skill. A
+trava humana de um workflow pago é a **aprovação da chamada `start_workflow`**, e ela depende do Run Mode
+([DOC](https://cursor.com/docs/agent/security/run-modes)): em Allowlist, pede sempre, se `start_workflow` não estiver
+na allowlist; em Auto-review, um classificador decide; em Run Everything, não pede. Ponha na allowlist só
+`wait_workflow` e `get_workflow_status`. No Claude Code, a trava é o prompt de permissão da tool
+`mcp__workflows__start_workflow`, que `permissions.allow` não deve liberar. Sem essa trava, sobram os tetos de custo.
 
 ### 4. Hooks (complementares, opcionais)
 
@@ -177,7 +185,7 @@ dentro do kit e depois copie.
 | Eixo | Cursor | Claude Code |
 |---|---|---|
 | Onde registrar o MCP server | `.cursor/mcp.json` (projeto) ou `~/.cursor/mcp.json` | `.mcp.json` (projeto) ou `claude mcp add`. Em sessão interativa, o servidor do `.mcp.json` pede aprovação: até lá, `claude mcp list` mostra `workflows: node_modules/.bin/tsx src/mcp-server.ts - ⏸ Pending approval` (verificado em 2026-11-11). Em `claude -p`, no Agent SDK e em sessões na nuvem fora de um projeto, ele é carregado sem perguntar ([DOC](https://code.claude.com/docs/en/mcp)) |
-| Disparo explícito | Skill com `disable-model-invocation: true` (`/run-workflow`) [DOC](https://cursor.com/docs/skills) | Idem (via `.claude/skills/`) [DOC](https://code.claude.com/docs/en/skills), ou chamada direta da tool MCP |
+| Trava de disparo | Aprovação de `start_workflow` pelo Run Mode (fora da allowlist) [DOC](https://cursor.com/docs/agent/security/run-modes); a skill `run-workflow` guia o agente | Prompt de permissão de `mcp__workflows__start_workflow` (fora de `permissions.allow`) [DOC](https://code.claude.com/docs/en/permissions); a skill chega via `.claude/skills/` |
 | Workflow nativo | **Não existe**. Este kit preenche a lacuna | Ferramenta `Workflow`, `/deep-research`, `ultracode`, `.claude/workflows/` ([DOC](https://code.claude.com/docs/en/workflows)) |
 | Como o contexto chega aos agentes das etapas | `settingSources: ["project","team","mdm"]` carrega `AGENTS.md`, `.cursor/rules`, skills, hooks e MCP do projeto. Medido em 2026-11-11: o `AGENTS.md` só chega com `"project"`, e é opt-in ([02 §5](02-configuracao-inicial.md#5-contexto-do-projeto-nos-agentes)) | Os agentes das etapas são do Cursor mesmo quando o Claude Code dispara. A doc não diz se as runs locais do SDK leem o `CLAUDE.md` (o agente do Cursor IDE e os cloud agents leem, segundo as release notes: [DOC](https://cursor.com/docs/release-notes)); por isso as regras ficam em `AGENTS.md` |
 | Hooks que alcançam as etapas | Hooks do projeto, do time e MDM (via `settingSources`). A doc diz que o Cursor carrega hooks do Claude Code, com `loop_limit` `null` em `stop`/`subagentStop` ([DOC](https://cursor.com/docs/hooks)). Nas runs locais do SDK, a release note 1.0.40 do SDK diz que um hook `PreToolUse` de um `settings.json` do Claude Code que nega uma chamada de tool bloqueia essa chamada ([DOC](https://cursor.com/docs/release-notes/sdk)); não fala de cloud. Medido em 2026-11-11 numa run local com `"project"` ([verificações locais](research/verificacoes-locais.md) §7): os hooks de `.cursor/hooks.json` (`beforeShellExecution`, `postToolUse`) rodaram, e um `PreToolUse` de `.claude/settings.json` (`matcher: "*"`, `exit 2`) bloqueou o comando; o hook viu os nomes `Shell` e `MCP:submit_result`. Com `[]`, nenhum rodou. Se o `~/.claude/settings.json` também é lido não foi testado. Hooks de `team` e `mdm` não foram testados (conta pessoal) | Para auditar ou bloquear o disparo, use um hook `PreToolUse` com `matcher: "mcp__workflows__start_workflow"` e `"onFailure": "block"` (v2.1.295+) ([DOC](https://code.claude.com/docs/en/hooks); ver §4). Nas etapas, o Cursor SDK roda os `PreToolUse` do `.claude/settings.json` do projeto e respeita o deny (medido, ver coluna ao lado) |

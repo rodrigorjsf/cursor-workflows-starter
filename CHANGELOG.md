@@ -12,10 +12,18 @@
   testes. Novo status de resultado `pending` nas métricas para checkpoints.
 - **Skill `workflow-authoring` renomeada para `cursor-workflow-authoring`.** O Claude Code tem uma skill embutida
   com o nome antigo, e a do projeto a substituía.
-- **Skills reescritas** pela referência `writing-for-agents` (mattpocock/skills): descrições de uma linha nas
-  invocadas pelo usuário, critério de pronto em cada passo, regras sem duplicar `docs/08`, e os casos de origem
-  da `/skill-to-workflow` num arquivo à parte (`ORIGEM.md`). A `/run-workflow` trata qualquer checkpoint (resultado
-  com `next`) e o resume pelo CLI.
+- **Skills reescritas** pela referência `writing-for-agents` (mattpocock/skills): critério de pronto em cada passo,
+  regras sem duplicar `docs/08`, e os casos de origem da `/skill-to-workflow` num arquivo à parte (`ORIGEM.md`). A
+  `/run-workflow` trata qualquer checkpoint (resultado com `next`), separa as falhas pela causa e cobre o resume pelo
+  CLI.
+- **`run-workflow` passa a ser invocável pelo modelo.** Como só do usuário, ela não travava nada: um pedido em prosa
+  chegava a `start_workflow` sem passar pela skill. A trava de um workflow pago é a aprovação de `start_workflow`
+  (fora da allowlist), descrita em `docs/04` §3.
+- **Etapa red descarta o que não é teste.** No run real da issue #7, o `composer-2.5` implementou junto com o teste
+  nas duas tentativas e o run parou em `tdd-violation`. Agora o código descarta a mudança fora dos testes e confere
+  o red só com o teste; `tdd-violation` e `test-not-red` trazem o motivo em `reason`.
+- **`approveSeams` sem plano proposto** no progresso do run (outro `runId` ou outro `--cwd`) para com
+  `seams-not-proposed`, em vez de aprovar um plano recalculado que ninguém viu.
 - **Teto padrão por workflow:** `budget` na definição vale quando o run não informa `--max-tokens`/`--max-cents`;
   o `implement-issue` declara 3 milhões de tokens.
 

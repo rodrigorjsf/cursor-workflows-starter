@@ -1,7 +1,6 @@
 ---
 name: run-workflow
-description: "Dispara um workflow determinístico e acompanha o job até o resultado (/run-workflow <nome> <args>)."
-disable-model-invocation: true
+description: "Use antes de chamar start_workflow ou wf start: dispara um workflow determinístico e acompanha o job até o resultado (/run-workflow <nome> <args>)."
 ---
 
 # Rodar um workflow

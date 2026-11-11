@@ -13,8 +13,8 @@
 //     para com "seams-not-proposed" em vez de aprovar um plano novo; para pular o checkpoint, passe `seams`;
 //   - a suíte tem de estar verde antes da primeira fatia ("baseline-red"; um runner sem nenhum teste conta como
 //     verde); `setupCommand` opcional antes; os testes têm teto de tempo ("tests-timeout");
-//   - cada fatia é um ciclo red → green controlado pelo código. Red: só arquivos de teste mudam, nenhum teste é
-//     apagado, o runner não é reconfigurado, e a suíte FALHA (ou a etapa declara, com a suíte verde, que o
+//   - cada fatia é um ciclo red → green controlado pelo código. Red: o que a etapa mudar fora dos testes é
+//     descartado (medido: o composer-2.5 implementa junto com o teste), nenhum teste é apagado, e a suíte FALHA (ou a etapa declara, com a suíte verde, que o
 //     comportamento já existia). Green, correções e refactor: nenhum teste, configuração do runner (`protectedGlobs`,
 //     scripts do package.json) ou o teste da fatia muda, e a suíte PASSA. Quem tocou o quê vem de snapshots de
 //     árvore git antes e depois de cada etapa (sem detecção de renomeação); violação desfaz a etapa e tenta de novo
@@ -83,6 +83,7 @@ import {
   isTestFile,
   looksLikeNoTests,
   matchesAny,
+  restorePaths,
   revertTo,
   runTests,
   runnerConfigChanged,
@@ -520,6 +521,9 @@ export default defineWorkflow<Args>({
 
     let tddRetries = 0;
     let redUnattributed = 0;
+    let redDiscarded = 0;
+    /** O motivo da última violação, devolvido no resultado de tdd-violation e test-not-red. */
+    let lastProblem = "";
     /** Um ciclo red → green. Devolve um status de falha (com o worktree de volta ao último estado verde), ou undefined. */
     const runSlice = async (key: string, sfx: string, sl: Slice): Promise<string | undefined> => {
       const rec: SliceRecord = progress.slice(key) ?? { key, behavior: sl.behavior, seam: sl.seam, done: false };
@@ -537,16 +541,25 @@ export default defineWorkflow<Args>({
             `${P.TEST_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Comando de teste\n\`${testCommand}\`${problem ? `\n\n## Corrija\n${problem}` : ""}`,
             { label: attempt === 1 ? `teste-${sfx}` : `teste-${sfx}:${attempt}`, model: MODELS[tier], schema: TEST_SCHEMA },
           );
-          const after = snapshotTree(worktree);
+          let after = snapshotTree(worktree);
           const changes = changesBetween(worktree, before, after);
+          // O que não é teste (implementação, stub, configuração) é descartado pelo código: o teste fica e tem de
+          // falhar sozinho. Medido: o composer-2.5 implementou junto com o teste nas duas tentativas da issue #7.
           const nonTest = changes.filter((c) => !isTest(c.path)).map((c) => c.path);
-          const deleted = changes.filter((c) => c.status === "D").map((c) => c.path);
-          if (nonTest.length || deleted.length || runnerConfigChanged(worktree, before, after)) {
+          if (nonTest.length) {
+            restorePaths(worktree, before, nonTest);
+            redDiscarded += nonTest.length;
+            ctx.log(`fatia ${sfx}: a etapa red alterou ${nonTest.join(", ")}; essas mudanças foram descartadas, só o teste fica`);
+            after = snapshotTree(worktree);
+          }
+          const deleted = changes.filter((c) => c.status === "D" && isTest(c.path)).map((c) => c.path);
+          if (deleted.length || runnerConfigChanged(worktree, before, after)) {
             revertTo(worktree, before);
             settle();
             problem =
-              `A mudança foi desfeita: ${nonTest.length ? `você alterou arquivos que não são de teste (${nonTest.join(", ")})` : ""}` +
-              `${deleted.length ? ` você apagou arquivos (${deleted.join(", ")})` : ""}. Escreva ou atualize só testes, sem apagar nenhum.`;
+              `A mudança foi desfeita: ${deleted.length ? `você apagou testes (${deleted.join(", ")})` : "você mudou a configuração do runner"}. ` +
+              "Escreva ou atualize testes, sem apagar nenhum.";
+            lastProblem = problem;
             if (attempt === 2) return "tdd-violation";
             continue;
           }
@@ -568,6 +581,7 @@ export default defineWorkflow<Args>({
             problem =
               "O teste passou sem implementação. Se o comportamento já existe, responda alreadySatisfied: true com a evidência; " +
               "senão, escreva um teste que falhe porque o comportamento da fatia falta.";
+            lastProblem = problem;
             if (attempt === 2) return "test-not-red";
             continue;
           }
@@ -596,6 +610,7 @@ export default defineWorkflow<Args>({
           );
           problem = codeViolation(before, snapshotTree(worktree), rec);
           if (problem) {
+            lastProblem = problem;
             revertTo(worktree, before);
             settle();
             if (attempt === 2) return "tdd-violation";
@@ -617,7 +632,8 @@ export default defineWorkflow<Args>({
           model: MODELS[tier === "LOW" ? "MED" : "HIGH"], // escala o modelo na correção
           schema: IMPL_SCHEMA,
         });
-        if (codeViolation(before, snapshotTree(worktree), rec)) {
+        lastProblem = codeViolation(before, snapshotTree(worktree), rec);
+        if (lastProblem) {
           revertTo(worktree, before);
           settle();
           return "tdd-violation";
@@ -643,7 +659,7 @@ export default defineWorkflow<Args>({
       const failed = await runSlice(sliceKey("s", sl.behavior, sl.seam), String(i + 1), sl);
       if (failed) {
         if (failed !== "tdd-violation" && failed !== "test-not-red") revertTo(worktree, start);
-        return { ...base, status: failed, slice: i + 1, worktree };
+        return { ...base, status: failed, slice: i + 1, reason: lastProblem || undefined, worktree };
       }
     }
 
@@ -707,7 +723,7 @@ export default defineWorkflow<Args>({
         const failed = await runSlice(key, `extra-${i + 1}`, { behavior, seam, testIdea: `requisito da issue: "${f.quote}"` });
         if (failed) {
           if (failed !== "tdd-violation" && failed !== "test-not-red") revertTo(worktree, start);
-          return { ...base, status: failed, slice: `extra-${i + 1}`, worktree };
+          return { ...base, status: failed, slice: `extra-${i + 1}`, reason: lastProblem || undefined, worktree };
         }
         const rec = progress.slice(key);
         if (rec?.alreadySatisfied) refuted.push(`${behavior}: ${rec.alreadySatisfied}`); // o review se enganou
@@ -720,10 +736,11 @@ export default defineWorkflow<Args>({
           `${P.REFACTOR_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n## Achados\n${JSON.stringify(toRefactor, null, 2)}`,
           { label: "refatorar-1", model: MODELS[tier], schema: IMPL_SCHEMA },
         );
-        if (codeViolation(before, snapshotTree(worktree))) {
+        const refactorProblem = codeViolation(before, snapshotTree(worktree));
+        if (refactorProblem) {
           revertTo(worktree, before);
           settle();
-          return { ...base, status: "tdd-violation", step: "refatorar-1", worktree };
+          return { ...base, status: "tdd-violation", step: "refatorar-1", reason: refactorProblem, worktree };
         }
         const after = suite();
         if (!after.ok) {
@@ -741,6 +758,7 @@ export default defineWorkflow<Args>({
     }
     ctx.metric("tdd_retries", tddRetries);
     ctx.metric("red_unattributed", redUnattributed);
+    ctx.metric("red_discarded_files", redDiscarded);
     ctx.metric("slices_done", progress.data.slices.filter((s) => s.done).length);
 
     // ── Entrega (pr): suíte verde, commit e PR feitos pelo código; idempotentes no resume ─

@@ -1,7 +1,7 @@
 // Testes offline do fluxo do implement-issue (tdd → review em 3 eixos → PR). O ambiente (SDK falso, gh falso,
 // repositório temporário) está em implement-issue.fixture.ts.
 import assert from "node:assert/strict";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { calls } from "@cursor/sdk";
@@ -77,17 +77,24 @@ test("HIGH: três designers em paralelo e um juiz antes de propor as seams", asy
   assert.equal(names()[3], "julgar");
 });
 
-test("a etapa de teste que mexe em arquivo que não é de teste é refeita uma vez e depois o run para", async () => {
+test("a etapa de teste que também implementa: o código descarta o que não é teste, confere o red e segue", async () => {
+  // Medido no run real de 2026-11-11 (issue #7): o composer-2.5 implementou junto com o teste nas duas tentativas.
   issue(["complexity:low"]);
   fx.handlers["teste-1"] = (o) => {
     write(o, "test/sub.test.js", SUB_TEST);
-    write(o, "src/math.js", SUB_CODE); // implementação junto com o teste: viola o red
+    write(o, "src/math.js", SUB_CODE); // implementação junto com o teste
     submit(o, { testFile: "test/sub.test.js", testName: "subtract" });
   };
+  let mathAtGreen = "";
+  fx.handlers["codigo-1"] = (o) => {
+    mathAtGreen = readFileSync(join(o.local.cwd, "src", "math.js"), "utf8");
+    write(o, "src/math.js", SUB_CODE);
+    submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
+  };
   const r = await run({});
-  assert.equal((r.result as any).status, "tdd-violation");
-  assert.equal(names().filter((n) => n.startsWith("teste-1")).length, 2);
-  assert.ok(!names().includes("codigo-1"));
+  assert.equal((r.result as any).status, "done", JSON.stringify(r.result));
+  assert.equal(names().filter((n) => n.startsWith("teste-1")).length, 1, "sem nova tentativa: o teste aproveitado já é red");
+  assert.doesNotMatch(mathAtGreen, /subtract/, "a implementação da etapa red foi descartada antes do green");
 });
 
 test("teste que já passa sem implementação não é red: uma nova tentativa e depois test-not-red", async () => {

@@ -3,7 +3,7 @@
 // que já passou, e para desfazer o que uma etapa interrompida deixou pela metade).
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 /** O que conta como arquivo de teste quando o run não informa `testGlobs`. */
@@ -90,6 +90,18 @@ export const changedBetween = (cwd: string, before: string, after: string) => ch
 /** Desfaz o que uma etapa mudou: volta índice e arquivos ao snapshot (remove os novos, restaura os alterados). */
 export function revertTo(cwd: string, tree: string): void {
   git(cwd, "read-tree", "--reset", "-u", tree);
+}
+
+/** Volta só estes caminhos ao snapshot: os que existiam são restaurados, os criados depois são apagados. */
+export function restorePaths(cwd: string, tree: string, paths: string[]): void {
+  if (!paths.length) return;
+  const inTree = new Set(git(cwd, "ls-tree", "-r", "--name-only", tree, "--", ...paths).split("\n").filter(Boolean));
+  const existed = paths.filter((p) => inTree.has(p));
+  if (existed.length) git(cwd, "checkout", tree, "--", ...existed);
+  for (const p of paths.filter((x) => !inTree.has(x))) {
+    git(cwd, "rm", "-q", "-f", "--cached", "--ignore-unmatch", "--", p);
+    rmSync(join(cwd, p), { force: true });
+  }
 }
 
 const PKG_RUNNER_FIELDS = ["jest", "vitest", "mocha", "ava", "c8", "nyc"];

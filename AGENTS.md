@@ -27,8 +27,8 @@ Leem este arquivo:
 - Dentro de uma etapa de workflow, não inicie outro workflow. O runtime barra o caminho acidental: nas etapas, o
   servidor MCP `workflows` é trocado por um sem tools, e o CLI recusa `run`/`start` (`WF_INSIDE_WORKFLOW`). Não é
   barreira de segurança: um comando de shell pode contorná-la. Não tente.
-- Ao rodar um workflow pelo chat, use `/run-workflow`: dispare e acompanhe, sem refazer etapas nem editar arquivos
-  enquanto o job roda.
+- Antes de rodar um workflow pelo chat, carregue a skill `run-workflow` (`.agents/skills/run-workflow/`): dispare,
+  acompanhe e repasse, sem refazer etapas nem editar arquivos enquanto o job roda.
 - Commit, push e PR são feitos pelo código do workflow, não por você.
 - Testes contra a API real: prefira os modelos incluídos no plano (`composer-2.5`, Grok, `default`). Modelos que
   consomem cota paga são permitidos quando o teste precisar deles. Sempre com `--max-tokens` e `--max-cents`.

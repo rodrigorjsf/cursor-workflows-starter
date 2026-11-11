@@ -165,11 +165,12 @@ Uma regra do processo que o modelo policiaria sozinho ("red antes de green", "s�
 - **O que fica travado:** nas etapas de código (green, correção, refactor), os arquivos dos globs de teste e a
   configuração do runner (`protectedGlobs`, os scripts do `package.json` e os campos `jest`, `vitest`, `mocha`,
   `ava`, `c8` e `nyc` dele); no green e na correção, também o arquivo do teste da fatia (hash guardado no red). Sem
-  essa trava, a etapa green desligaria o teste em vez de implementar. Na etapa red, só arquivos de teste mudam, e
-  nenhum é apagado.
+  essa trava, a etapa green desligaria o teste em vez de implementar. Na etapa red, o código descarta o que a etapa
+  mudou fora dos arquivos de teste (`restorePaths`) e confere o red só com o teste: no run real da issue #7, o
+  `composer-2.5` implementou junto com o teste nas duas tentativas. Apagar um teste é violação.
 - **Violação:** `revertTo` desfaz a etapa. No red e no green, uma nova tentativa leva o problema no prompt e, na
   segunda, o run encerra com um status próprio (`tdd-violation`, `test-not-red`); na correção e no refactor, a
-  primeira violação já encerra o run (`tdd-violation`).
+  primeira violação já encerra o run (`tdd-violation`). O resultado traz o motivo em `reason`.
 - **Partida:** a invariante vale antes do primeiro item (suíte verde, senão `baseline-red`).
 
 ```ts
