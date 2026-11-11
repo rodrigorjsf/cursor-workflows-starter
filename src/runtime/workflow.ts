@@ -15,7 +15,7 @@ export interface WorkflowPhase {
 }
 
 export interface WorkflowMeta {
-  /** Nome estável; vira o nome do comando (CLI) e da tool (MCP). */
+  /** Nome estável: o `name` do start_workflow (MCP) e o de `wf run <nome>` (CLI). */
   name: string;
   /** Uma linha. Aparece na listagem do MCP e no `--help` do CLI. */
   description: string;
@@ -67,9 +67,10 @@ export interface AgentCallOptions {
   /**
    * Camadas de configuração que esta etapa carrega (sobrescreve o default do run).
    * Cada camada aumenta o contexto fixo de TODA chamada: regras, descrições de skills e de subagents
-   * (injetadas na descrição da tool Task) e tools dos MCP servers do projeto. Etapas que não precisam
-   * do contexto do repositório (classificar, resumir) podem usar ["team","mdm"]: sem AGENTS.md, regras, hooks
-   * e MCP do projeto, mas as skills continuam carregadas (medido: 58). Só [] tira tudo, inclusive hooks do time e MDM.
+   * (injetadas na descrição da tool Task) e tools dos MCP servers do projeto. Etapas só de leitura usam []
+   * (sem AGENTS.md, regras, hooks, MCP nem skills; o prompt lista os arquivos de contexto que importam).
+   * ["team","mdm"] só quando a etapa precisa dos hooks do time ou MDM: ele ainda carrega as skills (docs/08 §4.3).
+   * Regra em docs/08 §6.
    */
   settingSources?: SettingSource[];
   /**
@@ -137,6 +138,8 @@ export interface WorkflowDefinition<A = unknown, R = unknown> {
   meta: WorkflowMeta;
   /** Defaults aplicados a toda chamada agent() que não sobrescrever. */
   defaults?: Pick<AgentCallOptions, "model" | "timeoutMs" | "retries" | "schemaRetries" | "tools" | "sandbox">;
+  /** Teto padrão do run quando quem chama não informa um (`--max-tokens`/`--max-cents`, ou o MCP); `null` explícito desliga. */
+  budget?: { maxTokens?: number; maxCents?: number };
   run(ctx: WorkflowContext<A>): Promise<R>;
 }
 

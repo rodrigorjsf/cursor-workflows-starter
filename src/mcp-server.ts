@@ -15,10 +15,7 @@
 //
 // STATUS: exercitado por stdio (initialize, tools/list, list_workflows) nos testes de fumaça do kit.
 
-// stdout é o canal JSON-RPC: qualquer console.log de um workflow iria corrompê-lo.
-console.log = (...a: unknown[]) => process.stderr.write(a.map(String).join(" ") + "\n");
-console.info = console.log;
-
+import "./console-to-stderr.js"; // stdout é o canal JSON-RPC: o console do SDK e dos workflows vai para o stderr
 import "./node-check.js"; // antes de tudo: o @cursor/sdk exige Node 22.13+
 import { readFileSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -36,8 +33,8 @@ installCrashHandlers();
 const nested = process.env[INSIDE_WORKFLOW_ENV] === "1";
 
 const cwd = process.env.WF_CWD ?? process.cwd();
-const maxCents = Number(process.env.WF_MAX_CENTS) || null;
-const maxTokens = Number(process.env.WF_MAX_TOKENS) || null;
+const maxCents = Number(process.env.WF_MAX_CENTS) || undefined; // sem valor: vale o teto padrão do workflow
+const maxTokens = Number(process.env.WF_MAX_TOKENS) || undefined;
 const workflows = nested ? new Map() : await loadWorkflows(cwd);
 
 const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
@@ -64,7 +61,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             properties: {
               name: { type: "string", enum: [...workflows.keys()] },
               args: { type: "object" },
-              resumeRunId: { type: "string", description: "runId de um run que falhou, para retomar sem repetir etapas concluídas" },
+              resumeRunId: { type: "string", description: "runId de um run anterior (que falhou, ou que parou num checkpoint e devolveu `next`), para retomar sem repetir etapas concluídas" },
             },
           },
         },

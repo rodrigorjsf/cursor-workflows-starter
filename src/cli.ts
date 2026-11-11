@@ -17,6 +17,7 @@
 //
 // STATUS: verificado contra a API real num plano Premium em 2026-11-11 (docs/research/verificacoes-locais.md).
 
+import "./console-to-stderr.js"; // o stdout leva o JSON do resultado: o console do SDK vai para o stderr
 import "./node-check.js"; // antes de tudo: o @cursor/sdk exige Node 22.13+
 import { spawn } from "node:child_process";
 import { openSync } from "node:fs";
@@ -50,8 +51,8 @@ const out = (v: unknown) => process.stdout.write(JSON.stringify(v, null, 2) + "\
 const runOpts = () => ({
   cwd,
   runId: values.resume,
-  maxCents: values["max-cents"] ? Number(values["max-cents"]) : Number(process.env.WF_MAX_CENTS) || null,
-  maxTokens: values["max-tokens"] ? Number(values["max-tokens"]) : Number(process.env.WF_MAX_TOKENS) || null,
+  maxCents: values["max-cents"] ? Number(values["max-cents"]) : Number(process.env.WF_MAX_CENTS) || undefined, // sem valor: teto padrão do workflow
+  maxTokens: values["max-tokens"] ? Number(values["max-tokens"]) : Number(process.env.WF_MAX_TOKENS) || undefined,
   onEvent: (e: unknown) => process.stderr.write(JSON.stringify(e) + "\n"),
 });
 

@@ -19,13 +19,15 @@ Linux x64 (WSL2). Evidence: [`docs/research/verificacoes-locais.md`](docs/resear
 - **Measured:** login without a local browser, model catalog, structured output, what `settingSources` loads
   (`AGENTS.md`, Cursor and Claude Code hooks, `.cursor/mcp.json`), the recursion guard, prompt cache between agents,
   token types, localhost-only dashboard, and Claude Code listing the MCP tools.
-- **End to end:** only the **LOW** path of the example `implement-issue` workflow (implement → tests → commit → PR →
-  resume without repeating), run from this tree. MED and HIGH paths (plan, review) did not run.
+- **End to end:** the **LOW** and **MED** paths of `implement-issue` (TDD slice by slice checked by code, a three-axis
+  review, a PR in the template; on MED, seams approved across two runs and slices past the cap deferred): 339k tokens
+  on LOW and 769k on MED (whole issue, two runs), with resume not repeating steps (§13 of the verification report). HIGH ("Design it twice")
+  and a blocking review only have offline tests.
 - **Cost:** on the tested account the SDK's `getUsage()` returns `feature_unavailable` for local agents, so the kit
   cannot read the real cost: the cents cap is blind and only the token cap protects you.
 - **Incident:** in an earlier test an unsandboxed step edited a file outside the repository. It was fixed and
   re-tested; read [SECURITY.md](SECURITY.md) before use.
-- **Pending:** Cursor IDE (MCP, skills, `/run-workflow`), sandbox, MED/HIGH paths, team/MDM hooks, admin policies,
+- **Pending:** Cursor IDE (MCP, skills, `/run-workflow`), sandbox, the HIGH path, team/MDM hooks, admin policies,
   macOS and Windows.
 
 ## Quick start

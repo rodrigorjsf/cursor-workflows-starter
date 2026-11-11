@@ -24,15 +24,18 @@ Cursor, que não tem esse runtime nativo. O porquê e a comparação completa es
 > - **Medido:** login sem navegador local; catálogo de modelos; saída estruturada; o que `settingSources` carrega
 >   (`AGENTS.md`, hooks do Cursor e do Claude Code, `.cursor/mcp.json`); guarda contra recursão; cache entre agentes;
 >   tokens por tipo; dashboard só em localhost; Claude Code lista as tools MCP e lê `CLAUDE.md` → `@AGENTS.md`.
-> - **Ponta a ponta:** só o caminho **LOW** do `implement-issue` (implementar → testes → commit → PR → resume sem
->   repetir), rodado a partir desta árvore. MED e HIGH (plano e review) não rodaram.
+> - **Ponta a ponta:** caminhos **LOW** e **MED** do `implement-issue` (TDD fatia a fatia conferido pelo código,
+>   review em três eixos, PR no template; no MED, seams aprovadas em dois runs e fatias além do teto adiadas):
+>   339 mil tokens no LOW e 769 mil no MED (issue inteira, dois runs), resume sem repetir etapas (§13 das
+>   verificações). O HIGH ("Design it
+>   twice") e o review que bloqueia só têm testes offline.
 > - **Custo:** nesta conta o `getUsage()` do SDK responde `feature_unavailable` para agentes locais, então o kit não
 >   lê o custo real: o teto em centavos fica cego e só o de tokens protege.
 > - **Incidente:** num teste anterior, uma etapa sem sandbox editou um arquivo fora do repositório. Foi corrigido e
 >   retestado, mas leia [SECURITY.md](SECURITY.md) antes de usar.
-> - **Pendente:** Cursor IDE (MCP, skills, `/run-workflow`), sandbox, caminhos MED e HIGH, hooks do time e MDM,
+> - **Pendente:** Cursor IDE (MCP, skills, `/run-workflow`), sandbox, caminho HIGH, hooks do time e MDM,
 >   políticas de admin, macOS e Windows. Lista completa no §12 das verificações.
-> - 35 testes offline (SDK falso), rodados no Node 22.13.0 e no 22.23.4.
+> - 79 testes offline (SDK falso), rodados no Node 22.13.0 e no 22.23.4.
 
 ## Estrutura
 
@@ -53,12 +56,13 @@ Cursor, que não tem esse runtime nativo. O porquê e a comparação completa es
 │   ├── cli.ts              # wf login | whoami | models | list | run | start | wait | status | jobs | stats | metrics
 │   └── mcp-server.ts       # tools MCP: list_workflows, start_workflow, wait_workflow, get_workflow_status
 ├── workflows/
-│   └── implement-issue.ts  # exemplo: tier por label → plano → código → testes → review condicional → PR
+│   ├── implement-issue.ts  # exemplo: TDD fatia a fatia conferido pelo código → review em 3 eixos → PR com evidência
+│   └── implement-issue/    # prompts (paráfrases das skills de mattpocock/skills), laço TDD, review, corpo do PR
 ├── test/                   # testes offline (fake SDK)
 ├── .agents/                # local neutro (Cursor e Codex leem nativamente)
 │   ├── skills/
 │   │   ├── run-workflow/       # /run-workflow <nome> <args>: dispara e acompanha
-│   │   ├── workflow-authoring/ # referência para escrever workflows
+│   │   ├── cursor-workflow-authoring/ # referência para escrever workflows
 │   │   └── skill-to-workflow/  # /skill-to-workflow: converte skills e subagents em workflow
 │   └── workflows/          # workflows do repositório (carregados junto com workflows/)
 ├── .cursor/mcp.json        # MCP server no Cursor
@@ -106,7 +110,7 @@ antes ([01 §6](docs/01-instalacao.md#6-habilitar-no-cursor-ide)). Depois, digit
 | [02 · Configuração inicial](docs/02-configuracao-inicial.md) | Autenticação (conta do usuário × service account), modelos, teto de custo, variáveis |
 | [03 · Arquitetura](docs/03-arquitetura.md) | Como o runtime funciona e o que ele garante (e o que não garante) |
 | [04 · Invocação no Cursor IDE](docs/04-invocacao-no-cursor-ide.md) | MCP, CLI, skill, hooks; paridade com o Claude Code |
-| [05 · Escrevendo workflows](docs/05-escrevendo-workflows.md) | API, padrões, regras, testes |
+| [05 · Escrevendo workflows](docs/05-escrevendo-workflows.md) | O porquê das regras, efeitos garantidos × pedidos, receitas, prompts de etapa, testes (API e regras na skill `cursor-workflow-authoring`) |
 | [06 · Convertendo skills e subagents](docs/06-convertendo-skills-e-subagents.md) | O processo da skill `/skill-to-workflow`, com um exemplo |
 | [07 · Governança e custos (Enterprise)](docs/07-governanca-e-custos.md) | Orçamento por usuário, políticas de admin, auditoria, riscos |
 | [08 · Custos, cache e boas práticas](docs/08-custos-e-cache.md) | De onde vem o custo, que caches existem (e quem controla), memo, contexto mínimo, prefixo estável, checklist |
@@ -128,7 +132,10 @@ antes ([01 §6](docs/01-instalacao.md#6-habilitar-no-cursor-ide)). Depois, digit
   o adiciona a `.git/info/exclude`, sem mexer no `.gitignore` do repositório.
 - Cada run grava métricas (tokens, custo, modelo, passos, resultado) em `~/.cursor-workflows/metrics.db`. Os prompts
   ficam só como hash. Desligue com `WF_METRICS=off` (ver [09](docs/09-observabilidade.md)).
-- Os agentes das etapas carregam `AGENTS.md`, regras, skills, hooks e MCP do projeto, e hooks do time e
-  Enterprise (`settingSources: ["project","team","mdm"]`). Uma guarda evita que uma etapa dispare outro workflow
+- Por padrão, os agentes das etapas carregam `AGENTS.md`, regras, skills, hooks e MCP do projeto, e hooks do time
+  e Enterprise (`settingSources: ["project","team","mdm"]`). No `implement-issue`, as etapas só de leitura usam
+  `[]`: nada disso chega a elas, nem os hooks do time e do MDM. Uma guarda evita que uma etapa dispare outro workflow
   por acidente; ela não é uma fronteira de segurança.
-- Commit, push e PR são feitos pelo **código do workflow**, com `git` e `gh`, e só quando você pede (`openPr`).
+- Commit, push, PR e comentário na issue são feitos pelo **código do workflow**, com `git` e `gh`. O
+  `implement-issue` sempre faz o commit local na branch `wf/issue-<n>`; push e PR, só com `openPr: true`. Em issues
+  MED e HIGH, o primeiro run comenta as seams propostas na issue, com ou sem `openPr`.

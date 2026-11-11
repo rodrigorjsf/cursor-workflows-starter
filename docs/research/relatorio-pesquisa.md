@@ -272,6 +272,12 @@ flowchart LR
 | **Hooks** | `stop` com `followup_message` | Sem infraestrutura | Não ordena etapas nem troca modelos: determinismo fraco |
 | **Cloud / Automations** | Gatilho por label de issue → cloud agent | Sem máquina local | Cada cloud agent é um agente só; para multi-etapa, ponha o runtime numa Action/worker que chame o SDK |
 
+> **Nota (2026-11-11, depois desta pesquisa):** a skill `run-workflow` deixou de usar `disable-model-invocation`.
+> Só do usuário, ela não travava nada: o servidor MCP anuncia `start_workflow` com o `whenToUse` de cada workflow, e um
+> pedido em prosa chegava à tool sem passar pela skill. A trava de um workflow pago é a aprovação de `start_workflow`
+> pelo Run Mode ([04 §3](../04-invocacao-no-cursor-ide.md#3-skill-run-workflow-e-a-trava-de-disparo)). O diagrama
+> e a tabela acima ficam como estavam na pesquisa.
+
 **Custo do polling:** cada `wait_workflow` é uma chamada de tool do agente do chat e consome tokens do modelo do
 chat. Use um modelo barato no chat que dispara o workflow e esperas longas (45–50 s por chamada, ou `wf wait`
 com timeout maior).

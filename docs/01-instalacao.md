@@ -105,7 +105,7 @@ são os candidatos mais prováveis.
    shell pode não valer ali. Rode `node -v` nesse ambiente. Abaixo do Node 22.13, o CLI e o MCP server saem com uma
    mensagem clara, com a versão encontrada; no Cursor, ela aparece em **Output → MCP Logs**
    ([DOC](https://cursor.com/docs/mcp)).
-4. Confira que as skills `/run-workflow`, `/workflow-authoring` e `/skill-to-workflow` aparecem no chat ao digitar
+4. Confira que as skills `/run-workflow`, `/cursor-workflow-authoring` e `/skill-to-workflow` aparecem no chat ao digitar
    `/`. Elas ficam em `.agents/skills/`, que o Cursor lê nativamente.
 5. No chat: `/run-workflow implement-issue 1`.
 
@@ -119,7 +119,9 @@ são os candidatos mais prováveis.
    ([verificações §10](research/verificacoes-locais.md)).
 2. O Claude Code não lê nada sob `.agents/`. Para ter as skills lá também, rode `scripts/link-claude-skills.sh`,
    que cria links em `.claude/skills/`. O Cursor também lê `.claude/skills/`, então a mesma skill pode aparecer
-   duas vezes no Cursor.
+   duas vezes no Cursor. A skill de autoria se chama `cursor-workflow-authoring` porque o Claude Code tem uma
+   skill embutida `workflow-authoring` (a da ferramenta Workflow dele), e uma skill de projeto com o mesmo nome
+   substituiria a embutida ([DOC](https://code.claude.com/docs/en/skills)).
 3. `CLAUDE.md` importa `AGENTS.md` (`@AGENTS.md`), então as instruções do repositório são as mesmas nos dois.
 4. Como no Cursor, o Claude Code sobe o servidor com o `node` do PATH do próprio processo, e o mise ou o nvm podem
    não estar ativos ali. Rode `node -v` no ambiente que inicia o `claude`. Abaixo do Node 22.13, o servidor sai

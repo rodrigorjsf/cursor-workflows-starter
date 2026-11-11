@@ -155,6 +155,7 @@ test("classe do resultado", () => {
   assert.equal(outcomeClass("finished", "done"), "delivered");
   assert.equal(outcomeClass("finished", "tests-failed"), "failed");
   assert.equal(outcomeClass("finished"), "unknown");
+  assert.equal(outcomeClass("finished", "seams-proposed"), "pending"); // aguarda aprovação, não é falha
   assert.equal(outcomeClass("failed", "done"), "error");
 });
 

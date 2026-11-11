@@ -1,7 +1,7 @@
 # 08 · Custos, cache e boas práticas
 
 Este documento reúne o que torna um workflow barato sem perder a garantia de execução. É a referência da
-seção de custo das skills `workflow-authoring` e `/skill-to-workflow`.
+seção de custo das skills `cursor-workflow-authoring` e `/skill-to-workflow`.
 
 > **Marcas de confiança:**
 > - **[PKG]**: lido no pacote `@cursor/sdk@1.3.1`.
@@ -157,7 +157,7 @@ reporta, porque lá o `getUsage()` dá `feature_unavailable` [[TESTE]](research/
 
 ```ts
 await ctx.agent(`${PLAN_INSTRUCTIONS}\n\n${issueBlock(issue)}`, {
-  model: MODELS.MED, tools: ["read", "grep", "glob", "ls", "semSearch"], schema: PLAN_SCHEMA, memo: true,
+  model: MODELS.MED, tools: ["read", "grep", "glob", "ls", "semSearch"], settingSources: [], schema: PLAN_SCHEMA, memo: true,
 });
 ```
 
@@ -175,7 +175,7 @@ O contexto fixo é pago em **toda** chamada de **toda** etapa. Ele cresce com o 
 
 | Fonte de contexto | Como reduzir |
 |---|---|
-| `settingSources: "project"`: `AGENTS.md`, regras, **descrições de skills**, hooks e **tools dos MCP servers do `.cursor/mcp.json`** | Por etapa, `settingSources: ["team","mdm"]` tira o `AGENTS.md` e mantém a governança, mas **não** as skills: o SDK carregou as mesmas 58 skills com ele e com `"project"` [[TESTE]](research/verificacoes-locais.md). Só `[]` zerou as skills, e aí saem também os hooks do time e do MDM. Mesmo prompt com `shell` e `mcp`: 30,4 mil tokens de input com `"project"` × 25,5 mil com `[]` [[TESTE]](research/verificacoes-locais.md). A origem das 58 skills não foi isolada. Para etapas que não precisam do repositório (classificar, resumir, revisar texto), `[]` corta mais; se o time exige hooks de time ou MDM em toda run, fique com `["team","mdm"]` |
+| `settingSources: "project"`: `AGENTS.md`, regras, **descrições de skills**, hooks e **tools dos MCP servers do `.cursor/mcp.json`** | Por etapa, `settingSources: ["team","mdm"]` tira o `AGENTS.md` e mantém a governança, mas **não** as skills: o SDK carregou as mesmas 58 skills com ele e com `"project"` ([[TESTE]](research/verificacoes-locais.md) §7). Só `[]` zerou as skills, e aí saem também os hooks do time e do MDM. Mesmo prompt com `shell` e `mcp`: 30,4 mil tokens de input com `"project"` × 25,5 mil com `[]` ([[TESTE]](research/verificacoes-locais.md) §7). A origem das 58 skills não foi isolada. Para etapas só de leitura, mesmo as que leem o repositório (planejar, revisar, escrever o texto do PR; o classificar nem o lê), `[]` corta mais: no lugar do `AGENTS.md`, o código lista no prompt os arquivos de contexto que importam e existem (padrões, glossário, ADRs). Se o time exige hooks de time ou MDM em toda run, fique com `["team","mdm"]` |
 | `"user"`: `~/.cursor/agents`, `~/.cursor/skills`, `~/.claude/skills`, MCP do usuário | O kit **não** carrega `user` por padrão. Um relato mostra mais de 60 subagents em `~/.cursor/agents` somando cerca de 10 mil tokens no início de cada chat (11,4 k → 1,4 k ao tirá-los da pasta). Uma resposta no fórum, provavelmente da equipe do Cursor, confirmou a causa [[FÓRUM]](https://forum.cursor.com/t/162001) |
 | Tool `task`: a descrição lista nome e descrição de **todo subagent custom** (`.cursor/agents/`, `~/.cursor/agents/`). O contexto cresce linearmente com o número deles, e o catálogo de subagents não tinha limite em maio de 2026, ao contrário do de skills [[FÓRUM]](https://forum.cursor.com/t/162001) (resposta provavelmente da equipe do Cursor). A doc diz só que a descrição aparece nas dicas da tool Task [[DOC]](https://cursor.com/docs/subagents). Nenhuma fonte diz se os subagents nativos (`explore`, `browser`) entram do mesmo jeito | Use allowlist de `tools` sem `"task"`, salvo se a etapa precisar delegar |
 | Definições de tools | Allowlist de `tools`. `[]` = só texto (o kit acrescenta `mcp` quando há schema) |
@@ -232,7 +232,9 @@ cache reduz o preço de parte do contexto, sem garantia; o volume de input conti
 ### 4.8 Limites sempre
 
 Laços de correção com teto, `timeoutMs` por etapa, `retries` pequeno (default 1), `--max-cents` e `--max-tokens`
-juntos por run (um cobre o ponto cego do outro; ver §3), e polling barato no chat (modelo barato e esperas de
+juntos por run (um cobre o ponto cego do outro; ver §3), um teto padrão declarado pelo workflow em `budget` (vale
+quando o run não informa outro; o `implement-issue` declara 3 milhões de tokens, porque o texto da issue pode empurrar
+o run para o pior caso), e polling barato no chat (modelo barato e esperas de
 45–50 s; ver [04](04-invocacao-no-cursor-ide.md)).
 
 ## 5. Skills e subagents: o que custam no IDE e como ficam no workflow
@@ -252,22 +254,23 @@ Use ao escrever um workflow e na etapa de otimização da `/skill-to-workflow`.
 - [ ] Toda decisão objetiva é código (não é uma etapa de agente).
 - [ ] Etapas opcionais têm condição explícita (tier, tamanho, flag).
 - [ ] Cada etapa tem modelo explícito; o de fronteira só onde se justifica; há escalonamento na falha.
-- [ ] Etapas só de leitura têm `tools` só de leitura e `memo: true`.
-- [ ] Etapas que não precisam do repositório usam `settingSources: []` (o único que corta também as skills) ou
-  `["team","mdm"]` (tira o `AGENTS.md` e mantém os hooks do time e MDM, mas carrega as skills; §4.3).
+- [ ] Etapas só de leitura (classificar, planejar, revisar, escrever o texto do PR) têm `tools` só de leitura,
+  `memo: true` e `settingSources: []`; as que leem o repositório recebem no prompt os arquivos de contexto que
+  importam e existem. `["team","mdm"]` só quando a etapa precisa dos hooks do time ou MDM (§4.3). Etapas que
+  escrevem ficam sem `settingSources`, no default do engine (`["project","team","mdm"]`).
 - [ ] `tools` é uma allowlist; sem `"task"` se a etapa não delega; `mcpServers` só onde usa.
 - [ ] Prompts: constante de instruções primeiro, dados no fim; nada volátil no começo.
 - [ ] Schemas mínimos; nenhuma etapa mecânica pede explicação longa.
 - [ ] Saídas grandes (logs, diffs) truncadas ou resumidas antes de virar prompt.
 - [ ] Fan-out só de itens independentes; itens pequenos agrupados.
-- [ ] Laços com teto; `timeoutMs` e `retries` definidos.
+- [ ] Laços com teto; `timeoutMs` e `retries` definidos; teto padrão do run em `budget`.
 - [ ] Estimativa de custo por caminho (§7) registrada no topo do workflow.
 - [ ] Primeiro run real com `--max-cents` e `--max-tokens` baixos; `usage` por etapa revisado.
 
 ## 7. Estimar antes de rodar
 
-Para cada caminho do workflow (ex.: LOW sem plano nem review; HIGH com plano, review e uma rodada de correção),
-liste as etapas com:
+Para cada caminho do workflow, no caso típico e no pior caso (ex.: no `implement-issue`, LOW com uma fatia e três
+revisores; HIGH com três desenhos, juiz, cinco fatias e uma correção), liste as etapas com:
 
 ```
 custo ≈ Σ etapas × turnos_estimados × (contexto_fixo + prompt + histórico_médio) × preço_input/cache
