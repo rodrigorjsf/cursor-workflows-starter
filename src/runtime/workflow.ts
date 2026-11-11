@@ -1,0 +1,145 @@
+// Tipos públicos do runtime de workflows sobre o Cursor SDK.
+// Espelha a superfície do Workflow do Claude Code (agent/parallel/pipeline/phase/log/args/budget),
+// mas roda como processo Node comum: o "script" é um módulo TypeScript que exporta defineWorkflow(...).
+//
+// STATUS: verificado contra a API real num plano Premium em 2026-11-11 (docs/research/verificacoes-locais.md).
+
+import type { AgentDefinition, McpServerConfig, ModelSelection, SettingSource, ToolName } from "@cursor/sdk";
+
+/** JSON Schema (subconjunto aceito pelo Ajv). */
+export type JsonSchema = Record<string, unknown>;
+
+export interface WorkflowPhase {
+  title: string;
+  detail?: string;
+}
+
+export interface WorkflowMeta {
+  /** Nome estável; vira o nome do comando (CLI) e da tool (MCP). */
+  name: string;
+  /** Uma linha. Aparece na listagem do MCP e no `--help` do CLI. */
+  description: string;
+  /** Quando usar — texto para o agente do chat decidir chamar a tool. */
+  whenToUse?: string;
+  phases?: WorkflowPhase[];
+  /** JSON Schema dos args; o runtime valida (Ajv) antes de rodar e falha o run se não bater. */
+  argsSchema?: JsonSchema;
+}
+
+export interface AgentCallOptions {
+  /** Rótulo no log/progresso. */
+  label?: string;
+  /** Agrupa no progresso; use dentro de parallel/pipeline em vez de phase() global. */
+  phase?: string;
+  /**
+   * Modelo desta etapa. Obrigatório para agentes locais no SDK; o runtime usa
+   * `defaults.model` do workflow quando omitido. O SDK valida o ID (ou alias) contra o catálogo da
+   * conta antes da run; ID fora do catálogo faz a etapa falhar.
+   */
+  model?: ModelSelection;
+  /**
+   * JSON Schema com `type: "object"` na raiz. Com schema, o agente precisa chamar a tool `submit_result`; o retorno é o objeto validado.
+   * Sem schema, o retorno é o texto final do agente.
+   */
+  schema?: JsonSchema;
+  /** Diretório de trabalho (ex.: um git worktree criado pelo workflow). Default: cwd do run. */
+  cwd?: string;
+  /** Allowlist de tools nativas (ex.: ["read","grep","glob","ls"] para etapas read-only). */
+  tools?: ToolName[];
+  disallowedTools?: ToolName[];
+  /** Subagents inline disponíveis para esta etapa (via tool `task`). */
+  agents?: Record<string, AgentDefinition>;
+  mcpServers?: Record<string, McpServerConfig>;
+  /** Tempo máximo da etapa. Ao estourar, a run é cancelada. Default 20 min. */
+  timeoutMs?: number;
+  /** Tentativas extras quando a run termina em erro/cancelada. Default 1. */
+  retries?: number;
+  /** Re-prompts quando o agente não chama `submit_result` ou envia JSON inválido. Default 2. */
+  schemaRetries?: number;
+  /**
+   * Liga o sandbox local do SDK (`local.sandboxOptions.enabled`). Pela doc do SDK, ele restringe as chamadas de shell
+   * e os processos que elas iniciam: escrita só no cwd, em diretórios temporários e nos caminhos do `sandbox.json`;
+   * **leitura não é restringida**; rede negada exceto a allowlist de `.cursor/sandbox.json`. A doc não diz se cobre
+   * as tools `edit`/`write`. No Linux exige `bubblewrap` (sem ele o SDK lança ConfigurationError). Não testado neste
+   * kit. Testes que baixam pacotes podem falhar com ele ligado.
+   */
+  sandbox?: boolean;
+  /**
+   * Camadas de configuração que esta etapa carrega (sobrescreve o default do run).
+   * Cada camada aumenta o contexto fixo de TODA chamada: regras, descrições de skills e de subagents
+   * (injetadas na descrição da tool Task) e tools dos MCP servers do projeto. Etapas que não precisam
+   * do contexto do repositório (classificar, resumir) podem usar ["team","mdm"]: sem AGENTS.md, regras, hooks
+   * e MCP do projeto, mas as skills continuam carregadas (medido: 58). Só [] tira tudo, inclusive hooks do time e MDM.
+   */
+  settingSources?: SettingSource[];
+  /**
+   * Cache de resultado entre runs: se a mesma etapa (prompt + modelo + schema + tools + contexto) já
+   * rodou com o repositório no mesmo estado (HEAD + mudanças locais), devolve o resultado salvo sem
+   * chamar a API. Só para etapas sem efeitos: exige `tools` com apenas tools de leitura.
+   */
+  memo?: boolean;
+}
+
+/** Uso de tokens somado (por etapa ou por run). `cacheRead`/`cacheWrite` vêm do provedor via Cursor. */
+export interface UsageTotals {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+}
+
+export interface Budget {
+  /**
+   * Teto em centavos, comparado com `spentCents()`: a soma, por tentativa, do maior entre o custo bruto
+   * (`rawCostCents`) e o cobrado (`chargedCents`). null = sem teto.
+   */
+  readonly maxCents: number | null;
+  /** Teto de tokens totais. Vale mesmo sem custo reportado: se getUsage() falha, conta os tokens dos eventos turn-ended. */
+  readonly maxTokens: number | null;
+  /** Custo considerado pelo teto (ver `maxCents`). */
+  spentCents(): number;
+  /** Só o cobrado: 0 para uso incluído no plano, BYOK e créditos. */
+  chargedCents(): number;
+  spentTokens(): number;
+  remainingCents(): number;
+  /** Tokens somados por tipo, para medir aproveitamento de cache. */
+  usage(): UsageTotals;
+}
+
+export interface WorkflowContext<A = unknown> {
+  readonly args: A;
+  readonly runId: string;
+  readonly cwd: string;
+  readonly budget: Budget;
+  /** Executa uma etapa com um agente novo do Cursor SDK. Lança erro se falhar após as tentativas. */
+  agent<T = string>(prompt: string, opts?: AgentCallOptions): Promise<T>;
+  /** Barreira: roda tudo em paralelo e espera todos. Thunk que falha vira null. */
+  parallel<T>(thunks: Array<() => Promise<T>>): Promise<Array<T | null>>;
+  /**
+   * Sem barreira: cada item atravessa os estágios de forma independente.
+   * Estágio que lança erro descarta o item (null) e pula os estágios seguintes.
+   */
+  pipeline<I>(
+    items: I[],
+    ...stages: Array<(prev: any, item: I, index: number) => Promise<any> | any>
+  ): Promise<any[]>;
+  phase(title: string): void;
+  log(message: string): void;
+  /**
+   * Métrica de negócio do run (vai para a tabela `metrics`): resultado de testes, achados de review, tamanho do
+   * diff, dificuldade (tier)… É o que permite medir custo por entrega e controlar a dificuldade nas comparações.
+   */
+  metric(name: string, value: number | string): void;
+}
+
+export interface WorkflowDefinition<A = unknown, R = unknown> {
+  meta: WorkflowMeta;
+  /** Defaults aplicados a toda chamada agent() que não sobrescrever. */
+  defaults?: Pick<AgentCallOptions, "model" | "timeoutMs" | "retries" | "schemaRetries" | "tools" | "sandbox">;
+  run(ctx: WorkflowContext<A>): Promise<R>;
+}
+
+export function defineWorkflow<A = unknown, R = unknown>(def: WorkflowDefinition<A, R>): WorkflowDefinition<A, R> {
+  return def;
+}

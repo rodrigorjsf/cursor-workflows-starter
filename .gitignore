@@ -1,0 +1,15 @@
+node_modules/
+.workflows/
+test/.tmp/
+metrics-export/
+
+# Nunca versionar: estado de runs, métricas, credenciais e artefatos de teste
+*.db
+*.db-wal
+*.db-shm
+*.sqlite*
+auth.json
+.env
+.env.*
+.probe/
+.claude/skills/

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "workflows": {
+      "command": "node_modules/.bin/tsx",
+      "args": ["src/mcp-server.ts"],
+      "env": {
+        "WF_MAX_CENTS": "500",
+        "WF_MAX_TOKENS": "2000000"
+      }
+    }
+  }
+}

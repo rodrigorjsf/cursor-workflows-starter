@@ -1,0 +1,31 @@
+{
+  "name": "cursor-workflows-starter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Starter kit: workflows determinísticos sobre o Cursor SDK, invocáveis pelo chat do Cursor IDE (MCP) e pelo terminal (CLI).",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "wf": "tsx src/cli.ts",
+    "mcp": "tsx src/mcp-server.ts",
+    "typecheck": "tsc --noEmit",
+    "models": "tsx src/cli.ts models",
+    "test": "tsx --tsconfig tsconfig.test.json --test test/*.test.ts",
+    "dash": "tsx src/observability/dashboard.ts",
+    "stats": "tsx src/cli.ts stats"
+  },
+  "dependencies": {
+    "@cursor/sdk": "1.3.1",
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "ajv": "^8.17.1",
+    "tsx": "^4.20.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "typescript": "^5.9.0"
+  }
+}
