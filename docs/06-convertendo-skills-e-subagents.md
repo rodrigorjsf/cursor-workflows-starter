@@ -18,7 +18,7 @@ Ela aceita artefatos de qualquer um destes lugares:
 
 O inventário registra **em quais harnesses cada artefato é descoberto hoje** (matriz em
 [04](04-invocacao-no-cursor-ide.md#onde-cada-harness-procura-cada-coisa)). Por exemplo, uma skill em
-`.agents/skills/` roda no Cursor mas é invisível ao Claude Code. Depois da conversão, o fluxo deixa de depender de
+`.agents/skills/` roda no Cursor e só chega ao Claude Code pelos links de `scripts/link-claude-skills.sh`. Depois da conversão, o fluxo deixa de depender de
 onde cada harness procura: as etapas são código, e as instruções compartilhadas ficam em `AGENTS.md`.
 
 ## Quando converter (e quando não)
@@ -38,8 +38,9 @@ em dois runs ([05 · Checkpoint em dois runs](05-escrevendo-workflows.md#checkpo
 1. **Inventário.** Tabela com cada skill e subagent e tudo o que eles referenciam (outras skills, arquivos de
    referência, licença numa skill de terceiros): gatilho atual, entradas, saídas, tools, modelo e efeitos externos.
 2. **Decisões implícitas.** Tudo o que hoje o modelo decide ("quando relevante", "repita até…", "verifique se
-   passou", "red antes de green", "confirme com o usuário"). Cada uma vira uma regra em código, uma invariante
-   conferida entre etapas, um checkpoint ou um classificador barato com schema.
+   passou", "red antes de green", "confirme com o usuário"). Cada uma vira uma regra em código, um arg, uma
+   invariante conferida entre etapas, um checkpoint, um classificador barato com schema, ou fica como skill (a lista e
+   o critério de pronto estão no passo 2 da skill).
 3. **Mapeamento** para `ctx.agent`, `ctx.parallel`, `ctx.pipeline`, `execFileSync` e laços com teto. A tabela
    completa está na skill.
 4. **Otimização de custo** (obrigatória): checklist de [08](08-custos-e-cache.md#6-checklist-de-custo) etapa por
@@ -61,7 +62,7 @@ código, os fluxos das skills `tdd`, `codebase-design`, `code-review` e `pr` de
 | Unidade | Gatilho atual | Harnesses que descobrem hoje | O que traz para o fluxo |
 |---|---|---|---|
 | `tdd` | Modelo ("test-first", "red-green-refactor") | Claude Code, via plugin | Seams combinadas com o usuário; fatias verticais; red antes de green; teste pela interface pública; cita a `codebase-design` |
-| `codebase-design` | Modelo, ou citada pela `tdd` | Claude Code, via plugin | Vocabulário de módulo profundo e seam; "Design it twice" com três sub-agents em paralelo |
+| `codebase-design` | Modelo, ou citada pela `tdd` | Claude Code, via plugin | Vocabulário de módulo profundo e seam; "Design it twice" com três ou mais sub-agents em paralelo (o workflow fixa três) |
 | `code-review` | Modelo ("review since X") | Claude Code, via plugin | Dois sub-agents em paralelo (Standards, Spec), relatórios lado a lado; baseline de smells de Fowler |
 | `pr` | Modelo ("writing a PR body") | Claude Code, via plugin | Template Summary / Evidence / Merge Danger; credita a `show-me` (humanlayer/skills, MIT) |
 
@@ -69,19 +70,24 @@ código, os fluxos das skills `tdd`, `codebase-design`, `code-review` e `pr` de
 
 | Na skill | No workflow |
 |---|---|
-| "confirme as seams com o usuário" (`tdd`) | Checkpoint em MED e HIGH: o run 1 propõe as seams na issue e devolve `seams-proposed`; o run 2, com `approveSeams`, executa o plano guardado. LOW segue sem parar, com uma fatia |
+| "confirme as seams com o usuário" (`tdd`) | Checkpoint em MED e HIGH: o run 1 propõe as seams na issue e devolve `seams-proposed`; o run 2, com `approveSeams`, o mesmo `runId` e o mesmo `--cwd`, executa o plano guardado (sem ele, para com `seams-not-proposed`). LOW segue sem parar, com uma fatia |
 | "red antes de green", "uma fatia por vez" (`tdd`) | Invariantes conferidas pelo código: só testes mudam no red e a suíte falha; nem testes nem configuração do runner mudam no green e a suíte passa; violação desfaz a etapa e tenta de novo uma vez |
 | "Design it twice" quando vale a pena (`codebase-design`) | Só no tier HIGH: três designers em `ctx.parallel` com restrições diferentes e um juiz com schema |
-| "dois sub-agents, sem misturar nem reordenar" (`code-review`) | Três eixos em `ctx.parallel` (Standards, Spec e Segurança, este do kit), cada um com o schema das suas categorias; o código roteia: requisito faltando vira fatia TDD extra, padrão ou segurança vira refactor, julgamento vai para o PR |
+| "dois sub-agents, sem misturar nem reordenar" (`code-review`) | Três eixos em `ctx.parallel` (Standards, Spec e Segurança, este do kit), cada um com o schema das suas categorias; o código roteia: requisito faltando ou errado vira fatia TDD extra (até 2), padrão violado ou falha de segurança vira refactor, e julgamento, fora do pedido e nota de segurança vão para o PR |
 | "qual é o ponto fixo?" (`code-review`) | Commit base do worktree, guardado pelo código |
 | "Evidence: o teste falhando, depois passando" (`pr`) | Saídas reais da suíte em cada fatia, capturadas pelo código; o agente escreve só Summary e Merge Danger |
-| "corrija até passar" | Até 2 correções por fatia, escalando o modelo; depois `tests-failed` |
+| "corrija até passar" | Até 2 correções por fatia, um tier acima (LOW → MED, MED → HIGH; o HIGH continua no HIGH); depois `tests-failed` |
 | modelo herdado do chat | Mapa de tiers explícito (`composer-2.5` no LOW, `grok-4.7` no MED, `grok-4.7` com esforço alto no HIGH e no review) |
 
 **Otimização de custo:** a tabela por etapa (modelo, tools, `settingSources`, `memo`) e as estimativas por caminho
 estão no cabeçalho do workflow. As etapas que só leem (classificar, planejar, desenhar, julgar, revisar, escrever o
-texto do PR) rodam com `settingSources: []`, que corta as 58 skills que qualquer outra camada carrega, e recebem no
-prompt os arquivos de contexto que existem. Testes, diff, commit, comentário e PR são código: zero tokens.
+texto do PR) rodam com `settingSources: []`, a única configuração medida que corta as skills
+([08 §4.3](08-custos-e-cache.md#43-contexto-fixo-mínimo-por-etapa)). No lugar do `AGENTS.md`, o código lista no prompt
+os arquivos de contexto que existem no planejar, desenhar, julgar e no texto do PR, e os de padrão no eixo Standards;
+o classificar recebe só a issue, e os eixos Spec e Segurança, a issue e o diff. Testes, diff, commit, comentário e PR são código: zero tokens.
+As etapas que escrevem (teste, código, correção, refactor) ficam com todas as tools, `task` inclusive, e o default do
+engine (`["project","team","mdm"]`): é a exceção do workflow ao item de `tools` do
+[checklist](08-custos-e-cache.md#6-checklist-de-custo).
 
 O que a conversão exigiu além dos passos da skill virou receita em [05](05-escrevendo-workflows.md#receitas)
 (invariantes entre etapas, resume com invariantes, checkpoint em dois runs, review em eixos) e referência em

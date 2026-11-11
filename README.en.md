@@ -19,8 +19,9 @@ Linux x64 (WSL2). Evidence: [`docs/research/verificacoes-locais.md`](docs/resear
 - **Measured:** login without a local browser, model catalog, structured output, what `settingSources` loads
   (`AGENTS.md`, Cursor and Claude Code hooks, `.cursor/mcp.json`), the recursion guard, prompt cache between agents,
   token types, localhost-only dashboard, and Claude Code listing the MCP tools.
-- **End to end:** only the **LOW** path of the example `implement-issue` workflow (implement → tests → commit → PR →
-  resume without repeating), run from this tree. MED and HIGH paths (plan, review) did not run.
+- **End to end:** only the **LOW** path of the previous `implement-issue` (implement → tests → commit → PR → resume
+  without repeating), run from the tree published as 0.1.0. The current flow (TDD slice by slice and a three-axis
+  review on every tier; plan and seams checkpoint on MED and HIGH) has not run against the real API yet.
 - **Cost:** on the tested account the SDK's `getUsage()` returns `feature_unavailable` for local agents, so the kit
   cannot read the real cost: the cents cap is blind and only the token cap protects you.
 - **Incident:** in an earlier test an unsandboxed step edited a file outside the repository. It was fixed and

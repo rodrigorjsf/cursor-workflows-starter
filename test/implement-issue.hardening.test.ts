@@ -287,3 +287,11 @@ test("a evidência do PR não leva caminhos locais", async () => {
   assert.equal(res(r).status, "done");
   assert.ok(!gh().prs[0]!.body.includes(fx.repo), "o caminho do worktree vira <worktree>");
 });
+
+test("approveSeams sem plano proposto neste run (outro runId ou outro --cwd) não executa um plano que ninguém viu", async () => {
+  issue(["complexity:medium"]);
+  const r = await run({ approveSeams: true });
+  assert.equal(res(r).status, "seams-not-proposed", JSON.stringify(res(r)));
+  assert.ok(!names().includes("planejar"));
+  assert.equal(gh().comments.length, 0);
+});

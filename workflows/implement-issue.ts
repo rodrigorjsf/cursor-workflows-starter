@@ -9,7 +9,8 @@
 //   - MED/HIGH param depois do plano (status "seams-proposed", comentário na issue, plano guardado no progresso do
 //     run): o segundo run, com `--resume <runId>` e `approveSeams: true`, executa EXATAMENTE o plano proposto; com
 //     `seams: [...]`, refaz o plano com as seams dadas. A skill tdd manda combinar as seams antes dos testes, e o
-//     runtime não pausa para perguntar. `approveSeams` num primeiro run vale como aprovação antecipada;
+//     runtime não pausa para perguntar. Sem plano proposto no progresso (outro runId ou outro --cwd), `approveSeams`
+//     para com "seams-not-proposed" em vez de aprovar um plano novo; para pular o checkpoint, passe `seams`;
 //   - a suíte tem de estar verde antes da primeira fatia ("baseline-red"; um runner sem nenhum teste conta como
 //     verde); `setupCommand` opcional antes; os testes têm teto de tempo ("tests-timeout");
 //   - cada fatia é um ciclo red → green controlado pelo código. Red: só arquivos de teste mudam, nenhum teste é
@@ -45,6 +46,9 @@
 //   review ×3        grok-4.7 high          só leitura, sem shell    []               sim (o diff e a rodada no prompt)
 //   refatorar-1      do tier                todas                    default          não
 //   pr-texto         composer-2.5           só leitura, sem shell    []               sim
+// Exceção ao checklist (docs/08 §6): as etapas que escrevem ficam com todas as tools, "task" inclusive, e o default
+// do engine (project, team, mdm). A allowlist de escrita do SDK ainda não foi medida, e os hooks do time e do MDM
+// têm de valer onde o agente escreve.
 // Agentes por caminho, típico (sem retentativas nem achados) e pior caso (2 tentativas por etapa, 2 correções por
 // fatia, 2 fatias extras, refactor, re-review). Teto padrão: 3 milhões de tokens (`budget`); --max-tokens troca:
 //   LOW   típico 6  (1 fatia + 3 reviews + PR)                     pior caso ~26
@@ -133,7 +137,7 @@ interface Args {
   /** Roda uma vez no worktree novo antes da suíte de base (ex.: `npm ci`). */
   setupCommand?: string;
   openPr?: boolean;
-  /** Segundo run de MED/HIGH (com `--resume <runId>`): aprova o plano proposto. Num primeiro run: aprovação antecipada. */
+  /** Segundo run de MED/HIGH (com `--resume <runId>` e o mesmo `--cwd`): aprova o plano proposto no primeiro. */
   approveSeams?: boolean;
   /** Seams aprovadas por você, no lugar das propostas: o plano é refeito com elas. */
   seams?: string[];
@@ -358,6 +362,9 @@ export default defineWorkflow<Args>({
         slices: [{ behavior: issue.title, seam: "a interface pública mais próxima do comportamento pedido", testIdea: "use um exemplo do enunciado da issue como valor esperado" }],
         testCommand: ctx.args.testCommand ?? "npm test",
       };
+    } else if (ctx.args.approveSeams && !ctx.args.seams?.length && !progress.data.proposedPlan) {
+      // Aprovar exige um plano mostrado: sem ele, um planejador novo produziria um plano que ninguém viu.
+      return { ...base, status: "seams-not-proposed", runId: ctx.runId, hint: "rode sem approveSeams para propor as seams, ou retome o run que as propôs com o mesmo --cwd" };
     } else if (ctx.args.approveSeams && !ctx.args.seams?.length && progress.data.proposedPlan) {
       plan = progress.data.proposedPlan as Plan; // aprova exatamente o que foi mostrado na issue
       ctx.log("seams aprovadas: usando o plano proposto no primeiro run");
@@ -420,7 +427,7 @@ export default defineWorkflow<Args>({
           "",
           "### Para aprovar",
           "",
-          "Relance com os mesmos args e `approveSeams: true`; o run executa exatamente este plano:",
+          "Relance com os mesmos args e `approveSeams: true`, no mesmo diretório (ou com o mesmo `--cwd`) deste run; ele executa exatamente este plano:",
           "",
           "```bash",
           relaunch,

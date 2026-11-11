@@ -1,7 +1,7 @@
 # Casos da origem
 
-Referência da `/skill-to-workflow` para origens que trazem um destes casos. Leia só a seção do caso. A conversão de
-referência, `workflows/implement-issue.ts` (com `workflows/implement-issue/`), tem um exemplo de quase todos.
+Referência da `/skill-to-workflow` para origens que trazem um destes casos. A conversão de
+referência, `workflows/implement-issue.ts` (com `workflows/implement-issue/`), tem um exemplo de cada caso, menos "Subagent de origem".
 
 ## Conversa com o usuário
 
@@ -66,6 +66,11 @@ Além de `name`, `description`, `model` e do corpo como prompt:
 | Campo do Claude Code | No workflow |
 |---|---|
 | `isolation: worktree` | `git worktree add` no código e `cwd` da etapa apontando para ele |
-| `maxTurns` | `timeoutMs` e `retries` da etapa (o SDK não expõe teto de turnos) |
+| `maxTurns` | `timeoutMs` curto, com `retries: 0` e `schemaRetries` baixo para um teto duro: o engine refaz a etapa que estoura o tempo, e cada re-prompt de schema tem o seu `timeoutMs` (o SDK não expõe teto de turnos) |
 | `effort` | `model.params` (ex.: `[{ id: "reasoning_effort", value: "high" }]`), se o modelo oferecer; confira em `npm run models` |
 | `tools` / `disallowedTools` | `tools` / `disallowedTools` do SDK (nomes diferentes: `Read`→`read`, `Bash`→`shell`, `Edit`/`Write`→`edit`) |
+| `mcpServers` | `mcpServers` da etapa, só com os servidores que ela usa |
+| `skills` | Seção "Outra skill citada e arquivos de referência" |
+
+Campo sem linha aqui (`permissionMode`, `hooks`, `memory`, `background`, `is_background`…) entra na lista do que não
+foi convertido (passo 6 da skill), com o motivo.
