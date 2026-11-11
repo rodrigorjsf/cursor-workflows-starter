@@ -26,7 +26,8 @@ Cursor, que não tem esse runtime nativo. O porquê e a comparação completa es
 >   tokens por tipo; dashboard só em localhost; Claude Code lista as tools MCP e lê `CLAUDE.md` → `@AGENTS.md`.
 > - **Ponta a ponta:** caminhos **LOW** e **MED** do `implement-issue` (TDD fatia a fatia conferido pelo código,
 >   review em três eixos, PR no template; no MED, seams aprovadas em dois runs e fatias além do teto adiadas):
->   339 mil tokens no LOW e 887 mil no MED, resume sem repetir etapas (§13 das verificações). O HIGH ("Design it
+>   339 mil tokens no LOW e 769 mil no MED (issue inteira, dois runs), resume sem repetir etapas (§13 das
+>   verificações). O HIGH ("Design it
 >   twice") e o review que bloqueia só têm testes offline.
 > - **Custo:** nesta conta o `getUsage()` do SDK responde `feature_unavailable` para agentes locais, então o kit não
 >   lê o custo real: o teto em centavos fica cego e só o de tokens protege.

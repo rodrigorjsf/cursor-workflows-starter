@@ -24,6 +24,8 @@
   o red só com o teste; `tdd-violation` e `test-not-red` trazem o motivo em `reason`.
 - **Logs do SDK fora do stdout do CLI.** O SDK escreve linhas `INFO` por `console.log`, que sujavam o JSON do `wf run`;
   o desvio para o stderr, que só o servidor MCP tinha, virou um módulo comum.
+- **O planejador recebe o teto de fatias do tier.** Na issue #8 ele propôs 5 fatias para um tier de 3, e o PR saiu
+  parcial; na #11, com o teto no prompt, 2 fatias cobriram a issue inteira.
 - **Comentário das seams marca as fatias adiadas** pelo teto do tier, e a Evidence do PR começa numa linha inteira
   (os dois vistos nos runs reais).
 - **`approveSeams` sem plano proposto** no progresso do run (outro `runId` ou outro `--cwd`) para com
@@ -33,9 +35,9 @@
 
 ### Verificado
 
-- Caminhos LOW e MED contra a API real ([PR #9](https://github.com/rodrigorjsf/wf-sandbox/pull/9) e
-  [PR #10](https://github.com/rodrigorjsf/wf-sandbox/pull/10) no `wf-sandbox`): 339 mil e 887 mil tokens, dentro das
-  estimativas; resume sem refazer etapas; nada escrito fora do repositório (`docs/research/verificacoes-locais.md` §13).
+- Caminhos LOW e MED contra a API real ([PR #9](https://github.com/rodrigorjsf/wf-sandbox/pull/9),
+  [PR #10](https://github.com/rodrigorjsf/wf-sandbox/pull/10) e [PR #12](https://github.com/rodrigorjsf/wf-sandbox/pull/12)
+  no `wf-sandbox`): 339 mil tokens no LOW e 769 mil no MED, dentro das estimativas; resume sem refazer etapas; nada escrito fora do repositório (`docs/research/verificacoes-locais.md` §13).
 
 ### Corrigido
 

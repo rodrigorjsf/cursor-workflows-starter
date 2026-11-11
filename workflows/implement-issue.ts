@@ -54,8 +54,8 @@
 //   LOW   típico 6  (1 fatia + 3 reviews + PR)                     pior caso ~26
 //   MED   típico 11 (plano; até 3 fatias + 3 reviews + PR)          pior caso ~39
 //   HIGH  típico 20 (3 designers + juiz; até 5 fatias + ...)        pior caso ~55
-// Tokens medidos (docs/research/verificacoes-locais.md §13): LOW 339 mil (6 agentes); MED 887 mil nos dois runs
-// (11 agentes, 3 fatias e 2 adiadas).
+// Tokens medidos (docs/research/verificacoes-locais.md §13): LOW 339 mil (6 agentes); MED 769 mil nos dois runs
+// (9 agentes, 2 fatias); um MED com 3 fatias e 2 adiadas, antes do teto no prompt do planejador, gastou 887 mil.
 // Fora de agentes (zero tokens): leitura da issue, roteamento, git, testes, diff, comentário, commit e PR.
 //
 // IDs de modelo: confirme os seus com `npm run models`. Os defaults são modelos do Cursor (Composer e Grok), que os

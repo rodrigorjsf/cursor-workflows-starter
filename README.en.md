@@ -21,7 +21,7 @@ Linux x64 (WSL2). Evidence: [`docs/research/verificacoes-locais.md`](docs/resear
   token types, localhost-only dashboard, and Claude Code listing the MCP tools.
 - **End to end:** the **LOW** and **MED** paths of `implement-issue` (TDD slice by slice checked by code, a three-axis
   review, a PR in the template; on MED, seams approved across two runs and slices past the cap deferred): 339k tokens
-  on LOW and 887k on MED, with resume not repeating steps (§13 of the verification report). HIGH ("Design it twice")
+  on LOW and 769k on MED (whole issue, two runs), with resume not repeating steps (§13 of the verification report). HIGH ("Design it twice")
   and a blocking review only have offline tests.
 - **Cost:** on the tested account the SDK's `getUsage()` returns `feature_unavailable` for local agents, so the kit
   cannot read the real cost: the cents cap is blind and only the token cap protects you.
