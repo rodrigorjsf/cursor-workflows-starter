@@ -61,5 +61,7 @@ Não executado; detalhes e como testar em `docs/research/verificacoes-locais.md`
 - Re-prompt de schema pelo engine contra a API real.
 - Hooks do time e MDM e de `~/.claude/settings.json`; políticas de admin, limite em dólares por membro e chaves Team
   Admin (sem acesso de admin); o erro do teto mensal de uso.
+- Reconfirmar `getUsage()` em agentes locais: a Cursor libera conta por conta, e nesta deu `feature_unavailable`;
+  quando liberar, o teto em centavos e o `wf metrics reconcile` passam a funcionar.
 - Faixa de contexto do Haiku 5.5 (modelo de terceiros exige crédito no Premium); macOS e Windows nativo; limites de
   concorrência.
