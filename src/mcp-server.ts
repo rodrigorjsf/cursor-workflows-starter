@@ -15,10 +15,7 @@
 //
 // STATUS: exercitado por stdio (initialize, tools/list, list_workflows) nos testes de fumaça do kit.
 
-// stdout é o canal JSON-RPC: qualquer console.log de um workflow iria corrompê-lo.
-console.log = (...a: unknown[]) => process.stderr.write(a.map(String).join(" ") + "\n");
-console.info = console.log;
-
+import "./console-to-stderr.js"; // stdout é o canal JSON-RPC: o console do SDK e dos workflows vai para o stderr
 import "./node-check.js"; // antes de tudo: o @cursor/sdk exige Node 22.13+
 import { readFileSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";

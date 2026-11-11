@@ -17,6 +17,7 @@
 //
 // STATUS: verificado contra a API real num plano Premium em 2026-11-11 (docs/research/verificacoes-locais.md).
 
+import "./console-to-stderr.js"; // o stdout leva o JSON do resultado: o console do SDK vai para o stderr
 import "./node-check.js"; // antes de tudo: o @cursor/sdk exige Node 22.13+
 import { spawn } from "node:child_process";
 import { openSync } from "node:fs";
