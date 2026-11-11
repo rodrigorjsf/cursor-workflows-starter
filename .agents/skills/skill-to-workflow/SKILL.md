@@ -1,157 +1,152 @@
 ---
 name: skill-to-workflow
-description: Converte um fluxo feito de skills e subagents (.agents/skills, .cursor/skills, .claude/skills, .codex/skills + .cursor/agents, .claude/agents, .codex/agents) em um workflow determinístico em workflows/*.ts ou .agents/workflows/*.ts. Use quando o usuário digitar /skill-to-workflow e indicar as skills ou subagents de referência.
+description: Converte skills e subagents existentes em um workflow determinístico deste kit, com teste offline e relatório de custo.
 disable-model-invocation: true
 ---
 
 # Converter skills e subagents em workflow
 
 **Entrada:** caminhos para um ou mais `SKILL.md` (`.agents/skills/`, `.cursor/skills/`, `.claude/skills/`,
-`.codex/skills/`), arquivos de subagent (`.cursor/agents/*.md`, `.claude/agents/*.md`, `.codex/agents/*.md`) e, se
-existirem, instruções (`AGENTS.md`, `CLAUDE.md`, `.cursor/rules/`), comandos ou hooks que participam do fluxo.
+`.codex/skills/`, ou uma skill de terceiros num cache de plugin ou noutro repositório), arquivos de subagent
+(`.cursor/agents/*.md`, `.claude/agents/*.md`, `.codex/agents/*.md`) e, se existirem, instruções (`AGENTS.md`,
+`CLAUDE.md`, `.cursor/rules/`), comandos ou hooks que participam do fluxo.
 
-**Saída:** `workflows/<nome>.ts` (dentro do kit) ou `.agents/workflows/<nome>.ts` (num repositório que usa o kit
-instalado fora), `test/<nome>.test.ts` e um relatório de conversão no chat.
+**Saída:** `workflows/<nome>.ts` neste kit, onde typecheck e testes rodam, com prompts e checagens numa pasta
+`workflows/<nome>/` quando o módulo cresce; `test/<nome>.test.ts`; `CREDITS.md` quando a origem é de terceiros; e um
+relatório de conversão no chat. Se o fluxo é de outro repositório (kit instalado fora), o passo 5 termina copiando o
+workflow para `.agents/workflows/` de lá. A conversão de referência é `workflows/implement-issue.ts` (skills `tdd`,
+`codebase-design`, `code-review` e `pr`; o cabeçalho resume as decisões), com `test/implement-issue.workflow.test.ts`.
 
-Antes de começar, carregue a skill `workflow-authoring` (a API do runtime e as regras) e leia
-`docs/08-custos-e-cache.md` (práticas de custo e cache, usadas no passo 4).
+Antes de começar, carregue a skill `cursor-workflow-authoring`: a API do runtime e as regras que os passos 3 a 5
+aplicam.
 
 ## Passo 1: inventário (só leitura)
 
-Leia cada arquivo indicado e tudo o que ele referencia: scripts, templates, outros agentes e MCP servers. Monte esta tabela:
+Leia cada arquivo indicado e tudo o que ele referencia: scripts, templates, outras skills (a `tdd` chama a
+`codebase-design`), os arquivos de referência ao lado do `SKILL.md`, outros agentes, MCP servers e, numa skill de
+terceiros, a licença e os créditos dela. Monte esta tabela:
 
 | Unidade | Caminho | Tipo | Gatilho atual | Harnesses que descobrem hoje | Entradas | Saídas | Tools | Modelo | Efeitos externos |
 |---|---|---|---|---|---|---|---|---|---|
 
-Para "Harnesses que descobrem hoje", use esta regra:
-
-- **`.agents/skills/`**: Cursor e Codex. **Não** o Claude Code, que não lê nada sob `.agents/`.
-- **`.claude/skills/`**: Claude Code, mais o Cursor por compatibilidade.
-- **`.cursor/agents/`**: só o Cursor.
-- **`.claude/agents/`**: Claude Code, mais o Cursor por compatibilidade. Nas runs do SDK (as etapas), porém, a
-  doc só cita `.cursor/agents/*.md`.
-
-O lado do Cursor está nas páginas de [skills](https://cursor.com/docs/skills#skill-directories) e de
-[subagents](https://cursor.com/docs/subagents#file-locations) [DOC] (acesso em 2026-11-11). O do SDK está na
-[referência TypeScript](https://cursor.com/docs/sdk/typescript) [DOC].
-
-Essa coluna mostra o que hoje só funciona num harness e passa a funcionar nos dois depois da conversão, porque o
-workflow é disparado pelo mesmo MCP server.
+Para "Harnesses que descobrem hoje", use a matriz de `docs/04-invocacao-no-cursor-ide.md` (§ Onde cada harness
+procura cada coisa) e confira se `.claude/skills/` tem links para `.agents/skills/` (`scripts/link-claude-skills.sh`):
+com eles, o Claude Code também descobre a skill. Numa skill de plugin ou de outro repositório, anote onde ela está
+instalada e qual harness a carrega. Essa coluna alimenta a paridade do relatório (passo 6).
 
 Os campos vêm destas fontes:
 
-- **Subagent**:
-  - `name`, `description`, `model` e o corpo como prompt.
-  - No Cursor, `readonly`/`is_background`. `model: inherit` (o default) usa o modelo do agente pai
-    ([DOC](https://cursor.com/docs/subagents#configuration-fields)). Nas runs do SDK, a doc não lista `readonly` nem
-    `is_background`, nem em `.cursor/agents/*.md` (só `name`, `description` e `model`) nem no `agents` inline. Por
-    isso o passo 3 traduz `readonly` em allowlist de `tools`.
-  - No Claude Code, `tools`/`disallowedTools`, `permissionMode` (ignorado em subagents de plugin), `skills`,
-    `maxTurns`, `isolation: worktree` e `effort`. `model: inherit` usa o modelo da **conversa principal**, que num
-    subagent aninhado pode não ser o do pai. Um `model` passado na invocação tem precedência, e com
-    `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` ligado o Claude Code ignora o campo
-    ([DOC](https://code.claude.com/docs/en/sub-agents)).
-- **Skill**:
-  - os passos numerados, as condições ("se X, faça Y") e os scripts chamados.
-  - `disable-model-invocation`, que diz se a skill era explícita ou dependia do modelo para disparar. Com `true`,
-    só o usuário dispara, com `/nome`, no Cursor ([DOC](https://cursor.com/docs/skills#disabling-automatic-invocation))
-    e no Claude Code ([DOC](https://code.claude.com/docs/en/skills#control-who-invokes-a-skill)).
+- **Skill**: os passos numerados, as condições ("se X, faça Y"), os scripts chamados e `disable-model-invocation`
+  (se a skill era explícita ou dependia do modelo para disparar).
+- **Subagent**: `name`, `description`, `model` e o corpo como prompt, mais os campos de cada harness (seção
+  "Subagent de origem" de [ORIGEM.md](ORIGEM.md)).
+
+Se a origem conversa com o usuário, cita outra skill, dispara sub-agents em paralelo, é de terceiros ou inclui um
+subagent, leia a seção do caso em [ORIGEM.md](ORIGEM.md) antes do passo 2.
+
+Pronto quando todo arquivo que as entradas referenciam tem uma linha na tabela ou está citado na linha de quem o
+referencia.
 
 ## Passo 2: achar as decisões implícitas
 
 Liste toda decisão que hoje **o modelo** toma. Sinais típicos:
 
 - "quando relevante", "se necessário", "use o subagent X para…" (delegação decidida pelo modelo);
-- "repita até…" sem número máximo;
+- laço sem teto: "repita até…", "corrija até passar";
 - "verifique se os testes passam" (verificação feita por quem gerou o código);
+- regra imperativa do processo que o modelo policia sozinho ("red antes de green", "só toque arquivos de teste",
+  "não junte os relatórios"): vira **invariante** conferida pelo código entre etapas;
+- "confirme com o usuário", "pergunte": vira `args`, **checkpoint** ou fica como skill (seção "Conversa com o
+  usuário" de [ORIGEM.md](ORIGEM.md));
 - escolha de modelo implícita, quando tudo herda o modelo do chat.
 
 Para cada decisão, proponha a regra em código que a substitui: um campo, uma label, uma contagem, um exit code ou
 um schema. Se não houver regra objetiva possível, ela vira uma etapa `ctx.agent` com `schema` (um classificador
 barato), e o **código** age sobre a resposta.
 
+Pronto quando toda condicional, laço, delegação, regra imperativa, pedido ao usuário e escolha de modelo dos passos
+e das `description` do inventário tem uma linha com a regra adotada.
+
 ## Passo 3: mapear para o runtime
+
+As receitas citadas estão em `docs/05-escrevendo-workflows.md` (seção Receitas).
 
 | Origem | Destino |
 |---|---|
-| Instruções gerais (`CLAUDE.md`, `.cursor/rules/`) usadas pelo fluxo | Mova o que for comum para `AGENTS.md`, que as etapas carregam via `settingSources: ["project"]`. Deixe no prompt da etapa só o que é específico dela |
-| Passo de skill executado pelo modelo | `ctx.agent(prompt, { schema, tools, model })`. O prompt é o texto do passo mais as entradas explícitas |
-| Subagent chamado por delegação | `ctx.agent(corpoDoSubagent + tarefa, { model, tools })`. `readonly: true` vira `tools: ["read","grep","glob","ls"]` |
-| Vários subagents independentes | `ctx.parallel` (barreira) ou `ctx.pipeline` (por item) |
+| Instruções gerais (`CLAUDE.md`, `.cursor/rules/`) usadas pelo fluxo | O que for comum vai para `AGENTS.md`, que as etapas que escrevem carregam via `settingSources: ["project"]`. Etapas só de leitura ficam com `[]` e recebem no prompt os arquivos que importam |
+| Passo de skill executado pelo modelo | `ctx.agent(prompt, { schema, tools, model })`. O prompt é o texto do passo, numa constante de instruções, mais as entradas explícitas |
+| Subagent chamado por delegação | `ctx.agent(corpoDoSubagent + tarefa, { model, tools })`; a condição da delegação vira código (passo 2) |
+| Vários subagents independentes, ou sub-agents que a própria skill dispara em paralelo | `ctx.parallel` (barreira) ou `ctx.pipeline` (por item); o código confere o mínimo de resultados, e a agregação da skill vira código ou etapa juiz |
+| Outra skill citada pela skill ("chame a skill X") | Trecho parafraseado numa constante, importada por todo prompt que o usa |
 | Script chamado pela skill (lint, testes, build) | `execFileSync` no workflow; o resultado decide o próximo passo |
-| "Repita até passar" | `for (let round = 1; round <= N && !ok; round++)` |
-| Revisão/crítica | Etapa separada com modelo próprio e schema `{findings, severity}`; o código decide se bloqueia. Revisor que falha (`null`) encerra o run com status explícito; depois de corrigir, revise de novo |
+| Regra imperativa do processo | Receita "Invariantes entre etapas" |
+| Aprovação humana de um resultado intermediário | Receita "Checkpoint em dois runs" |
+| Laço sem teto | `for (let round = 1; round <= N && !ok; round++)` |
+| Revisão/crítica | Receita "Review em eixos": uma etapa por eixo, schema com as categorias de achado da própria skill, roteamento no código |
 | Hook `stop`/`subagentStop` com `followup_message` (loop) | Laço explícito no workflow; o hook deixa de ser necessário |
-| Efeito externo (commit, PR, comentário) | Código no fim, depois das verificações |
+| Efeito externo (commit, PR, comentário) | Código no fim, depois das verificações. A saída real que a skill pede no artefato (teste falhando, depois passando) é capturada pelo código; o agente escreve só o texto de julgamento |
 | Subagent que o workflow quer delegar *dentro* de uma etapa | `agents: { nome: { description, prompt, model } }` na opção da etapa |
-| Claude Code `isolation: worktree` | `git worktree add` no código e `cwd` da etapa apontando para ele |
-| Claude Code `maxTurns` | `timeoutMs` e `retries` da etapa (o SDK não expõe teto de turnos) |
-| Claude Code `effort` | `model.params` (ex.: `[{ id: "reasoning_effort", value: "high" }]`), se o modelo oferecer; confira em `npm run models` |
-| Claude Code `tools` / `disallowedTools` | `tools` / `disallowedTools` do SDK (nomes diferentes: `Read`→`read`, `Bash`→`shell`, `Edit`/`Write`→`edit`) |
+| Campo de frontmatter de subagent (`readonly`, `model: inherit`, `isolation`, `maxTurns`, `effort`, `tools`…) | Seção "Subagent de origem" de [ORIGEM.md](ORIGEM.md) |
 
-**Modelos:** troque `inherit` por um tier explícito. Use um modelo barato para etapas mecânicas e de leitura e reserve
-o modelo de fronteira para planejamento difícil e revisão. Confirme os IDs com `npm run models`.
+Pronto quando toda linha do inventário e toda decisão do passo 2 têm destino nesta tabela, ou entram na lista do
+que não foi convertido (passo 6), com o motivo.
 
 ## Passo 4: otimizar custo (obrigatório)
 
-Antes de gerar, aplique a cada etapa o checklist de custo de `docs/08-custos-e-cache.md` §6. Registre a decisão
-de cada item numa tabela:
+Antes de gerar, aplique a cada etapa **todos** os itens do checklist de custo de `docs/08-custos-e-cache.md` §6 e
+registre a decisão numa tabela, uma linha por etapa:
 
-| Etapa | Modelo (tier) | `tools` | `settingSources` | `memo` | Prompt fixo → dados | Schema mínimo | Laço/timeout |
+| Etapa | Modelo (tier) | `tools` | `settingSources` | `memo` | Prefixo estável | Schema mínimo | Laço/timeout |
 |---|---|---|---|---|---|---|---|
 
-Regras que valem sempre:
+Item do checklist sem coluna (condição de etapa opcional, truncamento, fan-out, `mcpServers`, teto padrão) entra
+como nota da linha; item que não se aplica leva `n/a` e o motivo. O primeiro run real fica para o usuário (passo 6).
+Na conversão, o texto da skill original e o corpo de cada subagent viram as constantes de instruções das etapas: no
+topo do módulo ou, se forem longas, em `workflows/<nome>/prompts.ts`, como no `implement-issue`.
 
-- **Decisão objetiva vira código**, não etapa de agente. É a maior economia.
-- **Etapa só de leitura:** `tools` só de leitura + `memo: true`.
-- **Etapa que não precisa do repositório** (classificar, resumir, revisar texto): `settingSources: []` ou
-  `["team","mdm"]`. A camada `project` carrega `AGENTS.md`, regras, hooks e tools do MCP do projeto em toda
-  chamada. `["team","mdm"]` tira o `AGENTS.md` e mantém os hooks do time e MDM, mas o SDK ainda carrega as skills
-  (58 nos dois casos, medido); só `[]` as corta, e aí saem também os hooks do time e MDM
-  (`docs/research/verificacoes-locais.md` §7).
-- **Sem `"task"` na allowlist**, salvo se a etapa precisa delegar. O Cursor põe nome e descrição de cada subagent
-  custom na descrição da tool Task, e o contexto fixo cresce com o número deles: o catálogo de subagents ainda não
-  tem teto nem corte, ao contrário do de skills. A fonte é um relato sobre o IDE no
-  [fórum](https://forum.cursor.com/t/162001) [FÓRUM], com resposta provavelmente da equipe do Cursor (2026-05-31).
-  A doc diz só que a descrição aparece nas dicas da Task ([DOC](https://cursor.com/docs/subagents#configuration-fields)).
-  Nenhuma fonte diz se os subagents embutidos (`explore`, `browser`) entram nessa lista.
-- **Instruções da skill original viram constantes** no topo do módulo, e o prompt é `INSTRUÇÕES + dados`. O
-  prefixo estável ajuda o cache do provedor e mantém journal e memo estáveis.
-- **O corpo de um subagent vira instruções da etapa.** O que era `model: inherit` ganha tier explícito, e o modelo
-  de fronteira fica só onde se justifica.
-- **Logs e diffs são truncados** antes de entrar no prompt. O output pedido é só o que o código lê.
-- **Fan-out só de itens independentes;** itens pequenos são agrupados.
+Depois, **estime o custo por caminho** (`docs/08-custos-e-cache.md` §7): para cada combinação de ramos (ex.: LOW
+sem review; HIGH com review e uma correção), conte as etapas de agente e o modelo de cada uma, no caso típico e no
+pior caso (todas as novas tentativas e correções). Compare com o fluxo original, em que tudo rodava no modelo do
+chat, com delegações que repetem o contexto fixo.
 
-Depois, **estime o custo por caminho**: para cada combinação de ramos (ex.: LOW sem review; HIGH com review e uma
-correção), conte as etapas de agente e o modelo de cada uma. Compare com o fluxo original, em que tudo rodava no
-modelo do chat, com delegações que repetem o contexto fixo.
+Pronto quando toda etapa tem uma linha, toda célula tem uma decisão ou `n/a` com motivo, e todo caminho tem
+estimativa.
 
 ## Passo 5: gerar
 
-1. Escreva o workflow seguindo `workflow-authoring`, com `meta.whenToUse` copiado e adaptado da
-   `description` da skill original.
-2. Escreva `test/<nome>.test.ts` com o fake SDK, cobrindo cada ramo criado no passo 2.
-3. No topo do workflow, comente a estimativa de custo por caminho do passo 4.
-   Defina também **o que é entregar**: os `status` de retorno (`done` e os de falha) e as métricas de resultado e
-   de dificuldade emitidas com `ctx.metric` (ver `docs/09-observabilidade.md` §6). Dê `label` a toda etapa.
-4. Rode `npm run typecheck` e `npm test` e corrija até passar.
-5. **Não apague** as skills e os subagents originais. Sugira ao usuário marcar a skill antiga com
-   `disable-model-invocation: true`, ou trocar o corpo dela por "use /run-workflow <nome>".
+1. Escreva `workflows/<nome>.ts` seguindo `cursor-workflow-authoring`, inclusive "Observabilidade" e "Antes de
+   entregar". No topo, comente a tabela e a estimativa de custo do passo 4. `meta.whenToUse` é lido pelo agente do
+   chat: escreva-o com os gatilhos do fluxo original (a `description` da skill, se ela era invocada pelo modelo; o
+   pedido que levava o usuário a digitar `/nome`, se não era; o trabalho pedido, quando várias skills viram um
+   fluxo só).
+2. Escreva `test/<nome>.test.ts` como pede "Antes de entregar" de `cursor-workflow-authoring`: um teste por ramo do
+   passo 2, por invariante e por `status`, mais o resume.
+3. Rode `npm run typecheck` e `npm test` até os dois passarem.
+4. Se o fluxo é de outro repositório, copie `workflows/<nome>.ts` e, se existir, a pasta `workflows/<nome>/` para
+   `.agents/workflows/` de lá, trocando `defineWorkflow({...})` e o import relativo do runtime por
+   `export default { meta, defaults, async run(ctx) { ... } }` (imports só de tipo podem ficar), como em
+   `docs/04-invocacao-no-cursor-ide.md` (§ Usar o kit em outros repositórios).
+5. Mantenha as skills e os subagents originais intactos: apagá-los é decisão do usuário, depois de comparar os dois
+   fluxos.
+
+Pronto quando cada ramo do passo 2 tem teste, a última execução de `npm run typecheck` e `npm test` passou, e os
+originais estão como estavam.
 
 ## Passo 6: relatório no chat
 
 - Tabela do passo 1 e lista de decisões implícitas, com a regra adotada para cada uma.
 - **Custo:** a tabela do passo 4, a estimativa por caminho e o que mudou em relação ao original (etapas
   eliminadas por código, modelos rebaixados, etapas com memo, contexto reduzido).
-- O que **não** foi convertido e por quê: por exemplo, uma interação com o humano no meio do fluxo. O runtime não
-  pausa para perguntar; divida em dois workflows ou receba a resposta por `args`.
-- Paridade: se o fluxo original era do Claude Code, aponte o que muda no Cursor (formato dos hooks, `loop_limit`,
-  subagents lidos de `.claude/agents/`, MCP em cloud). Em cloud, os MCP servers vêm primeiro do `send` (que
-  substitui os do `create`, sem somar) ou do `create`, depois do usuário e do time em cursor.com/agents;
-  `local.settingSources` não vale em cloud ([DOC](https://cursor.com/docs/sdk/typescript)).
-- O comando para o primeiro teste real com tetos baixos:
-  `npm run wf -- run <nome> --args '{...}' --max-cents 100 --max-tokens 2000000`. Passe os dois: em uso cobrado
-  por request (planos legados e alguns Enterprise), `rawCostCents` vem 0, o teto em centavos não enxerga nada e
-  só o de tokens protege. Depois desse run, compare o custo por etapa com a estimativa (`npm run stats` ou
-  `npm run dash`) e ajuste os tiers. As duas etapas mais caras são as primeiras candidatas. Com alguns runs
-  acumulados, compare custo por entrega com o fluxo original.
+- O que **não** foi convertido e por quê: por exemplo, uma conversa aberta com o usuário, que fica como skill.
+- **Créditos:** origem, versão, autor e licença de cada skill de terceiros e de quem ela credita.
+- **Paridade:** pela coluna "Harnesses que descobrem hoje", onde o fluxo rodava e onde passa a rodar (todo harness
+  com o MCP `workflows`). Se o fluxo era do Claude Code, aponte o que muda no Cursor (formato dos hooks,
+  `loop_limit`, subagents lidos de `.claude/agents/`).
+- **Original:** numa skill do próprio repositório que o modelo ainda invoca, sugira `disable-model-invocation: true`
+  ou trocar o corpo por "use /run-workflow <nome>". Skill de terceiros fica como está.
+- **Primeiro run real**, que é do usuário porque o workflow pode ter efeitos externos:
+  `npm run wf -- run <nome> --args '{...}' --max-cents 100 --max-tokens 2000000`, com `--cwd` num repositório
+  descartável quando há commit, PR ou comentário, e sempre com os dois tetos (`docs/02-configuracao-inicial.md` §3).
+  Depois, compare o custo por etapa com a estimativa (`npm run stats` ou `npm run dash`) e ajuste os tiers,
+  começando pelas duas etapas mais caras. Com alguns runs acumulados, compare custo por entrega com o fluxo
+  original.

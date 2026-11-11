@@ -64,7 +64,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             properties: {
               name: { type: "string", enum: [...workflows.keys()] },
               args: { type: "object" },
-              resumeRunId: { type: "string", description: "runId de um run que falhou, para retomar sem repetir etapas concluídas" },
+              resumeRunId: { type: "string", description: "runId de um run anterior (que falhou, ou que parou num checkpoint e devolveu `next`), para retomar sem repetir etapas concluídas" },
             },
           },
         },

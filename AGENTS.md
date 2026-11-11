@@ -15,7 +15,7 @@ Leem este arquivo:
 
 ## Ao trabalhar no código
 
-- Antes de criar ou editar um workflow, carregue a skill `workflow-authoring` (`.agents/skills/workflow-authoring/`).
+- Antes de criar ou editar um workflow, carregue a skill `cursor-workflow-authoring` (`.agents/skills/cursor-workflow-authoring/`).
 - Para converter skills e subagents existentes, use `/skill-to-workflow`.
 - Depois de qualquer mudança, rode `npm run typecheck` e `npm test`. Os testes são offline e usam `test/fake-sdk.ts`.
 - `@cursor/sdk` está fixado. Ao atualizar, confira os `.d.ts` de `node_modules/@cursor/sdk/dist/esm/` e rode os

@@ -1,5 +1,33 @@
 # Changelog
 
+## Não publicado (0.2.0)
+
+### Mudado
+
+- **`implement-issue` segue as skills `tdd`, `codebase-design`, `code-review` e `pr`** de
+  [mattpocock/skills](https://github.com/mattpocock/skills) 1.3.1 (MIT; créditos em [`CREDITS.md`](CREDITS.md)):
+  TDD fatia a fatia com red e green conferidos pelo código; seams aprovadas em dois runs em MED e HIGH
+  (`seams-proposed` e `approveSeams`); "Design it twice" no HIGH; review sempre, em três eixos paralelos
+  (Standards, Spec e Segurança); corpo do PR no template Summary / Evidence / Merge Danger, com a saída real dos
+  testes. Novo status de resultado `pending` nas métricas para checkpoints.
+- **Skill `workflow-authoring` renomeada para `cursor-workflow-authoring`.** O Claude Code tem uma skill embutida
+  com o nome antigo, e a do projeto a substituía.
+- **Skills reescritas** pela referência `writing-for-agents` (mattpocock/skills): descrições de uma linha nas
+  invocadas pelo usuário, critério de pronto em cada passo, regras sem duplicar `docs/08`, e os casos de origem
+  da `/skill-to-workflow` num arquivo à parte (`ORIGEM.md`). A `/run-workflow` trata qualquer checkpoint (resultado
+  com `next`) e o resume pelo CLI.
+- **Teto padrão por workflow:** `budget` na definição vale quando o run não informa `--max-tokens`/`--max-cents`;
+  o `implement-issue` declara 3 milhões de tokens.
+
+### Corrigido
+
+- Revisão adversarial do novo `implement-issue` (24 agentes, 20 achados confirmados), cada correção com teste de
+  regressão em `test/implement-issue.hardening.test.ts`: o green não pode mover o teste red, reconfigurar o runner
+  nem esconder edições com `skip-worktree`; o red não apaga testes; etapa que falha ou é interrompida é desfeita; o
+  resume não refaz review, não recalcula o plano aprovado e não zera a branch; a suíte roda de novo antes do commit;
+  commits de agentes são desfeitos antes da trava de segredos, que passa a olhar também o comentário e o corpo do PR;
+  os testes têm teto de tempo.
+
 ## 0.1.0 (pré-release, 2026-11-11)
 
 Primeira publicação. Base: o kit do estudo no commit

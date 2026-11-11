@@ -53,12 +53,13 @@ Cursor, que não tem esse runtime nativo. O porquê e a comparação completa es
 │   ├── cli.ts              # wf login | whoami | models | list | run | start | wait | status | jobs | stats | metrics
 │   └── mcp-server.ts       # tools MCP: list_workflows, start_workflow, wait_workflow, get_workflow_status
 ├── workflows/
-│   └── implement-issue.ts  # exemplo: tier por label → plano → código → testes → review condicional → PR
+│   ├── implement-issue.ts  # exemplo: TDD fatia a fatia conferido pelo código → review em 3 eixos → PR com evidência
+│   └── implement-issue/    # prompts (paráfrases das skills de mattpocock/skills), laço TDD, review, corpo do PR
 ├── test/                   # testes offline (fake SDK)
 ├── .agents/                # local neutro (Cursor e Codex leem nativamente)
 │   ├── skills/
 │   │   ├── run-workflow/       # /run-workflow <nome> <args>: dispara e acompanha
-│   │   ├── workflow-authoring/ # referência para escrever workflows
+│   │   ├── cursor-workflow-authoring/ # referência para escrever workflows
 │   │   └── skill-to-workflow/  # /skill-to-workflow: converte skills e subagents em workflow
 │   └── workflows/          # workflows do repositório (carregados junto com workflows/)
 ├── .cursor/mcp.json        # MCP server no Cursor

@@ -35,16 +35,16 @@
 // Custo por etapa (passo 4 da /skill-to-workflow). "[]" = settingSources vazio: sem AGENTS.md, regras, hooks, MCP e
 // sem as skills que o SDK carrega com qualquer outra camada (medido: 58).
 //   etapa            modelo                 tools                    settingSources   memo
-//   classificar      composer-2.5           nenhuma                  team, mdm        sim
+//   classificar      composer-2.5           nenhuma                  []               sim
 //   planejar (MED)   grok-4.7               só leitura               []               sim
 //   desenhar ×3      composer-2.5           só leitura               []               sim
 //   julgar (HIGH)    grok-4.7 high          só leitura               []               sim
 //   teste-N          do tier                todas                    default          não
 //   codigo-N         do tier                todas                    default          não
 //   corrigir-N-R     tier acima             todas                    default          não
-//   review ×3        grok-4.7 high          só leitura, sem shell    []               não (diff no prompt)
+//   review ×3        grok-4.7 high          só leitura, sem shell    []               sim (o diff e a rodada no prompt)
 //   refatorar-1      do tier                todas                    default          não
-//   pr-texto         composer-2.5           só leitura, sem shell    []               não
+//   pr-texto         composer-2.5           só leitura, sem shell    []               sim
 // Agentes por caminho, típico (sem retentativas nem achados) e pior caso (2 tentativas por etapa, 2 correções por
 // fatia, 2 fatias extras, refactor, re-review). Teto padrão: 3 milhões de tokens (`budget`); --max-tokens troca:
 //   LOW   típico 6  (1 fatia + 3 reviews + PR)                     pior caso ~26
@@ -337,7 +337,7 @@ export default defineWorkflow<Args>({
         label: "classificar",
         model: MODELS.CLASSIFY,
         tools: [], // só texto: classificar não precisa ler o repositório
-        settingSources: ["team", "mdm"], // sem AGENTS.md, regras, hooks e MCP do projeto; skills continuam (medido)
+        settingSources: NO_SETTINGS, // sem AGENTS.md, hooks, MCP nem as skills que qualquer outra camada carrega (medido)
         memo: true,
         schema: CLASSIFY_SCHEMA,
       });
@@ -671,6 +671,7 @@ export default defineWorkflow<Args>({
             tools: REVIEW_TOOLS,
             settingSources: NO_SETTINGS,
             schema: AXIS_SCHEMAS[axis],
+            memo: true, // o mesmo diff na mesma rodada não paga de novo
           }),
         ),
       );
@@ -762,7 +763,7 @@ export default defineWorkflow<Args>({
       if (!prUrl) {
         const text = await ctx.agent<PrText>(
           `${P.PR_INSTRUCTIONS}\n\n${contextBlock}\n\n${issueBlock(issue)}\n\n## Diff\n${diffSinceBase(worktree, baseCommit)}`,
-          { label: "pr-texto", model: MODELS.CLASSIFY, cwd: worktree, tools: REVIEW_TOOLS, settingSources: NO_SETTINGS, schema: PR_SCHEMA },
+          { label: "pr-texto", model: MODELS.CLASSIFY, cwd: worktree, tools: REVIEW_TOOLS, settingSources: NO_SETTINGS, schema: PR_SCHEMA, memo: true },
         );
         const body = buildPrBody({
           issueNumber: issue.number,
