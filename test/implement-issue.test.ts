@@ -138,3 +138,13 @@ test("a chave da fatia vem do conteúdo, não da posição", () => {
   assert.notEqual(sliceKey("s", "a", "b"), sliceKey("s", "outra", "b"));
   assert.notEqual(sliceKey("s", "a", "b"), sliceKey("x", "a", "b"));
 });
+
+test("a evidência do PR começa numa linha inteira, sem pedaço de linha cortada", () => {
+  const red = "linha-inteira\n# Subtest: x\nnot ok 1 - x\n";
+  const body = buildPrBody({
+    issueNumber: 7, text: PR_TEXT, review: {}, deferred: [],
+    slices: [{ key: "s", behavior: "b", seam: "s", testFile: "t.js", testName: "x", red: "x".repeat(800) + "\n" + red, green: "ok", done: true }],
+  });
+  assert.doesNotMatch(body, /x{5}/, "o pedaço da linha cortada pelo limite sai");
+  assert.match(body, /linha-inteira\n# Subtest: x/);
+});

@@ -7,7 +7,14 @@ import type { SliceRecord } from "./tdd.js";
 export interface PrText { summary: string; door: "one-way" | "two-way"; doorNote?: string; blastRadius: string; blastNote?: string }
 
 const MAX_BODY = 60_000; // o GitHub aceita até 65.536 caracteres
-const tail = (s: string | undefined, n: number) => (s ?? "").trim().slice(-n);
+/** O fim de uma saída, a partir de uma linha inteira: o pedaço de linha que o limite corta sai. */
+const tail = (s: string | undefined, n: number) => {
+  const t = (s ?? "").trim();
+  if (t.length <= n) return t;
+  const cut = t.slice(-n);
+  const nl = cut.indexOf("\n");
+  return nl >= 0 && nl < cut.length - 1 ? cut.slice(nl + 1) : cut;
+};
 const fence = (s: string) => "```text\n" + s.replace(/```/g, "ˋˋˋ") + "\n```";
 
 /**
