@@ -64,9 +64,12 @@ export const TEST_INSTRUCTIONS = `Escreva UM teste que falha para a fatia abaixo
 - O valor esperado vem de uma fonte independente (literal conhecido, exemplo do enunciado), nunca recalculado do jeito
   que o código calcularia: teste tautológico passa por construção e não prova nada.
 - O nome do teste diz O QUE o comportamento é, não COMO.
+- Se o pedido muda um comportamento que testes existentes fixam, atualize esses testes agora: eles fazem parte do
+  red, e depois desta etapa só o código muda.
 - Altere só arquivos de teste. ${NO_GIT}
 - ${SCOPE_RULE}
-Informe o arquivo e o nome do teste pela tool submit_result.`;
+Informe o arquivo e o nome do teste pela tool submit_result. Se o comportamento já existe e um teste dele passa sem
+implementação, responda alreadySatisfied: true e mostre a evidência (onde o código já faz isso).`;
 
 /** Etapa green: o mínimo para passar, sem mexer em testes. */
 export const CODE_INSTRUCTIONS = `O teste abaixo falha. Escreva o mínimo de código para ele passar (TDD, passo green).

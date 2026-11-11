@@ -137,6 +137,8 @@ export interface WorkflowDefinition<A = unknown, R = unknown> {
   meta: WorkflowMeta;
   /** Defaults aplicados a toda chamada agent() que não sobrescrever. */
   defaults?: Pick<AgentCallOptions, "model" | "timeoutMs" | "retries" | "schemaRetries" | "tools" | "sandbox">;
+  /** Teto padrão do run quando quem chama não informa um (`--max-tokens`/`--max-cents`, ou o MCP); `null` explícito desliga. */
+  budget?: { maxTokens?: number; maxCents?: number };
   run(ctx: WorkflowContext<A>): Promise<R>;
 }
 

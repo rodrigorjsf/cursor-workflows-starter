@@ -315,12 +315,12 @@ export async function runWorkflow<A, R>(
   let currentPhase: string | undefined;
 
   const budget: Budget = {
-    maxCents: opts.maxCents ?? null,
-    maxTokens: opts.maxTokens ?? null,
+    maxCents: (opts.maxCents === undefined ? def.budget?.maxCents : opts.maxCents) ?? null,
+    maxTokens: (opts.maxTokens === undefined ? def.budget?.maxTokens : opts.maxTokens) ?? null,
     spentCents: () => spentCents,
     chargedCents: () => chargedCents,
     spentTokens: () => spentTokens,
-    remainingCents: () => (opts.maxCents == null ? Infinity : Math.max(0, opts.maxCents - spentCents)),
+    remainingCents: () => (budget.maxCents == null ? Infinity : Math.max(0, budget.maxCents - spentCents)),
     usage: () => ({ ...totals }),
   };
 

@@ -50,8 +50,8 @@ const out = (v: unknown) => process.stdout.write(JSON.stringify(v, null, 2) + "\
 const runOpts = () => ({
   cwd,
   runId: values.resume,
-  maxCents: values["max-cents"] ? Number(values["max-cents"]) : Number(process.env.WF_MAX_CENTS) || null,
-  maxTokens: values["max-tokens"] ? Number(values["max-tokens"]) : Number(process.env.WF_MAX_TOKENS) || null,
+  maxCents: values["max-cents"] ? Number(values["max-cents"]) : Number(process.env.WF_MAX_CENTS) || undefined, // sem valor: teto padrão do workflow
+  maxTokens: values["max-tokens"] ? Number(values["max-tokens"]) : Number(process.env.WF_MAX_TOKENS) || undefined,
   onEvent: (e: unknown) => process.stderr.write(JSON.stringify(e) + "\n"),
 });
 

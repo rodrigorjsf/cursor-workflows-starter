@@ -270,3 +270,13 @@ test("guarda contra recursão: com settingSources de arquivo, um MCP inline 'wor
   assert.match(guard.args?.join(" ") ?? "", /nested-mcp-guard\.mjs$/);
   assert.equal(calls[1].mcpServers?.workflows, undefined, "sem camadas de arquivo não há o que substituir");
 });
+
+test("teto padrão declarado pelo workflow vale sem --max-tokens; null explícito desliga", async () => {
+  const capped = { ...threeSteps, budget: { maxTokens: 150 } };
+  const r = await runWorkflow(capped, {}, { cwd });
+  assert.equal(r.status, "failed");
+  assert.match(r.error!, /Teto de tokens/);
+  calls.length = 0;
+  const free = await runWorkflow(capped, {}, { cwd, maxTokens: null });
+  assert.equal(free.status, "finished", free.error);
+});

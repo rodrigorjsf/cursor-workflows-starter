@@ -36,8 +36,8 @@ installCrashHandlers();
 const nested = process.env[INSIDE_WORKFLOW_ENV] === "1";
 
 const cwd = process.env.WF_CWD ?? process.cwd();
-const maxCents = Number(process.env.WF_MAX_CENTS) || null;
-const maxTokens = Number(process.env.WF_MAX_TOKENS) || null;
+const maxCents = Number(process.env.WF_MAX_CENTS) || undefined; // sem valor: vale o teto padrão do workflow
+const maxTokens = Number(process.env.WF_MAX_TOKENS) || undefined;
 const workflows = nested ? new Map() : await loadWorkflows(cwd);
 
 const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
