@@ -373,7 +373,12 @@ export default defineWorkflow<Args>({
     } else {
       ctx.phase("Plano");
       const approved = listBlock("Seams aprovadas (use exatamente estas)", ctx.args.seams ?? []);
-      const planData = `${issueBlock(issue)}\n\n${contextBlock}${approved ? `\n\n${approved}` : ""}`;
+      // O planejador sabe o teto: sem isso, propôs 5 fatias para um tier de 3 na issue #8, e o PR saiu parcial.
+      const capBlock =
+        `## Limite de fatias\nEste tier faz até ${SLICE_CAP[tier]} fatias. Para a issue caber inteira, uma fatia pode cobrir ` +
+        "casos de um mesmo comportamento que se testam juntos (o caso ímpar e o par de uma função; o valor e o erro). " +
+        "Se ainda assim não couber, ponha por último o que pode ficar para depois.";
+      const planData = `${issueBlock(issue)}\n\n${capBlock}\n\n${contextBlock}${approved ? `\n\n${approved}` : ""}`;
       if (tier === "MED") {
         plan = await ctx.agent<Plan>(`${P.PLAN_INSTRUCTIONS}\n\n${planData}`, {
           label: "planejar",

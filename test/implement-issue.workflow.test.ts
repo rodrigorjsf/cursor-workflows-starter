@@ -215,3 +215,19 @@ test("o comentário das seams avisa quais fatias ficam fora pelo limite do tier"
   assert.match(comment, /limite do tier MED \(3 fatias\)/);
   assert.doesNotMatch(comment, /3\. comportamento 3 .*\(adiada/);
 });
+
+test("planejador e juiz recebem o teto de fatias do tier", async () => {
+  issue(["complexity:medium"]);
+  let planPrompt = "";
+  fx.handlers.planejar = (o, msg) => { planPrompt = msg; submit(o, PLAN); };
+  await run({});
+  assert.match(planPrompt, /até 3 fatias/);
+
+  issue(["complexity:high"]);
+  let judgePrompt = "";
+  const design = (o: any) => submit(o, { interface: "i", usage: "u", hides: "h", dependencies: "d", tradeoffs: "t" });
+  for (const k of ["desenhar:minima", "desenhar:flexivel", "desenhar:comum"]) fx.handlers[k] = design;
+  fx.handlers.julgar = (o, msg) => { judgePrompt = msg; submit(o, PLAN); };
+  await run({});
+  assert.match(judgePrompt, /até 5 fatias/);
+});

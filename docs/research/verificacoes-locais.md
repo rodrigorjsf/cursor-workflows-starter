@@ -318,8 +318,12 @@ O `implement-issue` passou a seguir as skills `tdd`, `codebase-design`, `code-re
 20 defeitos, cada um corrigido com um teste de regressão que falha no código anterior
 (`test/implement-issue.hardening.test.ts`). Os runs abaixo usaram o repositório `wf-sandbox`, Premium, Linux x64
 (WSL2), `npm test` como comando de teste, `--max-cents 100` e `WF_METRICS_DB=~/tmp/wf-verify.db`. Antes de cada run foi
-criado um arquivo marcador, e `find "$HOME" -newer <marcador>` (sem as pastas de trabalho, caches e estado do Cursor e
-do Claude) procurou arquivos alterados fora do repositório. O `getUsage()` deu `feature_unavailable` em toda etapa
+criado um arquivo marcador, e `find "$HOME" -newer <marcador>` procurou arquivos alterados fora do repositório, sem
+excluir `~/.local/share/mise` (o alvo do incidente do §9) nem `~/.cursor` (onde ficam `sdk/auth.json` e `mcp.json`). Só
+mudaram o estado do SDK em `~/.cursor/projects/` (transcrições e agent store) e
+`~/.cursor/skills-cursor/.sync-manifest.json`, e arquivos das ferramentas desta sessão (`~/.claude.json`, logs e cache
+do npm de outra ferramenta, histórico do RTK): nada em `~/.local/share/mise`, em `~/.cursor/sdk/` nem em
+`~/.cursor/mcp.json`. O `getUsage()` deu `feature_unavailable` em toda etapa
 (§5): `spentCents: 0` quer dizer custo desconhecido, e os números são de tokens.
 
 | Item | Código | Resultado | Evidência | Ação tomada |
