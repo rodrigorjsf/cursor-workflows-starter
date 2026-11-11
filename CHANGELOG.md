@@ -1,6 +1,6 @@
 # Changelog
 
-## Não publicado (0.2.0)
+## 0.2.0 (pré-release, 2026-11-11)
 
 ### Mudado
 

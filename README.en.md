@@ -10,7 +10,7 @@ output. Workflows run from the **Cursor IDE chat** (through an MCP server), from
 (through a CLI). The idea mirrors Claude Code's *dynamic workflows* (`agent`, `parallel`, `pipeline`, `phase`),
 which Cursor does not ship natively.
 
-## Status: pre-release 0.1.0 (2026-11-11)
+## Status: pre-release 0.2.0 (2026-11-11)
 
 Verified against the real API in one environment: the **Premium** plan of The X Subscription, `@cursor/sdk@1.3.1`,
 Linux x64 (WSL2). Evidence: [`docs/research/verificacoes-locais.md`](docs/research/verificacoes-locais.md).

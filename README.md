@@ -15,7 +15,7 @@ A ideia é a mesma dos *dynamic workflows* do Claude Code (`agent`, `parallel`, 
 Cursor, que não tem esse runtime nativo. O porquê e a comparação completa estão em
 [`docs/research/relatorio-pesquisa.md`](docs/research/relatorio-pesquisa.md).
 
-> **Status: pré-release 0.1.0 (2026-11-11).** Verificado contra a API real num único ambiente: plano **Premium** da
+> **Status: pré-release 0.2.0 (2026-11-11).** Verificado contra a API real num único ambiente: plano **Premium** da
 > The X Subscription, `@cursor/sdk@1.3.1`, Linux x64 (WSL2). Evidência completa em
 > [`docs/research/verificacoes-locais.md`](docs/research/verificacoes-locais.md).
 >
@@ -117,7 +117,7 @@ antes ([01 §6](docs/01-instalacao.md#6-habilitar-no-cursor-ide)). Depois, digit
 | [09 · Observabilidade](docs/09-observabilidade.md) | Banco SQLite por usuário, o que é medido (e o que não dá), views, receitas SQL, dashboard localhost, export, privacidade |
 | [Relatório de pesquisa](docs/research/relatorio-pesquisa.md) | Por que o kit existe: Workflow do Claude Code × Cursor SDK, autenticação e cobrança, paridade |
 | [Verificações locais](docs/research/verificacoes-locais.md) | O que foi testado contra a doc ao vivo e a API real, com evidência, e o que ficou pendente |
-| [Segurança](SECURITY.md) · [Proveniência](PROVENANCE.md) · [Mudanças](CHANGELOG.md) | Riscos e como reportar; de onde o kit veio; o que mudou na 0.1.0 |
+| [Segurança](SECURITY.md) · [Proveniência](PROVENANCE.md) · [Mudanças](CHANGELOG.md) | Riscos e como reportar; de onde o kit veio; o que mudou em cada versão |
 | [Contribuindo](CONTRIBUTING.md) | Testes antes do PR e a política de custo dos testes contra a API real |
 
 ## Transparência: o que este kit faz por baixo
