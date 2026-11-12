@@ -215,9 +215,10 @@ async function main(): Promise<number> {
     case "gc": {
       const def = (await loadWorkflows(cwd)).get("implement-issue");
       if (!def) throw new Error("unknown workflow: implement-issue. Use `wf list`.");
-      const failedAfterDays = loadEffectiveConfig(def, { cwd }).config.settings.gcFailedAfterDays;
+      const { gcFailedAfterDays: failedAfterDays, networkTimeoutSec } = loadEffectiveConfig(def, { cwd }).config.settings;
       if (typeof failedAfterDays !== "number") throw new Error("workflows.implement-issue.settings.gcFailedAfterDays must be a number of days");
-      const commands = directCommands();
+      if (typeof networkTimeoutSec !== "number") throw new Error("workflows.implement-issue.settings.networkTimeoutSec must be a number of seconds");
+      const commands = directCommands(networkTimeoutSec);
       const plan = await planGc({ cwd, commands, failedAfterDays });
       process.stderr.write(formatPlan(plan)); // the plan first, then the removal
       if (values["dry-run"]) process.stderr.write("wf gc: dry run, nothing was changed.\n");

@@ -36,7 +36,7 @@
 //   - o corpo do PR segue o template da skill pr; a Evidence é a saída real red → green de cada fatia, sem caminhos
 //     locais; com fatias adiadas, o PR só referencia a issue (`Refs`) em vez de fechá-la;
 //   - todo comando (testes, git, gh) roda por `ctx.exec` (implement-issue/commands.ts): assíncrono, com teto de tempo
-//     (testes: `testTimeoutSec`; `git push` e `gh`: `networkTimeoutSec`; git local: 5 min) e como nó de comando no log
+//     (testes: `testTimeoutSec`; `git push` e `gh`: `networkTimeoutSec`; git local: o `execTimeoutMs` da configuração) e como nó de comando no log
 //     do run. Um erro do `gh` ou do `git` falha o run com a mensagem dele; "sem PR" é só a resposta conhecida do `gh`;
 //   - cada run tem a sua branch (`wf/issue-<n>-<run>`) e o seu worktree, criados a partir da cabeça ATUAL da branch padrão; o
 //     worktree só é reaproveitado pelo run que o registrou no progresso. Uma issue tem no máximo um run ativo: o segundo run
@@ -91,7 +91,7 @@ import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import { NamedLockedError, acquireNamedLock } from "../src/runtime/run-store.js";
 import { defineWorkflow, type AgentCallOptions } from "../src/runtime/workflow.js";
 import { buildPrBody, type PrText } from "./implement-issue/pr-body.js";
-import { CommandError, Commands, LOCAL_GIT_TIMEOUT_MS, NETWORK_TIMEOUT_SEC, WORKFLOW_BRANCH_PREFIX } from "./implement-issue/commands.js";
+import { CommandError, Commands, NETWORK_TIMEOUT_SEC, WORKFLOW_BRANCH_PREFIX } from "./implement-issue/commands.js";
 import * as P from "./implement-issue/prompts.js";
 import { AXES, AXIS_SCHEMAS, blockingAxes, blockingOf, type Axis, type ReviewReports } from "./implement-issue/review.js";
 import {
@@ -146,6 +146,10 @@ type Settings = {
   maxStepCrashes: number;
   /** `wf gc`: o run que falhou há mais dias que isto perde o worktree e as branches. Quem o lê é o `wf gc`, não o run. */
   gcFailedAfterDays: number;
+  /** Teto de tempo de cada rodada de testes, em segundos. O arg `testTimeoutSec` do run vence. */
+  testTimeoutSec: number;
+  /** Teto de tempo de cada comando de rede (`git push` e `gh`), em segundos. O arg `networkTimeoutSec` do run vence. */
+  networkTimeoutSec: number;
 };
 const SETTINGS: Settings = {
   sliceCaps: { LOW: 1, MED: 3, HIGH: 5 },
@@ -162,6 +166,8 @@ const SETTINGS: Settings = {
   },
   maxStepCrashes: 2,
   gcFailedAfterDays: 14,
+  testTimeoutSec: 600,
+  networkTimeoutSec: NETWORK_TIMEOUT_SEC,
 };
 const READ_ONLY = ["read", "grep", "glob", "ls", "semSearch"];
 const REVIEW_TOOLS = ["read", "grep", "glob", "ls"];
@@ -177,9 +183,9 @@ interface Args {
   repo?: string;
   /** Comando de teste; default: o que o plano sugerir, ou `npm test`. */
   testCommand?: string;
-  /** Teto de tempo de cada rodada de testes, em segundos (default 600). */
+  /** Teto de tempo de cada rodada de testes, em segundos (default: o ajuste `testTimeoutSec`, 600). */
   testTimeoutSec?: number;
-  /** Teto de tempo de cada comando de rede (`git push` e `gh`), em segundos (default 120): uma credencial pedida ou uma conexão parada falha a etapa. */
+  /** Teto de tempo de cada comando de rede (`git push` e `gh`), em segundos (default: o ajuste `networkTimeoutSec`, 120): uma credencial pedida ou uma conexão parada falha a etapa. */
   networkTimeoutSec?: number;
   /** Roda uma vez no worktree novo antes da suíte de base (ex.: `npm ci`). */
   setupCommand?: string;
@@ -314,7 +320,7 @@ async function defaultBranchHead(cmd: Commands, cwd: string): Promise<string> {
  * branch is not there yet): a commit anyone else made on the branch is never overwritten. Returns why the push was refused, or
  * undefined when the branch is on the origin.
  */
-async function pushDelivery(cmd: Commands, progress: ProgressStore, worktree: string, branch: string): Promise<string | undefined> {
+async function pushDelivery(cmd: Commands, progress: ProgressStore, worktree: string, branch: string, repo: string | undefined): Promise<string | undefined> {
   const delivered = progress.data.deliveredCommit!;
   const onOrigin = await cmd.remoteBranchHead(worktree, branch);
   if (onOrigin === delivered) return undefined;
@@ -322,6 +328,7 @@ async function pushDelivery(cmd: Commands, progress: ProgressStore, worktree: st
     return `origin/${branch} is at ${onOrigin.slice(0, 7)}, which has commits this workflow did not make, and the push would overwrite them: merge your work from ${worktree} by hand, or push it under another branch`;
   }
   progress.data.pushed = [...(progress.data.pushed ?? []), delivered]; // before the push: a crash right after it still leaves the origin's branch recognized as this run's
+  progress.data.repo = repo; // where its PR lives: `wf gc` asks there for the PR's state
   progress.save();
   await cmd.pushOwned(worktree, branch, onOrigin);
   return undefined;
@@ -456,11 +463,11 @@ export default defineWorkflow<Args>({
       const settings = ctx.settings as unknown as Settings; // o esquema da configuração valida os tipos; os padrões vêm de `meta.settings`
       const globs = ctx.args.testGlobs?.length ? ctx.args.testGlobs : DEFAULT_TEST_GLOBS;
       const protectedGlobs = ctx.args.protectedGlobs ?? DEFAULT_PROTECTED_GLOBS;
-      const testTimeout = (ctx.args.testTimeoutSec ?? 600) * 1000;
+      const testTimeout = (ctx.args.testTimeoutSec ?? settings.testTimeoutSec) * 1000;
       // Todo comando do workflow (testes, git, gh) passa por ctx.exec: assíncrono, com teto de tempo e visível no log do run.
+      // O git local não passa teto: vale o `execTimeoutMs` da configuração do workflow.
       const cmd = new Commands((command, args, opts) => ctx.exec(command, args, opts), {
-        localMs: LOCAL_GIT_TIMEOUT_MS,
-        networkMs: (ctx.args.networkTimeoutSec ?? NETWORK_TIMEOUT_SEC) * 1000,
+        networkMs: (ctx.args.networkTimeoutSec ?? settings.networkTimeoutSec) * 1000,
       });
       const isTest = (f: string) => isTestFile(f, globs);
       const progress = new ProgressStore(ctx.cwd, ctx.runId);
@@ -997,7 +1004,7 @@ export default defineWorkflow<Args>({
           const leak = findSecretInText(body);
           if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the PR body`, branch, worktree };
         }
-        const refused = await pushDelivery(cmd, progress, worktree, branch);
+        const refused = await pushDelivery(cmd, progress, worktree, branch, repo);
         if (refused) return { ...base, status: "push-refused", reason: refused, branch, worktree };
         if (body !== undefined) {
           prUrl = (await withBodyFile(body, (f) => cmd.gh(worktree, "pr", "create", "--head", branch, "--title", `${issue.title} (#${issue.number})`, "--body-file", f, ...repoFlag))).trim();

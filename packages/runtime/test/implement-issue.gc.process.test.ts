@@ -16,7 +16,7 @@ import { tryAcquireRunLock } from "../src/runtime/run-store.js";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import implementIssue from "../workflows/implement-issue.js";
 import { type GcPlan, applyGc, directCommands, planGc } from "../workflows/implement-issue/gc.js";
-import { branchOf, failGh, fx, git, issue, originBranches, run, setPrState, setup, teardown, worktreeOf } from "./implement-issue.fixture.js";
+import { branchOf, failGh, fx, gh, git, issue, originBranches, run, setPrState, setup, teardown, worktreeOf } from "./implement-issue.fixture.js";
 
 beforeEach(() => {
   setup();
@@ -96,6 +96,20 @@ test("wf gc removes the worktree, the local branch and the origin branch of a ru
   );
   assert.equal(r.out.remove.length, 1);
   assert.match(r.out.kept.find((x) => x.runId === open.runId)?.why ?? "", /PR is open/);
+});
+
+test("gc asks for the PR state in the repository the run delivered to (its --repo), not in the one of the cwd", async () => {
+  const r = await run({ openPr: true, repo: "acme/fx" });
+  const result = r.result as { status: string; branch: string; worktree: string };
+  assert.equal(result.status, "done", JSON.stringify(result));
+  setPrState(result.branch, "MERGED");
+
+  const out = gc();
+  assert.equal(out.status, 0, out.stderr);
+  const stateCalls = gh().calls.filter((c) => c[0] === "pr" && c[1] === "view" && c[2] === result.branch && c.includes("state"));
+  assert.ok(stateCalls.length > 0, "gc asked for the PR state");
+  for (const c of stateCalls) assert.deepEqual(c.slice(c.indexOf("--repo"), c.indexOf("--repo") + 2), ["--repo", "acme/fx"], c.join(" "));
+  assert.deepEqual(stillThere(result), { worktree: false, localBranch: false, originBranch: false });
 });
 
 test("a run that failed more than gcFailedAfterDays ago is cleaned up; one that failed more recently stays, and the days come from the config", async () => {

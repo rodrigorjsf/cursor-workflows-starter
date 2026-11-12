@@ -12,6 +12,7 @@ import { runWorkflow } from "../src/runtime/engine.js";
 import implementIssue from "../workflows/implement-issue.js";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import { runnerConfigChanged } from "../workflows/implement-issue/tdd.js";
+import { writeRepoConfig } from "./config-fixtures.js";
 import { SUB_CODE, SUB_TEST, failGh, fx, gh, git, issue, onOrigin, run, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
 
 beforeEach(setup);
@@ -56,6 +57,29 @@ test("a test run that outlives its limit is killed: tests-timeout, and the run g
   assert.ok(Date.now() - startedAt < 30_000, "the run did not wait for the command");
   const suite = execStarts(eventsOf(r.runId)).find((s) => s.label === "suite:baseline");
   assert.equal(suite?.timeoutMs, 1000, "the limit the run was asked for is the command's limit");
+});
+
+test("the command limits come from the repo config when the run passes none: tests and network from the settings, local git from execTimeoutMs", async () => {
+  issue(["complexity:low"]);
+  writeRepoConfig(fx.repo, { workflows: { "implement-issue": { execTimeoutMs: 123_456, settings: { testTimeoutSec: 1, networkTimeoutSec: 7 } } } });
+  const r = await run({ testCommand: "sleep 60" });
+  assert.equal(res(r).status, "tests-timeout", JSON.stringify(res(r)));
+  const starts = execStarts(eventsOf(r.runId));
+  assert.equal(starts.find((s) => s.label === "suite:baseline")?.timeoutMs, 1000, "testTimeoutSec from the repo file");
+  assert.equal(starts.find((s) => s.label === "gh issue view")?.timeoutMs, 7000, "networkTimeoutSec from the repo file");
+  const localGit = starts.filter((s) => s.label.startsWith("git ") && s.label !== "git push" && s.label !== "git ls-remote");
+  assert.ok(localGit.length > 0, "the run ran local git");
+  for (const s of localGit) assert.equal(s.timeoutMs, 123_456, `${s.label}: local git takes the workflow's execTimeoutMs`);
+});
+
+test("a run's own limits win over the config's", async () => {
+  issue(["complexity:low"]);
+  writeRepoConfig(fx.repo, { workflows: { "implement-issue": { settings: { testTimeoutSec: 600, networkTimeoutSec: 7 } } } });
+  const r = await run({ testCommand: "sleep 60", testTimeoutSec: 1, networkTimeoutSec: 9 });
+  assert.equal(res(r).status, "tests-timeout", JSON.stringify(res(r)));
+  const starts = execStarts(eventsOf(r.runId));
+  assert.equal(starts.find((s) => s.label === "suite:baseline")?.timeoutMs, 1000);
+  assert.equal(starts.find((s) => s.label === "gh issue view")?.timeoutMs, 9000);
 });
 
 test("a suite that writes far more than the log keeps is not a failure", async () => {

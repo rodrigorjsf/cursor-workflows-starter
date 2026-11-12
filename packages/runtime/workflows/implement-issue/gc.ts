@@ -59,8 +59,8 @@ export interface GcPlan {
 const directExec: Exec = async (command, args = [], opts = {}) =>
   toExecResult(await runCommand({ command, args, cwd: opts.cwd ?? process.cwd(), env: opts.env, timeoutMs: opts.timeoutMs ?? LOCAL_GIT_TIMEOUT_MS }, () => {}));
 
-/** The commands of implement-issue, run outside a workflow run. */
-export const directCommands = () => new Commands(directExec, { localMs: LOCAL_GIT_TIMEOUT_MS, networkMs: NETWORK_TIMEOUT_SEC * 1000 });
+/** The commands of implement-issue, run outside a workflow run. `networkTimeoutSec`: the workflow's setting of that name. */
+export const directCommands = (networkTimeoutSec = NETWORK_TIMEOUT_SEC) => new Commands(directExec, { localMs: LOCAL_GIT_TIMEOUT_MS, networkMs: networkTimeoutSec * 1000 });
 
 /** The path as git prints it (symlinks resolved); a leaf that does not exist keeps its name. */
 const normal = (path: string) => {
@@ -189,7 +189,7 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
 
     let state: PrState | undefined;
     try {
-      state = (progress.pushed?.length ?? 0) > 0 ? await commands.prState(cwd, branch) : undefined;
+      state = (progress.pushed?.length ?? 0) > 0 ? await commands.prState(cwd, branch, progress.repo) : undefined;
     } catch (err) {
       plan.errors.push(`run ${runId}: the state of its PR cannot be read, so it is kept: ${message(err)}`);
       continue;

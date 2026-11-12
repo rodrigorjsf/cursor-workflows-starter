@@ -220,6 +220,8 @@ export interface Progress {
   deliveredCommit?: string;
   /** Commits que o run empurrou (ou ia empurrar) para o origin: o que ele reconhece como seu lá. Qualquer outro commit na branch é de alguém. */
   pushed?: string[];
+  /** O `repo` (owner/repo) do run quando ele empurrou: o PR da branch está lá. Ausente: o repositório do cwd. */
+  repo?: string;
   inFlight?: InFlight;
   /**
    * Quantas vezes o processo caiu no meio de cada etapa de escrita (por id), contadas pelo resume que a encontrou em andamento.

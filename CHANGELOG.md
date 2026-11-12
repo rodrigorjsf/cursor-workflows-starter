@@ -163,14 +163,16 @@
     falhou deixou (um arquivo novo, uma edição pela metade) estava lá na seguinte e podia ir para o commit. O desfazer
     do resume (`revertTo`) também apaga os arquivos novos que ninguém pôs no índice, que o `read-tree` deixava.
   - **Limites em `workflows.implement-issue.settings`**: tetos de fatias por tier, fatias extras, rodadas de correção,
-    tentativas de red e green, tamanho do diff, mapa label → tier e limite de quedas. A lista e os padrões estão em
+    tentativas de red e green, tamanho do diff, mapa label → tier, limite de quedas e os tetos de tempo dos testes
+    (`testTimeoutSec`) e dos comandos de rede (`networkTimeoutSec`). A lista e os padrões estão em
     [`docs/reference/config.md`](docs/reference/config.md#ajustes-de-um-workflow).
 - **O `implement-issue` roda `git`, `gh` e os testes por `ctx.exec`.** Nenhum comando dele trava mais o processo: o
   status e o cancelamento respondem durante uma suíte, e cancelar mata o comando na hora. Cada suíte do laço TDD
   (`suite:baseline`, `suite:red:1`, `suite:green:1`, `suite:final`…) e cada chamada de `git` e `gh` é um nó de comando
-  no log do run, com a saída da suíte ao lado. O `git push` e todo `gh` têm teto de tempo (argumento
+  no log do run, com a saída da suíte ao lado. O `git push` e todo `gh` têm teto de tempo (ajuste ou argumento
   `networkTimeoutSec`, 120 s): um push que espera credencial, ou uma conexão parada, falha a etapa com
-  `git push … timed out after Ns`, e o resume entrega. O `git` local tem teto de 5 minutos. Um erro do `gh` na busca
+  `git push … timed out after Ns`, e o resume entrega. O `git` local segue o `execTimeoutMs` do workflow (10 minutos
+  por padrão); o `wf gc` pergunta o estado do PR no `--repo` em que o run entregou. Um erro do `gh` na busca
   do PR existente (autenticação, rede) passa a falhar o run com a mensagem dele; antes virava "não há PR" e o
   workflow tentava criar outro. As respostas do `git` e do `gh` que o workflow lê (diffs, listas de arquivos, a issue
   e seus comentários) vêm inteiras, não do `tail` de 32768 caracteres do `ctx.exec`: a trava de segredos continua

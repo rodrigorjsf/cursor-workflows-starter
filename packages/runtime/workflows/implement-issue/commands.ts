@@ -13,8 +13,8 @@ export type Exec = (command: string, args?: string[], opts?: ExecOptions) => Pro
 
 /** How long a command may run before it is killed. */
 export interface CommandTimeouts {
-  /** Local `git`: a stuck hook or lock, never a network wait. */
-  localMs: number;
+  /** Local `git`: a stuck hook or lock, never a network wait. Absent: `ctx.exec`'s default, the workflow's `execTimeoutMs`. */
+  localMs?: number;
   /** `git push` and every `gh` call: a credential prompt or a stalled connection must fail the step, not hang the run. */
   networkMs: number;
 }
@@ -31,7 +31,7 @@ export class CommandError extends Error {
     command: string,
     args: string[],
     readonly result: ExecResult,
-    timeoutMs: number,
+    timeoutMs: number | undefined,
   ) {
     const line = `${command} ${args.join(" ")}`.slice(0, 200);
     super(failureMessage(line, result, timeoutMs));
@@ -40,8 +40,8 @@ export class CommandError extends Error {
   }
 }
 
-function failureMessage(line: string, r: ExecResult, timeoutMs: number): string {
-  if (r.timedOut) return `${line} timed out after ${timeoutMs / 1000}s`;
+function failureMessage(line: string, r: ExecResult, timeoutMs: number | undefined): string {
+  if (r.timedOut) return `${line} timed out ${timeoutMs === undefined ? "(the workflow's execTimeoutMs)" : `after ${timeoutMs / 1000}s`}`;
   if (r.error) return `${line} could not start: ${r.error}`;
   const output = r.tail.trim().slice(-1000);
   return `${line} ${r.exitCode === null ? "was killed" : `exited with code ${r.exitCode}`}${output ? `: ${output}` : ""}`;
@@ -151,33 +151,34 @@ export class Commands {
 
   /**
    * The state of the pull request whose head is `branch` (the latest one, when there are several), or undefined when the
-   * branch has none. Any other `gh` failure (an auth error, a network stall) is an error, never "no PR".
+   * branch has none. `repo` (owner/repo): where the PR lives; default, the repository of `cwd`. Any other `gh` failure (an
+   * auth error, a network stall) is an error, never "no PR".
    */
-  async prState(cwd: string, branch: string): Promise<PrState | undefined> {
-    const out = await this.ghOrNothing(cwd, /no pull requests? found/i, "pr", "view", branch, "--json", "state", "-q", ".state");
+  async prState(cwd: string, branch: string, repo?: string): Promise<PrState | undefined> {
+    const out = await this.ghOrNothing(cwd, /no pull requests? found/i, "pr", "view", branch, "--json", "state", "-q", ".state", ...(repo ? ["--repo", repo] : []));
     const state = out?.trim().toUpperCase();
     if (state === undefined || state === "") return undefined;
     if (state !== "OPEN" && state !== "MERGED" && state !== "CLOSED") throw new Error(`gh pr view ${branch}: unexpected state ${JSON.stringify(out?.trim())}`);
     return state;
   }
 
-  private options(command: string, args: string[], cwd: string, timeoutMs: number): ExecOptions {
-    return { cwd, timeoutMs, label: `${command} ${args.slice(0, command === "gh" ? 2 : 1).join(" ")}` };
+  private options(command: string, args: string[], cwd: string, timeoutMs: number | undefined): ExecOptions {
+    return { cwd, ...(timeoutMs === undefined ? {} : { timeoutMs }), label: `${command} ${args.slice(0, command === "gh" ? 2 : 1).join(" ")}` };
   }
 
-  private async succeed(command: string, args: string[], cwd: string, timeoutMs: number): Promise<void> {
+  private async succeed(command: string, args: string[], cwd: string, timeoutMs: number | undefined): Promise<void> {
     const r = await this.exec(command, args, this.options(command, args, cwd, timeoutMs));
     if (!r.ok) throw new CommandError(command, args, r, timeoutMs);
   }
 
-  private async succeedRead(command: string, args: string[], cwd: string, timeoutMs: number): Promise<string> {
+  private async succeedRead(command: string, args: string[], cwd: string, timeoutMs: number | undefined): Promise<string> {
     const r = await this.read(command, args, cwd, timeoutMs);
     if (!r.ok) throw new CommandError(command, args, r, timeoutMs);
     return r.stdout;
   }
 
   /** Runs the command with its stdout going to a file, and returns the result with the whole stdout. */
-  private async read(command: string, args: string[], cwd: string, timeoutMs: number): Promise<ExecResult & { stdout: string }> {
+  private async read(command: string, args: string[], cwd: string, timeoutMs: number | undefined): Promise<ExecResult & { stdout: string }> {
     const dir = mkdtempSync(join(tmpdir(), "wf-stdout-"));
     const file = join(dir, "stdout");
     try {
