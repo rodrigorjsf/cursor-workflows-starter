@@ -34,6 +34,9 @@ export const NODE_SIZE: Record<NodeKind, { width: number; height: number }> = {
   join: { width: 30, height: 30 },
 };
 
+/** The text sizes of a step or command node, in pixels at zoom 1: its label, and the line under it (the model or the command). The components set them. */
+export const NODE_TEXT_PX = { label: 14, sub: 12 } as const;
+
 /** Space around the nodes of the first and last lane, inside the band. */
 const LANE_PADDING = 24;
 

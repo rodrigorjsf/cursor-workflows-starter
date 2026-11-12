@@ -2,7 +2,7 @@
 import { Handle, type Node, type NodeProps, Position } from "@xyflow/react";
 import { NodeRows } from "./NodeRows.js";
 import { describeNode, runsInCloud } from "./node-details.js";
-import { LANE_TITLE, NODE_SIZE } from "./run-layout.js";
+import { LANE_TITLE, NODE_SIZE, NODE_TEXT_PX } from "./run-layout.js";
 import type { GraphNode, NodeState } from "./run-graph.js";
 
 export interface WorkNodeData extends Record<string, unknown> {
@@ -45,7 +45,7 @@ export function WorkNode({ data, selected }: NodeProps<Node<WorkNodeData, "work"
   return (
     <div
       className={`work ${node.kind} state-${node.state}${selected ? " selected" : ""}`}
-      style={NODE_SIZE[node.kind]}
+      style={{ ...NODE_SIZE[node.kind], fontSize: NODE_TEXT_PX.label }}
       tabIndex={0}
       role="button"
       aria-pressed={selected}
@@ -67,7 +67,11 @@ export function WorkNode({ data, selected }: NodeProps<Node<WorkNodeData, "work"
           </span>
         )}
       </div>
-      {what !== undefined && <div className="sub">{what}</div>}
+      {what !== undefined && (
+        <div className="sub" style={{ fontSize: NODE_TEXT_PX.sub }}>
+          {what}
+        </div>
+      )}
       <NodeRows rows={rows} className="tip" role="tooltip" tabbable={false} />
     </div>
   );
