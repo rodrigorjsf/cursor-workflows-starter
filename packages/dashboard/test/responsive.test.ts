@@ -85,3 +85,12 @@ test("on a narrow screen a step's log opens over the canvas, not beside it: the 
   assert.match(overlay.decls, /inset:\s*0/, "and covers it whole");
   assert.doesNotMatch(css, /\.step-panel\s*\{[^}]*flex:\s*0 0 \d+%/, "the log never takes a share of the canvas's height");
 });
+
+test("while the log covers the canvas, the canvas is hidden, so its nodes and zoom buttons leave the Tab order", () => {
+  const css = readFileSync(join(PACKAGE, "run-view", "run-view.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = narrowRules(css).flatMap(({ width, body }) => [...body.matchAll(/([^{}]+)\{([^}]*)\}/g)].map((r) => ({ width, selector: r[1]!.trim(), decls: r[2]! })));
+  const overlay = rules.find((r) => r.selector === ".step-panel" && /position:\s*(absolute|fixed)/.test(r.decls));
+  assert.ok(overlay, "the log is drawn over the canvas on a narrow screen");
+  const hidden = rules.find((r) => r.width === overlay.width && /:has\(\s*\.step-panel\s*\)/.test(r.selector) && /\.canvas$/.test(r.selector) && /visibility:\s*hidden/.test(r.decls));
+  assert.ok(hidden, `under ${overlay.width}px, a workspace with the log open hides its canvas (visibility: hidden)`);
+});

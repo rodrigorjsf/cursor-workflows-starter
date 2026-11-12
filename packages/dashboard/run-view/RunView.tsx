@@ -57,7 +57,7 @@ function useClock(active: boolean): number {
   return now;
 }
 
-function toFlow(graph: RunGraph, layout: RunLayout, now: number, selectedId: string | undefined, open: (id: string) => void): { nodes: Node[]; edges: Edge[] } {
+export function toFlow(graph: RunGraph, layout: RunLayout, now: number, selectedId: string | undefined, open: (id: string) => void): { nodes: Node[]; edges: Edge[] } {
   const lanes: Node<LaneNodeData, "lane">[] = layout.lanes.map((lane) => ({
     id: `lane-${lane.index}`,
     type: "lane",
