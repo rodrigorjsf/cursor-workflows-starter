@@ -35,8 +35,12 @@ export interface TurnUsage {
   reasoningTokens?: number;
 }
 
-/** Por que uma tentativa de etapa falhou: estourou o tempo, o run do agente terminou em erro, o JSON do schema nunca veio válido, limite de uso do plano, ou exceção. */
-export type ErrorKind = "timeout" | "run-error" | "schema" | "rate-limit" | "exception";
+/**
+ * Por que uma tentativa de etapa falhou: estourou o tempo, o run do agente terminou em erro, o JSON do schema nunca veio
+ * válido, limite de uso do plano, teto de tokens (`budget`: o run do agente foi cancelado no turno que passou do teto da
+ * etapa ou do run, e a etapa não tenta de novo), ou exceção.
+ */
+export type ErrorKind = "timeout" | "run-error" | "schema" | "rate-limit" | "budget" | "exception";
 
 /** Campos de todo evento. */
 export interface EventBase {

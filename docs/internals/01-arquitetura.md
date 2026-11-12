@@ -50,8 +50,13 @@ flowchart TB
    - O gasto é do run, não da execução: ao abrir o run, o engine o recompõe a partir do log de eventos (todas as
      execuções anteriores, tentativas que falharam inclusive), então um resume nunca recomeça do zero. `--max-cents` e
      `--max-tokens` num resume são o novo teto **total**; com o mesmo teto, o resume para no mesmo ponto.
-   - O teto não interrompe uma tentativa que já começou, e ela não tem teto de tokens próprio: só o `timeoutMs` de
-     cada envio a limita (o pedido e cada re-prompt de schema têm o seu). Medido em 2026-11-11: uma etapa começou abaixo de `--max-tokens 300000` e o run fechou em 344 mil
+   - Os tetos de tokens também valem durante a tentativa, no fim de cada turno (`turn-ended`, passo 7): o engine soma os
+     turnos das tentativas em andamento ao gasto já registrado. Se o total passa de `maxTokens`, cancela o run do
+     agente de **todas** as etapas ativas e o run termina com o `BudgetExceededError` (nenhuma etapa nova começa, e o
+     `run-end` espera as canceladas fecharem a conta). Se a etapa passa do próprio `maxTokensPerStep` (todas as
+     tentativas dela somadas), só ela é cancelada e falha com `StepBudgetError`, que não é fatal. A tentativa cortada
+     fecha com `errorKind: "budget"` e não é repetida. A ultrapassagem é de no máximo um turno por etapa ativa.
+     Antes disso, medido em 2026-11-11: uma etapa começou abaixo de `--max-tokens 300000` e o run fechou em 344 mil
      ([verificações locais](../research/verificacoes-locais.md) §9).
 4. **Agente novo:** `Agent.create` com o modelo da etapa, a allowlist de tools, os subagents e MCP servers
    inline, o sandbox (se pedido) e `settingSources: ["project","team","mdm"]`.
@@ -102,6 +107,8 @@ flowchart TB
    do plano ("Usage limit exceeded"); o SDK marca `isRetryable: true` nos casos transitórios
    [DOC](https://cursor.com/docs/sdk/typescript#errors). O retentável espera com backoff exponencial; o não
    retentável (teto do plano) vira `BudgetExceededError`.
+   - Falha por teto de tokens (`errorKind: "budget"`, passo 3) não é repetida: o run do agente já foi cancelado e outra
+     tentativa só gastaria mais.
    - Erro de conta (`plan_required`) não é repetido: vira `AccountAccessError`, que encerra o run na primeira
      tentativa, inclusive dentro de `parallel`/`pipeline`.
    - A doc não liga a nenhuma classe de erro do SDK os limites de gasto de time, de membro ou de service account.
@@ -126,7 +133,7 @@ flowchart TB
 | Etapa concluída tem saída no formato esperado | `submit_result` + Ajv + re-prompt; senão a etapa falha |
 | Falha é explícita | `agent()` lança erro. `parallel`/`pipeline` transformam a falha de um item em `null` e registram `warning`, mas o teto de custo e o erro de conta (`plan_required`) sempre abortam |
 | O modelo de cada etapa é o do código ou o que a configuração pôs no papel dela, e um ID não liberado falha | Validação do SDK contra o catálogo da conta. A configuração em camadas (código < arquivo global < arquivo do repositório < ambiente < flag < override do chat) troca modelo, tempo e tentativas por papel; os tetos do arquivo global limitam tudo e só podem ser apertados. O `run-start` grava a configuração efetiva e a origem de cada valor ([6.2 · Referência de configuração](../reference/config.md)) |
-| Teto de gasto checado antes de cada tentativa (não é gasto máximo) | Teto por run (centavos e tokens) + `RateLimitError`. Etapa iniciada não é interrompida e não tem teto de tokens próprio, só o `timeoutMs` de cada envio: a ultrapassagem chega a concorrência × uma etapa sem limite (medido: 344 mil tokens com `--max-tokens 300000`, [verificações locais](../research/verificacoes-locais.md) §9). O teto em centavos depende do custo do `getUsage()`: em uso cobrado por request (passo 3) e quando o `getUsage()` falha (passo 7), só o de tokens vale, contado pelos eventos `turn-ended` |
+| Teto de gasto (não é gasto máximo) | Teto por run (centavos e tokens), teto de tokens por etapa e `RateLimitError`. Os de tokens valem a cada turno, durante a etapa: o run do agente é cancelado no turno que passa do teto, e a ultrapassagem é de no máximo um turno por etapa ativa. Um turno do SDK pode ser o laço inteiro do agente, então o `timeoutMs` de cada envio segue sendo o freio dentro dele (antes do teto ao vivo: 344 mil tokens com `--max-tokens 300000`, [verificações locais](../research/verificacoes-locais.md) §9). O teto em centavos, checado antes de cada tentativa, depende do custo do `getUsage()`: em uso cobrado por request (passo 3) e quando o `getUsage()` falha (passo 7), só o de tokens vale, contado pelos eventos `turn-ended` |
 | Retomar sem repetir etapas | Journal + `runId` gravado no job desde o início |
 | O orçamento acumula entre resumes | O gasto parte do que o log do run já registra (tentativas que falharam inclusive), e o teto de um resume é o novo teto total |
 | O estado de um job tem uma só fonte | O registro do job (`.workflows/jobs/<jobId>.json`) guarda só id do job, id do run, pid e heartbeat. Status, fase, últimas linhas, gasto e resultado são projetados do log de eventos a cada leitura (`wf status`, `wf jobs`, `get_workflow_status`, `wait_workflow`). Não há arquivo de estado para ficar pela metade, e as linhas de `recent` são resumos de uma linha, nunca texto de prompt ou de saída |

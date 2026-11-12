@@ -98,13 +98,26 @@ próprios e não seguem mais `WF_MODEL_MED`/`WF_MODEL_HIGH`.
 
 Como funciona:
 
-- **O teto não garante um gasto máximo.** Ele é checado **antes** de cada etapa (e de cada nova tentativa).
-  Etapas que já começaram não são interrompidas, e uma etapa não tem teto de tokens próprio: só o `timeoutMs` de
-  cada envio a limita (o pedido e até `schemaRetries` re-prompts, cada um com o seu). A ultrapassagem pode chegar a **concorrência × uma etapa sem limite** (ex.: 4 etapas em `parallel`).
-  Medido em 2026-11-11: com `--max-tokens 300000`, o `implement-issue` gastou 344.376 tokens. A `corrigir-1`
-  começou com 74,9 mil gastos e sozinha usou 269 mil ([verificações locais](../research/verificacoes-locais.md) §9).
-  Para tetos apertados, use `concurrency` baixa e um `timeoutMs` curto nas etapas que escrevem (o exemplo usa
-  30 min; sem valor na etapa, o engine usa 20 min).
+- **O teto de tokens vale durante a etapa, no fim de cada turno.** O SDK reporta o uso de cada turno do agente no
+  evento `turn-ended`. A cada um, o engine compara com dois tetos: o da etapa (`maxTokensPerStep` do papel, do glob
+  de label, do workflow ou do arquivo global; conta todas as tentativas da etapa) e o do run (o gasto que o log já
+  registra, resumes inclusive, mais os turnos em andamento de todas as etapas). Passou de um deles (estritamente
+  acima), o run do agente é cancelado na hora e a tentativa falha com `errorKind: "budget"`, sem nova tentativa.
+  - O teto da **etapa** só derruba a etapa: ela lança `Teto de tokens da etapa "x" atingido: 300 de 250.`, e o
+    workflow decide (em `parallel` vira `null`, com um `warning`).
+  - O teto do **run** cancela todas as etapas ativas, nenhuma etapa nova começa, e o run termina com
+    `Teto de tokens atingido: 500 de 450.` O run espera as etapas canceladas fecharem a conta (até 30 s), então o
+    `run-end` é o último evento do log e os tokens delas entram no total.
+  - A ultrapassagem é de **no máximo um turno por etapa ativa**. Quanto vale um turno depende do SDK: ele reporta o
+    uso só no fim do turno, e medimos 1 `send` = 1 `turn-ended` ([verificações locais](../research/verificacoes-locais.md)
+    §6), então um turno pode ser o laço inteiro do agente. O teto corta entre os turnos (a cada re-prompt de schema, a
+    cada etapa em paralelo); dentro de um turno, só o `timeoutMs` de cada envio freia. Etapa sem uso reportado no
+    `turn-ended` não é cortada ao vivo.
+  - O teto em centavos continua checado só **antes** de cada tentativa: o custo só chega depois da etapa.
+  Medido em 2026-11-11, antes do teto ao vivo: com `--max-tokens 300000`, o `implement-issue` gastou 344.376 tokens.
+  A `corrigir-1` começou com 74,9 mil gastos e sozinha usou 269 mil ([verificações locais](../research/verificacoes-locais.md) §9).
+  O teto ao vivo foi testado só com o SDK falso. Para tetos apertados, use `concurrency` baixa e um `timeoutMs` curto
+  nas etapas que escrevem (o exemplo usa 30 min; sem valor na etapa, o engine usa 20 min).
 - O teto em centavos depende do custo que o `getUsage()` devolve. O Premium testado não devolveu custo nenhum
   (abaixo), e aí só o teto de tokens protege.
 - O custo de cada etapa é lido com `agent.getUsage()` ao fim dela, inclusive quando ela falha ou estoura o tempo.

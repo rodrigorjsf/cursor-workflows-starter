@@ -78,9 +78,12 @@ test("a resume with a cap sets the new total cap, not an allowance on top of wha
 });
 
 test("the token cap is a total across resumes too", async () => {
-  const first = await runWorkflow(three, {}, { cwd, maxTokens: 150 }); // a (110), b (220), then c is refused
+  // The cap is live now: a turn that takes the run strictly above it cancels the step. 220 lets a (110) and b (220) finish
+  // and refuses c before it starts.
+  const first = await runWorkflow(three, {}, { cwd, maxTokens: 220 });
   assert.equal(first.status, "failed");
   assert.equal(first.spentTokens, 220);
+  assert.match(first.error!, /Teto de tokens atingido: 220 de 220/);
 
   const tight = await runWorkflow(three, {}, { cwd, runId: first.runId, maxTokens: 220 });
   assert.equal(tight.status, "failed");
