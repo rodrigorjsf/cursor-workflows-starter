@@ -31,6 +31,10 @@ export interface RunFeed {
   ids: number[];
   /** Undefined until the API answers. */
   status?: ApiStatus;
+  /** Why the run failed or was cancelled, as the API says (for a run whose process died: the runtime's error, with its resume hint). */
+  error?: string;
+  /** Why the latest look at the run's status failed (the dashboard is not answering). Cleared by the next one that works. */
+  unreachable?: string;
   info?: RunInfo;
   connection: Connection;
   /** Asks the API for the run's status now, instead of at the next poll (after an action that changes it). */
@@ -48,6 +52,8 @@ const QUIET_MS = 1500;
 export function useRunEvents(runId: string): RunFeed {
   const [feed, setFeed] = useState<{ events: RunEvent[]; ids: number[] }>({ events: [], ids: [] });
   const [status, setStatus] = useState<ApiStatus>();
+  const [error, setError] = useState<string>();
+  const [unreachable, setUnreachable] = useState<string>();
   const [info, setInfo] = useState<RunInfo>();
   const pollNow = useRef<() => void>(() => undefined);
   const [connection, setConnection] = useState<Connection>("waiting");
@@ -69,18 +75,21 @@ export function useRunEvents(runId: string): RunFeed {
         try {
           const reply = await fetch(runApiPath(runId));
           if (stopped) return;
+          setUnreachable(reply.ok || reply.status === 404 ? undefined : `the dashboard answered ${reply.status}`);
           if (reply.ok) {
-            const detail = (await reply.json()) as { status: ApiStatus; workflow?: string; repo?: string; start?: JobStart };
+            const detail = (await reply.json()) as { status: ApiStatus; error?: unknown; workflow?: string; repo?: string; start?: JobStart };
             latest = detail.status;
             setStatus(latest);
+            setError(typeof detail.error === "string" ? detail.error : undefined);
             const { workflow, repo } = detail;
             const start = detail.start && typeof detail.start === "object" && "args" in detail.start ? detail.start : undefined;
             if (typeof workflow === "string" && typeof repo === "string")
               setInfo((before) => (before && before.workflow === workflow && before.repo === repo && JSON.stringify(before.start) === JSON.stringify(start) ? before : { workflow, repo, start }));
             if (latest === "missing") setConnection("not-found");
           } else if (reply.status === 404 && Date.now() - since > NOT_FOUND_AFTER_MS) setConnection("not-found");
-        } catch {
-          /* the dashboard is not answering: try again */
+        } catch (err) {
+          // the dashboard is not answering: say so, and try again
+          if (!stopped) setUnreachable(err instanceof Error ? err.message : String(err));
         }
       }
       if (!stopped) timer = setTimeout(poll, latest === "running" || latest === undefined ? POLL_RUNNING_MS : POLL_SETTLED_MS);
@@ -136,5 +145,5 @@ export function useRunEvents(runId: string): RunFeed {
     };
   }, [runId, readable, running]);
 
-  return { events: feed.events, ids: feed.ids, status, info, connection, refresh: () => pollNow.current() };
+  return { events: feed.events, ids: feed.ids, status, error, unreachable, info, connection, refresh: () => pollNow.current() };
 }

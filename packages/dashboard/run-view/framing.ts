@@ -1,21 +1,48 @@
-// How the Run view frames a run on its canvas: all of it when that stays readable, otherwise a part of it. Pure: the caller
-// gives it the size of the pane.
+// How the Run view frames a run on its canvas: all of it when that stays readable, otherwise as many nodes as fit at a readable
+// zoom. Pure: the caller gives it the size of the pane.
 import type { FitViewOptions } from "@xyflow/react";
 import type { RunGraph } from "./run-graph.js";
-import type { RunLayout } from "./run-layout.js";
+import { type Box, NODE_TEXT_PX, type RunLayout } from "./run-layout.js";
 
-/** The smallest zoom at which a node's text can still be read. A run that would need less to fit on screen is framed in part. */
-export const READABLE_ZOOM = 0.45;
-/** How many nodes a partial frame holds. */
-const FRAME_NODES = 5;
+/** Text smaller than this on screen is not readable: a node's label, and the line under it. */
+const MIN_LABEL_PX = 11;
+const MIN_SUB_PX = 10;
+
+/** The smallest zoom at which a node's text can still be read: its label at 11px or more, the line under it at 10px or more. A run that would need less to fit on screen is framed in part. */
+export const READABLE_ZOOM = Math.ceil(Math.max(MIN_LABEL_PX / NODE_TEXT_PX.label, MIN_SUB_PX / NODE_TEXT_PX.sub) * 100) / 100;
 /** The padding `fitView` keeps around what it frames, as a share of its size. */
 export const FRAME_PADDING = 0.15;
 
-/** How to frame the run in a pane of `pane` pixels: all of it when that stays readable, otherwise the latest nodes of a live run, or the first ones of a run that is over (to be read from the start). */
+/** The zoom React Flow's `fitView` gives `bounds` in a pane of `pane` pixels with `padding`, before it clamps it (`getViewportForBounds` in @xyflow/system). */
+export function fitZoom(bounds: Box, pane: { width: number; height: number }, padding = FRAME_PADDING): number {
+  const pad = (size: number) => 2 * Math.floor((size - size / (1 + padding)) * 0.5);
+  return Math.min((pane.width - pad(pane.width)) / bounds.width, (pane.height - pad(pane.height)) / bounds.height);
+}
+
+export function boundsOf(boxes: Box[]): Box {
+  const x = Math.min(...boxes.map((b) => b.x));
+  const y = Math.min(...boxes.map((b) => b.y));
+  return { x, y, width: Math.max(...boxes.map((b) => b.x + b.width)) - x, height: Math.max(...boxes.map((b) => b.y + b.height)) - y };
+}
+
+/**
+ * How to frame the run in a pane of `pane` pixels: all of it when that stays readable; otherwise as many nodes as fit at a
+ * readable zoom, from the latest of a live run back, or from the first of a run that is over (to be read from the start).
+ * The user pans to the rest; Fit View shows it all.
+ */
 export function frameOf(graph: RunGraph, layout: RunLayout, pane: { width: number; height: number }): FitViewOptions {
   const options: FitViewOptions = { padding: FRAME_PADDING, maxZoom: 1, minZoom: READABLE_ZOOM };
-  if (Math.min(pane.width / layout.width, pane.height / layout.height) >= READABLE_ZOOM) return options;
+  if (layout.width === 0 || fitZoom({ x: 0, y: 0, width: layout.width, height: layout.height }, pane) >= READABLE_ZOOM) return options;
   const settled = graph.nodes.every((n) => n.state !== "running");
-  const work = graph.nodes.filter((n) => n.kind !== "start");
-  return { ...options, nodes: (settled ? work.slice(0, FRAME_NODES) : work.slice(-FRAME_NODES)).map((n) => ({ id: n.id })) };
+  const placed = graph.nodes.filter((n) => layout.nodes[n.id] !== undefined);
+  // The first step comes first, then the start node in front of it when there is room, then what follows.
+  const first = placed.findIndex((n) => n.kind !== "start");
+  const order = settled ? [placed[first]!, ...placed.filter((_, i) => i !== first)] : [...placed].reverse();
+  const picked: string[] = [];
+  for (const node of first < 0 ? placed : order) {
+    const boxes = [...picked, node.id].map((id) => layout.nodes[id]!);
+    if (picked.length > 0 && fitZoom(boundsOf(boxes), pane) < READABLE_ZOOM) break;
+    picked.push(node.id);
+  }
+  return { ...options, nodes: picked.map((id) => ({ id })) };
 }
