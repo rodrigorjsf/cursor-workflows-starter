@@ -7,7 +7,7 @@ const ROOT = resolve(import.meta.dirname, "..");
 
 export function wfCommands(): string[] {
   const r = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), join(ROOT, "packages", "runtime", "src", "cli.ts")], { encoding: "utf8" });
-  const usage = /uso: wf <([^>]+)>/.exec(r.stderr);
+  const usage = /usage: wf <([^>]+)>/.exec(r.stderr);
   assert.ok(usage, `wf prints its usage: ${r.stderr}`);
   return usage[1]!.split("|");
 }

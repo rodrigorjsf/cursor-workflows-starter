@@ -14,8 +14,6 @@ const SRC = join(import.meta.dirname, "..", "src");
 const PORTUGUESE = /[ãõçáéíóúâêôà]|\b(não|para|uma|que|dos|das|são|também|você|com o|de um|de|da|em|ou|sem|nenhuma?|chave|desconhecid[oa]s?|encontrad[oa]s?|arquivo|pasta|rode|banco|uso|falha|nem|autenticado|servidor)\b/i;
 /** Not messages: the metrics database's DDL, whose SQL comments keep the file's language, and the pricing rows it seeds. */
 const DATA = ["CREATE VIEW", "CREATE TABLE", "cursor.com/docs/models-and-pricing"];
-/** Known exceptions, to be gone: the top-level usage line keeps "uso:" while test/cli-commands.ts parses it by that word. */
-const PENDING = ["uso: wf <login|"];
 
 const sources = (dir: string): string[] =>
   readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? sources(join(dir, e.name)) : /\.(ts|mjs)$/.test(e.name) ? [join(dir, e.name)] : []));
@@ -37,8 +35,18 @@ function literals(file: string): Array<{ line: number; text: string }> {
 test("no string in the runtime's source is Portuguese: every message that can reach an agent is English", () => {
   const offenders = sources(SRC).flatMap((file) =>
     literals(file)
-      .filter(({ text }) => PORTUGUESE.test(text) && ![...DATA, ...PENDING].some((d) => text.includes(d)))
+      .filter(({ text }) => PORTUGUESE.test(text) && !DATA.some((d) => text.includes(d)))
       .map(({ line, text }) => `${relative(SRC, file)}:${line}: ${text.slice(0, 100)}`),
   );
+  assert.deepEqual(offenders, []);
+});
+
+test("the installer's messages are English too: an agent runs it (INSTALL-AGENT.md) and reads what it prints", () => {
+  const script = join(import.meta.dirname, "..", "..", "..", "scripts", "install.sh");
+  const offenders = readFileSync(script, "utf8")
+    .split("\n")
+    .map((text, i) => ({ line: i + 1, text }))
+    .filter(({ text }) => !text.trimStart().startsWith("#") && PORTUGUESE.test(text))
+    .map(({ line, text }) => `install.sh:${line}: ${text.trim().slice(0, 100)}`);
   assert.deepEqual(offenders, []);
 });

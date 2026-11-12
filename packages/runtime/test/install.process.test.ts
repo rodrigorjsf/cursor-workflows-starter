@@ -217,7 +217,7 @@ test("a tag install and a dev install never overwrite each other: the installer 
   assert.equal(install(dev, ["--dev"], { from: workingCopy(true) }).status, 0);
   const onDev = install(dev, ["--tag", "v0.3.0", "--repo", origin]);
   assert.equal(onDev.status, 1);
-  assert.ok(onDev.stderr.includes(kitOf(dev)) && /desenvolvimento/.test(onDev.stderr), onDev.stderr);
+  assert.ok(onDev.stderr.includes(kitOf(dev)) && /development install/.test(onDev.stderr), onDev.stderr);
 
   const tagged = newHome();
   assert.equal(install(tagged, ["--tag", "v0.3.0", "--repo", origin]).status, 0);
@@ -357,7 +357,7 @@ function originWithReleases(): string {
     rmSync(join(d, "skills", "skill-to-workflow"), { recursive: true });
     // The installer of the new tag is the one `wf upgrade` must run: it says so.
     const script = join(d, "scripts", "install.sh");
-    writeFileSync(script, readFileSync(script, "utf8").replace('echo "kit pronto em $kit"', 'echo "kit pronto em $kit (instalador 0.4.0)"'));
+    writeFileSync(script, readFileSync(script, "utf8").replace('echo "kit ready at $kit"', 'echo "kit ready at $kit (installer 0.4.0)"'));
   });
   release(dir, "0.5.0-rc.1");
   return dir;
@@ -382,7 +382,7 @@ test("wf upgrade checks out the newest release tag, reinstalls dependencies and 
   assert.deepEqual(JSON.parse(r.stdout), { upgraded: true, from: "0.3.0", to: "0.4.0", tag: "v0.4.0" }); // v0.5.0-rc.1 is newer, but not a release
   assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.4.0");
   assert.deepEqual(npmCalls().slice(before), [`${kit} ci --no-audit --no-fund`]);
-  assert.ok(r.stderr.includes("instalador 0.4.0"), `the new tag's installer must run: ${r.stderr}`);
+  assert.ok(r.stderr.includes("installer 0.4.0"), `the new tag's installer must run: ${r.stderr}`);
 
   const skills = join(home, ".claude", "skills");
   assert.equal(readlinkSync(join(skills, "extra-skill")), join(kit, "skills", "extra-skill"), "a skill the new tag adds is linked");
