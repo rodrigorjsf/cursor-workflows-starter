@@ -1,6 +1,6 @@
 # 7.6 · ADR-0006: Cloud steps as built
 
-**Status:** accepted · decided in [spec #5](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/5); supersedes [ADR-0005](0005-cloud-backend-and-location-cap.md)
+**Status:** superseded by ADR-0007 ([7.7](0007-cancel-stops-cloud-agents.md)) · decided in [spec #5](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/5); supersedes [ADR-0005](0005-cloud-backend-and-location-cap.md)
 
 ## Context
 
@@ -100,4 +100,4 @@ enforced before any cloud code exists.
 
 ---
 
-[← Anterior: 7.5 · ADR-0005: The cloud backend and the location cap](0005-cloud-backend-and-location-cap.md) · [Índice](../README.md) · [Próximo: 8.1 · Cursor SDK como motor de workflows determinísticos: relatório de pesquisa →](../research/relatorio-pesquisa.md)
+[← Anterior: 7.5 · ADR-0005: The cloud backend and the location cap](0005-cloud-backend-and-location-cap.md) · [Índice](../README.md) · [Próximo: 7.7 · ADR-0007: Cancelling a run stops its cloud agents →](0007-cancel-stops-cloud-agents.md)
