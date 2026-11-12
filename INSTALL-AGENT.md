@@ -5,7 +5,7 @@ guide is pinned to release `v0.3.0` and needs no other document. Run the steps i
 result: when you cannot reach it, stop and tell the user what failed, with the command output.
 
 The kit runs deterministic workflows on the Cursor SDK from the Cursor IDE chat (MCP), Claude Code or a terminal. The
-kit's messages are in Portuguese; this guide quotes the few it matches. Supported: Linux and WSL2.
+kit's messages are in English; this guide quotes the few it matches as they are printed. Supported: Linux and WSL2.
 
 Ground rules:
 
@@ -46,7 +46,7 @@ that includes `implement-issue`.
   profile (bash or zsh: `~/.profile`; fish: `fish_add_path ~/.local/bin`) and to restart the IDE afterwards.
 - A line starting `error:` is a failure: fix what it names and run the installer again. For example,
   `<tool> is not on the PATH; install it and run again` or `Node <have> (<path>) is too old: the kit needs <need> or
-  newer.`
+  newer. Install a newer Node, put it on the PATH and run again`.
 
 ## 3. Log in to the Cursor SDK
 

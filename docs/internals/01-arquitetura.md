@@ -94,8 +94,8 @@ são o que o backend local faz numa tentativa.
    dois. O resultado do run traz `usage.cacheHitRatio` = cache read ÷ input (medido: `inputTokens` já inclui cache
    read e cache write; ver [5.2 §3](../operating/02-custos-e-cache.md#3-medir-antes-de-otimizar)).
    - Se o `getUsage()` responde sem `cost` (custo ainda não assentado), os tokens vêm dele e o teto de tokens
-     conta a tentativa. O teto em centavos não a conta, e o engine emite `warning` ("custo da tentativa ainda não
-     reportado ...").
+     conta a tentativa. O teto em centavos não a conta, e o engine emite `warning` ("Cursor has not reported the
+     attempt's cost yet ...").
    - Se o `getUsage()` falha, os tokens vêm da soma dos eventos `turn-ended` da tentativa, e o teto de tokens
      continua valendo. O custo fica desconhecido: o teto em centavos não conta a tentativa, e o engine emite
      `warning` ("getUsage() failed (...)"). Isso acontece, por exemplo, com `403 feature_unavailable`
@@ -229,13 +229,18 @@ O contrato, além da tabela:
   projeção `interruptedCloudSteps`), e a primeira tentativa de cada uma recebe `StepOptions.reattach`: o backend de nuvem
   retoma o agente pelo id (`Agent.resume`), acha o run que estava em andamento (`Agent.listRuns`: o que ainda roda, senão o
   mais novo) e espera por ele, sem reenviar o prompt; um run que terminou enquanto ninguém olhava entrega a resposta na hora, e
-  um resultado inválido recebe o follow-up de sempre, no agente retomado. Ao reanexar, o motor fecha no log a tentativa morta (um
+  um resultado inválido recebe o follow-up de sempre, no agente retomado. Se esse run foi cancelado (nenhum roda e o mais
+  novo terminou `cancelled`: é o que deixa o cancelamento de um run cujo processo morreu, abaixo), não há o que esperar: o
+  backend solta o agente e a tentativa cria outro, que custa de novo, com o aviso
+  `cloud agent <id>, left by an interrupted attempt, was cancelled: starting a new one`. Ao reanexar, o motor fecha no log a tentativa morta (um
   `step-end` sem cobrança, `errorKind: "exception"`) e tira do orçamento os tokens dos turnos que ela tinha reportado, porque
-  a tentativa que reanexa paga o uso inteiro do agente. A branch de snapshot que o crash deixou é apagada no fim. O motor só fecha
+  a tentativa que reanexa paga o uso inteiro do agente. A branch de snapshot que o crash deixou é apagada no fim, também quando
+  a tentativa criou outro agente: o que um agente cancelado commitou nela não volta para o worktree. O motor só fecha
   a tentativa morta quando a nova tem um agente (o evento `agent`): se a nuvem não responde em nenhuma tentativa, nada se fecha, e
   o próximo resume ainda vê a etapa como interrompida. Um agente que a nuvem não conhece mais (404: a primeira mensagem não
-  chegou, ou ele foi apagado) é trocado por um novo, com um aviso, e a tentativa morta fecha com os tokens que seus turnos tinham
-  reportado (eram gasto de verdade); qualquer outra falha ao alcançá-lo (`AttemptResult.reattachFailed`) falha só a tentativa, e a
+  chegou, ou ele foi apagado) também é trocado por um novo, com o aviso
+  `cloud agent <id>, left by an interrupted attempt, is no longer there: starting a new one`; nos dois casos a tentativa
+  morta fecha com os tokens que seus turnos tinham reportado (eram gasto de verdade); qualquer outra falha ao alcançá-lo (`AttemptResult.reattachFailed`) falha só a tentativa, e a
   seguinte tenta reanexar de novo: criar outro agente seria pagar duas vezes. Um run reanexado não tem o stream: o log não guarda o que o agente fez enquanto nenhum processo olhava (só a resposta
   final dele entra, como uma mensagem do agente: `converse` a emite como `text`), e os tetos de tokens ao vivo só atuam
   quando o run termina (o `warning` da reanexação diz isso).
@@ -245,7 +250,8 @@ O contrato, além da tabela:
   `signal` a abortar: o cancelamento por fora (`wf cancel`, `cancel_workflow`, a rota de cancelamento do dashboard) lê no
   log os agentes sem fim e cancela os runs deles na nuvem pela API da Cursor (`cancelLeftCloudAgents`, em
   `cloud-cancel.ts`), a menos que um processo esteja executando o run de novo. Isso alcança também o agente de uma etapa que
-  o resume não executa (prompt ou opções mudaram). O cliente do SDK desiste de esperar um run da nuvem depois de duas horas
+  o resume não executa (prompt ou opções mudaram). O cancelamento não grava nada no log: a etapa continua interrompida, e um
+  resume depois dele não reanexa ao agente cancelado, cria outro (acima), que custa de novo. O cliente do SDK desiste de esperar um run da nuvem depois de duas horas
   (`wait()` devolve `error` com "Timed out waiting for the cloud run to finish.", e aquele handle fica falho, embora o run
   continue lá). O backend de nuvem não trata um `error` assim como o fim da etapa: pergunta à nuvem (`Agent.getRun`) e, se o
   run ainda roda (ou já terminou), espera de novo por ele. Só um run que a própria nuvem diz ter falhado é um erro; quem limita
@@ -300,7 +306,7 @@ stateDiagram-v2
 | Todo evento do run fica registrado, e a estrutura do run dá para refazer só com o log | Log de eventos por run (`events.jsonl`): `v`, `ts` e `runId` em todo evento; `stepId`, `parentId` e `groupId` nas etapas; `group-start`/`group-end` em `parallel` e `pipeline`. Campos em [6.1 · Referência de eventos](../reference/events.md), gerada do tipo |
 | Uma queda no meio de uma gravação não impede o resume | Log e journal em JSON Lines: a última linha incompleta é ignorada, e a seguinte começa em linha nova. Os demais arquivos de estado (job, memo, progresso do workflow) são trocados por inteiro (arquivo temporário + `rename`) |
 | Um run não roda duas vezes ao mesmo tempo | `run.lock` no diretório do run: o segundo processo é recusado com `already running`; o lock de um processo que morreu é retomado |
-| Um recurso do repositório (uma issue) não tem dois runs ao mesmo tempo | Lock nomeado no run store (`acquireNamedLock`: `.workflows/locks/<nome>.lock`, mesmo mecanismo do `run.lock`, com o id do run que o tem). O `implement-issue` trava `issue-<n>` do começo ao fim do run (com um hash do repositório no nome só quando o arg `repo` aponta para outro repositório que não o do cwd): o segundo run volta `status: "issue-locked"` com `activeRunId`, sem criar branch, worktree nem agente. O lock de um processo que morreu é retomado |
+| Um recurso do repositório (uma issue) não tem dois runs ao mesmo tempo | Lock nomeado no run store (`acquireNamedLock`: `.workflows/locks/<nome>.lock`, mesmo mecanismo do `run.lock`, com o id do run que o tem). O `implement-issue` trava `issue-<n>` do começo ao fim do run (com um hash do repositório no nome quando o arg `repo` aponta para outro repositório que não o do cwd, ou quando o `gh` não consegue dizer se aponta): o segundo run volta `status: "issue-locked"` com `activeRunId`, sem criar branch, worktree nem agente. O lock de um processo que morreu é retomado |
 | Retomar um run com o workflow alterado não passa em silêncio | O `workflowHash` do `run-start` é comparado ao da execução anterior; mudou, o log recebe um `warning` |
 | Os runs de todos os repositórios são encontráveis | Cada run novo acrescenta uma linha (id, repositório, workflow, início) a `~/.cursor-workflows/runs.jsonl` (`WF_HOME` muda o diretório) |
 | Workflow não dispara workflow por acidente | MCP inline `workflows` sem tools nas etapas, que encobre o do `.cursor/mcp.json` (passo 4), + `WF_INSIDE_WORKFLOW` herdado pelo shell, com recusa no CLI. Medido em 2026-11-11: sem o inline, a etapa via `start_workflow`; com ele, só `FetchMcpResource` e `submit_result`. Não é fronteira de segurança (ver abaixo) |
