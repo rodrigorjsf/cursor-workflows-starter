@@ -22,7 +22,7 @@ flowchart TB
   ENG --> ST[structured.ts<br/>submit_result + Ajv]
   ENG -->|"Agent.create({model, local:{cwd, settingSources, customTools}})"| SDK["@cursor/sdk<br/>(loop local)"]
   SDK -->|inferência + cobrança| CUR[Backend Cursor]
-  ENG -->|"execFileSync: git, gh, testes"| REPO[(Repo + worktrees)]
+  ENG -->|"ctx.exec: git, gh, testes"| REPO[(Repo + worktrees)]
 ```
 
 ## Ciclo de uma etapa (`ctx.agent`)
@@ -125,6 +125,34 @@ flowchart TB
     cada texto em 32768 caracteres. Ao iniciar um run, o `text` dos runs do repositório fora da retenção (os últimos 30
     runs ou 14 dias) é apagado; o resto do log fica.
 
+## Comandos do workflow (`ctx.exec`)
+
+Os comandos que o workflow roda por conta própria (testes, `git`, `gh`) passam por `ctx.exec(comando, args, { label, timeoutMs })`.
+Nenhum fica numa chamada síncrona, que congelaria o processo do job: o sinal de cancelamento esperaria atrás dela, nada
+poderia estourar o tempo dela e a saída dela ficaria invisível.
+
+1. **Nó do run.** A chamada vira um nó, com `stepId`, `parentId` e `groupId` como uma etapa de agente: o `exec-start` abre,
+   o `exec-end` fecha ([6.1](../reference/events.md#exec-start)). O `stepId` (`x-…`) deriva do comando, dos argumentos e do
+   cwd, mais o número da ocorrência, então um resume numera os comandos do mesmo jeito. O comando **não** entra no
+   journal: o resume o roda de novo.
+2. **Processo assíncrono, num grupo de processos próprio.** Sem shell e sem stdin. A saída chega em pedaços, e o motor a
+   grava no log como eventos `content` (`command-output`, com `stream` `stdout` ou `stderr`) enquanto o comando roda,
+   em linhas inteiras: o motor redige cada pedaço sozinho, e um segredo partido entre duas leituras do pipe escaparia
+   da redação. Um bloco de chave privada espera pela linha `END` antes de ser gravado, e um lote maior que um evento é
+   cortado entre linhas. Valem a mesma redação, o mesmo corte de 32768 caracteres por evento e a mesma retenção do
+   conteúdo de um agente. O log guarda no máximo 262144 caracteres da saída de um comando (`outputTruncated` no
+   `exec-end` avisa quando passa disso); o workflow recebe o fim dela, 32768 caracteres, em `tail`. A linha de comando (programa, argumentos e cwd)
+   é conteúdo: vai num `content` do tipo `tool-call`, e o `exec-start` leva só o nome do programa.
+3. **Tempo.** O comando morre no `timeoutMs` da chamada ou, sem ele, no `execTimeoutMs` do workflow na configuração
+   (padrão: 10 minutos, [6.2](../reference/config.md)): `SIGTERM` ao grupo inteiro e, dois segundos depois, `SIGKILL`.
+   O resultado (`ok`, `exitCode`, `timedOut`, `tail`, `error`) volta ao workflow, que decide o que fazer; código de saída
+   diferente de zero, tempo estourado e programa que não inicia não lançam erro. O comando não tem stdin nem terminal
+   de controle (processo em sessão própria): um `git push` que pediria credenciais falha na hora, em vez de esperar.
+   Um processo que o comando deixou rodando, segurando a saída depois de ele sair, é morto um segundo depois.
+4. **Cancelamento.** O cancelamento do run mata o grupo do comando, fecha o nó como `cancelled`, e a chamada lança
+   `RunCancelledError`: o workflow não segue. O run espera o comando parar antes de gravar o `run-end`. Um segundo sinal
+   (que sai do processo na hora) mata antes todos os comandos que ainda rodam.
+
 ## Ciclo de vida de um job
 
 Um job é uma execução de um run, num processo destacado. O status que `wait_workflow`, `get_workflow_status` e
@@ -162,11 +190,12 @@ stateDiagram-v2
 | Retomar sem repetir etapas | Journal + `runId` gravado no job desde o início |
 | Um run sobrevive a reinício do Cursor e do MCP server | Todo job roda em um processo destacado (`spawnJob`, nova sessão, sem pipe com quem o iniciou); o MCP server e o CLI só iniciam, leem o estado e pedem o cancelamento ([ADR-0003](../adr/0003-detached-jobs.md)) |
 | Um run que caiu aparece como `failed`, com o `runId` para retomar | O processo do job atualiza um heartbeat no registro do job (a cada 5 s, por uma thread própria: uma chamada síncrona longa, como uma suíte de testes, não o atrasa). Processo morto, ou heartbeat parado há mais de 30 s, projeta `failed` |
-| Cancelar para os agentes, desfaz a etapa que escrevia e deixa o run retomável | `cancel_workflow` e `wf cancel` mandam `SIGTERM` ao processo do job (só se a linha de comando dele leva o id do job); `SIGINT` e `SIGTERM` no processo fazem o mesmo, e um segundo sinal sai na hora; um processo travado (vivo, sem heartbeat) é encerrado com `SIGKILL`, sem desfazer a etapa, e o run segue retomável. Uma chamada síncrona em andamento (como a suíte de testes do `implement-issue`) adia o tratamento do sinal até terminar: `wf cancel` espera até 30 s e avisa que o processo ainda está encerrando. O motor cancela os agentes ativos, desfaz o diretório da etapa que escrevia, grava o `run-end` com `status: cancelled` e solta o lock. A etapa cancelada não entra no journal, e o gasto dela fica no orçamento |
+| Cancelar para os agentes, desfaz a etapa que escrevia e deixa o run retomável | `cancel_workflow` e `wf cancel` mandam `SIGTERM` ao processo do job (só se a linha de comando dele leva o id do job); `SIGINT` e `SIGTERM` no processo fazem o mesmo, e um segundo sinal sai na hora; um processo travado (vivo, sem heartbeat) é encerrado com `SIGKILL`, sem desfazer a etapa, e o run segue retomável. Um comando de `ctx.exec` não segura o sinal: o motor mata o comando e o run termina. Uma chamada síncrona em andamento (as que o `implement-issue` ainda faz, até migrar para `ctx.exec`) adia o tratamento do sinal até terminar: `wf cancel` espera até 30 s e avisa que o processo ainda está encerrando. O motor cancela os agentes ativos, desfaz o diretório da etapa que escrevia, grava o `run-end` com `status: cancelled` e solta o lock. A etapa cancelada não entra no journal, e o gasto dela fica no orçamento |
 | A etapa cancelada não deixa edições pela metade | Antes de uma etapa que pode escrever, o motor registra os arquivos do diretório dela (os que o git não ignora) e o índice, byte a byte, sem filtros do git (`core.autocrlf`, `.gitattributes`, LFS) e sem mexer no índice. No cancelamento, o que a etapa criou é apagado, o que mudou ou apagou volta, e o índice volta. Não são desfeitos: commits que a etapa fez, arquivos fora do diretório dela e arquivos ignorados. Duas etapas escrevendo no mesmo diretório ao mesmo tempo voltam cada uma ao próprio ponto de partida, então o resultado não é preciso. Fora de um repositório git nada é desfeito, e o log traz um `warning` dizendo isso |
 | O orçamento acumula entre resumes | O gasto parte do que o log do run já registra (tentativas que falharam inclusive), e o teto de um resume é o novo teto total |
 | O estado de um job tem uma só fonte | O registro do job (`.workflows/jobs/<jobId>.json`) guarda só id do job, id do run, pid e heartbeat. Status, fase, últimas linhas, gasto e resultado são projetados do log de eventos a cada leitura (`wf status`, `wf jobs`, `get_workflow_status`, `wait_workflow`). Não há arquivo de estado para ficar pela metade, e as linhas de `recent` são resumos de uma linha, nunca texto de prompt ou de saída |
 | O conteúdo das etapas fica só no log local, sem segredos, por tempo limitado | Eventos `content` + redação antes da gravação + retenção ao iniciar o run (ver passo 12). O banco de métricas e os exports dele nunca recebem conteúdo |
+| Um comando do workflow não trava o processo nem fica sem limite de tempo, e a saída dele aparece no log | `ctx.exec`: processo assíncrono com `timeoutMs`, saída em eventos `content`, um nó (`exec-start`/`exec-end`) por chamada; ver "Comandos do workflow" acima. Um teste do repositório reprova chamadas síncronas (`execFileSync`, `execSync`, `spawnSync`) nos arquivos de workflow |
 | Todo evento do run fica registrado, e a estrutura do run dá para refazer só com o log | Log de eventos por run (`events.jsonl`): `v`, `ts` e `runId` em todo evento; `stepId`, `parentId` e `groupId` nas etapas; `group-start`/`group-end` em `parallel` e `pipeline`. Campos em [6.1 · Referência de eventos](../reference/events.md), gerada do tipo |
 | Uma queda no meio de uma gravação não impede o resume | Log e journal em JSON Lines: a última linha incompleta é ignorada, e a seguinte começa em linha nova. Os demais arquivos de estado (job, memo, progresso do workflow) são trocados por inteiro (arquivo temporário + `rename`) |
 | Um run não roda duas vezes ao mesmo tempo | `run.lock` no diretório do run: o segundo processo é recusado com `already running`; o lock de um processo que morreu é retomado |

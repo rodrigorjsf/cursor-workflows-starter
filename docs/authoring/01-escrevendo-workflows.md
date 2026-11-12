@@ -48,6 +48,26 @@ documento explica o *porquê* das regras e traz as receitas, que a skill aponta.
   laço inteiro do agente. Por isso o `timeoutMs`, que cada envio (o pedido e cada re-prompt de schema) tem, continua
   sendo o freio do que acontece dentro de um turno ([2.2 §3](../usage/02-configuracao-inicial.md#3-teto-de-custo)).
 
+### Comandos: `ctx.exec`
+
+Todo comando que o workflow roda (testes, `git`, `gh`) passa por `ctx.exec(comando, args, { label, timeoutMs, cwd, env })`,
+nunca por `execFileSync`, `execSync` ou `spawnSync`: uma chamada síncrona congela o processo do job, então o
+cancelamento espera atrás dela e nada a interrompe. O `npm test` reprova um arquivo de workflow que faça uma delas.
+
+```ts
+const tests = await ctx.exec("bash", ["-c", "npm test"], { label: "testes", cwd: worktree, timeoutMs: 15 * 60_000 });
+if (!tests.ok) await ctx.agent(`${FIX_INSTRUCTIONS}\n\n${tests.tail}`, { label: "correção" }); // tests.tail: o fim da saída
+```
+
+- Devolve `{ ok, exitCode, timedOut, tail, error? }`. Código diferente de zero, tempo estourado e programa que não inicia
+  são **resultados**, não exceções: o código decide o que significam. Um run cancelado mata o comando e lança.
+- O comando morre no `timeoutMs` da chamada; sem ele, no `execTimeoutMs` da configuração do workflow
+  ([6.2](../reference/config.md)), 10 minutos por padrão. Dê um prazo curto a um comando de rede (`git push`, `gh`).
+- A saída vai para o log de eventos enquanto o comando roda, com a redação e a retenção do conteúdo de um agente, e cada
+  chamada é um nó do run, ao lado das etapas ([3.1](../internals/01-arquitetura.md#comandos-do-workflow-ctxexec)). `tail`
+  é a saída real, sem redação: antes de levá-la a um texto que sai da máquina, passe pela trava de segredos.
+- Um resume roda o comando de novo: `exec` não entra no journal. Mantenha os efeitos idempotentes.
+
 ## Custo
 
 Toda receita abaixo deve passar pelo checklist de custo ([5.2 §6](../operating/02-custos-e-cache.md#6-checklist-de-custo)). As

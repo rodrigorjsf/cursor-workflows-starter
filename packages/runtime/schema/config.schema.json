@@ -141,6 +141,7 @@
         "maxTokensPerStep": { "$ref": "#/definitions/limit", "description": "Teto de tokens por etapa, para todas as etapas do workflow." },
         "maxCents": { "type": ["number", "null"], "minimum": 0, "description": "Teto de custo por run, em centavos." },
         "concurrency": { "type": "integer", "minimum": 1, "description": "Agentes simultâneos. O teto global `maxConcurrency` vale sempre." },
+        "execTimeoutMs": { "type": "integer", "minimum": 1, "description": "Tempo máximo, em milissegundos, de um comando que o workflow roda com `ctx.exec` e não passa o próprio `timeoutMs`. Passado esse tempo o comando é morto. Padrão: 600000 (10 minutos)." },
         "roles": {
           "type": "object",
           "propertyNames": { "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*$" },
