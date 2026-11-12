@@ -13,6 +13,7 @@ import { closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, rmS
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { globalConfigPath, loadConfigFile } from "../config/file.js";
+import { fromEnv } from "./job-state.js";
 import { commandLineHas, isAlive } from "./pid.js";
 import { userDir } from "./state.js";
 import { writeFileAtomic } from "./state-files.js";
@@ -166,8 +167,7 @@ function answering(port: number, pid: number, started: boolean): DashboardStatus
  */
 export async function ensureDashboard(options: EnsureOptions = {}): Promise<DashboardStatus> {
   // `WF_DASH_START_TIMEOUT_MS` exists for the tests, which start dashboards on a machine that is running the whole suite at once.
-  const fromEnv = Number(process.env.WF_DASH_START_TIMEOUT_MS);
-  const startTimeoutMs = options.startTimeoutMs ?? (Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 10_000);
+  const startTimeoutMs = options.startTimeoutMs ?? fromEnv("WF_DASH_START_TIMEOUT_MS", 10_000);
   const seconds = Math.max(1, Math.round(startTimeoutMs / 1000));
   try {
     const port = dashboardPort();
