@@ -601,4 +601,4 @@ condicional** sobre o Cursor SDK. Esse é o espaço que o starter kit ocupa.
 
 ---
 
-[← Anterior: 7.6 · ADR-0006: Cloud steps as built](../adr/0006-cloud-steps-as-built.md) · [Índice](../README.md) · [Próximo: 8.2 · Verificações locais (2026-11-11) →](verificacoes-locais.md)
+[← Anterior: 7.7 · ADR-0007: Cancelling a run stops its cloud agents](../adr/0007-cancel-stops-cloud-agents.md) · [Índice](../README.md) · [Próximo: 8.2 · Verificações locais (2026-11-11) →](verificacoes-locais.md)
