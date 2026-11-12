@@ -22,6 +22,7 @@ import {
   type AttemptResult,
   type Delivery,
   type Exchange,
+  type ResultVia,
   type SettleRun,
   type SnapshotRef,
   type StepOptions,
@@ -31,6 +32,7 @@ import {
   within,
 } from "./backend.js";
 import { BringBackError, type PushedSnapshot, bringBack, cloudRepoUrl, deleteSnapshot, pushSnapshot, snapshotBranch } from "./cloud-snapshot.js";
+import type { JsonSchema } from "./workflow.js";
 import { RESULT_ARTIFACT, artifactInstruction, artifactReprompt, jsonBlockInstruction, jsonBlockReprompt, resultFromArtifact, resultFromJsonBlock } from "./structured.js";
 
 /** What a read-only cloud step is told, since the allowlist that would make it so cannot be sent. */
@@ -138,6 +140,31 @@ async function downloadResult(agent: SDKAgent): Promise<string | undefined> {
   return saved && (await agent.downloadArtifact(saved.path)).toString("utf8");
 }
 
+/**
+ * How a cloud step delivers its structured result, one per `ResultVia`: what the prompt asks for, where the result is read from
+ * after an answer, how a refusal is worded for the step and for the follow-up that corrects it.
+ */
+interface ResultChannel {
+  instruction: (schema: JsonSchema) => string;
+  read: (answer: { result?: string }, agent: SDKAgent, schema: JsonSchema) => Promise<ReturnType<typeof resultFromJsonBlock>>;
+  refusal: string;
+  reprompt: (error: string) => string;
+}
+const RESULT_CHANNELS: Record<ResultVia, ResultChannel> = {
+  "json-block": {
+    instruction: jsonBlockInstruction,
+    read: async (answer, _agent, schema) => resultFromJsonBlock(answer.result ?? "", schema),
+    refusal: "the agent did not end with a valid JSON block",
+    reprompt: jsonBlockReprompt,
+  },
+  artifact: {
+    instruction: artifactInstruction,
+    read: async (_answer, agent, schema) => resultFromArtifact(await downloadResult(agent), schema),
+    refusal: `the agent did not deliver a valid ${RESULT_ARTIFACT} artifact`,
+    reprompt: artifactReprompt,
+  },
+};
+
 /** The exchange of the attempt, handing every answer's `git` (where the run pushed) to `remember`. */
 function rememberingGit(exchange: Exchange, remember: (git: PushedBranches | undefined) => void): Exchange {
   const noting = async (answer: Promise<RunResult>) => {
@@ -149,13 +176,12 @@ function rememberingGit(exchange: Exchange, remember: (git: PushedBranches | und
 }
 
 /**
- * The branch to take the agent's work from: the one its run says it pushed to, when that is not the snapshot branch (an agent
- * that did not work on the current branch pushes to one of its own), else the snapshot branch. `elsewhere` says it is the former.
+ * The branches the run says it pushed to when the snapshot branch is not among them (an agent that did not work on the current
+ * branch pushes to one of its own); empty when it pushed to the snapshot branch, or says nothing about where it pushed.
  */
-function branchOfAgent(pushed: PushedBranches | undefined, snapshotBranch: string): { branch: string; elsewhere: boolean } {
+function pushedElsewhere(pushed: PushedBranches | undefined, snapshotBranch: string): string[] {
   const reported = (pushed?.branches ?? []).flatMap((entry) => (entry.branch ? [entry.branch] : []));
-  if (reported.length === 1 && reported[0] !== snapshotBranch) return { branch: reported[0]!, elsewhere: true };
-  return { branch: snapshotBranch, elsewhere: false };
+  return reported.includes(snapshotBranch) ? [] : reported;
 }
 
 /**
@@ -170,11 +196,11 @@ async function bringWorkBack(result: AttemptResult, pushed: PushedBranches | und
     ...(touchedWorktree && { touchedWorktree: true as const }),
   });
   if (!from?.commit) return failed("the snapshot the interrupted agent started from is not in the event log, so there is nothing to check the worktree against");
-  const { branch, elsewhere } = branchOfAgent(pushed, from.branch);
-  if (elsewhere) onEvent({ type: "warning", message: `the cloud agent pushed to the branch ${branch} instead of the snapshot branch: its work is taken from there, and the branch stays on ${from.remote}: delete it by hand` });
+  const elsewhere = pushedElsewhere(pushed, from.branch);
+  if (elsewhere.length) return failed(`the cloud agent pushed to ${elsewhere.join(", ")} instead of the snapshot branch ${from.branch}, so its work is not on the branch the worktree moves to; ${elsewhere.length === 1 ? "that branch stays" : "those branches stay"} on ${from.remote}: delete ${elsewhere.length === 1 ? "it" : "them"} by hand`);
   try {
-    const back = await bringBack({ cwd: o.cwd, remote: from.remote, branch, base: from.commit, signal });
-    if (back.commits === 0) onEvent({ type: "warning", message: `the cloud agent made no commit on ${branch}, so nothing came back to the worktree: a step that writes has to commit its work` });
+    const commits = await bringBack({ cwd: o.cwd, remote: from.remote, branch: from.branch, base: from.commit, signal });
+    if (commits === 0) onEvent({ type: "warning", message: `the cloud agent made no commit on ${from.branch}, so nothing came back to the worktree: a step that writes has to commit its work` });
     return result;
   } catch (err) {
     if (signal.aborted) return { ...result, outcome: { kind: "aborted", reason: signal.reason } };
@@ -216,15 +242,12 @@ async function runCloudAttempt({ remote, runId, waitFloorMs = WAIT_FLOOR_MS }: C
     let agent: SDKAgent | undefined;
     /** Where the last answer says the agent pushed. */
     let pushed: PushedBranches | undefined;
-    const viaArtifact = o.resultVia === "artifact";
+    const channel = RESULT_CHANNELS[o.resultVia ?? "json-block"];
     const check = async (answer: { result?: string }): Promise<Delivery> => {
-      const delivered = viaArtifact ? resultFromArtifact(await downloadResult(agent!), schema!) : resultFromJsonBlock(answer.result ?? "", schema!);
-      if (delivered.ok) return delivered;
-      return viaArtifact
-        ? { ok: false, message: `the agent did not deliver a valid ${RESULT_ARTIFACT} artifact (${delivered.error})`, reprompt: artifactReprompt(delivered.error) }
-        : { ok: false, message: `the agent did not end with a valid JSON block (${delivered.error})`, reprompt: jsonBlockReprompt(delivered.error) };
+      const delivered = await channel.read(answer, agent!, schema!);
+      return delivered.ok ? delivered : { ok: false, message: `${channel.refusal} (${delivered.error})`, reprompt: channel.reprompt(delivered.error) };
     };
-    const message = prompt + (o.writes ? WRITE_INSTRUCTION : READ_ONLY_INSTRUCTION) + (schema ? (viaArtifact ? artifactInstruction(schema) : jsonBlockInstruction(schema)) : "");
+    const message = prompt + (o.writes ? WRITE_INSTRUCTION : READ_ONLY_INSTRUCTION) + (schema ? channel.instruction(schema) : "");
     const result = await runAttempt(
       signal,
       // The agent's event says where it starts from and whether it is one taken over: the log keeps that with the id, for a resume to clean up after it.

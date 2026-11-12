@@ -18,7 +18,7 @@
 
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import { copyFile, lstat, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -61,13 +61,13 @@ export function snapshotBranch(runId: string): string {
 }
 
 /** The first line git said on stderr, or the error's own message. */
-function errorLine(err: unknown): string {
+function gitErrorLine(err: unknown): string {
   const stderr = (err as { stderr?: unknown } | undefined)?.stderr;
   const text = typeof stderr === "string" && stderr.trim() ? stderr.trim() : err instanceof Error ? err.message : String(err);
   return text.split("\n")[0]!;
 }
 
-export async function git(cwd: string, args: string[], options: { env?: Record<string, string>; signal?: AbortSignal; timeoutMs?: number } = {}): Promise<string> {
+async function git(cwd: string, args: string[], options: { env?: Record<string, string>; signal?: AbortSignal; timeoutMs?: number } = {}): Promise<string> {
   try {
     const { stdout } = await execFileAsync("git", args, {
       cwd,
@@ -81,7 +81,7 @@ export async function git(cwd: string, args: string[], options: { env?: Record<s
     return stdout.trim();
   } catch (err) {
     if (options.signal?.aborted) throw options.signal.reason; // the abort, not git's complaint about being killed
-    throw new Error(`git ${args[0]}: ${errorLine(err)}`);
+    throw new Error(`git ${args[0]}: ${gitErrorLine(err)}`);
   }
 }
 
@@ -148,29 +148,24 @@ export class BringBackError extends Error {
   }
 }
 
-/** What `bringBack` did. `commits` is how many commits the worktree's branch moved forward; 0 when the agent made none. */
-export interface BroughtBack {
-  commits: number;
-  /** The commit the worktree is at now. */
-  head: string;
-}
-
 /**
  * Brings the work of a cloud agent that committed on `branch` of `remote` into the worktree it was snapshotted from: fetches
  * the branch and fast-forwards the worktree's checked-out branch to it, working files and index included, so the worktree ends
- * clean at the agent's tree. `base` is the snapshot commit the agent started from.
+ * clean at the agent's tree. `base` is the snapshot commit the agent started from. Resolves with how many commits the worktree
+ * moved forward (0 when the agent made none).
  *
  * It is a fast-forward or it is nothing. It refuses, changing nothing, when
  *  - the agent's branch no longer contains the snapshot (the agent rewrote the history), or
  *  - the worktree's branch moved while the agent ran (a commit, a reset), or
- *  - the working files are no longer what was snapshotted: bringing the work back would overwrite the changes made meanwhile.
+ *  - the working files are no longer what was snapshotted: bringing the work back would overwrite the changes made meanwhile, or
+ *  - the agent adds a file where the worktree has one that git ignores (the snapshot does not hold it, and the move would overwrite it).
  * Once it starts to change the worktree (`BringBackError.touched`) the index and the files are all it touches, and the branch
  * moves last: a failure leaves HEAD where it was.
  *
  * The signal ends the fetch. The part that changes the worktree is not interrupted by it: a half-applied checkout is worse than
  * a late one, and it takes a moment.
  */
-export async function bringBack({ cwd, remote, branch, base, signal }: { cwd: string; remote: string; branch: string; base: string; signal?: AbortSignal }): Promise<BroughtBack> {
+export async function bringBack({ cwd, remote, branch, base, signal }: { cwd: string; remote: string; branch: string; base: string; signal?: AbortSignal }): Promise<number> {
   const top = await git(cwd, ["rev-parse", "--show-toplevel"], { signal }).catch((err: unknown) => {
     throw signal?.aborted ? err : new BringBackError(`${cwd} is not inside a git repository`);
   });
@@ -178,13 +173,13 @@ export async function bringBack({ cwd, remote, branch, base, signal }: { cwd: st
   const fetched = `refs/wf/cloud-result/${randomUUID().slice(0, 8)}`;
   try {
     await git(top, ["fetch", "--quiet", "--no-tags", remote, `+refs/heads/${branch}:${fetched}`], { signal, timeoutMs: NETWORK_TIMEOUT_MS }).catch((err: unknown) => {
-      throw signal?.aborted ? err : new BringBackError(`could not fetch the cloud agent's branch ${branch} from ${remote} (${errorLine(err)}): its work is not in the worktree`);
+      throw signal?.aborted ? err : new BringBackError(`could not fetch the cloud agent's branch ${branch} from ${remote} (${gitErrorLine(err)}): its work is not in the worktree`);
     });
     const tip = await git(top, ["rev-parse", `${fetched}^{commit}`], { signal });
     const head = await git(top, ["rev-parse", "HEAD"], { signal });
     const isAncestor = (ancestor: string, of: string) => git(top, ["merge-base", "--is-ancestor", ancestor, of], { signal }).then(() => true, () => false);
 
-    if (tip === base) return { commits: 0, head }; // the agent made no commit: there is nothing to bring back
+    if (tip === base) return 0; // the agent made no commit: there is nothing to bring back
     if (!(await isAncestor(base, tip))) {
       throw new BringBackError(`not a fast-forward: the cloud agent's branch ${branch} (${tip.slice(0, 7)}) does not contain the snapshot it started from (${base.slice(0, 7)}), so the agent rewrote the history; its work was not brought back`);
     }
@@ -193,6 +188,15 @@ export async function bringBack({ cwd, remote, branch, base, signal }: { cwd: st
     }
     if ((await worktreeTree(top, signal)) !== (await git(top, ["rev-parse", `${base}^{tree}`], { signal }))) {
       throw new BringBackError("the working files changed while the cloud agent ran, and bringing its work back would overwrite those changes: the agent's work was not brought back");
+    }
+
+    // Files git ignores are not in the snapshot, so the check above did not see them: one the agent adds at a path where the worktree
+    // has such a file would be overwritten by the move.
+    const added = (await git(top, ["diff", "--name-only", "--no-renames", "--diff-filter=A", "-z", base, tip], { signal })).split("\0").filter(Boolean);
+    for (const path of added) {
+      if (await lstat(join(top, path)).then(() => true, () => false)) {
+        throw new BringBackError(`the cloud agent adds ${path}, which exists in the worktree and is not part of the snapshot (git ignores it), and bringing its work back would overwrite it: the agent's work was not brought back`);
+      }
     }
 
     const commits = Number(await git(top, ["rev-list", "--count", `${head}..${tip}`], { signal }));
@@ -207,9 +211,9 @@ export async function bringBack({ cwd, remote, branch, base, signal }: { cwd: st
       await git(top, ["read-tree", "--reset", "-u", tip]);
       await git(top, ["update-ref", "-m", `wf: fast-forward to the cloud agent's work on ${branch}`, "HEAD", tip, head]);
     } catch (err) {
-      throw new BringBackError(`could not move the worktree to the cloud agent's work (${errorLine(err)})`, touched);
+      throw new BringBackError(`could not move the worktree to the cloud agent's work (${gitErrorLine(err)})`, touched);
     }
-    return { commits, head: tip };
+    return commits;
   } finally {
     await git(top, ["update-ref", "-d", fetched]).catch(() => {});
   }

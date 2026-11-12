@@ -70,10 +70,10 @@ function write(clone: string, files: Record<string, string | null>): void {
 }
 
 /** What a cloud agent does on its branch: commits `files` on `branch` of the bare `remote` and pushes. Returns the commit. */
-export function agentCommits(remote: string, branch: string, files: Record<string, string | null>, message = "agent: the work"): string {
+export function agentCommits(remote: string, branch: string, files: Record<string, string | null>, message = "agent: the work", { force = false } = {}): string {
   return inAgentClone(remote, branch, (clone) => {
     write(clone, files);
-    git(clone, "add", "-A");
+    git(clone, "add", "-A", ...(force ? ["-f"] : [])); // `force`: an agent that adds files the repository ignores
     git(clone, "commit", "-qm", message);
     git(clone, "push", "-q", "origin", `HEAD:refs/heads/${branch}`);
     return git(clone, "rev-parse", "HEAD").trim();

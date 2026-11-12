@@ -41,12 +41,15 @@ enforced before any cloud code exists.
   created to work on the current branch (the snapshot branch) and told to commit there. When its run finishes the engine
   fetches the branch and moves the worktree's branch, index and working files to it, then deletes the snapshot. It refuses,
   changing nothing, when the agent's branch no longer contains the snapshot it started from, when the local branch moved
-  meanwhile, or when the working files are no longer what was pushed (bringing the work back would overwrite the changes
-  made in the meantime); the attempt fails like any other and the step's retries apply. A worktree that had no changes needs
+  meanwhile, when the working files are no longer what was pushed (bringing the work back would overwrite the changes
+  made in the meantime), or when the agent adds a file where the worktree has one git ignores; the attempt fails like any
+  other and the step's retries apply. A refused attempt changed nothing in the worktree, so neither `revertOnRetry` nor a
+  cancellation reverts it: that would undo what the person changed meanwhile. An agent whose run says it pushed only to
+  some other branch fails the attempt too, naming it. A worktree that had no changes needs
   no snapshot commit (the snapshot is `HEAD`); one that had changes keeps the snapshot commit in the local history, because
   the agent's commits are built on it. If moving the worktree fails after it began to change the index or the files, the
   engine puts them back as they were before the step, the way it does for a cancelled step. A role a workflow declares
-  `never` stays that way until its author declares otherwise: `implement-issue`'s write roles are still `never`.
+  `never` stays that way until its author declares otherwise: `implement-issue`'s write roles are still `never` (see [#45](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/45)).
 - **Structured results keep their contract.** The prompt requires a final fenced JSON block, validated with Ajv and
   corrected by follow-up sends in the same conversation, so workflow code does not change between locations. A role can
   switch (`resultVia: "artifact"`) to a `result.json` file the agent saves in its artifacts directory, downloaded after the

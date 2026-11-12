@@ -1127,10 +1127,13 @@ async function executeRun<A, R>(
           live.delete(turnUsage); // idempotent: an attempt that never got to be charged must not keep counting
           step.tokens += turnUsage.totalTokens;
         }
-        if (cancelledBy) reverted = await reverter.onCancel();
-        // A backend that may have changed the directory before it failed (a cloud step whose work could not be brought back
-        // half way) has it put back whatever the call asks: the step failed, and a worktree half moved to its result is no one's.
-        else if (touchedWorktree || (o.revertOnRetry && attempt < attempts)) reverted = await reverter.beforeRetry();
+        // A cloud step changes the directory only when its work is brought back, and says so when that fails half way
+        // (`touchedWorktree`). Otherwise there is nothing of the step to put back, and putting the directory back as it was before
+        // the step would undo what the person changed meanwhile. A step that did touch it has it put back whatever the call asks:
+        // a worktree half moved to the agent's result is no one's.
+        const putsBack = location === "local" || touchedWorktree;
+        if (cancelledBy) reverted = putsBack && (await reverter.onCancel());
+        else if (touchedWorktree || (putsBack && o.revertOnRetry && attempt < attempts)) reverted = await reverter.beforeRetry();
         endEvent(false);
         if (cancelledBy) throw cancelledBy;
       }

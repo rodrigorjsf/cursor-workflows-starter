@@ -23,7 +23,9 @@
   run termina, o motor busca a branch e avança o worktree até ela (fast-forward de arquivos, índice e branch) antes de apagar
   o snapshot, e os comandos que o workflow roda depois com `ctx.exec` (a suíte do TDD) enxergam o trabalho. É um fast-forward
   ou nada: a etapa falha, sem mudar o worktree, quando o agente reescreveu o histórico, quando a branch local andou ou quando
-  os arquivos mudaram enquanto o agente trabalhava; se o avanço falha depois de mexer no índice e nos arquivos, o motor
+  os arquivos mudaram enquanto o agente trabalhava ou o agente adiciona um arquivo onde o worktree tem um que o git
+  ignora (o `revertOnRetry` e o cancelamento não desfazem uma etapa na nuvem recusada, para não apagar o que a pessoa
+  mudou nesse meio tempo); se o avanço falha depois de mexer no índice e nos arquivos, o motor
   devolve o worktree ao que era antes da etapa (`AttemptResult.touchedWorktree`). O snapshot de um worktree sem mudanças é o
   próprio `HEAD` (o histórico ganha só os commits do agente); o de um com mudanças fica no histórico local, e o `cloud-agent`
   grava o commit dele em `snapshot.commit`, para o resume conferir o worktree. Um papel ganha a preferência `resultVia`

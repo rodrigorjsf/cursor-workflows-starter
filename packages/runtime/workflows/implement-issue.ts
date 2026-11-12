@@ -442,7 +442,7 @@ export default defineWorkflow<Args>({
     // config and WF_MODEL_<ROLE> replace. `fix` and `design` declare no model: it depends on the tier or on the step.
     // `cloud`: the engine can run a write step in the cloud (its commits come back into the worktree: ADR-0005), but the roles
     // that write stay `never` here: their prompts forbid git commands, which a cloud agent needs to deliver its work, and no
-    // TDD loop has run on a cloud agent yet. The read-only ones may go (they read the run's worktree, hence `read-only`).
+    // TDD loop has run on a cloud agent yet (see #45). The read-only ones may go (they read the run's worktree, hence `read-only`).
     roles: [
       { name: "classify", description: "Classifies the complexity when the issue has no label.", cloud: "ok", defaults: { model: COMPOSER, settingSources: NO_SETTING_SOURCES } },
       { name: "implement.low", description: "Writes test and code in the LOW tier (and the refactor).", cloud: "never", envAliases: ["LOW"], defaults: { model: COMPOSER } },

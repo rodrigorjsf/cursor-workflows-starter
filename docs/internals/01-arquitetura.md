@@ -211,7 +211,9 @@ O contrato, além da tabela:
   `read-only`: o agente trabalha na própria branch de snapshot (`workOnCurrentBranch`) e commita nela, e, quando o run
   termina com sucesso, `bringBack` (`cloud-snapshot.ts`) busca a branch e avança o worktree até ela, antes de apagar o
   snapshot. É um fast-forward ou nada: ele recusa, sem mudar nada, quando a branch do agente não contém mais o snapshot, quando
-  a branch local andou ou quando os arquivos já não são o que foi empurrado; a tentativa então falha como qualquer outra. Se
+  a branch local andou, quando os arquivos já não são o que foi empurrado ou quando o agente adiciona um arquivo onde o worktree
+  tem um que o git ignora; a tentativa então falha como qualquer outra, sem nada a desfazer: o motor não aplica a ela o
+  `revertOnRetry` nem o do cancelamento (só `touchedWorktree` faz o motor reverter uma etapa na nuvem). Se
   o avanço falha depois de mexer no índice e nos arquivos, o backend marca `AttemptResult.touchedWorktree` e o motor devolve o
   worktree ao snapshot que tirou antes da etapa. O commit do snapshot só existe quando o worktree tinha mudanças (senão o
   snapshot é o próprio `HEAD`) e o log o guarda em `cloud-agent.snapshot.commit`, para o resume conferir o worktree contra

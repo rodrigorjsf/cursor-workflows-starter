@@ -4,7 +4,7 @@
 // the run in flight and reports the signal's reason, the usage read, the agent disposed, and the snapshot branch gone.
 process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
@@ -240,22 +240,31 @@ test("an agent that cannot be created is a failed attempt of the account's or th
   assert.deepEqual(remoteBranches(remote), []);
 });
 
-test("a write step's work is taken from the branch the run says it pushed to when that is not the snapshot branch, and the branch is left for the person to delete", async () => {
+test("an agent that pushed to a branch of its own instead of the snapshot branch fails the attempt, naming the branch, and its work is not brought back", async () => {
   // The fake agent does not work on the current branch here: its run reports a branch of its own.
-  let own = "";
   script.push((o) => {
-    const started = o.cloud.repos[0].startingRef;
-    git(remote, "branch", "cursor/own", started);
+    git(remote, "branch", "cursor/own", o.cloud.repos[0].startingRef);
     agentCommits(remote, "cursor/own", { "c.txt": "c\n" });
-    own = "cursor/own";
-    return { result: "ok", git: { branches: [{ repoUrl: o.cloud.repos[0].url, branch: own }] } };
+    return { result: "ok", git: { branches: [{ repoUrl: o.cloud.repos[0].url, branch: "cursor/own" }] } };
   });
-  const { result, events } = await attempt("p", options({ writes: true, tools: undefined }));
+  const { result } = await attempt("p", options({ writes: true, tools: undefined }));
 
-  assert.deepEqual(outcomeOf(result), { kind: "finished", value: "ok" });
-  assert.equal(readFileSync(join(repo, "c.txt"), "utf8"), "c\n");
-  assert.ok(events.some((e) => e.type === "warning" && e.message.includes("pushed to the branch cursor/own instead of the snapshot branch") && e.message.endsWith("delete it by hand")));
+  const outcome = outcomeOf(result);
+  assert.equal(outcome.kind, "error");
+  assert.match((outcome as { message: string }).message, /the cloud agent pushed to cursor\/own instead of the snapshot branch wf\/cloud-snapshot\/run-1\/[0-9a-f]{8}, so its work is not on the branch the worktree moves to; that branch stays on origin: delete it by hand/);
+  assert.equal(existsSync(join(repo, "c.txt")), false);
   assert.deepEqual(remoteBranches(remote), ["cursor/own"], "the snapshot is deleted; the agent's own branch is not ours to delete");
+});
+
+test("a run that reports the snapshot branch among the branches it pushed to, or none at all, is brought back as usual", async () => {
+  for (const git of [undefined, { branches: [] }, { branches: [{ repoUrl: "x" }] }]) {
+    script.push((o) => {
+      agentCommits(remote, o.cloud.repos[0].startingRef, { [`c-${calls.length}.txt`]: "c\n" });
+      return { result: "ok", ...(git && { git }) };
+    });
+    const { result } = await attempt("p", options({ writes: true, tools: undefined }));
+    assert.equal(outcomeOf(result).kind, "finished", JSON.stringify(git));
+  }
 });
 
 test("an interrupted write step whose snapshot commit the log does not know cannot be checked against the worktree, so its work is not brought back", async () => {
