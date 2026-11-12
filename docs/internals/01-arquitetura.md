@@ -203,8 +203,11 @@ O contrato, além da tabela:
   ignora; o backend avisa das camadas com um `warning`). Antes de criar o agente ele empurra um snapshot do worktree
   (`cloud-snapshot.ts`: o estado em disco, não commitado inclusive, sem tocar no índice nem na `HEAD` do usuário, e sem
   `.workflows/`) para uma branch `wf/cloud-snapshot/<run>/<id>` do remote `cloud.remote` (padrão `origin`) e a apaga quando
-  a tentativa termina, de qualquer jeito que termine. O `warning` não conta como "o agente existe": o teto de tokens segue
-  esperando o evento `agent`.
+  a tentativa termina, de qualquer jeito que termine. Um cancelamento ou um timeout que chega com o push em andamento não o
+  corta: um remote que já tem os objetos aceita a branch depois que o cliente sumiu, e um push morto deixaria uma branch que
+  ninguém conhece. O push termina (o limite de rede o limita), e a limpeza da tentativa apaga a branch, então um cancelamento
+  nesse instante espera o push. O `warning` não conta como "o agente existe": o teto de tokens segue esperando o evento
+  `agent`.
 - Uma etapa na nuvem não usa o memo. Hoje só roda ali a etapa de leitura (`writes: false`); a que escreve falha antes de
   gastar, com a mensagem que diz o que fazer.
 - **O agente na nuvem sobrevive ao processo.** O evento `agent` do backend leva também a branch de snapshot de que o agente
