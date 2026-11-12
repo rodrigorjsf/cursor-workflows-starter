@@ -12,11 +12,11 @@ disable-model-invocation: true
 `CLAUDE.md`, `.cursor/rules/`), commands or hooks that take part in the flow.
 
 **Output:** `packages/runtime/workflows/<name>.ts` in the kit, where typecheck and tests run, with prompts and checks
-in a `packages/runtime/workflows/<name>/` folder when the module grows; `packages/runtime/test/<name>.test.ts`; a
-credits entry in the kit's `CREDITS.md` when the origin is third-party; and a conversion report in the chat. If the flow
-comes from another repository (kit installed elsewhere), step 5 ends by copying the workflow to `.agents/workflows/`
-there. The kit's built-in `implement-issue` workflow is a finished conversion of four skills (`tdd`, `codebase-design`,
-`code-review` and `pr`).
+in a `packages/runtime/workflows/<name>/` folder when the module grows; `packages/runtime/test/<name>.test.ts`; a row in
+the credits table (section `Créditos`) of the kit's book chapter `vision/02-a-ideia-e-as-referencias.md` when the origin
+is third-party; and a conversion report in the chat. If the flow comes from another repository (kit installed elsewhere),
+step 5 ends by copying the workflow to `.agents/workflows/` there. The kit's built-in `implement-issue` workflow is a
+finished conversion of four skills (`tdd`, `codebase-design`, `code-review` and `pr`).
 
 The references next to this file carry everything the steps apply: [runtime-api.md](references/runtime-api.md) (the
 runtime API), [rules.md](references/rules.md), [recipes.md](references/recipes.md),

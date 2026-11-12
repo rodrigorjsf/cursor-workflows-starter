@@ -61,7 +61,8 @@ stateDiagram-v2
 - Direção `LR` para fluxos que se leem como frase, `TB` para camadas.
 - Ponha o rótulo entre aspas quando tiver parênteses, `:`, `<`, `>` ou barras: `A["Agent.create({model})"]`. Use `<br/>`
   para quebrar a linha e `&lt;` para um `<` literal.
-- Rótulos em pt-BR, com identificadores de código (`ctx.agent`, `journal.jsonl`) como estão no código.
+- Rótulos em pt-BR, com identificadores de código (`ctx.agent`, `journal.jsonl`) como estão no código. No `README.en.md` e
+  nos ADRs, que são em inglês, os rótulos também são em inglês.
 - Legenda e texto explicativo ficam fora do diagrama, em Markdown.
 
 ## Verificação

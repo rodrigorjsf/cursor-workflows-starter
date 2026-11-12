@@ -54,7 +54,7 @@ function checkBook(root: string, files: string[], parse: (file: string) => Parse
   const listed = new Set(entries.map((e) => e.file));
   for (const file of bookFiles) if (!listed.has(file)) problems.push(`${file}: not listed in the book index (${INDEX})`);
 
-  const chapters = entries.filter((e) => files.includes(e.file)); // a missing target is already a broken link
+  const chapters = chaptersOnDisk(entries, files);
   chapters.forEach((chapter, i) => {
     const h1 = parse(chapter.file).headings.find((h) => h.level === 1);
     if (h1?.text !== chapter.label) {
@@ -63,6 +63,11 @@ function checkBook(root: string, files: string[], parse: (file: string) => Parse
     checkFooter(root, chapter, chapters[i - 1], chapters[i + 1], problems);
   });
   return chapters.length;
+}
+
+/** The index entries that are Markdown files the check reads: the chapters a footer can point to. A missing target is already a broken link. */
+function chaptersOnDisk(entries: Entry[], files: string[]): Entry[] {
+  return entries.filter((e) => files.includes(e.file));
 }
 
 /** The `### Parte N · Title` sections of the index and the chapters listed in each, numbered N.position. */
@@ -93,17 +98,35 @@ function indexEntries(index: ParsedMarkdown, problems: string[]): Entry[] {
   return entries;
 }
 
-/** A chapter ends with a `---` rule and one line: previous chapter, index, next chapter, in index order. */
-function checkFooter(root: string, chapter: Entry, previous: Entry | undefined, next: Entry | undefined, problems: string[]): void {
+/** The one line a chapter ends with: previous chapter, index, next chapter, in index order. */
+function expectedFooter(chapter: Entry, previous: Entry | undefined, next: Entry | undefined): string {
   const from = posix.dirname(chapter.file);
   const link = (text: string, target: string) => `[${text}](${posix.relative(from, target)})`;
-  const expected = [
+  return [
     previous ? link(`← Anterior: ${previous.label}`, previous.file) : undefined,
     link("Índice", INDEX),
     next ? link(`Próximo: ${next.label} →`, next.file) : undefined,
   ]
     .filter((part) => part !== undefined)
     .join(" · ");
+}
+
+/**
+ * What the index says about `file` (a posix path from the repo root): its label (the H1 it must carry) and the footer it
+ * must end with. A generator that writes a chapter calls this instead of keeping a copy that goes stale when a neighbour
+ * is added. Undefined when the index does not list the file.
+ */
+export function bookPlace(root: string, file: string): { label: string; footer: string } | undefined {
+  if (!existsSync(join(root, INDEX))) return undefined;
+  // `file` may be about to be written, so it counts as present; every other chapter is judged the way checkBook judges it
+  const listed = chaptersOnDisk(indexEntries(parseMarkdown(readFileSync(join(root, INDEX), "utf8")), []), [...markdownFiles(root), file]);
+  const at = listed.findIndex((e) => e.file === file);
+  return at === -1 ? undefined : { label: listed[at]!.label, footer: expectedFooter(listed[at]!, listed[at - 1], listed[at + 1]) };
+}
+
+/** A chapter ends with a `---` rule and one line: previous chapter, index, next chapter, in index order. */
+function checkFooter(root: string, chapter: Entry, previous: Entry | undefined, next: Entry | undefined, problems: string[]): void {
+  const expected = expectedFooter(chapter, previous, next);
 
   const lines = readFileSync(join(root, chapter.file), "utf8").split("\n");
   while (lines.length > 0 && lines.at(-1)!.trim() === "") lines.pop();

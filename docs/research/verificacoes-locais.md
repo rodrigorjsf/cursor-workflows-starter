@@ -314,7 +314,7 @@ consomem cota paga (crédito pré-pago, uso além da franquia), o uso está auto
 ## 13. Fase 6: o `implement-issue` com TDD, review em três eixos e checkpoint (2026-11-11)
 
 O `implement-issue` passou a seguir as skills `tdd`, `codebase-design`, `code-review` e `pr` de mattpocock/skills 1.3.1
-([`CREDITS.md`](../../CREDITS.md)). Antes dos runs reais, uma revisão adversarial (24 agentes, três lentes) confirmou
+([1.2 · Créditos](../vision/02-a-ideia-e-as-referencias.md#créditos)). Antes dos runs reais, uma revisão adversarial (24 agentes, três lentes) confirmou
 20 defeitos, cada um corrigido com um teste de regressão que falha no código anterior
 (`packages/runtime/test/implement-issue.hardening.test.ts`). Os runs abaixo usaram o repositório `wf-sandbox`, Premium, Linux x64
 (WSL2), `npm test` como comando de teste, `--max-cents 100` e `WF_METRICS_DB=~/tmp/wf-verify.db`. Antes de cada run foi

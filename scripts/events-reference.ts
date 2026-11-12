@@ -4,20 +4,19 @@
 //       a generated one is checked: `npm test` (test/events-reference.test.ts) fails when it differs from the code.
 // WHEN: after any change to packages/runtime/src/runtime/events.ts (a field, a comment, a new event).
 // HOW:  `npm run docs:events` rewrites the page. `npx tsx scripts/events-reference.ts --check` only compares it and
-//       exits 1 when it is out of date. The source is parsed, not imported: no event code runs.
+//       exits 1 when it is out of date. The source is parsed, not imported: no event code runs. The page's number and
+//       footer come from the book index (docs/README.md), so adding a chapter next to it needs no edit here.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { bookPlace } from "./check-docs.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const EVENTS_SOURCE = join(ROOT, "packages", "runtime", "src", "runtime", "events.ts");
 export const EVENTS_PAGE = join(ROOT, "docs", "reference", "events.md");
-/** The page's label in the book index (docs/README.md); its H1 must equal it. */
-const BOOK_LABEL = "6.1 · Referência de eventos";
-/** The footer `npm run docs:check` expects: previous and next chapter in index order. Update it when they change. */
-const BOOK_FOOTER =
-  "[← Anterior: 5.3 · Observabilidade: custo, tokens, contexto e eficiência](../operating/03-observabilidade.md) · [Índice](../README.md) · [Próximo: 8.1 · Cursor SDK como motor de workflows determinísticos: relatório de pesquisa →](../research/relatorio-pesquisa.md)";
+/** The page's path from the repo root, as the book index (docs/README.md) lists it. */
+const BOOK_PAGE = "docs/reference/events.md";
 
 interface Field {
   name: string;
@@ -48,7 +47,9 @@ function docOf(node: ts.Node, source: ts.SourceFile): string {
   return squash(block.replace(/^\/\*\*|\*\/$/g, "").replace(/^\s*\* ?/gm, " "));
 }
 
-export function generateEventsReference(sourceText: string): string {
+export function generateEventsReference(sourceText: string, root = ROOT): string {
+  const place = bookPlace(root, BOOK_PAGE);
+  if (!place) throw new Error(`${BOOK_PAGE} is not listed in the book index (docs/README.md): list it before generating the page`);
   const source = ts.createSourceFile("events.ts", sourceText, ts.ScriptTarget.Latest, true);
 
   const interfaces = new Map<string, Declared>();
@@ -125,7 +126,7 @@ export function generateEventsReference(sourceText: string): string {
   };
 
   const out: string[] = [
-    `# ${BOOK_LABEL}`,
+    `# ${place.label}`,
     "",
     `<!-- Gerado por scripts/events-reference.ts a partir de packages/runtime/src/runtime/events.ts. Não edite à mão: rode \`npm run docs:events\`. O \`npm test\` falha se esta página divergir do código. -->`,
     "",
@@ -158,8 +159,8 @@ export function generateEventsReference(sourceText: string): string {
       else out.push("```ts", `type ${a.name} = ${a.text};`, "```", "");
     }
   }
-  // The page is chapter 6.1 of the docs book, so it ends with the previous/next footer the docs check demands.
-  out.push("---", "", BOOK_FOOTER);
+  // The page is a chapter of the docs book, so it ends with the previous/next footer the docs check demands.
+  out.push("---", "", place.footer);
   return `${out.join("\n").trimEnd()}\n`;
 }
 

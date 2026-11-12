@@ -57,6 +57,20 @@ imprime o rodapé esperado: copie dali.
 4. Mantenha as medições datadas e as citações `[DOC]` como estão ao mover ou reescrever um capítulo. Atualize só os
    caminhos de arquivos e as referências cruzadas.
 
+## ADRs
+
+Um ADR registra uma decisão difícil de reverter, surpreendente sem contexto e fruto de uma troca real. Os ADRs são o
+único conteúdo do livro em inglês, e cada um é um capítulo da Parte 7.
+
+1. Crie `docs/adr/NNNN-assunto.md`, com `NNNN` sequencial (o próximo depois do maior que existe).
+2. O H1 é o rótulo do índice, `# 7.N · ADR-NNNN: Short title`. Logo abaixo vem `**Status:** accepted` (ou `proposed`, ou
+   `superseded by ADR-NNNN`), com o link da spec que decidiu.
+3. As seções são `## Context`, `## Decision`, `## Consequences` e `## Considered options`. O `npm test` confere o título, o
+   status, as seções e o idioma (`test/vision-and-adrs.test.ts`).
+4. Liste o ADR na Parte 7 do índice e cole o rodapé que o docs check pedir.
+5. Para mudar uma decisão, não reescreva o ADR: escreva outro, e troque o status do antigo para
+   `superseded by ADR-NNNN`.
+
 ## O que o docs check confere
 
 `scripts/check-docs.ts` (`npm run docs:check`) roda dentro do `npm test`, em `test/docs-check.test.ts`. Ele lê todo

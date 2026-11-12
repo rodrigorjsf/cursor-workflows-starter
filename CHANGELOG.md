@@ -43,12 +43,26 @@
   `scripts/` tem um cabeçalho WHAT/WHY/WHEN/HOW, e `.claude/rules/diagrams.md` aponta o Claude Code para as
   convenções de diagramas nos arquivos `*.md`.
 
+- **O README vira um hub enxuto e a Parte 1 do livro conta a visão.** O `README.md` traz o problema, a ideia, um
+  diagrama de visão geral, o começo rápido, a tabela "O que você leva" e links para o livro; o `README.en.md` o espelha em
+  inglês. A Parte 1 ganha três capítulos: [1.1 · O problema](docs/vision/01-o-problema.md), [1.2 · A ideia e as
+  referências](docs/vision/02-a-ideia-e-as-referencias.md) (que absorve o antigo `PROVENANCE.md` e o `CREDITS.md`, agora
+  removidos) e [1.3 · Conceitos](docs/vision/03-conceitos.md). A seção de transparência do README foi para
+  [5.1](docs/operating/01-governanca-e-custos.md#transparência-o-que-o-kit-faz-por-baixo), e a árvore do repositório
+  para [9.1](docs/contributing/01-contribuindo.md#onde-fica-cada-coisa).
+- **Cinco ADRs, em inglês, na Parte 7** ([7.1](docs/adr/0001-layered-config-with-hard-caps.md) a
+  [7.5](docs/adr/0005-cloud-backend-and-location-cap.md)): configuração em camadas com tetos globais, o log de eventos
+  como fonte da verdade, jobs destacados, workspaces com o `CLAUDE.md` canônico, e o backend de nuvem com o teto de
+  location. Como registrar um novo: [9.2](docs/contributing/02-convencoes-do-livro.md#adrs).
+- **A referência de eventos (6.1) tira o número e o rodapé do índice do livro**, em vez de uma cópia fixa no gerador:
+  inserir um capítulo ao redor dela não exige mais editar `scripts/events-reference.ts`.
+
 ## 0.2.0 (pré-release, 2026-11-11)
 
 ### Mudado
 
 - **`implement-issue` segue as skills `tdd`, `codebase-design`, `code-review` e `pr`** de
-  [mattpocock/skills](https://github.com/mattpocock/skills) 1.3.1 (MIT; créditos em [`CREDITS.md`](CREDITS.md)):
+  [mattpocock/skills](https://github.com/mattpocock/skills) 1.3.1 (MIT; créditos em [1.2 · A ideia e as referências](docs/vision/02-a-ideia-e-as-referencias.md#créditos)):
   TDD fatia a fatia com red e green conferidos pelo código; seams aprovadas em dois runs em MED e HIGH
   (`seams-proposed` e `approveSeams`); "Design it twice" no HIGH; review sempre, em três eixos paralelos
   (Standards, Spec e Segurança); corpo do PR no template Summary / Evidence / Merge Danger, com a saída real dos

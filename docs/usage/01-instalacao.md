@@ -133,4 +133,4 @@ Para usar os workflows **em outros repositórios** sem copiar o kit para dentro 
 
 ---
 
-[Índice](../README.md) · [Próximo: 2.2 · Configuração inicial →](02-configuracao-inicial.md)
+[← Anterior: 1.3 · Conceitos](../vision/03-conceitos.md) · [Índice](../README.md) · [Próximo: 2.2 · Configuração inicial →](02-configuracao-inicial.md)

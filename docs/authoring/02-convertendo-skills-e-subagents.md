@@ -55,7 +55,7 @@ em dois runs ([4.1 · Checkpoint em dois runs](01-escrevendo-workflows.md#checkp
 O [`packages/runtime/workflows/implement-issue.ts`](../../packages/runtime/workflows/implement-issue.ts) é a conversão de referência. Ele segue, em
 código, os fluxos das skills `tdd`, `codebase-design`, `code-review` e `pr` de
 [mattpocock/skills](https://github.com/mattpocock/skills) 1.3.1 (MIT); os créditos estão em
-[`CREDITS.md`](../../CREDITS.md).
+[1.2 · Créditos](../vision/02-a-ideia-e-as-referencias.md#créditos).
 
 **Inventário** (resumo):
 

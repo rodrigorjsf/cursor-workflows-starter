@@ -1,6 +1,6 @@
 // Instruções das etapas do implement-issue. São paráfrases em pt-BR das skills tdd, codebase-design, code-review e
 // pr de mattpocock/skills 1.3.1 (MIT, Matt Pocock); o template do PR vem da skill show-me (humanlayer/skills, MIT,
-// Dex Horthy). Créditos em CREDITS.md.
+// Dex Horthy). Créditos em docs/vision/02-a-ideia-e-as-referencias.md.
 //
 // Instruções fixas ficam aqui, como constantes: o prompt de cada etapa é `INSTRUÇÕES + dados`, o que mantém o prefixo
 // estável para o cache do provedor e as chaves do journal e do memo (docs/08).

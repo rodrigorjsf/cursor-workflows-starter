@@ -79,6 +79,25 @@ Para as práticas de implementação (cache, contexto, prompts, memo), veja
 | Workflow disparando workflow | As etapas carregam o `.cursor/mcp.json` do projeto, e o SDK sobe esses servidores sem repassar o ambiente do processo. Medido em 2026-11-11: antes da correção, a etapa via `start_workflow`, e o servidor recebia `WF_INSIDE_WORKFLOW` vazio | Nas etapas, o engine registra um MCP inline `workflows` (ou `WF_MCP_SERVER_NAME`) sem tools, que vence o do arquivo pelo nome; no reteste, a etapa só via `FetchMcpResource` e `submit_result`. O shell da etapa herda `WF_INSIDE_WORKFLOW=1`, e o CLI recusa `run`/`start`. Isso evita a recursão acidental, mas não é fronteira de segurança: uma etapa com `shell` pode contornar a guarda, por exemplo rodando o CLI sem a variável |
 | Vazamento da chave | `wf login` gera uma chave | O CLI imprime só e-mail e validade, nunca a chave |
 
+## Transparência: o que o kit faz por baixo
+
+O que o kit grava e dispara na sua máquina, além do que a tabela de segurança acima já cobre (tools sem aprovação, escrita
+fora do repositório) e do que o [2.2 §5](../usage/02-configuracao-inicial.md#5-contexto-do-projeto-nos-agentes) diz sobre o
+contexto que as etapas carregam (`settingSources`):
+
+- **Cada etapa cria um agente local** do Cursor SDK na sua máquina. A inferência roda nos servidores da Cursor e é
+  cobrada na conta da chave usada.
+- **O estado fica em `.workflows/`** (journal, log de eventos, jobs, logs, worktrees) do repositório onde o workflow roda.
+  O runtime o adiciona ao `info/exclude` do git (`.git/info/exclude`, ou o caminho que o git indicar quando `.git` é um
+  arquivo, como num worktree ligado), sem mexer no `.gitignore` do repositório.
+- **Cada run grava métricas** (tokens, custo, modelo, passos, resultado) em `~/.cursor-workflows/metrics.db`. Os prompts
+  ficam só como hash. Desligue com `WF_METRICS=off` (ver [5.3](03-observabilidade.md)).
+- **Commit, push, PR e comentário na issue são feitos pelo código do workflow**, com `git` e `gh`. O `implement-issue`
+  sempre faz o commit local na branch `wf/issue-<n>`; push e PR, só com `openPr: true`. Em issues MED e HIGH, o primeiro
+  run comenta as seams propostas na issue, com ou sem `openPr`.
+- **Uma guarda evita que uma etapa dispare outro workflow por acidente**; ela não é uma fronteira de segurança
+  (ver acima, "Workflow disparando workflow").
+
 ## Políticas de admin que se aplicam
 
 - **Hooks Enterprise (MDM) e Team** (dashboard): o engine carrega `team` e `mdm` por padrão
