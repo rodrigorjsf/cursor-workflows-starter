@@ -3,6 +3,10 @@
 O vocabulário do kit. O livro e o código usam estes termos com estes sentidos. Onde existe um sinônimo que confunde, a
 linha _Evite_ diz qual não usar. Cada definição diz o que o conceito *é*; o que ele faz está nos capítulos que ela cita.
 
+> **Em construção.** O *role* e o *heartbeat* do job são decisões da [spec de fundação (#2)](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/2)
+> que ainda não estão todos no código, e o status do job como projeção do log de eventos também não. As definições abaixo
+> descrevem o desenho decidido; o que falta está nos tickets da spec.
+
 ```mermaid
 flowchart LR
   W["workflow<br/>código TypeScript"]:::conceito -->|"cada execução"| R["run<br/>runId"]:::conceito

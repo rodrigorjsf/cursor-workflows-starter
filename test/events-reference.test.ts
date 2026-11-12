@@ -1,10 +1,11 @@
 // Seam 3, the docs: the events reference page is generated from the event interfaces, and `npm test` fails when the
 // committed page drifts from them. Regenerate with `npm run docs:events`.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { checkDocs } from "../scripts/check-docs.js";
 import { EVENTS_PAGE, EVENTS_SOURCE, generateEventsReference } from "../scripts/events-reference.js";
 
 const source = readFileSync(EVENTS_SOURCE, "utf8");
@@ -83,6 +84,29 @@ test("the page refuses to be generated when the book index does not list it", ()
     mkdirSync(join(root, "docs/one"), { recursive: true });
     writeFileSync(join(root, "docs/one/01-primeiro.md"), "# 1.1 · Primeiro\n");
     assert.throws(() => generateEventsReference(source, root), /docs\/reference\/events\.md.*not listed/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the page the generator writes passes the docs check, also next to a chapter the check does not count", () => {
+  const root = mkdtempSync(join(tmpdir(), "wf-events-footer-"));
+  try {
+    const files: Record<string, string> = {
+      "docs/README.md": ["# Book", "", "### Parte 1 · Um", "", "- [1.1 · Referência de eventos](reference/events.md): x", "- [1.2 · Atalho](reference/02-atalho.md): x", ""].join("\n"),
+      "docs/other.md": "# Other\n",
+    };
+    for (const [path, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), content);
+    }
+    // a listed chapter that is a symbolic link: the docs check does not read links, so it is not the page's next chapter
+    mkdirSync(join(root, "docs/reference"), { recursive: true });
+    symlinkSync(join(root, "docs/other.md"), join(root, "docs/reference/02-atalho.md"));
+    writeFileSync(join(root, "docs/reference/events.md"), generateEventsReference(source, root));
+
+    const footerProblems = checkDocs(root).problems.filter((problem) => problem.startsWith("docs/reference/events.md") && /footer/.test(problem));
+    assert.deepEqual(footerProblems, []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

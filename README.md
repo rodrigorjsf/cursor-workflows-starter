@@ -24,12 +24,11 @@ um run interrompido retoma de onde parou. A ideia vem dos *workflows* do Claude 
 
 ```mermaid
 flowchart LR
-  CHAT["Chat do Cursor IDE<br/>/run-workflow"]:::entrada -->|MCP| RT
-  TERM["Terminal e CI<br/>wf run, wf start"]:::entrada -->|CLI| RT
+  CHAT["Chat do Cursor IDE<br/>/run-workflow"]:::etapa -->|MCP| RT
+  TERM["Terminal e CI<br/>wf run, wf start"]:::etapa -->|CLI| RT
   RT["Runtime do kit<br/>o workflow decide as etapas,<br/>o teto de custo e o resume"]:::kit -->|"uma etapa, um agente"| AG["Agentes do Cursor SDK<br/>modelo por etapa,<br/>saída com schema"]:::etapa
   RT -->|"git, gh e testes"| REPO[("Repositório e worktrees")]:::saida
   RT -->|"cada fato do run"| LOG["Estado do run<br/>log de eventos e journal"]:::saida
-  classDef entrada fill:#dbeafe,stroke:#1d4ed8,color:#0f172a
   classDef kit fill:#fef3c7,stroke:#b45309,color:#0f172a
   classDef etapa fill:#dbeafe,stroke:#1d4ed8,color:#0f172a
   classDef saida fill:#dcfce7,stroke:#15803d,color:#0f172a

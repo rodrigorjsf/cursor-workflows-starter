@@ -24,12 +24,11 @@ the mattpocock skills: [1.2 · A ideia e as referências](docs/vision/02-a-ideia
 
 ```mermaid
 flowchart LR
-  CHAT["Cursor IDE chat<br/>/run-workflow"]:::entrada -->|MCP| RT
-  TERM["Terminal and CI<br/>wf run, wf start"]:::entrada -->|CLI| RT
+  CHAT["Cursor IDE chat<br/>/run-workflow"]:::etapa -->|MCP| RT
+  TERM["Terminal and CI<br/>wf run, wf start"]:::etapa -->|CLI| RT
   RT["Kit runtime<br/>the workflow decides the steps,<br/>the cost cap and the resume"]:::kit -->|"one step, one agent"| AG["Cursor SDK agents<br/>model per step,<br/>schema-checked output"]:::etapa
   RT -->|"git, gh and tests"| REPO[("Repository and worktrees")]:::saida
   RT -->|"every fact of the run"| LOG["Run state<br/>event log and journal"]:::saida
-  classDef entrada fill:#dbeafe,stroke:#1d4ed8,color:#0f172a
   classDef kit fill:#fef3c7,stroke:#b45309,color:#0f172a
   classDef etapa fill:#dbeafe,stroke:#1d4ed8,color:#0f172a
   classDef saida fill:#dcfce7,stroke:#15803d,color:#0f172a

@@ -34,7 +34,8 @@ that the runtime must never install. And three readers (Claude Code, Cursor, Cod
 
 - Nothing from the dev space can leak into a target repo: the runtime does not see the repo root, and a test copies the
   package outside the repo and runs it from there.
-- Cursor reads both `AGENTS.md` and `CLAUDE.md` and deduplicates identical content, so the symlink costs no extra context.
+- Per the Cursor docs that spec #2 relied on (the 3.26 [release notes](https://cursor.com/docs/release-notes) add `CLAUDE.md`),
+  Cursor reads both `AGENTS.md` and `CLAUDE.md` and deduplicates identical content, so the symlink costs no extra context.
   Claude Code reads `CLAUDE.md`, and Codex reads `AGENTS.md`. One file serves all three, without an `@` import whose
   support in Cursor the docs do not state.
 - `CLAUDE.md` is the real file because the maintainer works in Claude Code, whose conventions (the Applied Learning
