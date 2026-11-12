@@ -13,7 +13,7 @@
 //   wf start <workflow> --args '<json>' [--resume <runId>]                 # segundo plano; imprime {jobId}
 //   wf status <jobId>
 //   wf wait <jobId> [--timeout 240]       # espera até o timeout e imprime o estado
-//   wf cancel <jobId> [--timeout 30]      # cancel the job (SIGTERM to its process) and wait for it to stop; the run stays resumable
+//   wf cancel <jobId> [--timeout 30]      # running job: SIGTERM, wait for it to stop; frozen job (no heartbeat): SIGKILL, no revert; ended job: no signal. Left cloud agents are cancelled; the run stays resumable
 //   wf jobs
 //   wf gc [--dry-run]                     # removes the worktrees, local branches and origin branches of implement-issue runs whose PR was merged or closed, or that failed long ago, and the cloud snapshot branches their steps left on the cloud.remote remote; --dry-run only prints the plan
 //   wf stats [--days 30]                  # resumo de custo/eficiência (banco ~/.cursor-workflows/metrics.db)
@@ -205,7 +205,10 @@ async function main(): Promise<number> {
       return 0;
     }
     case "cancel": {
-      // Waits for the process to stop (it cancels the agents, reverts the in-flight step and writes the run's end), 30 s at most.
+      // 30 s at most. A running job gets SIGTERM: its process cancels its agents, reverts the in-flight step and writes the run's
+      // end. A frozen job (no heartbeat) is killed (SIGKILL): no revert, no run end, the job stays `failed`, and once its process
+      // is gone its cloud agents are cancelled through the Cursor API. A job whose process already ended gets no signal: only
+      // the cloud agents it left are cancelled. See `cancelJob`.
       out((await cancelJob(cwd, name ?? "", Math.min(timeoutMs(), 30_000))) ?? { error: "job not found" });
       return 0;
     }

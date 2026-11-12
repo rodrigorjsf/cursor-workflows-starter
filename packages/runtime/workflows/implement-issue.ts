@@ -89,6 +89,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileS
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
+import { wasKilledByCancel } from "../src/runtime/job-state.js";
 import { NamedLockedError, acquireNamedLock, eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { defineWorkflow, type AgentCallOptions, type WorkflowCard } from "../src/runtime/workflow.js";
 import { buildPrBody, type PrText } from "./implement-issue/pr-body.js";
@@ -310,11 +311,14 @@ async function issueLockName(cmd: Commands, cwd: string, issue: number, repo: st
   return `issue-${issue}-${createHash("sha256").update(named).digest("hex").slice(0, 12)}`;
 }
 
-/** The run's executions as its event log has them: the `run-start` and the `run-end` (absent while running, or after a crash) of each, in order. */
-function executionsOf(cwd: string, runId: string): Array<{ ended?: string }> {
-  const executions: Array<{ ended?: string }> = [];
+/**
+ * The run's executions as its event log has them, in order: the job that ran each (`wf start`; absent for `wf run`) and the
+ * status of its `run-end` (absent while running, after a crash, or after a cancel killed its frozen job).
+ */
+function executionsOf(cwd: string, runId: string): Array<{ jobId?: string; ended?: string }> {
+  const executions: Array<{ jobId?: string; ended?: string }> = [];
   for (const e of readEventLog(eventLogPath(cwd, runId), { content: false }).events) {
-    if (e.type === "run-start") executions.push({});
+    if (e.type === "run-start") executions.push(e.jobId === undefined ? {} : { jobId: e.jobId });
     else if (e.type === "run-end" && executions.length) executions[executions.length - 1]!.ended = e.status;
   }
   return executions;
@@ -708,9 +712,12 @@ export default defineWorkflow<Args>({
         const { id, before, interrupted, execution: startedIn } = progress.data.inFlight;
         // Só uma queda conta para o limite: numa etapa `interrupted` o código estava vivo (um cancelamento, um erro que subiu), e
         // numa cuja execução terminou cancelada também (o engine encerra o run cancelado sem esperar este código chegar ao catch,
-        // e o `wf` sai logo depois: a marca pode não ter sido escrita). A queda é contada antes de desfazer, e o registro passa a
-        // `interrupted`: um cancelamento no meio do desfazer não a perde nem a conta de novo.
-        const cancelled = startedIn !== undefined && executionsOf(ctx.cwd, ctx.runId)[startedIn - 1]?.ended === "cancelled";
+        // e o `wf` sai logo depois: a marca pode não ter sido escrita). Um job congelado que o cancelamento matou (SIGKILL) não
+        // grava o fim do run: o registro do job diz que foi o cancelamento (`wasKilledByCancel`), e isso também não é queda.
+        // A queda é contada antes de desfazer, e o registro passa a `interrupted`: um cancelamento no meio do desfazer não a
+        // perde nem a conta de novo.
+        const began = startedIn === undefined ? undefined : executionsOf(ctx.cwd, ctx.runId)[startedIn - 1];
+        const cancelled = began !== undefined && (began.ended === "cancelled" || (began.jobId !== undefined && wasKilledByCancel(ctx.cwd, began.jobId)));
         if (!interrupted && !cancelled) {
           progress.data.crashes = { ...progress.data.crashes, [id]: (progress.data.crashes?.[id] ?? 0) + 1 };
           progress.data.inFlight = { id, before, interrupted: true };
@@ -1027,7 +1034,9 @@ export default defineWorkflow<Args>({
           if (!after.ok) {
             await revertTo(cmd, worktree, before); // volta ao último verde
             settle();
-            return { ...base, status: "tests-failed-after-review", worktree, output: after.output };
+            // Como em toda suíte: passar do teto ou morrer por um sinal não é uma suíte vermelha.
+            const status = after.kind === "timeout" || after.kind === "killed" ? `tests-${after.kind}` : "tests-failed-after-review";
+            return { ...base, status, worktree, output: after.output };
           }
           settle();
           progress.data.refactorDone = true;
