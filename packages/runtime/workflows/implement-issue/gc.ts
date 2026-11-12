@@ -325,7 +325,7 @@ async function planSnapshots(plan: GcPlan, commands: Commands, snapshots: Snapsh
       keep(`a process is executing run ${runId}`);
       continue;
     }
-    // The log is the one source of when a run last did anything (ADR-0002): a run with no event gives gc nothing to wait on, so it stays.
+    // The log is the one source of when a run last did anything (ADR-0008): a run with no event gives gc nothing to wait on, so it stays.
     const events = runEvents(cwd, runId);
     const lastEvent = Date.parse(events.at(-1)?.ts ?? "");
     if (!Number.isFinite(lastEvent)) {

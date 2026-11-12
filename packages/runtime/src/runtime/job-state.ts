@@ -2,11 +2,12 @@
 // the engine. The dashboard cancels a run through this module (`observe`), so it must stay free of the engine and, with it,
 // of the Cursor SDK: `jobs.ts` adds what starts a job. See there for what a job is.
 //
-// The job record (`.workflows/jobs/<jobId>.json`) holds identity only: job id, run id, pid and heartbeat, plus how the job
-// was started (args and limit flags), so a resume can repeat it exactly, and when a cancel killed its frozen process. Everything else
-// (status, phase, recent lines, spend, result) is a projection of the run's event log
-// (`.workflows/runs/<runId>/events.jsonl`), computed on every read: one source of truth, and no state file to be left
-// half-written.
+// The job record (`.workflows/jobs/<jobId>.json`) holds the job's identity (job id, run id, pid and heartbeat) and only the
+// facts the job's process cannot put in the run's log (ADR-0008): how the job was started (args and limit flags), so a resume
+// can repeat it exactly, why the runtime refused it before its run started, and when a cancel killed its frozen process.
+// Everything else (status, phase, recent lines, spend, result) is a projection of the run's event log
+// (`.workflows/runs/<runId>/events.jsonl`), computed on every read: one source of truth for the run's progress, and no
+// state file to be left half-written.
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -30,7 +31,7 @@ export interface JobStart {
   overrides?: LimitOverrides;
 }
 
-/** What is on disk: the identity of the job. */
+/** What is on disk: the identity of the job, and the facts its process cannot put in the run's log (ADR-0008). */
 export interface JobRecord {
   jobId: string;
   /** Written at the start: lets the run be resumed with the same journal even if the process dies. */
@@ -100,7 +101,7 @@ export function jobLogPath(cwd: string, jobId: string): string {
   return join(jobsDir(cwd), `${jobId}.log`);
 }
 
-/** The job record in `file` (identity only), without the projection. Undefined when the file is not there or is not a record this runtime wrote. */
+/** The job record in `file` (identity and the facts the log cannot hold), without the projection. Undefined when the file is not there or is not a record this runtime wrote. */
 function parseJobRecord(file: string): JobRecord | undefined {
   if (!existsSync(file)) return undefined;
   try {
@@ -117,7 +118,7 @@ export function readJobStart(repo: string, jobId: string): JobStart | undefined 
   return start && typeof start === "object" && "args" in start ? start : undefined;
 }
 
-/** The job record on disk (identity only), without the projection. */
+/** The job record on disk (identity and the facts the log cannot hold), without the projection. */
 export function readJobRecord(cwd: string, jobId: string): JobRecord | undefined {
   return parseJobRecord(join(jobsDir(cwd), `${jobId}.json`));
 }
@@ -244,7 +245,7 @@ export function runningJobOf(cwd: string, runId: string): JobState | undefined {
   return undefined;
 }
 
-/** Writes the record. Only the identity fields reach the disk, even when `record` is a `JobState`. */
+/** Writes the record. Only the `JobRecord` fields reach the disk, even when `record` is a `JobState`: never the projection. */
 export function writeJob(cwd: string, record: JobRecord): void {
   const { jobId, runId, pid, heartbeat, refused, start, killedByCancel } = record;
   const optional = { refused, start, killedByCancel };
