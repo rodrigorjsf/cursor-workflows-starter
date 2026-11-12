@@ -1,6 +1,6 @@
 node_modules/
 .workflows/
-test/.tmp/
+**/test/.tmp/
 metrics-export/
 
 # Nunca versionar: estado de runs, métricas, credenciais e artefatos de teste

@@ -1,7 +1,0 @@
-// Usado só pelo tsx em `npm test` (troca @cursor/sdk pelo fake em tempo de execução).
-// O typecheck do projeto é `npm run typecheck` (tsconfig.json), contra o SDK real.
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": { "baseUrl": ".", "paths": { "@cursor/sdk": ["./test/fake-sdk.ts"] } },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
-}

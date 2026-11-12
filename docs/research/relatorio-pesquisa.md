@@ -1,4 +1,4 @@
-# Cursor SDK como motor de workflows determinísticos: relatório de pesquisa
+# 8.1 · Cursor SDK como motor de workflows determinísticos: relatório de pesquisa
 
 > **Data:** 2026-11-11 · **Escopo:** Cursor SDK (`@cursor/sdk`), Cursor CLI headless, Cloud Agents. Comparação
 > com os *dynamic workflows* do Claude Code. Viabilidade de um harness próprio, invocável do chat do Cursor IDE
@@ -37,7 +37,7 @@
 > - **[DOC]**: doc oficial. Com link, é a página ao vivo (acesso em 2026-11-11); sem link, é o espelho local.
 > - **[FÓRUM]**: relato no fórum oficial do Cursor (indica quando a equipe respondeu).
 > - **[TESTE]**: medido contra a API real em 2026-11-11
->   ([docs/research/verificacoes-locais.md](verificacoes-locais.md)).
+>   ([8.2](verificacoes-locais.md)).
 > - **[S]**: resumo de busca, ainda a confirmar.
 > - **[I]**: inferência minha.
 
@@ -237,7 +237,7 @@ Ainda segundo o pacote [PKG]:
 | Aprovação | Prompt por run conforme o modo; regras `Workflow(<nome>)` e hook `PreToolUse` [DOC](https://code.claude.com/docs/en/workflows) | Local roda tools **sem aprovação** por padrão; sandbox, autoReview e hooks são opcionais [DOC](https://cursor.com/docs/sdk/typescript) | Allowlist de tools por etapa + hooks do projeto (`settingSources`) |
 | Contexto do projeto | CLAUDE.md carregado por padrão nos agentes, que são subagents (Explore, Plan e `omitClaudeMd` são exceções) [DOC](https://code.claude.com/docs/en/sub-agents) | Opt-in via `settingSources` | O engine liga `["project","team","mdm"]`; instruções em `AGENTS.md` |
 | Progresso | `/workflows` (TUI) | Stream de eventos | Arquivo de job + `wait_workflow` / `wf wait` |
-| Salvar e distribuir | `.claude/workflows/`, `~/.claude/workflows/`, plugin `workflows/` (vira `/<plugin>:<nome>`) | — | `workflows/` do kit + `.agents/workflows/` do repositório (este vence em nome repetido) |
+| Salvar e distribuir | `.claude/workflows/`, `~/.claude/workflows/`, plugin `workflows/` (vira `/<plugin>:<nome>`) | — | `packages/runtime/workflows/` do kit + `.agents/workflows/` do repositório (este vence em nome repetido) |
 | Script isolado (sem fs/rede) | Sim | — | **Não**: roda em Node normal, o que é mais poderoso (git, gh, testes no próprio script) e exige disciplina para o resume |
 
 ---
@@ -266,7 +266,7 @@ flowchart LR
 
 | Caminho | Como funciona | Prós | Contras |
 |---|---|---|---|
-| **MCP server** (recomendado) | `.cursor/mcp.json` sobe `src/mcp-server.ts`. Tools `start_workflow` → `jobId`; `wait_workflow` espera ≤ 50 s por chamada | Descoberta pelo agente (`whenToUse`), sem depender do shell, funciona também no Claude Code | O job morre se o Cursor reiniciar o servidor MCP (o resume pelo journal reduz o dano). O timeout de chamada de tool MCP no IDE **não é documentado**: a doc só diz que a chamada que estoura é marcada como falha [DOC](https://cursor.com/docs/mcp). Daí o start/wait. Cada chamada MCP segue o Run Mode, como o shell: sem allowlist, cada `wait_workflow` pode pedir aprovação [DOC](https://cursor.com/docs/agent/security/run-modes) |
+| **MCP server** (recomendado) | `.cursor/mcp.json` sobe `packages/runtime/src/mcp-server.ts`. Tools `start_workflow` → `jobId`; `wait_workflow` espera ≤ 50 s por chamada | Descoberta pelo agente (`whenToUse`), sem depender do shell, funciona também no Claude Code | O job morre se o Cursor reiniciar o servidor MCP (o resume pelo journal reduz o dano). O timeout de chamada de tool MCP no IDE **não é documentado**: a doc só diz que a chamada que estoura é marcada como falha [DOC](https://cursor.com/docs/mcp). Daí o start/wait. Cada chamada MCP segue o Run Mode, como o shell: sem allowlist, cada `wait_workflow` pode pedir aprovação [DOC](https://cursor.com/docs/agent/security/run-modes) |
 | **CLI pelo shell do agente** | `npm run wf -- start ...` e `wf wait <id> --timeout 240` | Processo destacado sobrevive ao chat; serve igual em CI | Timeout de ~300 s no shell do agente é relato não verificado: a doc só diz que existe um timeout, sem dar o valor [DOC](https://cursor.com/docs/release-notes); exige aprovação de comando conforme o modo |
 | **Skill explícita** | `/run-workflow` com `disable-model-invocation: true` [DOC](https://cursor.com/docs/skills) | O usuário dispara; o modelo não "decide" se roda | A skill só instrui; quem executa é o MCP ou o CLI |
 | **Hooks** | `stop` com `followup_message` | Sem infraestrutura | Não ordena etapas nem troca modelos: determinismo fraco |
@@ -275,7 +275,7 @@ flowchart LR
 > **Nota (2026-11-11, depois desta pesquisa):** a skill `run-workflow` deixou de usar `disable-model-invocation`.
 > Só do usuário, ela não travava nada: o servidor MCP anuncia `start_workflow` com o `whenToUse` de cada workflow, e um
 > pedido em prosa chegava à tool sem passar pela skill. A trava de um workflow pago é a aprovação de `start_workflow`
-> pelo Run Mode ([04 §3](../04-invocacao-no-cursor-ide.md#3-skill-run-workflow-e-a-trava-de-disparo)). O diagrama
+> pelo Run Mode ([2.3 §3](../usage/03-invocacao-no-cursor-ide.md#3-skill-run-workflow-e-a-trava-de-disparo)). O diagrama
 > e a tabela acima ficam como estavam na pesquisa.
 
 **Custo do polling:** cada `wait_workflow` é uma chamada de tool do agente do chat e consome tokens do modelo do
@@ -363,7 +363,7 @@ com timeout maior).
 ### 5.1 Custos e cache: o que dá para controlar
 
 O detalhamento, com checklist, está em
-[`docs/08-custos-e-cache.md`](../08-custos-e-cache.md) deste repositório. Em resumo:
+[5.2 · Custos, cache e boas práticas](../operating/02-custos-e-cache.md), neste repositório. Em resumo:
 
 - **O cache de prompt do Cursor não é configurável pelo SDK** [PKG]. Ele é automático, e cache read custa menos
   que input numa proporção que depende do modelo. O Auto não tem preço fixo por token: o modo Cost cobra como
@@ -396,7 +396,7 @@ O detalhamento, com checklist, está em
 
 ### 5.2 Observabilidade: o que dá para medir
 
-Detalhes em [`docs/09-observabilidade.md`](../09-observabilidade.md) deste repositório.
+Detalhes em [5.3 · Observabilidade: custo, tokens, contexto e eficiência](../operating/03-observabilidade.md), neste repositório.
 
 - **O SDK expõe** [PKG][DOC](https://cursor.com/docs/sdk/typescript):
   - tokens e custo por agente (`getUsage()`), com `rawCostCents` sem descontos (**0 para uso cobrado por
@@ -440,7 +440,7 @@ Detalhes em [`docs/09-observabilidade.md`](../09-observabilidade.md) deste repos
 
 | Eixo | Claude Code | Cursor | Lacuna e tratamento |
 |---|---|---|---|
-| Caminho de instalação | `.claude/workflows/`, `~/.claude/workflows/`, plugin `workflows/`; subagents em `.claude/agents/` | Sem pasta de workflows. Subagents em `.cursor/agents/`, com leitura também de `.claude/agents/` e `.codex/agents/` [DOC](https://cursor.com/docs/subagents); o SDK só documenta `.cursor/agents/*.md` | O kit traz `workflows/` + `.agents/workflows/`, `.agents/skills/`, `.cursor/mcp.json` e `.mcp.json`. O MCP server serve aos dois |
+| Caminho de instalação | `.claude/workflows/`, `~/.claude/workflows/`, plugin `workflows/`; subagents em `.claude/agents/` | Sem pasta de workflows. Subagents em `.cursor/agents/`, com leitura também de `.claude/agents/` e `.codex/agents/` [DOC](https://cursor.com/docs/subagents); o SDK só documenta `.cursor/agents/*.md` | O kit traz `packages/runtime/workflows/` + `.agents/workflows/`, `.agents/skills/`, `.cursor/mcp.json` e `.mcp.json`. O MCP server serve aos dois |
 | Eventos de hook | `PreToolUse` pode aprovar `Workflow`; agentes do workflow seguem regras de permissão [DOC](https://code.claude.com/docs/en/workflows) | `stop`, `subagentStart`, `subagentStop`, `sessionStart`, `postToolUse`, `beforeMCPExecution` etc. Hooks do Claude Code também são carregados, com `loop_limit` `null` em vez de 5 [DOC](https://cursor.com/docs/hooks). Em cloud agents hospedados pela Cursor não disparam `sessionStart`, `sessionEnd` nem `beforeMCPExecution`/`afterMCPExecution`. Em workers self-hosted (Pools e My Machines), `sessionStart` e `sessionEnd` disparam quando a sessão pega e libera o worker. Tools MCP HTTP em cloud ainda passam por `preToolUse`/`postToolUse` | Nas runs do SDK, hooks só com `settingSources` e sem `fs` [PKG]. A nota da 1.0.40 do SDK diz que um deny de `PreToolUse` vindo do `settings.json` do Claude Code bloqueia a tool call em agentes locais; antes, era ignorado [DOC](https://cursor.com/docs/release-notes/sdk). Medido numa run local com `project` [TESTE](verificacoes-locais.md): os hooks de `.cursor/hooks.json` (`beforeShellExecution`, `postToolUse`) rodaram, e um `PreToolUse` de `.claude/settings.json` com `exit 2` bloqueou o comando; com `[]`, nenhum. Se o `~/.claude/settings.json` também é lido não foi testado |
 | Como o contexto chega | CLAUDE.md carregado por padrão em cada agente do workflow; Explore, Plan e `omitClaudeMd` são exceções [DOC](https://code.claude.com/docs/en/sub-agents) | `AGENTS.md` + `.cursor/rules` só com `settingSources: ["project"]`. No IDE e em cloud, o agente também lê `CLAUDE.md` como instrução de projeto; se ele é cópia ou link do `AGENTS.md`, o conteúdo chega uma vez só [DOC](https://cursor.com/docs/release-notes). Para runs locais do SDK a doc não diz. O `AGENTS.md` chegou com `project` e não chegou com `[]` nem com `["team","mdm"]` [TESTE](verificacoes-locais.md). `additional_context` via hooks | O engine liga `project`, `team` e `mdm`; instruções em `AGENTS.md` (o `CLAUDE.md` do kit só faz `@AGENTS.md`). Prompts de etapa autocontidos |
 | MCP | Cada `agent()` do workflow cria um subagent [DOC](https://code.claude.com/docs/en/workflows), e subagents herdam as tools MCP da conversa principal, com filtros [DOC](https://code.claude.com/docs/en/sub-agents). A doc de workflows não trata de MCP; que os agentes do workflow alcançam o MCP da sessão é inferência [I] | `mcpServers` por create/send. Local: send → create → plugins → `.cursor/mcp.json` → `~/.cursor/mcp.json`; o primeiro nome que casar vence, e a lista do send substitui a do create (não mescla). Plugins, projeto e usuário só entram com `settingSources`. Cloud: send → create → servidores do usuário e do time em cursor.com/agents [DOC](https://cursor.com/docs/sdk/typescript). O SDK sobe os servidores do `.cursor/mcp.json` sem repassar o ambiente do processo, e um inline com o mesmo nome vence o do arquivo [TESTE](verificacoes-locais.md) | Passe `mcpServers` por etapa quando a etapa precisar. A guarda de recursão do kit usa essa ordem: um `workflows` inline sem tools encobre o do projeto |
@@ -549,7 +549,7 @@ condicional** sobre o Cursor SDK. Esse é o espaço que o starter kit ocupa.
 
 1. **Adote o padrão "runtime em código + MCP + skill explícita"** ([este repositório](../../README.md)). É o
    único caminho que entrega, ao mesmo tempo, ordem garantida, modelo por etapa, verificação por código, teto de
-   custo checado antes de cada etapa (não um gasto máximo; [02 §3](../02-configuracao-inicial.md#3-teto-de-custo))
+   custo checado antes de cada etapa (não um gasto máximo; [2.2 §3](../usage/02-configuracao-inicial.md#3-teto-de-custo))
    e invocação pelo chat.
 2. **Autenticação por `wf login` do próprio usuário.** O uso fica na conta dele, coerente com o orçamento
    individual do Enterprise (se o limite por membro vale para o SDK segue em aberto, §8). Para CI e Automations,
@@ -598,3 +598,7 @@ condicional** sobre o Cursor SDK. Esse é o espaço que o starter kit ocupa.
   - Fórum do Cursor: `forum.cursor.com/t/162001`, `/t/173200`, `/t/151439` e `/t/173469`.
 - Terceiros: `6e6p1k/cursor-agents-mcp`, `tuannvm/cursor-demo`, `fitchmultz/pi-cursor-sdk`,
   `@ai-sdk/harness-cursor`.
+
+---
+
+[← Anterior: 7.5 · ADR-0005: The cloud backend and the location cap](../adr/0005-cloud-backend-and-location-cap.md) · [Índice](../README.md) · [Próximo: 8.2 · Verificações locais (2026-11-11) →](verificacoes-locais.md)

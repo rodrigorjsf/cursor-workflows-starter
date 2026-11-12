@@ -1,11 +1,168 @@
 # Changelog
 
+## Não lançado
+
+### Adicionado
+
+- **Workflow `smoke` e o assistente de validação no Cursor IDE.** O `smoke` é uma etapa estruturada no `composer-2.5`,
+  sem tools e sem contexto do projeto, com teto de 50 mil tokens (medido: 21.628): prova chat → MCP → SDK → resultado
+  estruturado sem pagar um `implement-issue`. O `scripts/verify/validate-cursor-ide.sh` conduz os seis cenários de
+  validação: cria o repositório descartável (reaproveitando o `setup-sandbox-repo.sh`), roda `wf init` e `wf doctor`
+  nele, diz o que digitar no chat, registra o que a pessoa viu (e sobrevive ao reinício do Cursor do cenário 5) e
+  escreve `validation-report.json`, com caminhos e nomes de repositório anonimizados. Mostra o corpo da issue e só a
+  abre depois da confirmação. O `redaction` do log de eventos passa a cobrir também o formato `crsr_` da chave do Cursor.
+- **Log de eventos por run como fonte de verdade.** Todo evento é acrescentado a `.workflows/runs/<runId>/events.jsonl`
+  com versão do esquema, horário e id do run. As etapas levam `stepId`, `parentId` e `groupId`, e `parallel`/`pipeline`
+  emitem `group-start`/`group-end`: a estrutura do run se refaz só com o log. Etapas servidas do journal ou do memo
+  também emitem `step-start`. A referência dos eventos (`docs/reference/events.md`) é gerada do tipo
+  (`npm run docs:events`), e o `npm test` falha se ela divergir.
+- **Runs mais robustos.** Uma última linha incompleta no log ou no journal não impede o resume; um lock por run recusa
+  a segunda execução do mesmo `runId` (`já está em execução`); todo arquivo de estado é gravado de forma atômica;
+  retomar um run cujo workflow mudou grava um aviso; cada run novo entra no índice global
+  `~/.cursor-workflows/runs.jsonl` (`WF_HOME` muda o diretório do usuário).
+- **O estado de um job é projetado do log de eventos.** O registro do job (`.workflows/jobs/<jobId>.json`) guarda só id
+  do job, id do run, pid e heartbeat. `wf status`, `wf jobs`, `get_workflow_status` e `wait_workflow` calculam status,
+  fase, gasto, resultado e as últimas linhas (`recent`) do log a cada leitura: não há arquivo de estado para ficar pela
+  metade, e as linhas são resumos de uma linha, nunca texto de prompt ou de saída. O `run-end` passa a levar o `result`,
+  e o `run-start`, o `jobId`. Um processo que cai com exceção não tratada fecha o run no log como `failed`.
+- **O conteúdo das etapas fica só no log de eventos local.** Prompts, o que o agente disse, chamadas de tool e saída de
+  comandos entram no log como eventos `content` (cortados em 32768 caracteres), nunca no banco de métricas, nos exports
+  dele, nos ouvintes de `onEvent` nem em `recent`. Formatos conhecidos de segredo e o valor das variáveis de ambiente com
+  `KEY`, `TOKEN`, `SECRET` ou `PASSWORD` no nome são trocados por `[REDACTED]` antes de qualquer gravação. Ao iniciar um
+  run, o texto dos runs do repositório fora dos 30 mais recentes ou com mais de 14 dias é apagado (`RunOptions.retention`
+  muda os limites); os metadados ficam.
+- **O orçamento acumula entre resumes.** O gasto (centavos e tokens) é recomposto do log do run, tentativas que falharam
+  inclusive, e um resume com `--max-cents`/`--max-tokens` define o novo teto total. Uma tentativa que morreu no meio da
+  etapa conta os tokens dos turnos que terminou (o custo em centavos dela nunca chegou ao log).
+- **Tetos de tokens ao vivo, por etapa e por run.** A cada turno de uma etapa (`turn-ended`), o motor compara os
+  tokens com o `maxTokensPerStep` da etapa (todas as tentativas dela somadas) e com o `maxTokens` do run (o gasto do log,
+  resumes inclusive, mais os turnos em andamento). Passou de um dos dois: o run do agente é cancelado na hora e a
+  tentativa falha com o novo `errorKind: "budget"`, sem nova tentativa. A etapa que passa do próprio teto falha
+  sozinha; o teto do run cancela todas as etapas ativas, nenhuma etapa nova começa e o run termina com
+  `Teto de tokens atingido`, depois de as etapas canceladas fecharem a conta. A ultrapassagem é de no máximo um turno
+  por etapa ativa. Antes, um teto só era checado antes de cada tentativa.
+- **Configuração em camadas, com tetos globais e papéis.** Dois arquivos JSON, validados por um esquema que vai com o
+  kit (`packages/runtime/schema/config.schema.json`): o global (`~/.cursor-workflows/config.json`, com os tetos
+  rígidos `caps`) e o do repositório (`.agents/workflows/config.json`). Precedência: código < global < repositório <
+  ambiente < flag < override do chat; depois os tetos globais limitam tudo (números: o menor; listas: a interseção), e
+  o repositório e o chat só podem apertá-los (o que tenta afrouxar vira violação e não tem efeito). Os workflows
+  declaram **papéis** em `meta.roles` (`implement-issue`: `classify`, `implement.low|med|high`, `review`, `fix`,
+  `design`, `pr-text`), e a configuração define por papel o modelo (com `params`), o tempo, as tentativas e as camadas
+  de configuração, com globs de label como alternativa. `null` desliga um limite, chave ausente herda. A configuração
+  é lida de novo a cada run; o `run-start` grava a configuração efetiva, a origem de cada valor e as violações;
+  `wf config show [workflow]` imprime os três. `start_workflow` aceita `overrides` que só apertam. O teto
+  `requireSandbox: true` liga o sandbox do SDK em toda etapa, mesmo que o código do workflow o desligue. A referência
+  (`docs/reference/config.md`) é gerada do esquema (`npm run docs:config`), e o `npm test` falha se ela divergir.
+- **Jobs destacados, com heartbeat.** `start_workflow` passa a iniciar cada run em um processo destacado (o mesmo que
+  `wf start` já usava): reiniciar o Cursor ou o servidor MCP não o interrompe, e o servidor novo o encontra pelos
+  arquivos do job. O processo do job atualiza um heartbeat no registro a cada 5 s, por uma thread própria, então uma
+  chamada síncrona longa (uma suíte de testes) não o atrasa. Um job cujo processo morreu, ou cujo heartbeat está parado
+  há mais de 30 s, aparece como `failed` com o `runId` para retomar. `overrides` do chat chegam ao processo pela flag
+  `--overrides` de `wf run`/`wf start` (só apertam).
+- **Cancelamento.** A nova tool MCP `cancel_workflow` e o comando `wf cancel <jobId>` mandam `SIGTERM` ao processo do
+  job (só se a linha de comando dele leva o id do job); `SIGINT` e `SIGTERM` no processo do run fazem o mesmo, e um
+  segundo sinal sai na hora. O motor cancela os agentes ativos, **desfaz a etapa que estava escrevendo** (os arquivos que
+  o git não ignora e o índice voltam, byte a byte, ao estado de antes da etapa; commits e arquivos fora do diretório
+  dela não), grava `run-end` com `status: cancelled` e solta o lock. O job passa a ter o status `cancelled`, o run
+  continua retomável (`resumeRunId`) e o gasto da tentativa cancelada fica no orçamento. `wf run` sai com 130 quando o
+  run é cancelado. A skill `run-workflow` documenta o cancelamento e só o usa a pedido do usuário. Em `outcome_class`
+  do banco de métricas, o run cancelado é `cancelled`.
+- **Tempo das etapas.** A criação do agente e o envio passam a ter o `timeoutMs` da tentativa (antes só a espera pelo
+  resultado tinha), e os re-prompts de schema dividem o tempo da tentativa em vez de reiniciá-lo.
+- **`wf init` grava os arquivos do kit no repositório alvo.** Num repositório novo, ele cria o `.cursor/mcp.json`
+  (aponta para o kit por usuário em `${userHome}/.cursor-workflows/kit`, sem `WF_MAX_*`), o `.mcp.json` do Claude Code
+  (`${HOME}`), o `.agents/workflows/config.json` com `$schema` e a faixa de versão do kit, a linha `.workflows/` no
+  `.gitignore` e um bloco de quatro linhas no `AGENTS.md` (criado se preciso). Imprime o diff do que mudou e não faz
+  commit. Rodar de novo não muda nada; os outros servidores de um `mcp.json` existente ficam; `--no-agents-md` pula o
+  bloco e `--remove` o tira. Como o Claude Code lê o `CLAUDE.md` e não o `AGENTS.md`, o comando avisa no stderr quando o
+  `CLAUDE.md` não importa o `AGENTS.md` (não o edita). O `templates/agents-md-block.md` ganhou o link para o guia de instalação. O endereço
+  `$schema` do esquema passou a ser o da URL bruta (`raw.githubusercontent.com`): a da página do GitHub devolve HTML, que
+  o editor não lê.
+- **`wf doctor` confere o ambiente que o IDE usa.** Roda oito verificações, cada falha com a dica de como corrigir:
+  o `node` do PATH (o que o IDE usa para iniciar o servidor, mínimo 22.13), as dependências do kit (o comando do
+  `mcp.json`), o login no SDK, os modelos da configuração contra o catálogo da conta, o `gh`, o servidor MCP (ele é
+  iniciado como o IDE o inicia e precisa responder `tools/list`), a configuração e a versão do kit (a do `wf` e a que
+  cada servidor MCP diz ser). O `node` segue o `env.PATH` da entrada do `mcp.json`, quando ela define um. Num Node
+  antigo demais para carregar o kit, o próprio `wf doctor` ainda entrega o relatório, só com a falha do Node. O relatório
+  passa pela redação de segredos dos logs. Sai com 1 quando alguma falha e, com `--json`, imprime o relatório em JSON. O `wf doctor`, o `wf run`, o `wf start` e o
+  `start_workflow` recusam um kit fora da faixa semver que o `kit` do `.agents/workflows/config.json` declara, com a
+  versão do kit, a faixa e o que fazer; um `kit` que não é uma faixa semver também é recusado. A dependência `semver`
+  entra no pacote do runtime.
+- **Instalador do kit, `wf upgrade` e o guia para agentes.** O `scripts/install.sh --tag vX.Y.Z` clona o kit na tag em
+  `~/.cursor-workflows/kit`, instala as dependências (`npm ci`), escreve o comando `wf` em `~/.local/bin`, liga as skills
+  do kit em `~/.claude/skills/` (que o Cursor também lê) por links simbólicos e grava a configuração global padrão
+  (`templates/global-config.json`: 3.000.000 de tokens e 500 centavos por run, 600.000 tokens por etapa, simultaneidade 4,
+  só etapas locais) se o arquivo não existir. Para antes de instalar se o Node for mais antigo que o `engines.node`, e não
+  toca numa pasta de skill, num link ou num `wf` que seja do usuário. `--dev` faz do kit instalado um link para a cópia de
+  trabalho (sem `npm ci`, que esvaziaria o `node_modules` dela, nem num `--refresh` depois), e `--refresh` refaz dependências, comando, links e
+  configuração para o kit que já está no lugar. O `wf upgrade` busca as tags, leva o kit instalado à release mais nova
+  (pré-lançamentos não contam) e roda o `install.sh --refresh` dessa tag: uma skill nova ganha link e o link de uma skill
+  que saiu é removido. Ele recusa uma instalação de desenvolvimento, um `wf` que roda de outra pasta e a falta de rede, sem
+  mexer no kit. O `INSTALL-AGENT.md`, público, em inglês e fixado na tag do pacote, conduz um agente da instalação ao
+  `wf init` e ao `wf doctor` sem outro documento; o `npm test` reprova se a tag dele, a dos READMEs e a do capítulo 2.1
+  divergirem da versão do pacote. A nova skill `cursor-workflows-setup` cobre init, doctor, upgrade, a validação no Cursor
+  IDE e a configuração. A dica do `wf doctor` para um kit mais antigo que a faixa passa a citar o `wf upgrade`, e a de
+  dependências ausentes cita o guia. A linha de uso do `wf` passa a listar `models`, que já existia. O capítulo 2.1 e os
+  READMEs passam a descrever esse fluxo.
+- **O estado do runtime funciona em worktree ligado e submódulo**, onde `.git` é um arquivo: antes, qualquer acesso a
+  `.workflows/` falhava com `ENOTDIR`.
+
+### Mudado
+
+- **`WF_METRICS_STORE_PROMPTS` foi removida.** O banco de métricas nunca mais guarda o texto de um prompt (só hash e
+  tamanho); o texto fica no log de eventos local. O evento `step-start` perdeu o campo `prompt`. A coluna
+  `attempts.prompt_text` continua no esquema, sempre vazia, e a migração 3 do banco apaga o texto que versões antigas
+  gravaram com a opção.
+- **`WF_MODEL_*` agora é por papel e mantém os `params`.** `WF_MODEL_REVIEW=grok-5` troca só o ID; `id[param=valor]`
+  troca também os `params`. `WF_MODEL_LOW`, `MED` e `HIGH` seguem valendo como apelidos de `implement.low|med|high`. As
+  etapas de correção e de plano/desenho são os papéis `fix` e `design`: não seguem mais `WF_MODEL_MED` nem
+  `WF_MODEL_HIGH`. `WF_MAX_CENTS` e `WF_MAX_TOKENS` passam a ser a camada de ambiente da configuração (um valor inválido
+  é erro, em vez de ignorado), e o servidor MCP não os lê mais no início.
+- **O repositório vira npm workspaces.** O runtime (engine, CLI, servidor MCP, workflows embutidos e seus testes
+  offline) fica no pacote `packages/runtime/` (`@cursor-workflows/runtime`) e resolve seus assets pelo local de
+  instalação, nunca pela raiz do repositório. As skills distribuídas (`run-workflow`, `cursor-workflow-authoring`,
+  `skill-to-workflow`) passam para `skills/`, em inglês, e `.agents/skills/` aponta para elas por links simbólicos.
+  `templates/agents-md-block.md` guarda as regras para repositórios-alvo. `npm run wf`, `mcp`, `dash`, `stats`,
+  `typecheck` e `npm test` seguem iguais na raiz.
+- **As skills distribuídas são autossuficientes.** Cada uma carrega em `references/` tudo o que instrui (API do
+  runtime, regras, receitas, checklist de custo, observabilidade, testes, onde cada harness procura cada coisa), sem
+  apontar para `docs/`, `scripts/` nem para outra skill; as referências que duas skills dividem são cópias idênticas,
+  e o `npm test` confere. A `skill-to-workflow` troca `ORIGEM.md` por `references/origin-cases.md`.
+- **`CLAUDE.md` é o guia canônico do mantenedor, em inglês, e `AGENTS.md` é um link simbólico para ele.** As regras do
+  antigo `AGENTS.md` foram divididas: as de manutenção ficam em `CLAUDE.md`, as de repositórios-alvo em
+  `templates/agents-md-block.md`.
+- **A documentação vira um livro.** [`docs/README.md`](docs/README.md) é o índice, com a ordem de leitura e por onde
+  cada perfil (usuário, autor de workflows, mantenedor) começa. Os nove capítulos foram para a pasta da sua parte
+  (`usage/`, `internals/`, `authoring/`, `operating/`), e eles e os dois relatórios de pesquisa passam a ser numerados
+  `parte.posição` (o antigo "04" é o 2.3), cada um com um rodapé de anterior/próximo. Medições datadas e citações
+  `[DOC]` ficam como estavam; mudaram só os caminhos e as referências cruzadas. O `CONTRIBUTING.md` virou a seção
+  `docs/contributing/`, com as convenções do livro, as dos diagramas e a tabela de scripts do mantenedor.
+- **O `npm test` confere a documentação.** `scripts/check-docs.ts` (`npm run docs:check`) falha em link relativo
+  quebrado, âncora quebrada, capítulo fora do índice, H1 diferente do índice e rodapé errado. O CI ganha o job
+  `mermaid` (`npm run docs:mermaid`), que renderiza todo bloco Mermaid e reprova em erro de sintaxe. Todo script de
+  `scripts/` tem um cabeçalho WHAT/WHY/WHEN/HOW, e `.claude/rules/diagrams.md` aponta o Claude Code para as
+  convenções de diagramas nos arquivos `*.md`.
+
+- **O README vira um hub enxuto e a Parte 1 do livro conta a visão.** O `README.md` traz o problema, a ideia, um
+  diagrama de visão geral, o começo rápido, a tabela "O que você leva" e links para o livro; o `README.en.md` o espelha em
+  inglês. A Parte 1 ganha três capítulos: [1.1 · O problema](docs/vision/01-o-problema.md), [1.2 · A ideia e as
+  referências](docs/vision/02-a-ideia-e-as-referencias.md) (que absorve o antigo `PROVENANCE.md` e o `CREDITS.md`, agora
+  removidos) e [1.3 · Conceitos](docs/vision/03-conceitos.md). A seção de transparência do README foi para
+  [5.1](docs/operating/01-governanca-e-custos.md#transparência-o-que-o-kit-faz-por-baixo), e a árvore do repositório
+  para [9.1](docs/contributing/01-contribuindo.md#onde-fica-cada-coisa).
+- **Cinco ADRs, em inglês, na Parte 7** ([7.1](docs/adr/0001-layered-config-with-hard-caps.md) a
+  [7.5](docs/adr/0005-cloud-backend-and-location-cap.md)): configuração em camadas com tetos globais, o log de eventos
+  como fonte da verdade, jobs destacados, workspaces com o `CLAUDE.md` canônico, e o backend de nuvem com o teto de
+  location. Como registrar um novo: [9.2](docs/contributing/02-convencoes-do-livro.md#adrs).
+- **A referência de eventos (6.1) tira o número e o rodapé do índice do livro**, em vez de uma cópia fixa no gerador:
+  inserir um capítulo ao redor dela não exige mais editar `scripts/events-reference.ts`.
+
 ## 0.2.0 (pré-release, 2026-11-11)
 
 ### Mudado
 
 - **`implement-issue` segue as skills `tdd`, `codebase-design`, `code-review` e `pr`** de
-  [mattpocock/skills](https://github.com/mattpocock/skills) 1.3.1 (MIT; créditos em [`CREDITS.md`](CREDITS.md)):
+  [mattpocock/skills](https://github.com/mattpocock/skills) 1.3.1 (MIT; créditos em [1.2 · A ideia e as referências](docs/vision/02-a-ideia-e-as-referencias.md#créditos)):
   TDD fatia a fatia com red e green conferidos pelo código; seams aprovadas em dois runs em MED e HIGH
   (`seams-proposed` e `approveSeams`); "Design it twice" no HIGH; review sempre, em três eixos paralelos
   (Standards, Spec e Segurança); corpo do PR no template Summary / Evidence / Merge Danger, com a saída real dos

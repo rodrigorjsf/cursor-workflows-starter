@@ -1,3 +1,11 @@
+// WHAT: Probes @cursor/sdk against the real API with one short send: smoke, invalid model id, or a read-4-files run.
+// WHY: The runtime assumes things about events, usage and cost that only the live API can confirm (see
+//   docs/research).
+// WHEN: After upgrading @cursor/sdk, on a new account or plan, or to re-check whether getUsage() now reports cost
+//   for local agents.
+// HOW: `npx tsx scripts/probe-sdk.ts --model <id> --mode smoke|invalid-model|read`; options are listed below. Spends
+//   tokens, never prints the key.
+
 // Sonda do @cursor/sdk contra a API real: mede o que o kit assume sobre eventos, uso e custo.
 // Nunca imprime a API key. Cada modo faz no máximo um send() curto.
 //

@@ -2,7 +2,7 @@
   "mcpServers": {
     "workflows": {
       "command": "${workspaceFolder}/node_modules/.bin/tsx",
-      "args": ["${workspaceFolder}/src/mcp-server.ts"],
+      "args": ["${workspaceFolder}/packages/runtime/src/mcp-server.ts"],
       "env": {
         "WF_CWD": "${workspaceFolder}",
         "WF_MAX_CENTS": "500",

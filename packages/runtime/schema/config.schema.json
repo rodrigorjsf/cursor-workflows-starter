@@ -1,0 +1,158 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/rodrigorjsf/cursor-workflows-starter/blob/v0.3.0/packages/runtime/schema/config.schema.json",
+  "title": "Cursor Workflows: configuração",
+  "description": "Valida os dois arquivos de configuração do kit: o global (`~/.cursor-workflows/config.json`) e o do repositório (`.agents/workflows/config.json`).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string", "description": "Endereço deste esquema: dá autocompletar e validação no editor." },
+    "$comment": { "$ref": "#/definitions/comment" },
+    "kit": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Faixa semver do kit que este repositório aceita (por exemplo `>=0.3.0 <0.4.0`). Só vale no arquivo do repositório: um kit fora da faixa é recusado."
+    },
+    "caps": {
+      "$ref": "#/definitions/caps",
+      "description": "Tetos rígidos. Só valem no arquivo global: o arquivo do repositório e o chat só podem apertá-los, nunca afrouxar. Um `caps` no arquivo do repositório é registrado como violação e não tem efeito."
+    },
+    "workflows": {
+      "type": "object",
+      "description": "Preferências por workflow, pelo `meta.name` dele. Uma preferência acima de um teto global é reduzida ao teto e registrada como violação.",
+      "additionalProperties": { "$ref": "#/definitions/workflowPrefs" }
+    }
+  },
+  "examples": [
+    {
+      "$schema": "https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.3.0/packages/runtime/schema/config.schema.json",
+      "caps": {
+        "maxTokens": 3000000,
+        "maxTokensPerStep": 600000,
+        "maxCents": 500,
+        "allowedModels": null,
+        "allowedSettingSources": ["project", "user", "team", "mdm", "plugins"],
+        "allowedLocations": ["local"],
+        "maxConcurrency": 4
+      }
+    },
+    {
+      "kit": ">=0.3.0 <0.4.0",
+      "workflows": {
+        "implement-issue": {
+          "maxCents": 300,
+          "roles": {
+            "review": { "model": { "id": "grok-4.7", "params": [{ "id": "reasoning_effort", "value": "medium" }] }, "timeoutMs": 900000 },
+            "implement.low": { "retries": 0 }
+          },
+          "labels": { "desenhar:*": { "maxTokensPerStep": 150000 } }
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "comment": { "type": "string", "description": "Comentário livre; é ignorado." },
+    "limit": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Número de tokens. `null` desliga o limite; chave ausente herda da camada de baixo."
+    },
+    "caps": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "$ref": "#/definitions/comment" },
+        "maxTokens": { "$ref": "#/definitions/limit", "description": "Teto de tokens por run. Números: vale o menor entre o teto e o valor pedido." },
+        "maxTokensPerStep": { "$ref": "#/definitions/limit", "description": "Teto de tokens por etapa." },
+        "maxCents": { "type": ["number", "null"], "minimum": 0, "description": "Teto de custo por run, em centavos. `null` desliga." },
+        "allowedModels": {
+          "type": ["array", "null"],
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true,
+          "description": "Modelos permitidos, pelo ID como escrito na config (aceita `*` como curinga: `composer-*`). Listas: vale a interseção. Uma etapa cujo modelo não está na lista falha. `null` libera todos."
+        },
+        "allowedSettingSources": {
+          "type": ["array", "null"],
+          "items": { "$ref": "#/definitions/settingSource" },
+          "uniqueItems": true,
+          "description": "Camadas de configuração (`settingSources`) que uma etapa pode carregar. Listas: vale a interseção. O instalador grava todas menos `all`. `null` libera todas."
+        },
+        "allowedLocations": {
+          "type": ["array", "null"],
+          "items": { "enum": ["local", "cloud"] },
+          "uniqueItems": true,
+          "description": "Onde as etapas podem rodar. Hoje só `local` existe; `cloud` é reservado. `null` libera todos."
+        },
+        "maxConcurrency": { "type": ["integer", "null"], "minimum": 1, "description": "Máximo de agentes simultâneos num run. `null` desliga." },
+        "requireSandbox": {
+          "type": ["boolean", "null"],
+          "description": "`true` liga o sandbox local do SDK em toda etapa, mesmo quando o código do workflow o desliga: um pull request que edita um workflow não afrouxa o sandbox. Ausente, `false` ou `null`: vale o `sandbox` de cada etapa."
+        }
+      }
+    },
+    "settingSource": { "enum": ["project", "user", "team", "mdm", "plugins", "all"] },
+    "modelParam": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "value"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "description": "Nome do parâmetro (por exemplo `reasoning_effort`)." },
+        "value": { "type": "string", "description": "Valor do parâmetro (por exemplo `high`)." }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "$ref": "#/definitions/comment" },
+        "id": { "type": "string", "minLength": 1, "description": "ID do modelo no catálogo da conta (`npm run models`). Ausente: herda." },
+        "params": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/modelParam" },
+          "description": "Parâmetros do modelo. Ausente: herda, também quando só o `id` muda. Lista vazia: sem parâmetros."
+        },
+        "maxMode": { "type": "boolean", "description": "Liga o max mode do modelo." }
+      }
+    },
+    "rolePrefs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "$ref": "#/definitions/comment" },
+        "model": { "$ref": "#/definitions/model", "description": "Modelo da etapa, campo a campo: o que não aparece herda da camada de baixo." },
+        "timeoutMs": { "type": "integer", "minimum": 1, "description": "Tempo máximo da etapa, em milissegundos." },
+        "retries": { "type": "integer", "minimum": 0, "description": "Tentativas extras quando a etapa termina em erro." },
+        "schemaRetries": { "type": "integer", "minimum": 0, "description": "Re-prompts quando o agente não entrega o JSON do schema." },
+        "maxTokensPerStep": { "$ref": "#/definitions/limit", "description": "Teto de tokens desta etapa. Ausente: herda o do workflow. O teto global `maxTokensPerStep` vale sempre." },
+        "settingSources": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/settingSource" },
+          "uniqueItems": true,
+          "description": "Camadas de configuração que a etapa carrega. A interseção com `caps.allowedSettingSources` é o que vale."
+        }
+      }
+    },
+    "workflowPrefs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "$ref": "#/definitions/comment" },
+        "maxTokens": { "$ref": "#/definitions/limit", "description": "Teto de tokens por run deste workflow. O teto global `maxTokens` vale sempre." },
+        "maxTokensPerStep": { "$ref": "#/definitions/limit", "description": "Teto de tokens por etapa, para todas as etapas do workflow." },
+        "maxCents": { "type": ["number", "null"], "minimum": 0, "description": "Teto de custo por run, em centavos." },
+        "concurrency": { "type": "integer", "minimum": 1, "description": "Agentes simultâneos. O teto global `maxConcurrency` vale sempre." },
+        "roles": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*$" },
+          "additionalProperties": { "$ref": "#/definitions/rolePrefs" },
+          "description": "Preferências por papel nomeado (o `meta.roles` do workflow). Um papel que o workflow não declara é erro."
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/rolePrefs" },
+          "description": "Preferências por glob do `label` da etapa (`*` e `?`), só para etapas sem papel. Vale o glob com mais caracteres literais; empate vai para o primeiro."
+        }
+      }
+    }
+  }
+}

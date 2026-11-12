@@ -1,141 +1,71 @@
 # Cursor Workflows Starter Kit
 
-> English summary: [README.en.md](README.en.md).
+> English: [README.en.md](README.en.md). A documentação é um livro em pt-BR, com índice em [docs/README.md](docs/README.md).
 
-Esqueleto de repositório para criar **workflows de agentes determinísticos** sobre o
-[Cursor SDK](https://cursor.com/docs/sdk/typescript) (`@cursor/sdk`). Os workflows podem ser invocados do **chat do
-Cursor IDE** (via MCP), do **terminal** e de **CI** (via CLI).
+Workflows de agentes **determinísticos** sobre o [Cursor SDK](https://cursor.com/docs/sdk/typescript) (`@cursor/sdk`),
+chamados do chat do Cursor IDE (via MCP), do terminal e de CI (via CLI).
 
-Um workflow é um arquivo TypeScript em que **o código decide** a ordem das etapas, os ramos, os laços, o modelo de
-cada etapa, quando revisar e quando parar. Cada etapa é um agente do Cursor com uma tarefa pequena e uma saída
-validada por schema. Assim, modelos menores executam bem a maior parte do trabalho, e o fluxo termina por completo
-ou falha de forma explícita, nunca "pula" uma etapa em silêncio.
+> **Status: pré-release 0.3.0.** Verificado contra a API real num único ambiente (plano Premium, `@cursor/sdk@1.3.1`,
+> Linux x64 em WSL2). O Cursor IDE ainda não foi testado. Os agentes das etapas executam tools sem pedir aprovação:
+> leia [SECURITY.md](SECURITY.md) antes de usar. Evidência e pendências: [8.2 · Verificações locais](docs/research/verificacoes-locais.md).
 
-A ideia é a mesma dos *dynamic workflows* do Claude Code (`agent`, `parallel`, `pipeline`, `phase`), trazida para o
-Cursor, que não tem esse runtime nativo. O porquê e a comparação completa estão em
-[`docs/research/relatorio-pesquisa.md`](docs/research/relatorio-pesquisa.md).
+## O problema
 
-> **Status: pré-release 0.2.0 (2026-11-11).** Verificado contra a API real num único ambiente: plano **Premium** da
-> The X Subscription, `@cursor/sdk@1.3.1`, Linux x64 (WSL2). Evidência completa em
-> [`docs/research/verificacoes-locais.md`](docs/research/verificacoes-locais.md).
->
-> - **Plano:** no Free o SDK não roda (`plan_required` já no `Agent.create`); no Premium, sim. Outros planos não
->   foram testados.
-> - **Medido:** login sem navegador local; catálogo de modelos; saída estruturada; o que `settingSources` carrega
->   (`AGENTS.md`, hooks do Cursor e do Claude Code, `.cursor/mcp.json`); guarda contra recursão; cache entre agentes;
->   tokens por tipo; dashboard só em localhost; Claude Code lista as tools MCP e lê `CLAUDE.md` → `@AGENTS.md`.
-> - **Ponta a ponta:** caminhos **LOW** e **MED** do `implement-issue` (TDD fatia a fatia conferido pelo código,
->   review em três eixos, PR no template; no MED, seams aprovadas em dois runs e fatias além do teto adiadas):
->   339 mil tokens no LOW e 769 mil no MED (issue inteira, dois runs), resume sem repetir etapas (§13 das
->   verificações). O HIGH ("Design it
->   twice") e o review que bloqueia só têm testes offline.
-> - **Custo:** nesta conta o `getUsage()` do SDK responde `feature_unavailable` para agentes locais, então o kit não
->   lê o custo real: o teto em centavos fica cego e só o de tokens protege.
-> - **Incidente:** num teste anterior, uma etapa sem sandbox editou um arquivo fora do repositório. Foi corrigido e
->   retestado, mas leia [SECURITY.md](SECURITY.md) antes de usar.
-> - **Pendente:** Cursor IDE (MCP, skills, `/run-workflow`), sandbox, caminho HIGH, hooks do time e MDM,
->   políticas de admin, macOS e Windows. Lista completa no §12 das verificações.
-> - 79 testes offline (SDK falso), rodados no Node 22.13.0 e no 22.23.4.
+Quando o agente de um chat conduz um processo de várias etapas, é ele quem decide o que roda a seguir. Pode pular um
+passo sem avisar, usar um modelo grande para tudo, gastar sem teto e não saber retomar de onde parou. O Cursor não traz
+um runtime que tire essa condução do modelo. Mais em [1.1 · O problema](docs/vision/01-o-problema.md).
 
-## Estrutura
+## A ideia
 
-```
-.
-├── AGENTS.md               # instruções dos agentes (Cursor, etapas dos workflows, Codex)
-├── CLAUDE.md               # só `@AGENTS.md`, para o Claude Code ler as mesmas instruções
-├── src/
-│   ├── runtime/
-│   │   ├── workflow.ts     # tipos públicos + defineWorkflow()
-│   │   ├── engine.ts       # agent/parallel/pipeline/phase, retries, modelo, teto de custo
-│   │   ├── structured.ts   # saída estruturada via custom tool submit_result + Ajv
-│   │   ├── journal.ts      # resume sem repetir etapas concluídas
-│   │   ├── jobs.ts         # execução assíncrona com estado em disco (start/wait)
-│   │   ├── registry.ts     # descobre workflows/*.ts
-│   │   └── nested-mcp-guard.mjs  # servidor MCP sem tools que barra workflow dentro de etapa
-│   ├── observability/      # banco SQLite de métricas, recorder, consultas, dashboard localhost
-│   ├── cli.ts              # wf login | whoami | models | list | run | start | wait | status | jobs | stats | metrics
-│   └── mcp-server.ts       # tools MCP: list_workflows, start_workflow, wait_workflow, get_workflow_status
-├── workflows/
-│   ├── implement-issue.ts  # exemplo: TDD fatia a fatia conferido pelo código → review em 3 eixos → PR com evidência
-│   └── implement-issue/    # prompts (paráfrases das skills de mattpocock/skills), laço TDD, review, corpo do PR
-├── test/                   # testes offline (fake SDK)
-├── .agents/                # local neutro (Cursor e Codex leem nativamente)
-│   ├── skills/
-│   │   ├── run-workflow/       # /run-workflow <nome> <args>: dispara e acompanha
-│   │   ├── cursor-workflow-authoring/ # referência para escrever workflows
-│   │   └── skill-to-workflow/  # /skill-to-workflow: converte skills e subagents em workflow
-│   └── workflows/          # workflows do repositório (carregados junto com workflows/)
-├── .cursor/mcp.json        # MCP server no Cursor
-├── .mcp.json               # o mesmo MCP server no Claude Code
-├── scripts/
-│   ├── link-claude-skills.sh   # expõe .agents/skills ao Claude Code (que não lê .agents/)
-│   ├── probe-sdk.ts            # sonda o SDK contra a API real (eventos, uso, custo)
-│   └── verify/                 # workflows e scripts que reproduzem as verificações
-├── SECURITY.md · PROVENANCE.md · CHANGELOG.md
-└── docs/
+Um workflow é um arquivo TypeScript. O **código** decide a ordem, os ramos, o modelo de cada etapa e a hora de parar; o
+modelo só executa tarefas pequenas, com resposta validada por schema. O fluxo termina por inteiro ou falha às claras, e
+um run interrompido retoma de onde parou. A ideia vem dos *workflows* do Claude Code, do n8n e das skills de mattpocock:
+[1.2 · A ideia e as referências](docs/vision/02-a-ideia-e-as-referencias.md).
+
+```mermaid
+flowchart LR
+  CHAT["Chat do Cursor IDE<br/>/run-workflow"]:::etapa -->|MCP| RT
+  TERM["Terminal e CI<br/>wf run, wf start"]:::etapa -->|CLI| RT
+  RT["Runtime do kit<br/>o workflow decide as etapas,<br/>o teto de custo e o resume"]:::kit -->|"uma etapa, um agente"| AG["Agentes do Cursor SDK<br/>modelo por etapa,<br/>saída com schema"]:::etapa
+  RT -->|"git, gh e testes"| REPO[("Repositório e worktrees")]:::saida
+  RT -->|"cada fato do run"| LOG["Estado do run<br/>log de eventos e journal"]:::saida
+  classDef kit fill:#fef3c7,stroke:#b45309,color:#0f172a
+  classDef etapa fill:#dbeafe,stroke:#1d4ed8,color:#0f172a
+  classDef saida fill:#dcfce7,stroke:#15803d,color:#0f172a
 ```
 
 ## Começo rápido
 
-Requisitos: Node 22.13 ou mais novo, um plano pago do Cursor (no Free o SDK não roda), `git` e `gh` autenticado.
+Requisitos: Node 22.13 ou mais novo, um plano pago do Cursor, `git` e `gh` autenticado. Mais simples: peça a um agente de
+código que siga o [INSTALL-AGENT.md](INSTALL-AGENT.md). À mão:
 
 ```bash
-npm ci
-npm test && npm run typecheck
-npm run wf -- login          # login do Cursor no navegador; o uso fica na SUA conta (NO_OPEN_BROWSER=1 imprime a URL)
-npm run models               # IDs de modelo liberados para você
-# primeiro run real: num repositório de teste (com commit e remote GitHub), com tetos baixos
-npm run wf -- run implement-issue --cwd /caminho/do/repo-de-teste --args '{"issue":1}' --max-cents 100 --max-tokens 300000
-npm run stats                # custo, tokens, eficiência (banco ~/.cursor-workflows/metrics.db)
-npm run dash                 # dashboard em http://127.0.0.1:4317
+curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.3.0/scripts/install.sh -o /tmp/wf-install.sh
+bash /tmp/wf-install.sh --tag v0.3.0   # o kit na tag, o comando wf e as skills globais
+wf login                               # login no navegador; o uso fica na SUA conta
+wf init                                # no seu repositório: grava os arquivos do kit, mostra o diff e não faz commit
+wf doctor                              # confere Node, login, modelos, gh, servidor MCP e configuração
 ```
 
-Defina sempre os dois tetos. O de centavos depende do custo que o Cursor informa, e pode ficar cego; os dois são
-checados antes de cada etapa, então uma etapa sozinha pode passar do teto ([02 §3](docs/02-configuracao-inicial.md#3-teto-de-custo)).
-Para reproduzir as medições numa conta sua, use [`scripts/verify/`](scripts/verify/README.md).
+No Cursor IDE, habilite o MCP server `workflows` e digite `/run-workflow implement-issue 123`
+([2.1 §6](docs/usage/01-instalacao.md#6-habilitar-no-cursor-ide)). Os tetos de custo vêm de uma configuração global com
+valores padrão, que você ajusta: [2.2 §3](docs/usage/02-configuracao-inicial.md#3-teto-de-custo).
 
-**Ainda não testado:** no Cursor IDE, habilite o MCP server `workflows` em **Customize**, na barra lateral
-([DOC](https://cursor.com/docs/mcp), acesso em 2026-11-11). No Enterprise, o admin pode precisar liberar o servidor
-antes ([01 §6](docs/01-instalacao.md#6-habilitar-no-cursor-ide)). Depois, digite no chat:
+## O que você leva
 
-```
-/run-workflow implement-issue 123
-```
+| Peça | O que faz | Onde ler |
+|---|---|---|
+| Runtime | `ctx.agent`, `parallel`, `pipeline` e `phase`; modelo e retries por etapa; saída validada por schema; teto de custo | [3.1 · Arquitetura](docs/internals/01-arquitetura.md) |
+| Resume e log de eventos | O journal evita refazer etapas prontas; cada fato do run fica em um log por run | [6.1 · Referência de eventos](docs/reference/events.md) |
+| MCP server e CLI `wf` | `start_workflow`, `wait_workflow` e companhia; `wf init`, `doctor`, `upgrade`, `run`, `start`, `status`, `jobs`, `stats` | [2.3 · Invocação](docs/usage/03-invocacao-no-cursor-ide.md) |
+| Skills | `run-workflow`, `cursor-workflow-authoring`, `skill-to-workflow` e `cursor-workflows-setup` | [4.1](docs/authoring/01-escrevendo-workflows.md) e [4.2](docs/authoring/02-convertendo-skills-e-subagents.md) |
+| `implement-issue` | Workflow de exemplo: TDD fatia a fatia, review em três eixos, PR com evidência | [4.2](docs/authoring/02-convertendo-skills-e-subagents.md) |
+| Métricas e dashboard | Custo, tokens e eficiência num SQLite local; dashboard em localhost | [5.3 · Observabilidade](docs/operating/03-observabilidade.md) |
 
-## Documentação
+## Para continuar
 
-| Documento | Conteúdo |
-|---|---|
-| [01 · Instalação](docs/01-instalacao.md) | Requisitos, dependências, instalação, teste de fumaça |
-| [02 · Configuração inicial](docs/02-configuracao-inicial.md) | Autenticação (conta do usuário × service account), modelos, teto de custo, variáveis |
-| [03 · Arquitetura](docs/03-arquitetura.md) | Como o runtime funciona e o que ele garante (e o que não garante) |
-| [04 · Invocação no Cursor IDE](docs/04-invocacao-no-cursor-ide.md) | MCP, CLI, skill, hooks; paridade com o Claude Code |
-| [05 · Escrevendo workflows](docs/05-escrevendo-workflows.md) | O porquê das regras, efeitos garantidos × pedidos, receitas, prompts de etapa, testes (API e regras na skill `cursor-workflow-authoring`) |
-| [06 · Convertendo skills e subagents](docs/06-convertendo-skills-e-subagents.md) | O processo da skill `/skill-to-workflow`, com um exemplo |
-| [07 · Governança e custos (Enterprise)](docs/07-governanca-e-custos.md) | Orçamento por usuário, políticas de admin, auditoria, riscos |
-| [08 · Custos, cache e boas práticas](docs/08-custos-e-cache.md) | De onde vem o custo, que caches existem (e quem controla), memo, contexto mínimo, prefixo estável, checklist |
-| [09 · Observabilidade](docs/09-observabilidade.md) | Banco SQLite por usuário, o que é medido (e o que não dá), views, receitas SQL, dashboard localhost, export, privacidade |
-| [Relatório de pesquisa](docs/research/relatorio-pesquisa.md) | Por que o kit existe: Workflow do Claude Code × Cursor SDK, autenticação e cobrança, paridade |
-| [Verificações locais](docs/research/verificacoes-locais.md) | O que foi testado contra a doc ao vivo e a API real, com evidência, e o que ficou pendente |
-| [Segurança](SECURITY.md) · [Proveniência](PROVENANCE.md) · [Mudanças](CHANGELOG.md) | Riscos e como reportar; de onde o kit veio; o que mudou em cada versão |
-| [Contribuindo](CONTRIBUTING.md) | Testes antes do PR e a política de custo dos testes contra a API real |
-
-## Transparência: o que este kit faz por baixo
-
-- Cada etapa cria um **agente local** do Cursor SDK na sua máquina. A inferência roda nos servidores da Cursor e é
-  cobrada na conta da chave usada.
-- Os agentes **executam tools sem pedir aprovação** (é o padrão das runs locais do SDK) e podem escrever fora do
-  repositório: isso já aconteceu num teste ([SECURITY.md](SECURITY.md)). O kit limita as tools por etapa, pede às
-  etapas que não saiam do repositório e bloqueia commits com segredos. Leia [07 · Governança](docs/07-governanca-e-custos.md)
-  antes de usar em um repositório sensível.
-- O estado fica em `.workflows/` (journal, jobs, logs, worktrees) do repositório onde o workflow roda. O runtime
-  o adiciona a `.git/info/exclude`, sem mexer no `.gitignore` do repositório.
-- Cada run grava métricas (tokens, custo, modelo, passos, resultado) em `~/.cursor-workflows/metrics.db`. Os prompts
-  ficam só como hash. Desligue com `WF_METRICS=off` (ver [09](docs/09-observabilidade.md)).
-- Por padrão, os agentes das etapas carregam `AGENTS.md`, regras, skills, hooks e MCP do projeto, e hooks do time
-  e Enterprise (`settingSources: ["project","team","mdm"]`). No `implement-issue`, as etapas só de leitura usam
-  `[]`: nada disso chega a elas, nem os hooks do time e do MDM. Uma guarda evita que uma etapa dispare outro workflow
-  por acidente; ela não é uma fronteira de segurança.
-- Commit, push, PR e comentário na issue são feitos pelo **código do workflow**, com `git` e `gh`. O
-  `implement-issue` sempre faz o commit local na branch `wf/issue-<n>`; push e PR, só com `openPr: true`. Em issues
-  MED e HIGH, o primeiro run comenta as seams propostas na issue, com ou sem `openPr`.
+- **Usar:** [2.1 · Instalação](docs/usage/01-instalacao.md), depois [5.1 · Governança e custos](docs/operating/01-governanca-e-custos.md).
+- **Escrever workflows:** [4.1 · Escrevendo workflows](docs/authoring/01-escrevendo-workflows.md).
+- **Mudar o kit:** [9.1 · Contribuindo](docs/contributing/01-contribuindo.md) e as [decisões (ADRs)](docs/README.md#parte-7--decisões-adrs).
+- **Fora do livro:** [Segurança](SECURITY.md) · [Mudanças](CHANGELOG.md) · [Licença](LICENSE): MIT para o código e a
+  documentação; o `@cursor/sdk` é proprietário e segue os [Termos do Cursor](https://cursor.com/terms-of-service).

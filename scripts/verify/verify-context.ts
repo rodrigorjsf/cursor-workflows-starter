@@ -1,6 +1,14 @@
+// WHAT: Workflow that asks two agents (with and without settingSources) what instructions, hooks and MCP tools they
+//   received.
+// WHY: It proves which project context reaches a step agent and that the recursion guard hides start_workflow from
+//   it.
+// WHEN: On a new account or after an SDK upgrade, to re-check what settingSources loads.
+// HOW: Run it on the repo from scripts/verify/setup-probe-repo.sh: `WORKFLOWS_DIR=scripts/verify npm run wf -- run
+//   verify-context --cwd <probe-repo> --max-tokens 120000`.
+
 // Verificação real: o que settingSources carrega em runs locais e a guarda contra recursão
 // (ver docs/research/verificacoes-locais.md §7). Rode sobre o repositório criado por setup-probe-repo.sh.
-import { defineWorkflow } from "../../src/runtime/workflow.js";
+import { defineWorkflow } from "../../packages/runtime/src/runtime/workflow.js";
 
 const SCHEMA = {
   type: "object",

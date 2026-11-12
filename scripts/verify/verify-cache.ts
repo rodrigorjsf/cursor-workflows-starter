@@ -1,5 +1,13 @@
+// WHAT: Workflow that runs sibling agents in parallel and in sequence with an identical prefix and reports their
+//   cache-read tokens.
+// WHY: Whether sibling agents reuse a prompt-cache prefix is undocumented for the Cursor SDK; this measures it.
+// WHEN: On a new account or after an SDK upgrade, to refresh the cache numbers in
+//   docs/operating/02-custos-e-cache.md.
+// HOW: `WORKFLOWS_DIR=scripts/verify npm run wf -- run verify-cache --cwd <probe-repo> --max-tokens 100000` (see
+//   scripts/verify/README.md).
+
 // Verificação real: agentes irmãos aproveitam o prefixo em cache? (ver docs/research/verificacoes-locais.md §8)
-import { defineWorkflow } from "../../src/runtime/workflow.js";
+import { defineWorkflow } from "../../packages/runtime/src/runtime/workflow.js";
 
 const PROMPT = "Leia README.md, AGENTS.md e package.json. Responda em uma linha: quantas linhas tem cada arquivo.";
 const OPTS = { tools: ["read"], settingSources: [] as [] };

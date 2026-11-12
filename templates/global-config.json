@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.3.0/packages/runtime/schema/config.schema.json",
+  "caps": {
+    "maxTokens": 3000000,
+    "maxTokensPerStep": 600000,
+    "maxCents": 500,
+    "allowedModels": null,
+    "allowedSettingSources": ["project", "user", "team", "mdm", "plugins"],
+    "allowedLocations": ["local"],
+    "maxConcurrency": 4
+  }
+}
