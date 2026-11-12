@@ -166,7 +166,8 @@ function inspect(cwd: string, record: JobRecord): { state: JobState; liveness?: 
     return { state, liveness: "silent" };
   }
   // The pid is there but does not execute the job: the job's process ended, and another process got the number (or the run).
-  state.error = `${silent.slice(0, silent.indexOf(";"))}, and process ${record.pid} no longer executes the job: it ended without finishing it; ${resumeHint(record.runId)}`;
+  // Worded as a dead process is, never `no heartbeat`: readers take that prefix for a frozen job, which a cancel must kill.
+  state.error = `process ${record.pid} ended without finishing the job (the pid is now another process's); ${resumeHint(record.runId)}`;
   return { state, liveness: "gone" };
 }
 

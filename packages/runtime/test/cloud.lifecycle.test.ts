@@ -512,7 +512,9 @@ test("a crashed job whose pid another process got is not frozen: cancelling its 
   try {
     writeJob(cwd, { jobId: "reused-job", runId, pid: other.pid, heartbeat: new Date(Date.now() - 60_000).toISOString() });
     assert.equal(readRun(runId)!.status, "failed");
-    assert.match(readJob(cwd, "reused-job")!.error!, /no longer executes the job/);
+    const error = readJob(cwd, "reused-job")!.error!;
+    assert.match(error, /^process \d+ ended without finishing the job/, "wf status says the job ended");
+    assert.doesNotMatch(error, /no heartbeat/, "never the frozen job's wording, which readers act on");
 
     const outcome = await cancelRun(runId, 1000);
 
