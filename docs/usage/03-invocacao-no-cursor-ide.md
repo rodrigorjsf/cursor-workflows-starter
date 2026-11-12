@@ -172,6 +172,24 @@ um aviso: o teto em centavos não contou essa tentativa (o de tokens, sim; na fa
 Em uso cobrado por request (planos legados e alguns Enterprise), `rawCostCents` vem 0 e o teto em centavos fica
 cego; só `WF_MAX_TOKENS` protege. Defina sempre os dois, como no exemplo.
 
+**Em vez de criar esses arquivos à mão, rode o `wf init`** (`npm run wf -- init --cwd /caminho/do/repo`). Ele grava o
+que a forma B precisa e imprime o diff do que mudou; não faz commit nem `git add`:
+
+| Arquivo | O que recebe |
+|---|---|
+| `.cursor/mcp.json` | O servidor `workflows` apontando para o kit em `${userHome}/.cursor-workflows/kit`, com `WF_CWD=${workspaceFolder}` e sem `WF_MAX_*` (os tetos ficam na [configuração](../reference/config.md)). Não tem caminho absoluto: o mesmo arquivo vale para o time inteiro |
+| `.mcp.json` | O mesmo servidor para o Claude Code, com `${HOME}` no lugar de `${userHome}` |
+| `.agents/workflows/config.json` | `$schema` (autocompletar no editor) e `kit`, a faixa de versão do kit que rodou o `init` (`>=0.2.0 <0.3.0` para o kit 0.2.x). O que o arquivo já tem fica, a faixa inclusive |
+| `.gitignore` | A linha `.workflows/`, a não ser que uma forma usual dela já esteja lá |
+| `AGENTS.md` | Um bloco de quatro linhas entre `<!-- cursor-workflows:begin -->` e `<!-- cursor-workflows:end -->`: as regras de segurança e o link do guia de instalação. O arquivo é criado se não existir. O Claude Code lê o `CLAUDE.md`, não o `AGENTS.md` ([ADR-0004](../adr/0004-workspaces-and-claude-md-symlink.md)): quando o `CLAUDE.md` não importa o `AGENTS.md` (`@AGENTS.md`), o `init` avisa no stderr e não edita o `CLAUDE.md` |
+
+Rodar de novo não muda nada, e um arquivo que já diz o que o `init` escreveria não é reescrito. Num `mcp.json` que já
+existe, só o servidor `workflows` muda: os outros servidores e as chaves extras dele ficam. Um arquivo que não é JSON
+válido, ou um bloco com `begin` e sem `end`, faz o comando falhar antes de gravar qualquer arquivo. `--no-agents-md` pula
+o `AGENTS.md`; `--remove` tira só o bloco dele (e apaga o arquivo se o bloco era tudo o que havia). O servidor só sobe
+quando o kit está em `~/.cursor-workflows/kit`: o instalador que cria essa pasta e o `wf doctor` que confere o
+ambiente estão em construção.
+
 Depois, copie `skills/run-workflow/` para o repositório alvo. No Cursor, se o servidor não aparecer no
 chat, habilite-o em **Customize**, na barra lateral. No Enterprise, o admin pode limitar quais servidores MCP os
 membros rodam (servidores stdio são aprovados por padrão de comando; [DOC](https://cursor.com/docs/mcp)); com a

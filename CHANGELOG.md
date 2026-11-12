@@ -61,6 +61,15 @@
   do banco de métricas, o run cancelado é `cancelled`.
 - **Tempo das etapas.** A criação do agente e o envio passam a ter o `timeoutMs` da tentativa (antes só a espera pelo
   resultado tinha), e os re-prompts de schema dividem o tempo da tentativa em vez de reiniciá-lo.
+- **`wf init` grava os arquivos do kit no repositório alvo.** Num repositório novo, ele cria o `.cursor/mcp.json`
+  (aponta para o kit por usuário em `${userHome}/.cursor-workflows/kit`, sem `WF_MAX_*`), o `.mcp.json` do Claude Code
+  (`${HOME}`), o `.agents/workflows/config.json` com `$schema` e a faixa de versão do kit, a linha `.workflows/` no
+  `.gitignore` e um bloco de quatro linhas no `AGENTS.md` (criado se preciso). Imprime o diff do que mudou e não faz
+  commit. Rodar de novo não muda nada; os outros servidores de um `mcp.json` existente ficam; `--no-agents-md` pula o
+  bloco e `--remove` o tira. Como o Claude Code lê o `CLAUDE.md` e não o `AGENTS.md`, o comando avisa no stderr quando o
+  `CLAUDE.md` não importa o `AGENTS.md` (não o edita). O `templates/agents-md-block.md` ganhou o link para o guia de instalação. O endereço
+  `$schema` do esquema passou a ser o da URL bruta (`raw.githubusercontent.com`): a da página do GitHub devolve HTML, que
+  o editor não lê.
 - **O estado do runtime funciona em worktree ligado e submódulo**, onde `.git` é um arquivo: antes, qualquer acesso a
   `.workflows/` falhava com `ENOTDIR`.
 

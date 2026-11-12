@@ -5,6 +5,7 @@
 //   wf whoami                         # mostra a conta em uso
 //   wf models                         # IDs de modelo liberados para a chave em uso
 //   wf list
+//   wf init [--no-agents-md | --remove]   # writes the kit's files into the repo (MCP configs, repo config, .gitignore, AGENTS.md block); prints the diff, never commits
 //   wf config show [workflow]         # effective config of the current repo and where each value came from
 //   wf run <workflow> --args '<json>' [--max-cents N] [--resume <runId>]   # primeiro plano; imprime JSON no fim
 //   wf start <workflow> --args '<json>' [--resume <runId>]                 # segundo plano; imprime {jobId}
@@ -29,6 +30,8 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { Cursor } from "@cursor/sdk";
 import { globalConfigPath, loadEffectiveConfig, parseLimitOverrides, repoConfigPath } from "./config/index.js";
+import { initRepo } from "./init.js";
+import { unifiedDiff } from "./unified-diff.js";
 import { INSIDE_WORKFLOW_ENV, type RunStatus, runWorkflow } from "./runtime/engine.js";
 import { cancelJob, cancelOnSignals, installCrashHandlers, listJobs, readJob, readJobRecord, spawnJob, startJob, waitJob } from "./runtime/jobs.js";
 import { loadWorkflows } from "./runtime/registry.js";
@@ -48,6 +51,8 @@ const { positionals, values } = parseArgs({
     format: { type: "string", default: "csv" },
     out: { type: "string" },
     "no-anonymize": { type: "boolean", default: false },
+    "no-agents-md": { type: "boolean", default: false },
+    remove: { type: "boolean", default: false },
   },
 });
 
@@ -114,6 +119,14 @@ async function main(): Promise<number> {
     }
     case "list": {
       out([...(await loadWorkflows(cwd)).values()].map((w) => ({ name: w.meta.name, description: w.meta.description })));
+      return 0;
+    }
+    case "init": {
+      const { changes, notes } = initRepo({ cwd, skipAgentsMd: values["no-agents-md"], remove: values.remove });
+      // stdout is the diff alone (empty when there is nothing to change); the summary goes to stderr.
+      for (const { path, before, after } of changes) process.stdout.write(unifiedDiff(path, before, after));
+      process.stderr.write(changes.length ? `wf init: ${changes.length} arquivo(s) alterado(s) em ${cwd}. Nada foi commitado: revise o diff e faça o commit você mesmo.\n` : "wf init: nada a mudar, o repositório já está configurado.\n");
+      for (const note of notes) process.stderr.write(`wf init: ${note}\n`);
       return 0;
     }
     case "config": {
@@ -221,7 +234,7 @@ async function main(): Promise<number> {
       }
     }
     default:
-      process.stderr.write("uso: wf <login|whoami|list|config|run|start|status|wait|cancel|jobs|stats|metrics> ...\n");
+      process.stderr.write("uso: wf <login|whoami|list|init|config|run|start|status|wait|cancel|jobs|stats|metrics> ...\n");
       return 2;
   }
 }
