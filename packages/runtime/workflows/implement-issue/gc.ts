@@ -8,14 +8,15 @@
 // origin's branch of a merged or closed PR goes with the run; the one of a run that merely failed goes only if no PR is
 // open on it (deleting the branch would close the PR) and it points at a commit the run pushed. A `wf/` branch on the
 // origin that no run of this repo owns (the run was made in another clone) goes when its PR was merged or closed, and
-// stays otherwise. The run's own state (`.workflows/runs/<runId>/`, its event log and journal) stays: it is the history,
-// and the metrics read it.
+// stays otherwise. The branch `wf/issue-<n>` that every run of an issue shared before runs owned theirs goes, with its
+// worktree, when its PR was merged or closed and no process executes one of those runs. The run's own state
+// (`.workflows/runs/<runId>/`, its event log and journal) stays: it is the history, and the metrics read it.
 import { existsSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { runCommand, toExecResult } from "../../src/runtime/command-runner.js";
 import { outcomeClass } from "../../src/runtime/outcome.js";
 import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn, runsDirIn, tryAcquireRunLock } from "../../src/runtime/run-store.js";
-import { type Exec, type PrState, Commands, LOCAL_GIT_TIMEOUT_MS, NETWORK_TIMEOUT_SEC, WORKFLOW_BRANCH_PREFIX, worktreesDirIn } from "./commands.js";
+import { type Exec, type PrState, Commands, LOCAL_GIT_TIMEOUT_MS, NETWORK_TIMEOUT_SEC, WORKFLOW_BRANCH_PREFIX, worktreeOf, worktreesDirIn } from "./commands.js";
 import { type Progress, ProgressStore } from "./tdd.js";
 
 /** Why something is cleaned up: its PR was merged or closed, or its run failed longer ago than the limit. */
@@ -35,9 +36,13 @@ export interface GcAction {
   error?: string;
 }
 
-/** What is cleaned up for one run, or (no `runId`) for one origin branch that no run of this repo owns. */
+/**
+ * What is cleaned up for one run, or (no `runId`) for one origin branch that no run of this repo owns, or for the branch and
+ * worktree every run of an issue shared before runs owned theirs (`sharedBy`: those runs, locked while it is removed).
+ */
 export interface GcCleanup {
   runId?: string;
+  sharedBy?: string[];
   reason: GcReason;
   actions: GcAction[];
   /** What stays although the rest is cleaned up, and what is lost with it. */
@@ -137,7 +142,7 @@ async function unsavedWork(commands: Commands, cwd: string, run: { worktree?: st
   return notes;
 }
 
-/** The name every run's branch had before runs owned theirs (`wf/issue-<n>`): a run may be using it, so it is nobody's leftover. */
+/** The name every run's branch had before runs owned theirs (`wf/issue-<n>`): `planShared` decides on it, not the per-run rules. */
 const SHARED_BRANCH = new RegExp(`^${WORKFLOW_BRANCH_PREFIX}issue-\\d+$`);
 
 /**
@@ -167,10 +172,7 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
 
   for (const { runId, progress } of runs) {
     const { branch, worktree } = progress;
-    if (!branch || !worktree) {
-      if (progress.baseCommit !== undefined) plan.kept.push({ runId, why: `begun when every run shared the branch wf/issue-<n> and its worktree: nothing here says which they are, remove them by hand` });
-      continue; // a run that stopped before it made its worktree has nothing to clean
-    }
+    if (!branch || !worktree) continue; // a run that stopped before it made its worktree has nothing to clean, and an older run's are the shared ones below
     const inside = relative(worktreesDir, resolve(worktree));
     if (!branch.startsWith(WORKFLOW_BRANCH_PREFIX) || inside === "" || inside.startsWith("..") || isAbsolute(inside)) {
       plan.kept.push({ runId, why: `its progress names ${branch} and ${worktree}, which are not under ${WORKFLOW_BRANCH_PREFIX} and ${worktreesDir}: not touched` });
@@ -215,6 +217,8 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
     plan.remove.push({ runId, reason, actions, notes });
   }
 
+  await planShared(plan, commands, runs, locals, registered, remote);
+
   // The origin's `wf/` branches that none of these runs owns: made by a run in another clone, or by one whose state is gone.
   // Nothing says whether that run is still going, so only a PR that is done (merged or closed) says the branch is a leftover.
   const owned = new Set(runs.flatMap((r) => (r.progress.branch ? [r.progress.branch] : [])));
@@ -233,13 +237,58 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
 }
 
 /**
+ * The branches `wf/issue-<n>` (here, on the origin, or both) and their worktrees `.workflows/worktrees/wf-issue-<n>`, which every
+ * run of an issue shared before runs owned theirs. Their progress names neither, so nothing says which of those runs used which;
+ * they go together, once the PR on the branch is merged or closed and no process executes any of those runs.
+ */
+async function planShared(
+  plan: GcPlan,
+  commands: Commands,
+  runs: Array<{ runId: string; progress: Progress }>,
+  locals: Set<string>,
+  registered: Set<string>,
+  remote: Map<string, string> | undefined,
+): Promise<void> {
+  const cwd = plan.repo;
+  const older = runs.filter((r) => !r.progress.branch && r.progress.baseCommit !== undefined).map((r) => r.runId);
+  const branches = [...new Set([...locals, ...(remote?.keys() ?? [])])].filter((b) => SHARED_BRANCH.test(b)).sort();
+  for (const branch of branches) {
+    const worktree = worktreeOf(cwd, branch);
+    const hasWorktree = existsSync(worktree) || registered.has(normal(worktree));
+    const remoteHead = remote?.get(branch);
+    const executing = older.filter((runId) => isRunExecuting(cwd, runId));
+    if (executing.length) {
+      plan.kept.push({ branch, why: `the branch every run of its issue shared before runs owned theirs, and a process is executing one of those runs (${executing.join(", ")})` });
+      continue;
+    }
+    let state: PrState | undefined;
+    try {
+      state = await commands.prState(cwd, branch);
+    } catch (err) {
+      plan.errors.push(`shared branch ${branch}: the state of its PR cannot be read, so it is kept: ${message(err)}`);
+      continue;
+    }
+    const reason = state && DONE_PR[state];
+    if (!reason) {
+      plan.kept.push({ branch, why: `the branch every run of its issue shared before runs owned theirs: ${state === "OPEN" ? "its PR is open" : "it has no merged or closed PR"}` });
+      continue;
+    }
+    const actions: GcAction[] = [];
+    if (hasWorktree) actions.push({ kind: "worktree", target: worktree });
+    if (locals.has(branch)) actions.push({ kind: "local-branch", target: branch });
+    if (remoteHead) actions.push({ kind: "remote-branch", target: branch, head: remoteHead });
+    plan.remove.push({ sharedBy: older, reason, actions, notes: [] });
+  }
+}
+
+/**
  * Removes what the plan lists, and records on each action how it went. A run is worked on under its own lock, the one a
  * process executing it holds: if one started since the plan, the run is skipped. A failed action does not stop the others.
  */
 export async function applyGc(plan: GcPlan, commands: Commands): Promise<void> {
   const cwd = plan.repo;
   for (const cleanup of plan.remove) {
-    const release = cleanup.runId === undefined ? () => {} : tryAcquireRunLock(cwd, cleanup.runId);
+    const release = lockAll(cwd, cleanup.runId === undefined ? (cleanup.sharedBy ?? []) : [cleanup.runId]);
     if (!release) {
       for (const action of cleanup.actions) action.result = "skipped";
       cleanup.notes.push("skipped: a process started executing the run after the plan was made");
@@ -255,13 +304,29 @@ export async function applyGc(plan: GcPlan, commands: Commands): Promise<void> {
         } catch (err) {
           action.result = "failed";
           action.error = message(err);
-          plan.errors.push(`${cleanup.runId === undefined ? "origin branch" : `run ${cleanup.runId}`}: ${action.kind} ${action.target}: ${action.error}`);
+          const what = cleanup.runId !== undefined ? `run ${cleanup.runId}` : cleanup.sharedBy ? "shared branch" : "origin branch";
+          plan.errors.push(`${what}: ${action.kind} ${action.target}: ${action.error}`);
         }
       }
     } finally {
       release();
     }
   }
+}
+
+/** Takes the lock of every run, or none: undefined when a process is executing one of them. */
+function lockAll(cwd: string, runIds: string[]): (() => void) | undefined {
+  const held: Array<() => void> = [];
+  const releaseAll = () => held.splice(0).forEach((release) => release());
+  for (const runId of runIds) {
+    const release = tryAcquireRunLock(cwd, runId);
+    if (!release) {
+      releaseAll();
+      return undefined;
+    }
+    held.push(release);
+  }
+  return releaseAll;
 }
 
 async function removeWorktree(commands: Commands, cwd: string, worktree: string): Promise<void> {
@@ -282,10 +347,11 @@ const REASON: Record<GcReason, string> = { "pr-merged": "PR merged", "pr-closed"
 export function formatPlan(plan: GcPlan): string {
   const lines = [plan.remove.length ? `wf gc: ${plural(plan.remove.length, "thing")} to clean up in ${plan.repo}` : `wf gc: nothing to clean up in ${plan.repo}`];
   for (const c of plan.remove) {
-    lines.push(c.runId === undefined ? `  origin branch of no run here (${REASON[c.reason]})` : `  run ${c.runId} (${REASON[c.reason]})`);
+    const what = c.runId !== undefined ? `run ${c.runId}` : c.sharedBy ? "branch the older runs of an issue shared" : "origin branch of no run here";
+    lines.push(`  ${what} (${REASON[c.reason]})`);
     for (const a of c.actions) lines.push(`    ${LABEL[a.kind]}${a.target}`);
     for (const note of c.notes) lines.push(`    ${note}`);
   }
-  for (const k of plan.kept) lines.push(`  kept: ${k.runId === undefined ? `origin branch ${k.branch}` : `run ${k.runId}`}: ${k.why}`);
+  for (const k of plan.kept) lines.push(`  kept: ${k.runId === undefined ? `branch ${k.branch}` : `run ${k.runId}`}: ${k.why}`);
   return lines.join("\n") + "\n";
 }

@@ -325,17 +325,54 @@ test("a cancelled run is not a failed one: however long ago it stopped, gc keeps
   assert.ok(existsSync(worktreeOf(cancelled.runId)));
 });
 
-test("a run begun when every run shared the branch wf/issue-<n> is left alone and listed, since nothing in its state says which branch and worktree are its", () => {
-  const state = join(fx.repo, ".workflows", "runs", "implement-issue-old");
+/** A run begun when every run of an issue shared `wf/issue-<n>` and `.workflows/worktrees/wf-issue-<n>`: its progress names neither. */
+function legacyRun(runId: string) {
+  const state = join(fx.repo, ".workflows", "runs", runId);
   mkdirSync(state, { recursive: true });
   writeFileSync(join(state, "tdd-progress.json"), JSON.stringify({ slices: [], baseCommit: git(fx.repo, "rev-parse", "HEAD").trim() }));
-  git(fx.repo, "worktree", "add", "-q", "-b", "wf/issue-7", join(fx.repo, ".workflows", "worktrees", "wf-issue-7"));
+  const worktree = join(fx.repo, ".workflows", "worktrees", "wf-issue-7");
+  if (!existsSync(worktree)) {
+    git(fx.repo, "worktree", "add", "-q", "-b", "wf/issue-7", worktree);
+    git(worktree, "push", "-q", "origin", "wf/issue-7");
+  }
+  return { branch: "wf/issue-7", worktree };
+}
 
-  const r = gc();
-  assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.out.remove, []);
-  assert.match(r.out.kept.find((x) => x.runId === "implement-issue-old")?.why ?? "", /by hand/);
-  assert.ok(existsSync(join(fx.repo, ".workflows", "worktrees", "wf-issue-7")));
+test("the branch and worktree every run of an issue shared before runs owned theirs stay while its PR is not done, and go once it is merged or closed", async () => {
+  const shared = legacyRun("implement-issue-old");
+
+  const before = gc();
+  assert.equal(before.status, 0, before.stderr);
+  assert.deepEqual(before.out.remove, []);
+  assert.match(before.out.kept.find((x) => x.branch === "wf/issue-7")?.why ?? "", /shared/);
+  assert.deepEqual(stillThere(shared), { worktree: true, localBranch: true, originBranch: true });
+
+  addPr("wf/issue-7", "MERGED");
+  const after = gc();
+  assert.equal(after.status, 0, after.stderr);
+  assert.deepEqual(stillThere(shared), { worktree: false, localBranch: false, originBranch: false });
+  assert.deepEqual(
+    after.out.remove.map((x) => [x.runId, x.reason, x.actions.map((a) => [a.kind, a.target, a.result])]),
+    [[undefined, "pr-merged", [["worktree", shared.worktree, "removed"], ["local-branch", "wf/issue-7", "removed"], ["remote-branch", "wf/issue-7", "removed"]]]],
+  );
+});
+
+test("the shared branch of the old runs is not touched while a process executes any of them, whatever its PR says", async () => {
+  const shared = legacyRun("implement-issue-old");
+  legacyRun("implement-issue-older");
+  addPr("wf/issue-7", "CLOSED");
+  const release = tryAcquireRunLock(fx.repo, "implement-issue-older")!; // this process stands for the one executing it
+  try {
+    const r = gc();
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(r.out.remove, []);
+    assert.match(r.out.kept.find((x) => x.branch === "wf/issue-7")?.why ?? "", /executing/);
+    assert.deepEqual(stillThere(shared), { worktree: true, localBranch: true, originBranch: true });
+  } finally {
+    release();
+  }
+  assert.equal(gc().status, 0);
+  assert.deepEqual(stillThere(shared), { worktree: false, localBranch: false, originBranch: false });
 });
 
 test("a progress file that names a path or a branch the workflow does not own is not followed", async () => {
@@ -419,12 +456,10 @@ test("a wf/ branch on the origin that no run of this repo owns goes when its PR 
   setPrState(merged.branch, "MERGED");
   setPrState(closed.branch, "CLOSED");
   git(fx.repo, "push", "-q", "origin", "HEAD:refs/heads/wf/issue-9-no-pr-yet");
-  git(fx.repo, "push", "-q", "origin", "HEAD:refs/heads/wf/issue-7"); // the name every run had before runs owned their branch: one run may be using it now
-  addPr("wf/issue-7", "MERGED");
 
   const r = gc();
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(originBranches().sort(), [open.branch, "wf/issue-7", "wf/issue-9-no-pr-yet"].sort());
+  assert.deepEqual(originBranches().sort(), [open.branch, "wf/issue-9-no-pr-yet"].sort());
   assert.deepEqual(
     r.out.remove.map((x) => [x.runId, x.reason, x.actions.map((a) => [a.kind, a.target, a.result])]).sort(),
     [

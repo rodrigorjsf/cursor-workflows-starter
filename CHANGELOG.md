@@ -15,8 +15,9 @@
   nenhum run deste repositório possui (o run foi feito em outro clone) sai quando o PR dela foi mergeado ou fechado; sem
   PR, ou com o PR aberto, fica. Para um run que falhou, o plano avisa o que se perde com ele: arquivos não commitados no
   worktree e commits que não estão em nenhum remoto. O estado do run em `.workflows/runs/<runId>/` (log, journal) fica. Se o `gh` não diz o que houve com um PR, o run fica e o comando sai
-  com 1. Um run começado quando a branch era a fixa `wf/issue-<n>` aparece como mantido: o estado dele não diz qual é a
-  branch nem o worktree dele, então se remove à mão. A saída é um JSON em stdout (`remove`, `kept`, `errors`), e o plano
+  com 1. A branch fixa `wf/issue-<n>` que todos os runs de uma issue usavam antes desta
+  mudança sai, com o worktree `.workflows/worktrees/wf-issue-<n>`, quando o PR dela foi mergeado ou fechado e nenhum
+  processo executa um desses runs antigos; até lá, aparece como mantida. A saída é um JSON em stdout (`remove`, `kept`, `errors`), e o plano
   vai antes para o stderr.
 - **Ajustes de um workflow na configuração, e os limites do `implement-issue` entre eles.** Um workflow declara seus
   ajustes e os padrões em `meta.settings`, lê o resultado em `ctx.settings`, e os arquivos de configuração (global,
