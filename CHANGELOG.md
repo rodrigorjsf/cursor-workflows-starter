@@ -11,7 +11,7 @@
   cujo último evento tem mais de `gcSnapshotGraceHours` horas (ajuste novo do `implement-issue`, padrão 24: o cloud agent
   que o processo morto iniciou pode ainda estar partindo da branch). Fica, com o motivo no plano, a de um run em execução,
   de um run que não é deste repositório e de um run dentro da espera, e a de um run cortado no meio da etapa dona dela
-  fica por `gcFailedAfterDays` dias, e a de um run cancelado sem limite, como o próprio run (o resume reanexa ao agente e traz o trabalho dessa branch). Nenhuma delas vai para a
+  fica por `gcFailedAfterDays` dias, e a de um run cancelado sem limite, como o próprio run (o resume reanexa ao agente e traz o trabalho dessa branch, a não ser que o run do agente tenha sido cancelado: aí o resume cria um agente novo). Nenhuma delas vai para a
   busca de PR, e uma recusa do remote entra nos `errors` sem parar o resto da varredura. O plano ganhou a razão
   `snapshot` e o `remote` de cada ação; `Commands.remoteOwnedHeads` e `deleteOwned` aceitam o remote, e
   `cloud-snapshot.ts` exporta `snapshotRunSegment` e `snapshotBranchSegment`.
@@ -59,8 +59,9 @@
   tinha, sem reenviar o prompt, fecha no log a tentativa morta, cobra o uso do agente uma só vez e apaga a branch de snapshot
   que o crash deixou. Um agente que a nuvem não conhece mais é trocado por um novo, com aviso; qualquer outra falha ao
   alcançá-lo falha só a tentativa e a próxima reanexa de novo. Cancelar um run que executa cancela os runs dele na nuvem, o
-  reanexado inclusive, e um cancelamento no meio da busca do agente cancela o run que ele achar; um run cujo processo já morreu
-  não tem a quem cancelar (retome e cancele). O limite de espera de duas horas do cliente do SDK deixou de falhar a etapa: o backend pergunta à nuvem
+  reanexado inclusive, e um cancelamento no meio da busca do agente cancela o run que ele achar; cancelar um run cujo
+  processo já morreu cancela, pela API da Cursor e sem resume, os agentes que o log mostra sem fim. Um resume que encontra
+  o run do agente cancelado cria um agente novo, com aviso (e paga de novo). O limite de espera de duas horas do cliente do SDK deixou de falhar a etapa: o backend pergunta à nuvem
   (`Agent.getRun`) e espera de novo pelo run que continua. Novo workflow de verificação contra a API real,
   `scripts/verify/verify-cloud.ts` ([8.2 §14](docs/research/verificacoes-locais.md)), e o cenário 8 (opcional) do assistente
   de validação. O `AgentBackend` ganhou `StepOptions.reattach`, o evento `agent` ganhou `snapshot` e `reattached`, e
@@ -270,6 +271,18 @@
   `.workflows/` falhava com `ENOTDIR`.
 
 ### Mudado
+
+- **Cancelar um run para os cloud agents dele, em qualquer estado do job** ([ADR-0007](docs/adr/0007-cancel-stops-cloud-agents.md),
+  que substitui o ADR-0006). Um job que executa recebe SIGTERM; um job congelado (processo vivo, sem heartbeat) é morto, o
+  que não desfaz a etapa em andamento, e os agentes que o log mostra sem fim são cancelados pela API da Cursor; um job cujo
+  processo já morreu tem os agentes cancelados pela API, sem resume. Um resume depois de qualquer um desses cancelamentos
+  cria um agente novo e paga de novo. No dashboard, um run morto com agentes na nuvem ganha **Cancel cloud agent**.
+- **As mensagens do kit são em inglês.** Tudo o que o runtime, o CLI e o instalador imprimem, devolvem ou lançam (os
+  prefixos `warning:` e `error:` do instalador inclusive); o guia de instalação e as skills citam as mensagens como saem.
+  O `wf init` avisa, a cada execução, quando um arquivo de memória do Claude Code esconde o `AGENTS.md`.
+- **Dashboard redesenhado.** Runs, Board e Metrics com um só arquivo de tokens de cor (claro e escuro) e um formatador
+  en-US; na página do run, títulos de raia, zoom mínimo, log da etapa sobre o grafo no celular, foco do teclado que entra
+  no log e volta ao nó, e o enquadramento da etapa aberta ou da que falhou.
 
 - **O teto de tempo dos testes do `implement-issue` sai dos args do run.** `testTimeoutSec` passa a ser só um ajuste
   (`workflows.implement-issue.settings.testTimeoutSec`, padrão 600), como os outros limites: um run que ainda o passe
