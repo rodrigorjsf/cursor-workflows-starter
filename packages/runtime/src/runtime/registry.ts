@@ -16,14 +16,36 @@ export function workflowDirs(cwd: string): string[] {
   return [...new Set(dirs)].filter((d) => existsSync(d));
 }
 
-export async function loadWorkflows(cwd: string): Promise<Map<string, WorkflowDefinition<any, any>>> {
-  const found = new Map<string, WorkflowDefinition<any, any>>();
+/** A workflow file that failed to load: its path and why. */
+export interface BrokenWorkflow {
+  file: string;
+  error: string;
+}
+
+/** Loads every workflow it can. A file that fails to import is collected in `broken` instead of aborting the rest. */
+export async function discoverWorkflows(
+  cwd: string,
+): Promise<{ workflows: Map<string, WorkflowDefinition<any, any>>; broken: BrokenWorkflow[] }> {
+  const workflows = new Map<string, WorkflowDefinition<any, any>>();
+  const broken: BrokenWorkflow[] = [];
   for (const dir of workflowDirs(cwd)) {
     for (const file of readdirSync(dir).sort()) {
       if (!/\.(ts|js|mjs)$/.test(file) || file.endsWith(".d.ts")) continue;
-      const mod = (await import(pathToFileURL(join(dir, file)).href)) as { default?: WorkflowDefinition<any, any> };
-      if (mod.default?.meta?.name) found.set(mod.default.meta.name, mod.default);
+      const path = join(dir, file);
+      try {
+        const mod = (await import(pathToFileURL(path).href)) as { default?: WorkflowDefinition<any, any> };
+        if (mod.default?.meta?.name) workflows.set(mod.default.meta.name, mod.default);
+      } catch (err) {
+        broken.push({ file: path, error: err instanceof Error ? err.message : String(err) });
+      }
     }
   }
-  return found;
+  return { workflows, broken };
+}
+
+/** Loads every workflow, and throws on the first broken file: for callers that must not run with a partial set. */
+export async function loadWorkflows(cwd: string): Promise<Map<string, WorkflowDefinition<any, any>>> {
+  const { workflows, broken } = await discoverWorkflows(cwd);
+  if (broken.length) throw new Error(broken.map((b) => `${b.file}: ${b.error}`).join("\n"));
+  return workflows;
 }

@@ -29,7 +29,7 @@ import { type LimitOverrides, loadEffectiveConfig, parseLimitOverrides } from ".
 import { assertKitCompatible, readKitPackage } from "./kit-version.js";
 import { INSIDE_WORKFLOW_ENV } from "./runtime/engine.js";
 import { cancelJob, installCrashHandlers, readJob, spawnJob, waitJob } from "./runtime/jobs.js";
-import { loadWorkflows } from "./runtime/registry.js";
+import { type BrokenWorkflow, discoverWorkflows } from "./runtime/registry.js";
 
 installCrashHandlers();
 
@@ -39,7 +39,10 @@ installCrashHandlers();
 const nested = process.env[INSIDE_WORKFLOW_ENV] === "1";
 
 const cwd = process.env.WF_CWD ?? process.cwd();
-const workflows = nested ? new Map() : await loadWorkflows(cwd);
+// A broken workflow file must not take the server down: it is listed in list_workflows with its error instead.
+const { workflows, broken } = nested
+  ? { workflows: new Map(), broken: [] as BrokenWorkflow[] }
+  : await discoverWorkflows(cwd);
 
 const { version } = readKitPackage();
 const server = new Server({ name: "cursor-workflows", version }, { capabilities: { tools: {} } });
@@ -114,7 +117,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const a = (req.params.arguments ?? {}) as Record<string, unknown>;
   switch (req.params.name) {
     case "list_workflows":
-      return text([...workflows.values()].map((w) => ({ ...w.meta })));
+      return text([...[...workflows.values()].map((w) => ({ ...w.meta })), ...broken]);
     case "start_workflow": {
       const def = workflows.get(String(a.name));
       if (!def) return fail({ error: `workflow desconhecido: ${String(a.name)}` });
