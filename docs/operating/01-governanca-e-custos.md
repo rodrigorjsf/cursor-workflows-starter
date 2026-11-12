@@ -95,8 +95,19 @@ contexto que as etapas carregam (`settingSources`):
 - **Cada run grava métricas** (tokens, custo, modelo, passos, resultado) em `~/.cursor-workflows/metrics.db`. Os prompts
   ficam só como hash. Desligue com `WF_METRICS=off` (ver [5.3](03-observabilidade.md)).
 - **Commit, push, PR e comentário na issue são feitos pelo código do workflow**, com `git` e `gh`. O `implement-issue`
-  sempre faz o commit local na branch `wf/issue-<n>`; push e PR, só com `openPr: true`. Em issues MED e HIGH, o primeiro
+  sempre faz o commit local numa branch só do run, `wf/issue-<n>-<run>`; push e PR, só com `openPr: true`. O push é um
+  `--force-with-lease`, restrito às branches `wf/`: um resume depois do PR refaz o commit e entrega por cima, mas só
+  sobre commits que o próprio run empurrou. Commit de outra pessoa na branch dá `status: "push-refused"` e não é
+  sobrescrito. Em issues MED e HIGH, o primeiro
   run comenta as seams propostas na issue, com ou sem `openPr`.
+- **O worktree e as branches de um run ficam até o `wf gc`.** Cada run do `implement-issue` deixa o seu worktree
+  (`.workflows/worktrees/`), a branch local e, se empurrou, a branch no origin. `wf gc` remove os de um run cujo PR foi
+  mergeado ou fechado e os de um run que falhou há mais de `gcFailedAfterDays` dias (padrão 14, em
+  `workflows.implement-issue.settings`); `wf gc --dry-run` só mostra o plano. Ele nunca toca num run que um processo
+  está executando, numa branch fora de `wf/` nem num commit do origin que o run não empurrou, e não apaga o PR de ninguém:
+  a branch do origin de um run que falhou, com o PR ainda aberto, fica. Uma branch `wf/` do origin que nenhum run deste
+  repositório possui (feita em outro clone) só sai se o PR dela foi mergeado ou fechado. O log e o journal do run em
+  `.workflows/runs/` ficam.
 - **Uma guarda evita que uma etapa dispare outro workflow por acidente**; ela não é uma fronteira de segurança
   (ver acima, "Workflow disparando workflow").
 

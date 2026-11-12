@@ -23,7 +23,7 @@ can make a decision, code **makes** it.
    prompt: without it, round 2 of a resume gets round 1's saved answer.
 2. **A schema on every step whose result the code reads**, with only the fields it reads. Free text only at the end, or
    for the human.
-3. **Verification is code.** Run tests, lint and `git diff` with `execFileSync` inside the workflow; the exit code
+3. **Verification is code.** Run tests, lint and `git diff` with `ctx.exec` inside the workflow; the exit code
    decides the next step. Run tests in the caller's environment (`bash -c`, not `bash -lc`: a login profile can change
    the PATH and fail the suite for reasons that are not the code). Fix loops always have a cap
    (`for (round = 1; round <= N; ...)`).
@@ -33,7 +33,7 @@ can make a decision, code **makes** it.
 5. **Parallel writes only with isolation.** Two simultaneous steps cannot edit the same files. Create a `git worktree`
    per item and pass it as `cwd`.
 6. **External effects stay in code.** Commit, push, opening a PR and commenting on an issue are done with `gh` or `git`
-   in the workflow, after the checks. Everything that leaves the machine first passes a **secrets guard**, because an
+   (through `ctx.exec`) in the workflow, after the checks. Everything that leaves the machine first passes a **secrets guard**, because an
    issue body with a prompt injection can lead a step to copy `~/.cursor/sdk/auth.json` into the worktree and the
    sandbox does not restrict reads. The guard: before the commit, reset any commits an agent made (`git reset --soft`
    to the base, keeping the tree) and scan the lines added since the base for `crsr_` and `sk-` keys, the SDK's saved

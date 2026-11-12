@@ -55,6 +55,14 @@ export interface WorkflowMeta {
   argsSchema?: JsonSchema;
   /** The roles of the workflow's steps. Config sets model, timeouts, retries... per role. */
   roles?: WorkflowRole[];
+  /**
+   * The workflow's own tunable settings, by name, with their code defaults. The config files tune them under
+   * `workflows.<name>.settings` (the global file, then the repo file), and the workflow reads the result from
+   * `ctx.settings`. A name not declared here is a config error, like an unknown role. A value is any JSON value that
+   * survives a copy; the kit validates the types of the settings it ships (see the config schema), not those of a
+   * workflow of your own.
+   */
+  settings?: Record<string, unknown>;
 }
 
 export interface AgentCallOptions {
@@ -116,6 +124,47 @@ export interface AgentCallOptions {
    * chamar a API. Só para etapas sem efeitos: exige `tools` com apenas tools de leitura.
    */
   memo?: boolean;
+  /**
+   * Before each retry of this step (see `retries`), put its directory (`cwd`) back as it was when the step started: the
+   * files the failed attempt created are deleted, the ones it changed are restored, and what it staged is unstaged (the
+   * same undo as a cancel, and only for a step that can write). Default: false, the retry meets what the failed attempt
+   * left. Turn it on for a step that writes in a directory no other step writes in at the same time (a worktree of its own):
+   * the undo restores the whole directory, so a parallel writer's files would go with it. A directory that is not a git
+   * repository cannot be restored: the step is retried anyway, with a warning. The failed attempt's `step-end` says
+   * `reverted: true`.
+   */
+  revertOnRetry?: boolean;
+}
+
+/** Options of one `ctx.exec` call. */
+export interface ExecOptions {
+  /** Name of the command in the run's log and progress. Default: the command's name. */
+  label?: string;
+  /** Groups progress, like `AgentCallOptions.phase`. Default: the last `ctx.phase`. */
+  phase?: string;
+  /**
+   * How long the command may run before it is killed (SIGTERM to its whole process group, SIGKILL two seconds later).
+   * Default: the workflow's `execTimeoutMs` config preference, which defaults to 10 minutes.
+   */
+  timeoutMs?: number;
+  /** Working directory. Default: the run's cwd. */
+  cwd?: string;
+  /** Environment variables added to this process's own. A variable set to `undefined` is removed from the command's environment. */
+  env?: Record<string, string | undefined>;
+}
+
+/** What a `ctx.exec` call hands back. A command that fails, times out or cannot start is a result: the workflow decides what it means. */
+export interface ExecResult {
+  /** True when the command ran and exited with code 0. */
+  ok: boolean;
+  /** The exit code. `null` when the process was killed (at its timeout, or by a signal) or never started. */
+  exitCode: number | null;
+  /** True when the command was killed at its `timeoutMs`. */
+  timedOut: boolean;
+  /** The last 32768 characters of what the command wrote, stdout and stderr in the order they arrived. Not redacted: the log's copy is. */
+  tail: string;
+  /** Why the command could not start (a missing program, a bad cwd). Absent when it ran. */
+  error?: string;
 }
 
 /** Uso de tokens somado (por etapa ou por run). `cacheRead`/`cacheWrite` vêm do provedor via Cursor. */
@@ -150,6 +199,12 @@ export interface WorkflowContext<A = unknown> {
   readonly runId: string;
   readonly cwd: string;
   readonly budget: Budget;
+  /**
+   * The workflow's settings (`meta.settings`) as the config resolved them for this run: the code default, or what the
+   * global file or the repo file set. Read fresh at each run start, a resume included. A copy: changing it affects no
+   * other run.
+   */
+  readonly settings: Readonly<Record<string, unknown>>;
   /** Executa uma etapa com um agente novo do Cursor SDK. Lança erro se falhar após as tentativas. */
   agent<T = string>(prompt: string, opts?: AgentCallOptions): Promise<T>;
   /** Barreira: roda tudo em paralelo e espera todos. Thunk que falha vira null. */
@@ -162,6 +217,14 @@ export interface WorkflowContext<A = unknown> {
     items: I[],
     ...stages: Array<(prev: any, item: I, index: number) => Promise<any> | any>
   ): Promise<any[]>;
+  /**
+   * Runs a command (no shell: `command` and its `args`) without blocking the process, and returns its exit code and the
+   * tail of its output. The command is killed at its timeout. Its output is streamed into the run's event log, redacted and
+   * retained like an agent's content, and the call is a step node of the run. Use it for every command a workflow runs
+   * itself (tests, `git`, `gh`): a synchronous call (`execFileSync`) freezes status queries and cancellation. A cancelled
+   * run kills the command and throws. A resume runs the command again: `exec` is not journaled.
+   */
+  exec(command: string, args?: string[], opts?: ExecOptions): Promise<ExecResult>;
   phase(title: string): void;
   log(message: string): void;
   /**

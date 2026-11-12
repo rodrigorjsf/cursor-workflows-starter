@@ -4,6 +4,44 @@
 
 ### Adicionado
 
+- **`wf gc`: limpa o que os runs do `implement-issue` deixam.** Cada run tem o seu worktree, a sua branch local e, depois
+  do push, a sua branch no origin, e nada as removia. `wf gc` lista o que vai remover e remove: o worktree, a branch
+  local e a branch do origin de um run cujo PR foi mergeado ou fechado, e os de um run que falhou há mais de
+  `gcFailedAfterDays` dias (novo ajuste do `implement-issue`, padrão 14; falhou é terminar com erro ou com um status de
+  falha, ou o processo cair sem terminar, e um run cancelado não conta). `wf gc --dry-run` só imprime o plano. Nunca toca
+  num run que um processo está executando (o lock do run decide, e é tomado também durante a remoção), numa branch fora de
+  `wf/`, num caminho fora de `.workflows/worktrees/`, nem num commit do origin que o run não empurrou; a branch do
+  origin de um run que falhou também fica se o PR dela está aberto (apagar fecharia o PR). Uma branch `wf/` do origin que
+  nenhum run deste repositório possui (o run foi feito em outro clone) sai quando o PR dela foi mergeado ou fechado; sem
+  PR, ou com o PR aberto, fica. Para um run que falhou, o plano avisa o que se perde com ele: arquivos não commitados no
+  worktree e commits que não estão em nenhum remoto. O estado do run em `.workflows/runs/<runId>/` (log, journal) fica. Se o `gh` não diz o que houve com um PR, o run fica e o comando sai
+  com 1. A branch fixa `wf/issue-<n>` que todos os runs de uma issue usavam antes desta
+  mudança sai, com o worktree `.workflows/worktrees/wf-issue-<n>`, quando o PR dela foi mergeado ou fechado e nenhum
+  processo executa um desses runs antigos; até lá, aparece como mantida. A saída é um JSON em stdout (`remove`, `kept`, `errors`), e o plano
+  vai antes para o stderr.
+- **Ajustes de um workflow na configuração, e os limites do `implement-issue` entre eles.** Um workflow declara seus
+  ajustes e os padrões em `meta.settings`, lê o resultado em `ctx.settings`, e os arquivos de configuração (global,
+  depois o do repositório) os trocam em `workflows.<nome>.settings`; um nome que o workflow não declara é erro, com o
+  caminho do campo. O `run-start` e o `wf config show` trazem os ajustes em vigor (`config.settings`) e a origem de
+  cada um. O `implement-issue` declara oito: `sliceCaps` (fatias por tier, padrão LOW 1, MED 3, HIGH 5), `extraSlices`
+  (2), `fixRounds` (2), `redGreenAttempts` (2), `maxDiffChars` (40000), `labelTiers` (o mapa label → tier),
+  `maxStepCrashes` (2) e `gcFailedAfterDays` (14, do `wf gc`). O esquema os valida e a referência da configuração (`docs/reference/config.md`, regerada por
+  `npm run docs:config`) os documenta.
+- **`revertOnRetry` em `agent()`.** Antes de cada nova tentativa de uma etapa que escreve, o motor põe o `cwd` de volta
+  como estava no começo da etapa (o mesmo desfazer do cancelamento). Opt-in: o desfazer restaura o diretório inteiro,
+  então só vale para uma etapa que escreve num diretório só dela. O `step-end` da tentativa que falhou leva
+  `reverted: true`.
+- **`ctx.exec`: comandos do workflow assíncronos, com tempo limite e registrados.** `ctx.exec(comando, args, { label,
+  timeoutMs, cwd, env })` roda o comando em um processo assíncrono (o job continua respondendo a status e cancelamento
+  durante um teste longo), o mata no `timeoutMs` (`SIGTERM` ao grupo de processos, `SIGKILL` dois segundos depois) e
+  devolve `{ ok, exitCode, timedOut, tail, error? }`. O padrão do tempo vem da configuração: `workflows.<nome>.execTimeoutMs`
+  (600000 sem ela), que o `run-start` registra. A saída vai para o log de eventos enquanto o comando roda (eventos
+  `content` `command-output`, com `stream`), com a redação e a retenção do conteúdo de um agente, e cada chamada é um nó
+  do run (`exec-start`/`exec-end`, com `stepId`, `parentId` e `groupId`). O cancelamento mata o comando e o que ele
+  iniciou. A skill de autoria documenta o `ctx.exec`, e um teste do repositório reprova chamadas síncronas
+  (`execFileSync`, `execSync`, `spawnSync`) em arquivos de workflow. O próprio motor também deixa de rodar `git`
+  síncrono: o estado do repositório que o memo lê a cada etapa e a identidade do repositório no `run-start` vêm de um
+  `git` assíncrono, com teto de tempo (um git que não responde a tempo desliga o memo da etapa, não trava o processo).
 - **Workflow `smoke` e o assistente de validação no Cursor IDE.** O `smoke` é uma etapa estruturada no `composer-2.5`,
   sem tools e sem contexto do projeto, com teto de 50 mil tokens (medido: 21.628): prova chat → MCP → SDK → resultado
   estruturado sem pagar um `implement-issue`. O `scripts/verify/validate-cursor-ide.sh` conduz os seis cenários de
@@ -109,6 +147,70 @@
 
 ### Mudado
 
+- **O teto de tempo dos testes do `implement-issue` sai dos args do run.** `testTimeoutSec` passa a ser só um ajuste
+  (`workflows.implement-issue.settings.testTimeoutSec`, padrão 600), como os outros limites: um run que ainda o passe
+  como arg é recusado com `invalid args`. Os ajustes de um workflow só vêm dos arquivos de configuração (ADR-0001).
+
+- **Um resume não refaz, vazios, o worktree e a branch que alguém removeu.** Se nem o worktree nem a branch do run
+  existem mais (o `wf gc`, ou a mão, os removeu) e o run já tinha fatias, o resume falha dizendo isso e mandando começar um
+  run novo. Antes ele criava o worktree de novo a partir do commit-base, dava as fatias por prontas, entregava uma árvore
+  vazia e a empurrava por cima do trabalho no origin (o lease do push é o do próprio run). Um run que falhou antes da
+  primeira fatia continua podendo ser retomado: não havia nada a perder.
+- **O `implement-issue` fica robusto contra três falhas e tem limites configuráveis.**
+  - **O tier vem da label mais alta.** Com `complexity:low` e `complexity:high` na mesma issue, vale HIGH, em qualquer
+    ordem das labels; antes valia a primeira que casava, e a ordem podia rebaixar uma issue difícil. Uma label com o
+    nome de um membro de `Object.prototype` (`constructor`) deixa de ser lida como um tier.
+  - **Um laço de quedas para.** Quando um resume encontra uma etapa de escrita em andamento (o processo caiu no meio
+    dela), soma uma queda a essa etapa; passado o limite (`maxStepCrashes`, 2), o run encerra com
+    `status: "step-crash-loop"` e o id da etapa, em vez de retomá-la de novo. A contagem fica no progresso do run, então
+    o resume seguinte também para; subir o limite na configuração libera. Um cancelamento no meio da etapa não conta.
+    Antes, o contador existia no progresso e nunca era lido nem incrementado.
+  - **Toda nova tentativa de uma etapa de escrita parte de uma árvore limpa.** O worktree volta ao estado de antes da
+    etapa antes de cada nova tentativa (`revertOnRetry`), não só antes da falha final: antes, o que a tentativa que
+    falhou deixou (um arquivo novo, uma edição pela metade) estava lá na seguinte e podia ir para o commit. O desfazer
+    do resume (`revertTo`) também apaga os arquivos novos que ninguém pôs no índice, que o `read-tree` deixava.
+  - **Limites em `workflows.implement-issue.settings`**: tetos de fatias por tier, fatias extras, rodadas de correção,
+    tentativas de red e green, tamanho do diff, mapa label → tier, limite de quedas e os tetos de tempo dos testes
+    (`testTimeoutSec`) e dos comandos de rede (`networkTimeoutSec`). A lista e os padrões estão em
+    [`docs/reference/config.md`](docs/reference/config.md#ajustes-de-um-workflow).
+- **O `implement-issue` roda `git`, `gh` e os testes por `ctx.exec`.** Nenhum comando dele trava mais o processo: o
+  status e o cancelamento respondem durante uma suíte, e cancelar mata o comando na hora. Cada suíte do laço TDD
+  (`suite:baseline`, `suite:red:1`, `suite:green:1`, `suite:final`…) e cada chamada de `git` e `gh` é um nó de comando
+  no log do run, com a saída da suíte ao lado. O `git push` e todo `gh` têm teto de tempo (ajuste
+  `networkTimeoutSec`, 120 s): um push que espera credencial, ou uma conexão parada, falha a etapa com
+  `git push … timed out after Ns`, e o resume entrega. O `git` local segue o `execTimeoutMs` do workflow (10 minutos
+  por padrão); o `wf gc` pergunta o estado do PR no `--repo` em que o run entregou. Um erro do `gh` na busca
+  do PR existente (autenticação, rede) passa a falhar o run com a mensagem dele; antes virava "não há PR" e o
+  workflow tentava criar outro. As respostas do `git` e do `gh` que o workflow lê (diffs, listas de arquivos, a issue
+  e seus comentários) vêm inteiras, não do `tail` de 32768 caracteres do `ctx.exec`: a trava de segredos continua
+  vendo o diff todo. Essa saída (dados que o código lê, como um diff ou o JSON da issue) não vai para o log de eventos,
+  que mostra o comando, o `stderr` e o resultado; a saída das suítes, do `git push` e do `git commit` vai. O `runTests` agora é assíncrono e não devolve mais `overflow`, porque a saída não passa por um
+  buffer. Uma suíte morta por um sinal (o OOM killer, por exemplo) deixa de contar como red: o run para com
+  `tests-killed`, em vez de pedir a um agente que "faça passar" um runner que caiu.
+- **O `implement-issue` entrega com segurança e pode rodar várias vezes na mesma issue.** Cada run tem a sua branch
+  (`wf/issue-<n>-<run>`, antes a fixa `wf/issue-<n>`) e o seu worktree (`.workflows/worktrees/wf-issue-<n>-<run>`),
+  registrados no progresso do run; um run novo parte da cabeça atual da branch padrão (a que o `origin/HEAD` aponta, ou
+  a branch em uso; a cópia local, não a do origin: rode `git pull` antes para partir do que está lá) e nunca reaproveita
+  o worktree de outro run. Um worktree no lugar do run que ele não criou falha o run, sem apagar nada; um caminho que o próprio run
+  registrou e que não é um worktree (um `git worktree add` interrompido) é refeito. Como a branch é do run, um segundo
+  run na mesma issue, depois do primeiro, abre um PR novo na sua branch. Um run começado antes desta mudança retoma na
+  branch e no worktree antigos. Uma issue tem no máximo um run ativo: o segundo run volta
+  `status: "issue-locked"` com o `activeRunId` do que está ativo, sem branch, worktree nem agente (o lock é o arquivo
+  `.workflows/locks/issue-<n>.lock`, do mesmo tipo do `run.lock`, com um hash do `--repo` no nome quando o run o
+  passa, porque a issue #5 de outro repositório é outra issue; o de um processo que morreu é retomado). A entrega
+  empurra com `--force-with-lease`, só em branch `wf/`: o resume depois de o PR existir refaz o commit e entrega por
+  cima, em vez de falhar com non-fast-forward. Se a branch no origin tem um commit que o run não empurrou (alguém
+  empurrou uma correção), o run volta `status: "push-refused"` e não sobrescreve nada; o trabalho fica no worktree. Um run que entregou antes
+  desta mudança não tem a lista do que empurrou: para ele, o commit do origin é seu quando o repositório o tem, o único pai
+  é a base do run e a mensagem é a da entrega.
+- **A execução do agente fica atrás de uma interface, o `AgentBackend`.** O motor deixa de falar com o SDK: cada
+  tentativa de uma etapa vai a `AgentBackend.run(prompt, opções resolvidas, sinal de aborto, callback de eventos)`, que
+  devolve o resultado da tentativa. A execução local (criar o agente, enviar, esperar, entregar o resultado estruturado,
+  ler o uso, descartar) é o backend local, com o comportamento de antes: os testes do motor, da observabilidade e do
+  `implement-issue` passam sem mudança. Os tetos de tokens ao vivo, o `timeoutMs` e o cancelamento do run chegam ao
+  backend como o aborto do sinal da tentativa, com o motivo em `signal.reason`. `RunOptions.backend` troca o backend
+  (os testes usam). A interface é a de [3.1](docs/internals/01-arquitetura.md#o-agentbackend-quem-roda-a-tentativa) e o
+  backend de nuvem ([ADR-0005](docs/adr/0005-cloud-backend-and-location-cap.md)) entra por ela.
 - **`WF_METRICS_STORE_PROMPTS` foi removida.** O banco de métricas nunca mais guarda o texto de um prompt (só hash e
   tamanho); o texto fica no log de eventos local. O evento `step-start` perdeu o campo `prompt`. A coluna
   `attempts.prompt_text` continua no esquema, sempre vazia, e a migração 3 do banco apaga o texto que versões antigas

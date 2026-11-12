@@ -1,5 +1,5 @@
 // Worker thread of a running job: refreshes the heartbeat in the job record on its own event loop, so the heartbeat keeps
-// beating while the job's main thread is blocked in a synchronous call (a test run started with execFileSync, say).
+// beating while the job's main thread is blocked in a synchronous call (a workflow that runs a test suite with execFileSync, say).
 // Plain JavaScript on purpose: it needs nothing but node:fs, and a worker must not depend on the TypeScript loader.
 //
 // workerData: { file: the job record's path, record: the job record as it is when the job starts, intervalMs }

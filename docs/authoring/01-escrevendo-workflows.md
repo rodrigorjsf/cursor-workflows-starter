@@ -48,6 +48,26 @@ documento explica o *porquê* das regras e traz as receitas, que a skill aponta.
   laço inteiro do agente. Por isso o `timeoutMs`, que cada envio (o pedido e cada re-prompt de schema) tem, continua
   sendo o freio do que acontece dentro de um turno ([2.2 §3](../usage/02-configuracao-inicial.md#3-teto-de-custo)).
 
+### Comandos: `ctx.exec`
+
+Todo comando que o workflow roda (testes, `git`, `gh`) passa por `ctx.exec(comando, args, { label, timeoutMs, cwd, env })`,
+nunca por `execFileSync`, `execSync` ou `spawnSync`: uma chamada síncrona congela o processo do job, então o
+cancelamento espera atrás dela e nada a interrompe. O `npm test` reprova um arquivo de workflow que faça uma delas.
+
+```ts
+const tests = await ctx.exec("bash", ["-c", "npm test"], { label: "testes", cwd: worktree, timeoutMs: 15 * 60_000 });
+if (!tests.ok) await ctx.agent(`${FIX_INSTRUCTIONS}\n\n${tests.tail}`, { label: "correção" }); // tests.tail: o fim da saída
+```
+
+- Devolve `{ ok, exitCode, timedOut, tail, error? }`. Código diferente de zero, tempo estourado e programa que não inicia
+  são **resultados**, não exceções: o código decide o que significam. Um run cancelado mata o comando e lança.
+- O comando morre no `timeoutMs` da chamada; sem ele, no `execTimeoutMs` da configuração do workflow
+  ([6.2](../reference/config.md)), 10 minutos por padrão. Dê um prazo curto a um comando de rede (`git push`, `gh`).
+- A saída vai para o log de eventos enquanto o comando roda, com a redação e a retenção do conteúdo de um agente, e cada
+  chamada é um nó do run, ao lado das etapas ([3.1](../internals/01-arquitetura.md#comandos-do-workflow-ctxexec)). `tail`
+  é a saída real, sem redação: antes de levá-la a um texto que sai da máquina, passe pela trava de segredos.
+- Um resume roda o comando de novo: `exec` não entra no journal. Mantenha os efeitos idempotentes.
+
 ## Custo
 
 Toda receita abaixo deve passar pelo checklist de custo ([5.2 §6](../operating/02-custos-e-cache.md#6-checklist-de-custo)). As
@@ -63,8 +83,14 @@ práticas que mais pesam:
 
 ### Roteamento por label → modelo
 
+Quando várias labels casam, vale o tier mais alto: a ordem das labels nunca rebaixa uma issue difícil. O mapa fica em
+`meta.settings`, para o repositório trocá-lo na configuração (`workflows.<nome>.settings`).
+
 ```ts
-const tier = issue.labels.map((l) => LABEL_TIERS[l.name.toLowerCase()]).find(Boolean)
+const RANK = { LOW: 0, MED: 1, HIGH: 2 };
+const known = new Map(Object.entries(ctx.settings.labelTiers as Record<string, Tier>).map(([label, t]) => [label.toLowerCase(), t]));
+const matched = issue.labels.flatMap((l) => known.get(l.name.toLowerCase()) ?? []); // um Map: uma label "constructor" é só uma label
+const tier = matched.sort((a, b) => RANK[b] - RANK[a])[0]
   ?? (await ctx.agent<{ tier: Tier }>(`${CLASSIFY_INSTRUCTIONS}\n\n${issueBlock(issue)}`, {
     label: "classificar", model: MODELS.CLASSIFY, tools: [], settingSources: [], memo: true, schema: TIER_SCHEMA,
   })).tier;
@@ -95,12 +121,12 @@ a resposta antiga. Depois da correção, só os eixos que bloquearam são revist
 ### Corrigir até passar (com teto)
 
 ```ts
-let t = runTests(cmd, worktree);
-for (let round = 1; t.kind === "failed" && round <= 2; round++) {   // timeout e overflow não são falha de código
+let t = await runTests(testCommand, worktree);
+for (let round = 1; t.kind === "failed" && round <= 2; round++) {   // timeout ou suíte morta não é falha de código
   await ctx.agent(`${FIX_INSTRUCTIONS}\n\n## Rodada ${round}\n\n## Saída dos testes\n${t.output}`, {
     label: `corrigir-${round}`, model: MODELS.HIGH, cwd: worktree, schema: IMPL_SCHEMA,
   });
-  t = runTests(cmd, worktree);
+  t = await runTests(testCommand, worktree);
 }
 if (!t.ok) return { status: t.kind === "failed" ? "tests-failed" : `tests-${t.kind}`, output: t.output };
 ```
@@ -161,9 +187,10 @@ Uma regra do processo que o modelo policiaria sozinho ("red antes de green", "s�
 - **Quem tocou o quê:** `snapshotTree` (uma árvore git do worktree, que enxerga também `git add`, `stash`,
   `commit` e `skip-worktree` feitos pelo agente) antes e depois da etapa, e `changesBetween`, sem detecção de
   renomeação (um arquivo movido aparece como apagado e criado).
-- **Estado observável:** o código roda o comando e confere o resultado esperado com `runTests`, que tem teto de
-  tempo e devolve `kind` (`passed`, `failed`, `timeout`, `overflow`): só `failed` vale como red. Ele tira
-  `NODE_TEST_CONTEXT`, que faz um `node --test` aninhado sair com 0 mesmo falhando.
+- **Estado observável:** o código roda o comando e confere o resultado esperado com `runTests`, que roda por
+  `ctx.exec` (um nó de comando no log do run), tem teto de tempo e devolve `kind` (`passed`, `failed`, `timeout`,
+  `killed`; esta última é uma suíte morta por um sinal, como o OOM killer, que não é resultado de teste): só `failed`
+  vale como red. Ele tira `NODE_TEST_CONTEXT`, que faz um `node --test` aninhado sair com 0 mesmo falhando.
 - **O que fica travado:** nas etapas de código (green, correção, refactor), os arquivos dos globs de teste e a
   configuração do runner (`protectedGlobs`, os scripts do `package.json` e os campos `jest`, `vitest`, `mocha`,
   `ava`, `c8` e `nyc` dele); no green e na correção, também o arquivo do teste da fatia (hash guardado no red). Sem
@@ -176,12 +203,12 @@ Uma regra do processo que o modelo policiaria sozinho ("red antes de green", "s�
 - **Partida:** a invariante vale antes do primeiro item (suíte verde, senão `baseline-red`).
 
 ```ts
-const before = snapshotTree(worktree);
+const before = await snapshotTree(worktree);
 await ctx.agent(`${TEST_INSTRUCTIONS}\n\n${sliceBlock}`, { label: `teste-${n}`, cwd: worktree, schema: TEST_SCHEMA });
-const changed = changesBetween(worktree, before, snapshotTree(worktree));
-if (changed.some((c) => !isTestFile(c.path) || c.status === "D")) { revertTo(worktree, before); /* nova tentativa */ }
-const red = runTests(testCommand, worktree);
-if (red.kind === "timeout" || red.kind === "overflow") { revertTo(worktree, before); /* encerra: tests-timeout ou tests-overflow */ }
+const changed = await changesBetween(worktree, before, await snapshotTree(worktree));
+if (changed.some((c) => !isTestFile(c.path) || c.status === "D")) { await revertTo(worktree, before); /* nova tentativa */ }
+const red = await runTests(testCommand, worktree);
+if (red.kind === "timeout" || red.kind === "killed") { await revertTo(worktree, before); /* encerra: tests-timeout ou tests-killed */ }
 if (red.kind === "passed") { /* o teste não é red: nova tentativa, ou alreadySatisfied com a evidência */ }
 ```
 
@@ -193,12 +220,22 @@ etapa interrompida deixaria edições pela metade. Por isso o `implement-issue`:
 
 - guarda o progresso por item (e as saídas que viram evidência) em `.workflows/runs/<runId>/tdd-progress.json`,
   fora da árvore versionada (`ProgressStore`), com a chave de cada item derivada do conteúdo, não da posição;
-- marca a etapa de escrita em andamento antes de chamá-la e, no resume, volta ao snapshot de antes dela; uma etapa
-  que falha é desfeita antes de o erro subir;
+- marca a etapa de escrita em andamento antes de chamá-la e, no resume, volta ao snapshot de antes dela (inclusive os
+  arquivos novos que ninguém pôs no índice); uma etapa que falha é desfeita antes de o erro subir, e cada nova
+  tentativa dela (`revertOnRetry`) parte do worktree de antes da etapa, não do que a tentativa que falhou deixou;
+- conta as quedas do processo no meio de cada etapa de escrita: quando um resume a encontra em andamento, soma uma; passado
+  o limite (`maxStepCrashes`), o run encerra com `step-crash-loop` em vez de retomar a etapa de novo. Um cancelamento no
+  meio da etapa não é queda e não conta;
 - põe um número de sequência no prompt de cada etapa de escrita, para o journal nunca devolver uma escrita antiga;
 - guarda os relatórios de review por rodada, para o resume não pedir um review novo sobre um diff diferente;
 - reaproveita a branch existente no resume (sem `worktree add -B`, que a zeraria) e roda a suíte de novo antes do
-  commit.
+  commit;
+- dá a cada run a sua branch e o seu worktree (o id do run no nome), registrados no progresso: um run novo parte da
+  cabeça atual da branch padrão e nunca reaproveita o worktree de outro; o lock `issue-<n>` (em `.workflows/locks/`, com um
+  hash do `--repo` quando o run o passa) recusa um segundo run na mesma issue;
+- entrega com `git push --force-with-lease=<branch>:<commit que o origin tem>`, só em branch `wf/`, e só quando esse
+  commit é de um push do próprio run (o resume refaz o commit depois do PR; o commit de outra pessoa não é
+  sobrescrito).
 
 ### Checkpoint em dois runs
 
@@ -207,7 +244,7 @@ combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
 
 1. O run 1 vai até o resultado a aprovar, guarda-o no progresso do run e devolve um status pendente (no
    `implement-issue`, `seams-proposed`) com `runId` e `next`, o comando de retomada. O status entra em `PENDING`
-   ([`packages/runtime/src/observability/recorder.ts`](../../packages/runtime/src/observability/recorder.ts)); fora dele, o run contaria como falha no
+   ([`packages/runtime/src/runtime/outcome.ts`](../../packages/runtime/src/runtime/outcome.ts)); fora dele, o run contaria como falha no
    custo por entrega.
 2. O código publica o resultado onde o humano decide: no `implement-issue`, um comentário na issue com um marcador
    e o `runId` (uma vez por run), o comando pelo CLI (`--resume <runId>`, com os args entre aspas simples

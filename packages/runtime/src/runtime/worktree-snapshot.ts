@@ -1,6 +1,7 @@
 // A snapshot of the working files under a directory, and the way back to it. The engine takes one before a step that can
 // write; if the run is cancelled in the middle of that step, the directory is put back as it was, so a resume (which
-// runs the step again from its start) never meets half-made edits.
+// runs the step again from its start) never meets half-made edits. A step that asks (`revertOnRetry`) gets the same undo
+// before each retry of a failed attempt.
 //
 // Git is the store and the file lister, never the converter: file contents are hashed and restored byte for byte, with
 // no filters (`core.autocrlf`, `.gitattributes` text rules, git-lfs), so a revert cannot change a line ending. The user's

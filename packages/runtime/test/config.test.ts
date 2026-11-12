@@ -488,3 +488,63 @@ test("a code-default model that a cap refuses shows up as a violation of the def
   );
   assert.match(start.violations[0]!.message, /review/);
 });
+
+// ── Workflow settings: the workflow declares them, the config files tune them ───────────
+
+/** Like `configWorkflow`, plus two settings with code defaults. */
+const settingsWorkflow = (run: Parameters<typeof configWorkflow>[0]) => {
+  const base = configWorkflow(run);
+  return { ...base, meta: { ...base.meta, settings: { batchSize: 10, mode: "fast", maxTokens: 7 } } };
+};
+
+test("a workflow's settings: the code default, then the global file, then the repo file; the workflow reads the result, and the run-start records it with its origin", async () => {
+  let seen: Readonly<Record<string, unknown>> | undefined;
+  const wf = settingsWorkflow(async (ctx) => {
+    seen = ctx.settings;
+    return "done";
+  });
+  const start = async () => {
+    const r = await runWorkflow(wf, {}, { cwd });
+    assert.equal(r.status, "finished", r.error);
+    return runStartOf(logOf(r.runId));
+  };
+
+  let at = await start();
+  assert.deepEqual(at.config.settings, { batchSize: 10, mode: "fast", maxTokens: 7 });
+  assert.deepEqual(seen, { batchSize: 10, mode: "fast", maxTokens: 7 });
+  assert.deepEqual(at.provenance["/settings/batchSize"], { layer: "default" });
+
+  writeGlobalConfig({ workflows: { cfg: { settings: { batchSize: 20, mode: "slow" } } } });
+  writeRepoConfig(cwd, { workflows: { cfg: { settings: { batchSize: 30 } } } });
+  at = await start();
+  assert.deepEqual(seen, { batchSize: 30, mode: "slow", maxTokens: 7 }, "the repo beats the global file, which beats the code, setting by setting");
+  assert.deepEqual(at.provenance["/settings/batchSize"], { layer: "repo", ref: repoConfigPath(cwd) });
+  assert.deepEqual(at.provenance["/settings/mode"], { layer: "global", ref: globalConfigPath() });
+  assert.deepEqual(at.provenance["/settings/maxTokens"], { layer: "default" });
+});
+
+test("a setting named like a limit is a setting: no cap clamps it and no chat override touches it", async () => {
+  writeGlobalConfig({ caps: { maxTokens: 1000, maxTokensPerStep: 1000 } });
+  writeRepoConfig(cwd, { workflows: { cfg: { settings: { maxTokens: 5_000_000, maxTokensPerStep: 5_000_000 } } } });
+  const wf = { ...settingsWorkflow(async () => "done") };
+  wf.meta = { ...wf.meta, settings: { maxTokens: 7, maxTokensPerStep: 7 } };
+  const r = await runWorkflow(wf, {}, { cwd, mcpOverrides: { maxTokensPerStep: 100 } });
+  assert.equal(r.status, "finished", r.error);
+  const start = runStartOf(logOf(r.runId));
+  assert.deepEqual(start.config.settings, { maxTokens: 5_000_000, maxTokensPerStep: 5_000_000 });
+  assert.equal(start.config.limits.maxTokens, 1000, "the real limit is still clamped by the cap");
+  assert.deepEqual(start.violations.map((v) => v.path), [], "and the setting is no violation");
+});
+
+test("a setting the workflow does not declare is an error naming its path, like an unknown role; a workflow that declares none says so", async () => {
+  writeRepoConfig(cwd, { workflows: { cfg: { settings: { batchsize: 5 } } } });
+  const typo = await runWorkflow(settingsWorkflow(async () => "done"), {}, { cwd });
+  assert.equal(typo.status, "failed");
+  assert.ok(typo.error!.includes(repoConfigPath(cwd)), typo.error);
+  assert.match(typo.error!, /\/workflows\/cfg\/settings\/batchsize: unknown setting \(workflow cfg declares: batchSize, mode, maxTokens\)/);
+
+  const none = await runWorkflow(configWorkflow(async () => "done"), {}, { cwd });
+  assert.equal(none.status, "failed");
+  assert.match(none.error!, /\/workflows\/cfg\/settings\/batchsize: unknown setting \(workflow cfg declares no settings\)/);
+  assert.equal(calls.length, 0);
+});

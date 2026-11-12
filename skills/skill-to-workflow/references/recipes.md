@@ -2,15 +2,20 @@
 
 One recipe per pattern. Read the one for your case before writing the step, and pass every recipe through the cost
 checklist (cost.md). Names such as `MODELS`, `issueBlock`, `snapshotTree` or `runTests` are helpers you write in the
-workflow module; the recipe says what each does.
+workflow module; the recipe says what each does. A helper that runs a command (`runTests`, `snapshotTree`) is async: it
+goes through `ctx.exec`.
 
 ## Routing by label → model
 
 The tier, and with it the model, comes from an input datum (a label, a diff size); a cheap classifier step runs only
-when no datum decides.
+when no datum decides. When several labels match, take the highest tier: the order of the labels must never downgrade a
+hard issue. Keep the label map in `meta.settings`, so a repo can change it in its config.
 
 ```ts
-const tier = issue.labels.map((l) => LABEL_TIERS[l.name.toLowerCase()]).find(Boolean)
+const RANK = { LOW: 0, MED: 1, HIGH: 2 };
+const known = new Map(Object.entries(ctx.settings.labelTiers as Record<string, Tier>).map(([label, t]) => [label.toLowerCase(), t]));
+const matched = issue.labels.flatMap((l) => known.get(l.name.toLowerCase()) ?? []); // a Map: a label named "constructor" is only a label
+const tier = matched.sort((a, b) => RANK[b] - RANK[a])[0]
   ?? (await ctx.agent<{ tier: Tier }>(`${CLASSIFY_INSTRUCTIONS}\n\n${issueBlock(issue)}`, {
     label: "classify", model: MODELS.CLASSIFY, tools: [], settingSources: [], memo: true, schema: TIER_SCHEMA,
   })).tier;
@@ -40,19 +45,20 @@ The round goes in the prompt (journal key, rule 1). After the fix, re-review onl
 ## Fix until it passes (with a cap)
 
 ```ts
-let t = runTests(cmd, worktree);
-for (let round = 1; t.kind === "failed" && round <= 2; round++) {   // timeout and overflow are not code failures
+let t = await runTests(testCommand, worktree);
+for (let round = 1; t.kind === "failed" && round <= 2; round++) {   // a timeout or a killed suite is not a code failure
   await ctx.agent(`${FIX_INSTRUCTIONS}\n\n## Round ${round}\n\n## Test output\n${t.output}`, {
     label: `fix-${round}`, model: MODELS.HIGH, cwd: worktree, schema: IMPL_SCHEMA,
   });
-  t = runTests(cmd, worktree);
+  t = await runTests(testCommand, worktree);
 }
 if (!t.ok) return { status: t.kind === "failed" ? "tests-failed" : `tests-${t.kind}`, output: t.output };
 ```
 
-`runTests` runs the project's test command with a time limit and returns `kind` (`passed`, `failed`, `timeout`,
-`overflow`) plus truncated `output`. It unsets `NODE_TEST_CONTEXT`, which makes a nested `node --test` exit 0 even when
-it fails.
+`runTests` runs the project's test command with `ctx.exec` (`bash -c`, with a time limit) and returns `kind` (`passed`,
+`failed`, `timeout`, `killed`) plus the end of the `output`; `killed` is a suite ended by a signal (the OOM killer, say),
+which is not a test result. The run is a command node in the event log. It unsets `NODE_TEST_CONTEXT`, which makes a
+nested `node --test` exit 0 even when it fails.
 
 ## Fan-out with isolation
 
@@ -129,12 +135,12 @@ specification") becomes an **invariant** the code checks between two steps. The 
 - **Start:** the invariant holds before the first item (green suite, else `baseline-red`).
 
 ```ts
-const before = snapshotTree(worktree);
+const before = await snapshotTree(worktree);
 await ctx.agent(`${TEST_INSTRUCTIONS}\n\n${sliceBlock}`, { label: `test-${n}`, cwd: worktree, schema: TEST_SCHEMA });
-const changed = changesBetween(worktree, before, snapshotTree(worktree));
-if (changed.some((c) => !isTestFile(c.path) || c.status === "D")) { revertTo(worktree, before); /* retry */ }
-const red = runTests(testCommand, worktree);
-if (red.kind === "timeout" || red.kind === "overflow") { revertTo(worktree, before); /* end: tests-timeout or tests-overflow */ }
+const changed = await changesBetween(worktree, before, await snapshotTree(worktree));
+if (changed.some((c) => !isTestFile(c.path) || c.status === "D")) { await revertTo(worktree, before); /* retry */ }
+const red = await runTests(testCommand, worktree);
+if (red.kind === "timeout" || red.kind === "killed") { await revertTo(worktree, before); /* end: tests-timeout or tests-killed */ }
 if (red.kind === "passed") { /* the test is not red: retry, or alreadySatisfied with the evidence */ }
 ```
 
@@ -146,12 +152,20 @@ half-made edits. So:
 
 - keep the progress per item (and the outputs that become evidence) in `.workflows/runs/<runId>/<name>-progress.json`,
   outside the versioned tree, with each item's key derived from its content, not from its position;
-- mark the write step in progress before calling it and, on resume, go back to the snapshot from before it; a step that
-  fails is undone before the error rises;
+- mark the write step in progress before calling it and, on resume, go back to the snapshot from before it (new files
+  nobody staged included); a step that fails is undone before the error rises, and each retry of it starts from the
+  tree as it was before the step (`revertOnRetry` on the `agent()` call), not from what the failed attempt left;
+- count the crashes of each write step: a resume that finds a step still marked in progress adds one, and past a limit
+  the run ends with a status of its own instead of resuming the step again; a cancel in the middle of the step is not
+  a crash;
 - put a sequence number in the prompt of every write step, so the journal never returns an old write;
 - keep the review reports per round, so a resume does not ask for a new review of a different diff;
 - reuse the existing branch on resume (no `worktree add -B`, which would reset it) and run the suite again before the
-  commit.
+  commit;
+- give every run its own branch and worktree (the run id in the name), recorded in the progress; a worktree is reused
+  only by the run that recorded it, and a fresh run starts from the current head of the default branch;
+- deliver with `git push --force-with-lease=<branch>:<commit the origin has>`, only on a branch with the workflow's
+  prefix and only when that commit came from this run's own push, so a resume can redeliver and a person's commit stays.
 
 ## Checkpoint across two runs
 

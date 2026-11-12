@@ -82,6 +82,24 @@ test("wf config show without a workflow name covers every workflow of the repo, 
   assert.deepEqual(shown.files, { global: { path: globalConfig(), found: false }, repo: { path: repoConfig(), found: false } });
 });
 
+test("wf config show prints the settings of a workflow with the repo file's values and their origin; a setting the workflow does not declare exits 1", () => {
+  put(repoConfig(), { workflows: { "implement-issue": { settings: { fixRounds: 1, labelTiers: { urgent: "HIGH" } } } } });
+  const r = wf("config", "show", "implement-issue");
+  assert.equal(r.status, 0, r.stderr);
+  const { config, provenance } = JSON.parse(r.stdout).workflows["implement-issue"];
+  assert.equal(config.settings.fixRounds, 1);
+  assert.deepEqual(config.settings.labelTiers, { urgent: "HIGH" }, "the file's map replaces the default one");
+  assert.deepEqual(config.settings.sliceCaps, { LOW: 1, MED: 3, HIGH: 5 });
+  assert.deepEqual(provenance["/settings/fixRounds"], { layer: "repo", ref: repoConfig() });
+  assert.deepEqual(provenance["/settings/sliceCaps"], { layer: "default" });
+
+  put(repoConfig(), { workflows: { cfgwf: { settings: { fixRounds: 1 } } } });
+  const bad = wf("config", "show", "cfgwf");
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /\/workflows\/cfgwf\/settings\/fixRounds: unknown setting \(workflow cfgwf declares no settings\)/);
+  rmSync(repoConfig(), { force: true });
+});
+
 test("wf config show with an unusable config exits 1 and names the file and the field path; an unknown workflow is named", () => {
   put(repoConfig(), { workflows: { cfgwf: { roles: { review: { retries: -1 } } } } });
   const bad = wf("config", "show", "cfgwf");

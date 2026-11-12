@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { calls } from "@cursor/sdk";
 import { globToRegExp } from "../workflows/implement-issue/tdd.js";
-import { PLAN, SUB_CODE, SUB_TEST, fx, gh, git, issue, names, run, setup, submit, teardown, write } from "./implement-issue.fixture.js";
+import { PLAN, SUB_CODE, SUB_TEST, branchOf, fx, gh, git, issue, names, run, setup, submit, teardown, write } from "./implement-issue.fixture.js";
 
 beforeEach(setup);
 afterEach(teardown);
@@ -28,7 +28,7 @@ test("LOW: red → green, 3 eixos de review, PR com evidência red → green; re
   assert.match(prs[0]!.body, /\*\*After:\*\*/);
   assert.match(prs[0]!.body, /## Merge Danger/);
   assert.match(prs[0]!.body, /two-way/);
-  assert.match(git(join(fx.root, "origin.git"), "log", "--oneline", "wf/issue-7"), /#7/);
+  assert.match(git(join(fx.root, "origin.git"), "log", "--oneline", branchOf(r.runId)), /#7/);
 
   const created = calls.length;
   const again = await run({ openPr: true }, r.runId);

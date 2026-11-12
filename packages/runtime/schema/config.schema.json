@@ -141,6 +141,8 @@
         "maxTokensPerStep": { "$ref": "#/definitions/limit", "description": "Teto de tokens por etapa, para todas as etapas do workflow." },
         "maxCents": { "type": ["number", "null"], "minimum": 0, "description": "Teto de custo por run, em centavos." },
         "concurrency": { "type": "integer", "minimum": 1, "description": "Agentes simultâneos. O teto global `maxConcurrency` vale sempre." },
+        "execTimeoutMs": { "type": "integer", "minimum": 1, "description": "Tempo máximo, em milissegundos, de um comando que o workflow roda com `ctx.exec` e não passa o próprio `timeoutMs`. Passado esse tempo o comando é morto. Padrão: 600000 (10 minutos)." },
+        "settings": { "$ref": "#/definitions/workflowSettings", "description": "Ajustes do próprio workflow, pelo nome que ele declara em `meta.settings`: o padrão está no código do workflow e só o arquivo global e o do repositório o trocam. Um nome que o workflow não declara é erro. Os ajustes que o kit distribui estão na seção de ajustes de um workflow." },
         "roles": {
           "type": "object",
           "propertyNames": { "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*$" },
@@ -152,6 +154,38 @@
           "additionalProperties": { "$ref": "#/definitions/rolePrefs" },
           "description": "Preferências por glob do `label` da etapa (`*` e `?`), só para etapas sem papel. Vale o glob com mais caracteres literais; empate vai para o primeiro."
         }
+      }
+    },
+    "workflowSettings": {
+      "type": "object",
+      "description": "Os campos abaixo são os ajustes do `implement-issue`, validados pelo esquema. Um workflow do seu repositório pode declarar ajustes com outros nomes em `meta.settings`: o kit não confere o tipo deles. Cada ajuste tem um valor só: o de uma camada de cima troca o de baixo inteiro, sem combinar campos.",
+      "additionalProperties": true,
+      "properties": {
+        "$comment": { "$ref": "#/definitions/comment" },
+        "sliceCaps": { "$ref": "#/definitions/sliceCaps", "description": "`implement-issue`: máximo de fatias TDD (ciclos red → green) por tier. As fatias do plano que passam do teto ficam adiadas: o PR só referencia a issue, sem fechá-la. Padrão: LOW 1, MED 3, HIGH 5." },
+        "extraSlices": { "type": "integer", "minimum": 0, "description": "`implement-issue`: máximo de fatias extras que o review pode abrir (um requisito faltando ou errado vira uma fatia TDD nova). Padrão: 2." },
+        "fixRounds": { "type": "integer", "minimum": 0, "description": "`implement-issue`: rodadas de correção de uma fatia cuja suíte falha depois do green; passadas todas, o run encerra com `tests-failed`. Padrão: 2." },
+        "redGreenAttempts": { "type": "integer", "minimum": 1, "description": "`implement-issue`: tentativas de cada etapa red e de cada etapa green de uma fatia. Uma tentativa que viola o TDD é desfeita e a próxima leva o problema no prompt; na última, o run encerra com `tdd-violation` ou `test-not-red`. Padrão: 2." },
+        "maxDiffChars": { "type": "integer", "minimum": 1, "description": "`implement-issue`: tamanho máximo, em caracteres, do diff que entra no prompt do review e no do PR. O que passa dele é cortado (com a estatística do diff inteiro) e o agente lê o resto nos arquivos. Padrão: 40000." },
+        "labelTiers": {
+          "type": "object",
+          "additionalProperties": { "enum": ["LOW", "MED", "HIGH"] },
+          "description": "`implement-issue`: label da issue (sem diferenciar maiúsculas) → tier. Quando várias labels casam, vale o tier mais alto, qualquer que seja a ordem. Sem nenhuma label que case, um classificador barato decide. Troca o mapa padrão inteiro (`complexity:low` e `good first issue` são LOW, `complexity:medium` é MED, `complexity:high` e `security` são HIGH)."
+        },
+        "maxStepCrashes": { "type": "integer", "minimum": 0, "description": "`implement-issue`: quantas vezes uma mesma etapa de escrita pode derrubar o processo (um resume que a encontra em andamento) e ser retomada. Na vez seguinte o run encerra com `step-crash-loop`, em vez de repetir a etapa. Um cancelamento no meio da etapa não conta. Padrão: 2." },
+        "gcFailedAfterDays": { "type": "integer", "minimum": 0, "description": "`implement-issue`: o `wf gc` remove o worktree e as branches (local e do origin) de um run que falhou há mais dias que isto. Falhou quer dizer terminou com erro ou com um status de falha (`tests-failed`, `baseline-red`…), ou o processo caiu sem terminar; um run cancelado não conta. A branch do origin só sai se o PR não está aberto e o commit nela é de um push do próprio run. Um run cujo PR foi mergeado ou fechado sai antes, sem esperar. Padrão: 14." },
+        "testTimeoutSec": { "type": "number", "exclusiveMinimum": 0, "description": "`implement-issue`: tempo máximo, em segundos, de cada rodada de testes (e do `setupCommand`). Passado esse tempo o comando é morto e o run encerra com `tests-timeout`. Padrão: 600." },
+        "networkTimeoutSec": { "type": "number", "exclusiveMinimum": 0, "description": "`implement-issue` e `wf gc`: tempo máximo, em segundos, de cada comando de rede (`git push`, `git ls-remote` e todo `gh`): uma credencial pedida ou uma conexão parada falha a etapa em vez de travar o run. O git local usa o `execTimeoutMs` do workflow. Padrão: 120." }
+      }
+    },
+    "sliceCaps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["LOW", "MED", "HIGH"],
+      "properties": {
+        "LOW": { "type": "integer", "minimum": 1, "description": "Fatias de uma issue LOW." },
+        "MED": { "type": "integer", "minimum": 1, "description": "Fatias de uma issue MED." },
+        "HIGH": { "type": "integer", "minimum": 1, "description": "Fatias de uma issue HIGH." }
       }
     }
   }

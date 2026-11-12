@@ -15,6 +15,7 @@
 //   wf wait <jobId> [--timeout 240]       # espera até o timeout e imprime o estado
 //   wf cancel <jobId> [--timeout 30]      # cancel the job (SIGTERM to its process) and wait for it to stop; the run stays resumable
 //   wf jobs
+//   wf gc [--dry-run]                     # removes the worktrees, local branches and origin branches of implement-issue runs whose PR was merged or closed, or that failed long ago; --dry-run only prints the plan
 //   wf stats [--days 30]                  # resumo de custo/eficiência (banco ~/.cursor-workflows/metrics.db)
 //   wf metrics export [--days 30] [--format csv|json] [--out dir] [--no-anonymize]
 //   wf metrics reconcile                  # completa custos que o Cursor ainda não tinha reportado
@@ -40,6 +41,7 @@ import { upgradeKit } from "./upgrade.js";
 import { INSIDE_WORKFLOW_ENV, type RunStatus, runWorkflow } from "./runtime/engine.js";
 import { cancelJob, cancelOnSignals, installCrashHandlers, listJobs, readJob, readJobRecord, spawnJob, startJob, waitJob } from "./runtime/jobs.js";
 import { loadWorkflows } from "./runtime/registry.js";
+import { applyGc, directCommands, formatPlan, planGc } from "../workflows/implement-issue/gc.js";
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
@@ -59,6 +61,7 @@ const { positionals, values } = parseArgs({
     "no-agents-md": { type: "boolean", default: false },
     remove: { type: "boolean", default: false },
     json: { type: "boolean", default: false },
+    "dry-run": { type: "boolean", default: false },
   },
 });
 
@@ -209,6 +212,20 @@ async function main(): Promise<number> {
       out(listJobs(cwd).map(({ jobId, workflow, status, phase, runId }) => ({ jobId, workflow, status, phase, runId })));
       return 0;
     }
+    case "gc": {
+      const def = (await loadWorkflows(cwd)).get("implement-issue");
+      if (!def) throw new Error("unknown workflow: implement-issue. Use `wf list`.");
+      const { gcFailedAfterDays: failedAfterDays, networkTimeoutSec } = loadEffectiveConfig(def, { cwd }).config.settings;
+      if (typeof failedAfterDays !== "number") throw new Error("workflows.implement-issue.settings.gcFailedAfterDays must be a number of days");
+      if (typeof networkTimeoutSec !== "number") throw new Error("workflows.implement-issue.settings.networkTimeoutSec must be a number of seconds");
+      const commands = directCommands(networkTimeoutSec);
+      const plan = await planGc({ cwd, commands, failedAfterDays });
+      process.stderr.write(formatPlan(plan)); // the plan first, then the removal
+      if (values["dry-run"]) process.stderr.write("wf gc: dry run, nothing was changed.\n");
+      else await applyGc(plan, commands);
+      out({ dryRun: values["dry-run"], ...plan });
+      return plan.errors.length ? 1 : 0;
+    }
     case "stats": {
       const { openDb } = await import("./observability/db.js");
       const { summary } = await import("./observability/queries.js");
@@ -257,7 +274,7 @@ async function main(): Promise<number> {
       }
     }
     default:
-      process.stderr.write("uso: wf <login|whoami|models|list|init|doctor|upgrade|config|run|start|status|wait|cancel|jobs|stats|metrics> ...\n");
+      process.stderr.write("uso: wf <login|whoami|models|list|init|doctor|upgrade|config|run|start|status|wait|cancel|jobs|gc|stats|metrics> ...\n");
       return 2;
   }
 }

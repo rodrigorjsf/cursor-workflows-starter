@@ -4,7 +4,7 @@
 // Nothing here reads a file or the clock: both take the events. Neither ever carries step content: the projection looks
 // at metadata fields only, and `content` events are not read at all.
 
-import type { RunStatus, WorkflowEvent } from "./events.js";
+import type { ExecEndEvent, RunStatus, WorkflowEvent } from "./events.js";
 import type { UsageTotals } from "./workflow.js";
 
 /** How a message tells the reader to continue a run that stopped without finishing. The `run-workflow` skill matches the `resumeRunId="..."` part. */
@@ -80,6 +80,12 @@ function oneLine(text: string): string {
   return flat.length > LINE_MAX_CHARS ? `${flat.slice(0, LINE_MAX_CHARS - 1)}…` : flat;
 }
 
+/** How a command ended, in a few words: `exit 0, 1.2s`, `timeout, 600.0s`. Never the command's output. */
+function execEndText(e: ExecEndEvent): string {
+  const what = e.outcome === "exit" ? `exit ${e.exitCode ?? e.signal ?? "?"}` : e.outcome === "spawn-error" ? "could not start" : e.outcome;
+  return `${what}, ${(e.durationMs / 1000).toFixed(1)}s`;
+}
+
 /**
  * The progress line of an event, or undefined when the event is not progress. Built from metadata only (labels, model
  * ids, costs) and from the lines the workflow and the engine wrote for people to read (`ctx.log`, warnings). Never from
@@ -99,6 +105,10 @@ function recentLine(e: WorkflowEvent): string | undefined {
       const cents = attemptCents(e);
       return oneLine(`${e.ok ? "✓" : "✗"} ${e.label}${e.cached ? ` (${e.cached})` : ""}${cents ? ` ${cents}¢` : ""}${cache}`);
     }
+    case "exec-start":
+      return oneLine(`▶ ${e.label} [${e.command}]`);
+    case "exec-end":
+      return oneLine(`${e.ok ? "✓" : "✗"} ${e.label} (${execEndText(e)})`);
     case "warning":
       return oneLine(`⚠ ${e.message}`);
     case "metric":

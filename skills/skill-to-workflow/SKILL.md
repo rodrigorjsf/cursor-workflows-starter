@@ -83,7 +83,7 @@ The recipes cited are in [recipes.md](references/recipes.md).
 | Subagent called by delegation | `ctx.agent(subagentBody + task, { model, tools })`; the delegation condition becomes code (step 2) |
 | Several independent subagents, or sub-agents the skill itself fires in parallel | `ctx.parallel` (barrier) or `ctx.pipeline` (per item); the code checks the minimum number of results, and the skill's aggregation becomes code or a judge step |
 | Another skill cited by the skill ("call skill X") | Section "Another skill cited and reference files" of [origin-cases.md](references/origin-cases.md) |
-| Script called by the skill (lint, tests, build) | `execFileSync` in the workflow; the result decides the next step |
+| Script called by the skill (lint, tests, build) | `ctx.exec` in the workflow (never a synchronous call); the result decides the next step |
 | Imperative process rule | Recipe "Invariants between steps" |
 | Human approval of an intermediate result | Recipe "Checkpoint across two runs" |
 | Loop with no cap | `for (let round = 1; round <= N && !ok; round++)` |

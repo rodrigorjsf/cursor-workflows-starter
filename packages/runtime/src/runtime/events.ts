@@ -53,11 +53,14 @@ export interface EventBase {
 }
 
 /**
- * Posição de uma etapa (uma chamada de `agent()`) na estrutura do run. As três ids bastam para montar o grafo do run
- * só com os eventos: nós = etapas e grupos, arestas = `parentId`, agrupamento = `groupId`.
+ * Posição de uma etapa (uma chamada de `agent()` ou de `exec()`) na estrutura do run. As três ids bastam para montar o
+ * grafo do run só com os eventos: nós = etapas e grupos, arestas = `parentId`, agrupamento = `groupId`.
  */
 export interface StepRef {
-  /** Identifica a etapa. É o mesmo em todas as tentativas e em todo resume do run (deriva da chave do journal). */
+  /**
+   * Identifica a etapa. É o mesmo em todas as tentativas e em todo resume do run. Numa etapa de agente deriva da chave do
+   * journal (`s-…`); num comando de `ctx.exec`, do comando, dos argumentos e do cwd, mais o número da ocorrência (`x-…`).
+   */
   stepId: string;
   /**
    * O nó (etapa ou grupo) de que esta etapa continua: a etapa anterior da sequência, o estágio anterior do mesmo item
@@ -170,6 +173,10 @@ export interface EffectiveConfig {
   roles: Record<string, EffectiveRole>;
   /** Preferências por glob de label, para etapas sem papel. */
   labels: Record<string, EffectiveRole>;
+  /** Tempo máximo, em milissegundos, de um comando de `ctx.exec` que não passa o próprio `timeoutMs`. */
+  execTimeoutMs: number;
+  /** Os ajustes que o workflow declara (`meta.settings`), cada um com o padrão do código ou o valor que um arquivo de configuração trocou. A origem de cada um está em `provenance` (`/settings/<nome>`). Vazio quando o workflow não declara nenhum. */
+  settings: Record<string, unknown>;
 }
 
 /** O run começou (ou foi retomado: cada execução emite o seu). */
@@ -317,7 +324,7 @@ export interface StepEndEvent extends EventBase, StepRef {
   reasoningTokens?: number;
   /** Por que a tentativa falhou, quando `ok` é false. */
   errorKind?: ErrorKind;
-  /** true = o run foi cancelado no meio de uma etapa que escreve e as alterações dela no diretório de trabalho foram desfeitas (o diretório voltou ao estado de antes da etapa). Se não foi possível desfazer, há um `warning` com o motivo. */
+  /** true = as alterações da tentativa no diretório de trabalho foram desfeitas (o diretório voltou ao estado de antes da etapa): o run foi cancelado no meio de uma etapa que escreve, ou a tentativa falhou e a etapa pede `revertOnRetry` antes de tentar de novo. Se não foi possível desfazer, há um `warning` com o motivo. */
   reverted?: boolean;
   /** A mensagem do erro, quando `ok` é false. */
   error?: string;
@@ -339,6 +346,56 @@ export interface StepEndEvent extends EventBase, StepRef {
   durationMs?: number;
 }
 
+/** Uma chamada de `ctx.exec` começou. É um nó do run, como uma etapa de agente: o comando fecha com um `exec-end` e a saída dele vai em eventos `content`. */
+export interface ExecStartEvent extends EventBase, StepRef {
+  type: "exec-start";
+  /** Identifica esta execução do comando: liga o `exec-start`, os `content` da saída e o `exec-end`. Um comando tem uma só; um resume roda o comando de novo, com outro `attemptId` e o mesmo `stepId`. */
+  attemptId: string;
+  /** O `label` da chamada; sem ele, o nome do comando. */
+  label: string;
+  /** A fase em que o comando começou (`phase` da chamada ou o último `ctx.phase`). */
+  phase?: string;
+  /** O programa, sem os argumentos (`git`, `npm`…). Os argumentos e o cwd ficam num `content` do tipo `tool-call`: podem carregar dados. */
+  command: string;
+  /** O tempo máximo do comando, em milissegundos. Passado esse tempo, o comando é morto. */
+  timeoutMs: number;
+}
+
+/** Como um comando de `ctx.exec` terminou: `exit` (o processo terminou sozinho, com qualquer código), `timeout` (morto ao passar do tempo), `cancelled` (o run foi cancelado e o comando morto) ou `spawn-error` (o processo não chegou a rodar). */
+export type ExecOutcome = "exit" | "timeout" | "cancelled" | "spawn-error";
+
+/** Uma chamada de `ctx.exec` terminou. */
+export interface ExecEndEvent extends EventBase, StepRef {
+  type: "exec-end";
+  /** A execução que terminou (o `attemptId` do `exec-start`). */
+  attemptId: string;
+  /** O `label` da chamada. */
+  label: string;
+  /** A fase do comando. */
+  phase?: string;
+  /** O programa, como no `exec-start`. */
+  command: string;
+  /** O comando rodou e saiu com código 0. */
+  ok: boolean;
+  /** Como o comando terminou. */
+  outcome: ExecOutcome;
+  /** O código de saída. Ausente quando o processo foi morto por um sinal ou não rodou. */
+  exitCode?: number;
+  /** O sinal que matou o processo (`SIGTERM` no timeout e no cancelamento), quando houve. */
+  signal?: string;
+  /** Por que o processo não pôde rodar (programa inexistente, cwd inválido). */
+  error?: string;
+  /** Duração do comando em milissegundos. */
+  durationMs: number;
+  /** Tamanho da saída do comando (stdout e stderr) em caracteres, antes de qualquer corte. */
+  outputChars: number;
+  /** true quando a saída passou do que o log guarda por comando (262144 caracteres): os `content` têm só o começo dela. O `ctx.exec` devolve ao workflow o fim, em `tail`. */
+  outputTruncated?: true;
+}
+
+/** De qual saída de um comando vem um texto: `stdout` ou `stderr`. */
+export type OutputStream = "stdout" | "stderr";
+
 /** O que um `content` guarda: o que foi enviado ao agente, o que ele disse, as tools que chamou, a saída dos comandos. */
 export type ContentKind = "prompt" | "agent-message" | "tool-call" | "command-output";
 
@@ -351,14 +408,16 @@ export type ContentKind = "prompt" | "agent-message" | "tool-call" | "command-ou
  */
 export interface ContentEvent extends EventBase, StepRef {
   type: "content";
-  /** A tentativa a que o conteúdo pertence (o `attemptId` do `step-start`). */
+  /** A tentativa a que o conteúdo pertence (o `attemptId` do `step-start`, ou do `exec-start` quando o conteúdo é de um comando de `ctx.exec`). */
   attemptId: string;
   /** O que o `text` guarda. */
   kind: ContentKind;
-  /** O nome da tool (`shell`, `read`…), em `tool-call` e `command-output`. */
+  /** O nome da tool (`shell`, `read`…), em `tool-call` e `command-output`. `exec` marca um comando de `ctx.exec`: o `tool-call` traz o comando, os argumentos e o cwd; os `command-output` trazem a saída. */
   tool?: string;
-  /** O id da chamada de tool no stream do agente: liga o `tool-call` ao `command-output` dela. */
+  /** O id da chamada de tool no stream do agente: liga o `tool-call` ao `command-output` dela. Num comando de `ctx.exec`, é o `attemptId` dele. */
   callId?: string;
+  /** De qual saída vem o `text` de um `command-output` de `ctx.exec`. A saída de um comando chega em vários eventos, em ordem, cortada em linhas inteiras quando dá. Ausente na saída de uma tool de agente, que junta as duas. */
+  stream?: OutputStream;
   /** O conteúdo, já sem segredos e cortado em 32768 caracteres. Ausente depois que a retenção o apagou. */
   text?: string;
   /** Tamanho do conteúdo em caracteres antes do corte. Fica depois que a retenção apaga o `text`. */
@@ -394,6 +453,8 @@ export type WorkflowEvent =
   | TurnEvent
   | ContentEvent
   | StepEndEvent
+  | ExecStartEvent
+  | ExecEndEvent
   | MetricEvent
   | WarningEvent;
 

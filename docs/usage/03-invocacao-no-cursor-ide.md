@@ -73,6 +73,7 @@ Fallback quando o MCP não está habilitado, e caminho preferido em CI e em runs
 wf start implement-issue --args '{"issue":123}'   # processo destacado; log em .workflows/jobs/<id>.log
 wf wait <jobId> --timeout 240
 wf cancel <jobId>          # para o run (SIGTERM ao processo do job); o run continua retomável
+wf gc --dry-run            # mostra os worktrees e branches de runs terminados que o gc removeria
 ```
 
 `start` valida o nome do workflow e o JSON dos args **antes** de destacar o processo e grava o job (com `runId`)
@@ -81,6 +82,11 @@ timeout existe, sem valor ([DOC](https://cursor.com/docs/release-notes)). Os cer
 verificados. Também há relatos, não verificados, de falhas em execuções headless (`agent -p`) iniciadas quase ao
 mesmo tempo; nem a doc do CLI nem os tópicos do fórum consultados tratam disso. Os dois pontos seguem em aberto.
 Por isso `wait` usa um timeout menor que 300 s, e `start` roda destacado.
+
+`wf gc` limpa o que os runs do `implement-issue` deixam no repositório (o worktree, a branch local e a branch do origin
+de cada run) quando o PR do run foi mergeado ou fechado, ou quando o run falhou há mais de `gcFailedAfterDays` dias.
+Escreve o plano no stderr antes de remover e um JSON no stdout (`remove`, `kept`, `errors`); `--dry-run` não muda nada.
+Não é automático: roda quando você o chama. Detalhes e limites em [5.1](../operating/01-governanca-e-custos.md).
 
 ### 3. Skill `run-workflow` e a trava de disparo
 

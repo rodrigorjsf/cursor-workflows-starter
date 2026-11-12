@@ -51,9 +51,11 @@ export default defineWorkflow<{ target: string }>({
 | `ctx.agent(prompt, opts)` | Creates a new Cursor SDK agent and runs one step. With `schema`, returns the validated object (the agent must call `submit_result`). Without `schema`, returns the final text. **Throws** if it fails after `retries`. |
 | `ctx.parallel(thunks)` | Barrier: runs in parallel and waits for all. An item that fails becomes `null`. |
 | `ctx.pipeline(items, ...stages)` | No barrier: each item goes through the stages independently. A stage that fails drops the item (`null`) and skips its later stages. A stage receives `(previousResult, item, index)`. |
+| `ctx.exec(command, args, opts)` | Runs a command (tests, `git`, `gh`) and returns `{ ok, exitCode, timedOut, tail, error? }`. Asynchronous, killed at its timeout, logged. See "`exec()` options" below. |
 | `ctx.phase(title)` / `ctx.log(message)` | Progress, shown by `wait_workflow` and on the CLI. |
 | `ctx.metric(name, value)` | An outcome or difficulty signal of the run, written to the `metrics` table (observability.md). |
 | `ctx.args`, `ctx.cwd`, `ctx.runId` | Input, repository and run id (the same on resume). |
+| `ctx.settings` | The workflow's own tunable settings (`meta.settings`) as the config resolved them for this run: the code default, or what the global or repo file set under `workflows.<name>.settings`. A copy; read fresh at every run start. |
 | `ctx.budget` | `remainingCents()` (`Infinity` without a cents cap), `spentCents()`, `chargedCents()`, `spentTokens()`, `usage()` (tokens by type), `maxCents`, `maxTokens`. Spend is the run's total: a resume starts from what earlier executions spent, failed attempts included. |
 
 ## `agent()` options
@@ -74,7 +76,39 @@ export default defineWorkflow<{ target: string }>({
 | `schemaRetries` | Re-prompts when the agent skips `submit_result` or sends invalid JSON. Default 2. |
 | `settingSources` | Which config layers the step loads: `"project"` (AGENTS.md, rules, skills, hooks, project MCP), `"team"`, `"mdm"`, `"user"`. Default when omitted: `["project","team","mdm"]`. Every layer adds fixed context to every call (cost.md). |
 | `memo` | Result cache across runs, keyed by prompt, model, schema, tools, context and repository state. Accepted only with read-only `tools`. |
+| `revertOnRetry` | Before each retry of a step that can write, puts `cwd` back as it was when the step started (files created are deleted, files changed are restored, the index is unstaged). Default off. Use it only when no other step writes in that directory at the same time (a worktree of the step's own): the undo restores the whole directory. In a directory that is not a git repository the retry runs anyway, with a warning. |
 | `sandbox` | Turns on the SDK's local sandbox for shell calls (Linux needs `bubblewrap`). Untested here; leave it off. |
+
+## `exec()`: commands the workflow runs itself
+
+Every command a workflow runs goes through `ctx.exec(command, args?, opts?)`, never through `execFileSync`, `execSync`
+or `spawnSync`: a synchronous call freezes the whole process while it runs, so a cancel signal waits behind it, nothing
+can time it out, and its output is invisible. `npm test` fails when a workflow file calls one of them.
+
+```ts
+const tests = await ctx.exec("bash", ["-c", "npm test"], { label: "tests", cwd: worktree, timeoutMs: 15 * 60_000 });
+if (!tests.ok) { /* tests.exitCode, tests.timedOut, tests.tail: the last 32768 characters of stdout and stderr */ }
+```
+
+| Option | Meaning |
+|---|---|
+| `label` | Name of the command in progress and in the event log. Default: the command's name. |
+| `phase` | Groups progress, like `agent()`'s. Default: the last `ctx.phase`. |
+| `timeoutMs` | The command is killed after this long: SIGTERM to its whole process group, SIGKILL two seconds later. Default: `workflows.<name>.execTimeoutMs` in the config files, 10 minutes when unset. Give a network command (`git push`, `gh`) a short one. |
+| `cwd` | Working directory. Default: the run's cwd. |
+| `env` | Variables added to the process's own environment. A variable set to `undefined` is removed from the command's (`{ NODE_TEST_CONTEXT: undefined }`). |
+
+- There is **no shell**: `command` and its `args` go to the program as they are. Use `["bash", ["-c", line]]` when you
+  need one (`bash -c`, not `bash -lc`: rules.md, rule 3). The command has no stdin and no controlling terminal, so a
+  `git push` that would ask for credentials fails at once instead of waiting; a stalled network call is the timeout's job.
+- A command that exits non-zero, times out (`timedOut: true`, `exitCode: null`) or cannot start (`error` says why) is a
+  **result**, not an exception: the code decides what it means. A cancelled run kills the command and throws, so the
+  workflow does not go on.
+- The output is streamed into the run's event log as `content` events (stdout and stderr apart), with the same
+  redaction, size cut and retention as an agent's content, and each call is a step node of the run, with a step id, a
+  parent id and a group id. `tail` is the real output, not redacted: do not paste it into anything that leaves the
+  machine without the secrets guard (rules.md, rule 6).
+- A resume runs the command again: `exec` is not journaled. Keep the effects idempotent (rules.md, rule 8).
 
 ## Definition fields
 
@@ -83,7 +117,9 @@ export default defineWorkflow<{ target: string }>({
   (`{ name, cloud, defaults?, envAliases?, description? }[]`: the named kinds of step, such as `classify` or
   `implement.low`; their names are the keys users configure under `workflows.<name>.roles`, so choose them as a public
   contract. `cloud` is `ok`, `read-only` or `never`; `defaults` holds the role's `model`, `timeoutMs`, `retries`,
-  `schemaRetries`, `settingSources`).
+  `schemaRetries`, `settingSources`), `settings` (`{ name: codeDefault }`: the workflow's own tunable limits, read
+  from `ctx.settings`; users tune them under `workflows.<name>.settings`, and a name you did not declare is a config
+  error, so choose the names as a public contract).
 - `defaults`: `model`, `timeoutMs`, `retries`, `schemaRetries`, `tools`, `sandbox`, applied to every `agent()` call that
   does not override them.
 - `budget`: `{ maxTokens?, maxCents? }`, the cap when nothing in the config sets one; an explicit `null` turns a cap off.

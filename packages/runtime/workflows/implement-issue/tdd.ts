@@ -2,10 +2,11 @@
 // arquivos uma etapa tocou, a suíte de testes e o progresso por fatia (para o resume não refazer nem reconferir o
 // que já passou, e para desfazer o que uma etapa interrompida deixou pela metade).
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { runDirIn } from "../../src/runtime/run-store.js";
 import { writeFileAtomic } from "../../src/runtime/state-files.js";
+import { CommandError, type Commands } from "./commands.js";
 
 /** O que conta como arquivo de teste quando o run não informa `testGlobs`. */
 export const DEFAULT_TEST_GLOBS = [
@@ -56,28 +57,26 @@ export function globToRegExp(glob: string): RegExp {
 export const matchesAny = (path: string, globs: string[]) => globs.some((g) => globToRegExp(g).test(path));
 export const isTestFile = (path: string, globs: string[] = DEFAULT_TEST_GLOBS) => matchesAny(path, globs);
 
-const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-
 /**
  * Snapshot do estado atual do worktree como uma árvore git (respeita o .gitignore). Comparar dois snapshots diz o
  * que uma etapa tocou, mesmo que o agente tenha rodado `git add`, `stash` ou `commit` no meio. Antes, desliga
  * `skip-worktree` e `assume-unchanged`: com eles, um arquivo editado some do `git add -A` (medido no review).
  */
-export function snapshotTree(cwd: string): string {
-  const flagged = git(cwd, "ls-files", "-v")
+export async function snapshotTree(cmd: Commands, cwd: string): Promise<string> {
+  const flagged = (await cmd.gitRead(cwd, "ls-files", "-v"))
     .split("\n")
     .filter((l) => /^(S |[a-z] )/.test(l))
     .map((l) => l.slice(2));
-  if (flagged.length) git(cwd, "update-index", "--no-skip-worktree", "--no-assume-unchanged", "--", ...flagged);
-  git(cwd, "add", "-A");
-  return git(cwd, "write-tree").trim();
+  if (flagged.length) await cmd.git(cwd, "update-index", "--no-skip-worktree", "--no-assume-unchanged", "--", ...flagged);
+  await cmd.git(cwd, "add", "-A");
+  return (await cmd.gitRead(cwd, "write-tree")).trim();
 }
 
 export interface Change { path: string; status: string }
 
 /** O que mudou entre dois snapshots. `--no-renames`: um arquivo movido aparece como removido E criado. */
-export function changesBetween(cwd: string, before: string, after: string): Change[] {
-  return git(cwd, "diff", "--no-renames", "--name-status", before, after)
+export async function changesBetween(cmd: Commands, cwd: string, before: string, after: string): Promise<Change[]> {
+  return (await cmd.gitRead(cwd, "diff", "--no-renames", "--name-status", before, after))
     .split("\n")
     .filter(Boolean)
     .map((l) => {
@@ -86,21 +85,27 @@ export function changesBetween(cwd: string, before: string, after: string): Chan
     });
 }
 
-export const changedBetween = (cwd: string, before: string, after: string) => changesBetween(cwd, before, after).map((c) => c.path);
+export const changedBetween = async (cmd: Commands, cwd: string, before: string, after: string) => (await changesBetween(cmd, cwd, before, after)).map((c) => c.path);
 
-/** Desfaz o que uma etapa mudou: volta índice e arquivos ao snapshot (remove os novos, restaura os alterados). */
-export function revertTo(cwd: string, tree: string): void {
-  git(cwd, "read-tree", "--reset", "-u", tree);
+/**
+ * Desfaz o que uma etapa mudou: volta índice e arquivos ao snapshot (remove os novos, restaura os alterados). O `read-tree`
+ * deixa para trás o arquivo novo que ninguém pôs no índice (o agente criou e o processo caiu antes do próximo `git add`):
+ * todo arquivo que o snapshot tinha está na árvore, então o que sobra sem rastreio é da etapa, e `clean` o apaga. Os
+ * ignorados (`node_modules`) ficam.
+ */
+export async function revertTo(cmd: Commands, cwd: string, tree: string): Promise<void> {
+  await cmd.git(cwd, "read-tree", "--reset", "-u", tree);
+  await cmd.git(cwd, "clean", "-fdq");
 }
 
 /** Volta só estes caminhos ao snapshot: os que existiam são restaurados, os criados depois são apagados. */
-export function restorePaths(cwd: string, tree: string, paths: string[]): void {
+export async function restorePaths(cmd: Commands, cwd: string, tree: string, paths: string[]): Promise<void> {
   if (!paths.length) return;
-  const inTree = new Set(git(cwd, "ls-tree", "-r", "--name-only", tree, "--", ...paths).split("\n").filter(Boolean));
+  const inTree = new Set((await cmd.gitRead(cwd, "ls-tree", "-r", "--name-only", tree, "--", ...paths)).split("\n").filter(Boolean));
   const existed = paths.filter((p) => inTree.has(p));
-  if (existed.length) git(cwd, "checkout", tree, "--", ...existed);
+  if (existed.length) await cmd.git(cwd, "checkout", tree, "--", ...existed);
   for (const p of paths.filter((x) => !inTree.has(x))) {
-    git(cwd, "rm", "-q", "-f", "--cached", "--ignore-unmatch", "--", p);
+    await cmd.git(cwd, "rm", "-q", "-f", "--cached", "--ignore-unmatch", "--", p);
     rmSync(join(cwd, p), { force: true });
   }
 }
@@ -108,16 +113,18 @@ export function restorePaths(cwd: string, tree: string, paths: string[]): void {
 const PKG_RUNNER_FIELDS = ["jest", "vitest", "mocha", "ava", "c8", "nyc"];
 
 /** O `package.json` mudou o que roda nos testes? Compara os scripts e os campos de configuração de runners. */
-export function runnerConfigChanged(cwd: string, before: string, after: string): boolean {
-  const read = (tree: string) => {
+export async function runnerConfigChanged(cmd: Commands, cwd: string, before: string, after: string): Promise<boolean> {
+  const read = async (tree: string) => {
     try {
-      return JSON.parse(git(cwd, "show", `${tree}:package.json`)) as Record<string, unknown>;
-    } catch {
-      return {};
+      return JSON.parse(await cmd.gitRead(cwd, "show", `${tree}:package.json`)) as Record<string, unknown>;
+    } catch (err) {
+      // O git respondeu que não há package.json na árvore (saiu com erro), ou ele não é JSON: não mudou o que roda.
+      if ((err instanceof CommandError && err.result.exitCode !== null) || err instanceof SyntaxError) return {};
+      throw err; // o git estourou o tempo, não iniciou, ou o run foi cancelado: não é uma resposta
     }
   };
-  const a = read(before);
-  const b = read(after);
+  const a = await read(before);
+  const b = await read(after);
   const pick = (p: Record<string, unknown>) => JSON.stringify([p.scripts ?? null, ...PKG_RUNNER_FIELDS.map((f) => p[f] ?? null)]);
   return pick(a) !== pick(b);
 }
@@ -129,30 +136,28 @@ export const fileHash = (cwd: string, path: string): string | null => {
 
 export interface TestRun {
   ok: boolean;
+  /** O fim da saída (4000 caracteres). */
   output: string;
-  /** passed; failed (a suíte rodou e falhou); timeout; overflow (saída maior que o buffer). Só "failed" vale como red. */
-  kind: "passed" | "failed" | "timeout" | "overflow";
+  /**
+   * passed; failed (a suíte rodou e falhou); timeout (morta no teto de tempo); killed (um sinal a matou, o OOM killer por
+   * exemplo, ou ela nem iniciou: não é resultado de teste). Só "failed" vale como red.
+   */
+  kind: "passed" | "failed" | "timeout" | "killed";
 }
 
 /**
- * Roda o comando de teste com o ambiente de quem chamou o workflow. Sem `-l`: um shell de login recarrega o perfil e
- * pode trocar o PATH (medido: o npm do `mise exec` virou outro, quebrado). Sem NODE_TEST_CONTEXT: dentro de um runner
- * de testes, um `node --test` aninhado herda essa variável e sai com 0 mesmo com teste falhando (medido no 22.13 e
- * 22.23). Com teto de tempo: um teste red de comportamento assíncrono que ainda não existe costuma travar.
+ * Roda o comando de teste por `ctx.exec`, com o ambiente de quem chamou o workflow: a suíte aparece no log do run como um
+ * nó de comando, e nada trava o processo enquanto ela roda. Sem `-l`: um shell de login recarrega o perfil e pode trocar
+ * o PATH (medido: o npm do `mise exec` virou outro, quebrado). Sem NODE_TEST_CONTEXT: dentro de um runner de testes, um
+ * `node --test` aninhado herda essa variável e sai com 0 mesmo com teste falhando (medido no 22.13 e 22.23). Com teto de
+ * tempo: um teste red de comportamento assíncrono que ainda não existe costuma travar.
  */
-export function runTests(command: string, cwd: string, timeoutMs = 10 * 60_000): TestRun {
-  const env = { ...process.env };
-  delete env.NODE_TEST_CONTEXT;
-  try {
-    const out = execFileSync("bash", ["-c", command], { cwd, env, encoding: "utf8", stdio: "pipe", timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 });
-    return { ok: true, output: out.slice(-4000), kind: "passed" };
-  } catch (err) {
-    const e = err as { stdout?: string; stderr?: string; code?: string; signal?: string };
-    const output = `${e.stdout ?? ""}\n${e.stderr ?? ""}`.slice(-4000);
-    if (e.code === "ENOBUFS") return { ok: false, output, kind: "overflow" };
-    if (e.code === "ETIMEDOUT" || e.signal === "SIGTERM") return { ok: false, output, kind: "timeout" };
-    return { ok: false, output, kind: "failed" };
-  }
+export async function runTests(cmd: Commands, command: string, cwd: string, opts: { timeoutMs: number; label: string }): Promise<TestRun> {
+  const r = await cmd.exec("bash", ["-c", command], { cwd, env: { NODE_TEST_CONTEXT: undefined }, timeoutMs: opts.timeoutMs, label: opts.label });
+  const output = (r.error ? `${r.error}\n${r.tail}` : r.tail).slice(-4000);
+  if (r.timedOut) return { ok: false, output, kind: "timeout" };
+  if (r.exitCode === null) return { ok: false, output, kind: "killed" };
+  return { ok: r.ok, output, kind: r.ok ? "passed" : "failed" };
 }
 
 /** Runners que saem com erro quando não há nenhum teste (jest, vitest, pytest, mocha): isso não é base vermelha. */
@@ -188,9 +193,20 @@ export interface SliceRecord {
 }
 
 /** Etapa que escreve em andamento: se o processo cair, o resume volta a `before` antes de seguir. */
-export interface InFlight { id: string; before: string; resumes: number }
+export interface InFlight {
+  id: string;
+  before: string;
+  /**
+   * O código chegou a ver a etapa terminar sem o desfazer (um cancelamento no meio dela, ou um git que travou): o processo
+   * não caiu, então o resume não conta isto como uma queda.
+   */
+  interrupted?: boolean;
+}
 
 export interface Progress {
+  /** A branch e o worktree que ESTE run criou: o worktree só é reaproveitado pelo run que o registrou (nunca por outro). */
+  branch?: string;
+  worktree?: string;
   /** Commit do worktree antes de qualquer mudança: base do diff do review e do commit final. */
   baseCommit?: string;
   baselineGreen?: boolean;
@@ -202,7 +218,16 @@ export interface Progress {
   /** O que a rodada de correção disse que fez (ou por que discordou): vai para o revisor da rodada 2. */
   refactorSummary?: string;
   deliveredCommit?: string;
+  /** Commits que o run empurrou (ou ia empurrar) para o origin: o que ele reconhece como seu lá. Qualquer outro commit na branch é de alguém. */
+  pushed?: string[];
+  /** O `repo` (owner/repo) do run quando ele empurrou: o PR da branch está lá. Ausente: o repositório do cwd. */
+  repo?: string;
   inFlight?: InFlight;
+  /**
+   * Quantas vezes o processo caiu no meio de cada etapa de escrita (por id), contadas pelo resume que a encontrou em andamento.
+   * Passadas `maxStepCrashes`, o run para em vez de retomar a etapa de novo. A contagem fica: o resume seguinte também para.
+   */
+  crashes?: Record<string, number>;
   /** Contador das etapas de escrita: entra no prompt para o journal nunca devolver uma escrita antiga. */
   writeSeq?: number;
   slices: SliceRecord[];
@@ -213,7 +238,7 @@ export class ProgressStore {
   readonly file: string;
   data: Progress;
   constructor(cwd: string, runId: string) {
-    this.file = join(cwd, ".workflows", "runs", runId, "tdd-progress.json");
+    this.file = join(runDirIn(cwd, runId), "tdd-progress.json");
     this.data = existsSync(this.file) ? (JSON.parse(readFileSync(this.file, "utf8")) as Progress) : { slices: [] };
   }
   slice(key: string): SliceRecord | undefined {

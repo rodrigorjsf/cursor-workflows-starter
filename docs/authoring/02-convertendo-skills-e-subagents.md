@@ -41,7 +41,7 @@ em dois runs ([4.1 · Checkpoint em dois runs](01-escrevendo-workflows.md#checkp
    passou", "red antes de green", "confirme com o usuário"). Cada uma vira uma regra em código, um arg, uma
    invariante conferida entre etapas, um checkpoint, um classificador barato com schema, ou fica como skill (a lista e
    o critério de pronto estão no passo 2 da skill).
-3. **Mapeamento** para `ctx.agent`, `ctx.parallel`, `ctx.pipeline`, `execFileSync` e laços com teto. A tabela
+3. **Mapeamento** para `ctx.agent`, `ctx.parallel`, `ctx.pipeline`, `ctx.exec` e laços com teto. A tabela
    completa está na skill.
 4. **Otimização de custo** (obrigatória): checklist de [5.2](../operating/02-custos-e-cache.md#6-checklist-de-custo) etapa por
    etapa e estimativa de custo por caminho, no caso típico e no pior caso.

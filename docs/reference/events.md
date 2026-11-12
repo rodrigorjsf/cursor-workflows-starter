@@ -22,11 +22,11 @@ Campos de todo evento.
 
 ## StepRef
 
-Posição de uma etapa (uma chamada de `agent()`) na estrutura do run. As três ids bastam para montar o grafo do run só com os eventos: nós = etapas e grupos, arestas = `parentId`, agrupamento = `groupId`.
+Posição de uma etapa (uma chamada de `agent()` ou de `exec()`) na estrutura do run. As três ids bastam para montar o grafo do run só com os eventos: nós = etapas e grupos, arestas = `parentId`, agrupamento = `groupId`.
 
 | Campo | Tipo | Obrigatório | Descrição |
 | --- | --- | --- | --- |
-| `stepId` | `string` | sim | Identifica a etapa. É o mesmo em todas as tentativas e em todo resume do run (deriva da chave do journal). |
+| `stepId` | `string` | sim | Identifica a etapa. É o mesmo em todas as tentativas e em todo resume do run. Numa etapa de agente deriva da chave do journal (`s-…`); num comando de `ctx.exec`, do comando, dos argumentos e do cwd, mais o número da ocorrência (`x-…`). |
 | `parentId` | `string \| null` | sim | O nó (etapa ou grupo) de que esta etapa continua: a etapa anterior da sequência, o estágio anterior do mesmo item de um `pipeline`, ou o grupo que a abriu quando é a primeira do ramo. `null` na primeira etapa do run. |
 | `groupId` | `string \| null` | sim | O `parallel` ou `pipeline` mais interno que contém a etapa; `null` fora de qualquer grupo. |
 
@@ -151,10 +151,11 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 
 | Campo | Tipo | Obrigatório | Descrição |
 | --- | --- | --- | --- |
-| `attemptId` | `string` | sim | A tentativa a que o conteúdo pertence (o `attemptId` do `step-start`). |
+| `attemptId` | `string` | sim | A tentativa a que o conteúdo pertence (o `attemptId` do `step-start`, ou do `exec-start` quando o conteúdo é de um comando de `ctx.exec`). |
 | `kind` | `ContentKind` | sim | O que o `text` guarda. |
-| `tool` | `string` | não | O nome da tool (`shell`, `read`…), em `tool-call` e `command-output`. |
-| `callId` | `string` | não | O id da chamada de tool no stream do agente: liga o `tool-call` ao `command-output` dela. |
+| `tool` | `string` | não | O nome da tool (`shell`, `read`…), em `tool-call` e `command-output`. `exec` marca um comando de `ctx.exec`: o `tool-call` traz o comando, os argumentos e o cwd; os `command-output` trazem a saída. |
+| `callId` | `string` | não | O id da chamada de tool no stream do agente: liga o `tool-call` ao `command-output` dela. Num comando de `ctx.exec`, é o `attemptId` dele. |
+| `stream` | `OutputStream` | não | De qual saída vem o `text` de um `command-output` de `ctx.exec`. A saída de um comando chega em vários eventos, em ordem, cortada em linhas inteiras quando dá. Ausente na saída de uma tool de agente, que junta as duas. |
 | `text` | `string` | não | O conteúdo, já sem segredos e cortado em 32768 caracteres. Ausente depois que a retenção o apagou. |
 | `chars` | `number` | sim | Tamanho do conteúdo em caracteres antes do corte. Fica depois que a retenção apaga o `text`. |
 | `truncated` | `boolean` | não | true quando o `text` é só o começo do conteúdo. |
@@ -183,7 +184,7 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 | `usage` | `UsageTotals` | não | Tokens da tentativa por tipo, como o Cursor os reportou. |
 | `reasoningTokens` | `number` | não | Tokens de raciocínio, quando o modelo os reporta. |
 | `errorKind` | `ErrorKind` | não | Por que a tentativa falhou, quando `ok` é false. |
-| `reverted` | `boolean` | não | true = o run foi cancelado no meio de uma etapa que escreve e as alterações dela no diretório de trabalho foram desfeitas (o diretório voltou ao estado de antes da etapa). Se não foi possível desfazer, há um `warning` com o motivo. |
+| `reverted` | `boolean` | não | true = as alterações da tentativa no diretório de trabalho foram desfeitas (o diretório voltou ao estado de antes da etapa): o run foi cancelado no meio de uma etapa que escreve, ou a tentativa falhou e a etapa pede `revertOnRetry` antes de tentar de novo. Se não foi possível desfazer, há um `warning` com o motivo. |
 | `error` | `string` | não | A mensagem do erro, quando `ok` é false. |
 | `schemaReprompts` | `number` | não | Re-prompts feitos até o agente chamar `submit_result` com JSON válido. |
 | `turns` | `number` | não | Turnos do agente na tentativa. |
@@ -193,6 +194,41 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 | `agentId` | `string` | não | O id do agente no Cursor. |
 | `usageRuns` | `RunUsage[]` | não | O uso por run do agente, como o Cursor o reporta. |
 | `durationMs` | `number` | não | Duração da tentativa em milissegundos. |
+
+### `exec-start`
+
+Uma chamada de `ctx.exec` começou. É um nó do run, como uma etapa de agente: o comando fecha com um `exec-end` e a saída dele vai em eventos `content`.
+
+Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
+
+| Campo | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `attemptId` | `string` | sim | Identifica esta execução do comando: liga o `exec-start`, os `content` da saída e o `exec-end`. Um comando tem uma só; um resume roda o comando de novo, com outro `attemptId` e o mesmo `stepId`. |
+| `label` | `string` | sim | O `label` da chamada; sem ele, o nome do comando. |
+| `phase` | `string` | não | A fase em que o comando começou (`phase` da chamada ou o último `ctx.phase`). |
+| `command` | `string` | sim | O programa, sem os argumentos (`git`, `npm`…). Os argumentos e o cwd ficam num `content` do tipo `tool-call`: podem carregar dados. |
+| `timeoutMs` | `number` | sim | O tempo máximo do comando, em milissegundos. Passado esse tempo, o comando é morto. |
+
+### `exec-end`
+
+Uma chamada de `ctx.exec` terminou.
+
+Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
+
+| Campo | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `attemptId` | `string` | sim | A execução que terminou (o `attemptId` do `exec-start`). |
+| `label` | `string` | sim | O `label` da chamada. |
+| `phase` | `string` | não | A fase do comando. |
+| `command` | `string` | sim | O programa, como no `exec-start`. |
+| `ok` | `boolean` | sim | O comando rodou e saiu com código 0. |
+| `outcome` | `ExecOutcome` | sim | Como o comando terminou. |
+| `exitCode` | `number` | não | O código de saída. Ausente quando o processo foi morto por um sinal ou não rodou. |
+| `signal` | `string` | não | O sinal que matou o processo (`SIGTERM` no timeout e no cancelamento), quando houve. |
+| `error` | `string` | não | Por que o processo não pôde rodar (programa inexistente, cwd inválido). |
+| `durationMs` | `number` | sim | Duração do comando em milissegundos. |
+| `outputChars` | `number` | sim | Tamanho da saída do comando (stdout e stderr) em caracteres, antes de qualquer corte. |
+| `outputTruncated` | `true` | não | true quando a saída passou do que o log guarda por comando (262144 caracteres): os `content` têm só o começo dela. O `ctx.exec` devolve ao workflow o fim, em `tail`. |
 
 ### `metric`
 
@@ -228,6 +264,8 @@ A configuração efetiva de um run: o que as camadas e os tetos globais decidira
 | `caps` | `EffectiveCaps` | sim | Tetos globais em vigor. |
 | `roles` | `Record<string, EffectiveRole>` | sim | Um item por papel que o workflow declara (`meta.roles`). |
 | `labels` | `Record<string, EffectiveRole>` | sim | Preferências por glob de label, para etapas sem papel. |
+| `execTimeoutMs` | `number` | sim | Tempo máximo, em milissegundos, de um comando de `ctx.exec` que não passa o próprio `timeoutMs`. |
+| `settings` | `Record<string, unknown>` | sim | Os ajustes que o workflow declara (`meta.settings`), cada um com o padrão do código ou o valor que um arquivo de configuração trocou. A origem de cada um está em `provenance` (`/settings/<nome>`). Vazio quando o workflow não declara nenhum. |
 
 ### EffectiveLimits
 
@@ -318,12 +356,28 @@ O que um `content` guarda: o que foi enviado ao agente, o que ele disse, as tool
 type ContentKind = "prompt" | "agent-message" | "tool-call" | "command-output";
 ```
 
+### OutputStream
+
+De qual saída de um comando vem um texto: `stdout` ou `stderr`.
+
+```ts
+type OutputStream = "stdout" | "stderr";
+```
+
 ### ErrorKind
 
 Por que uma tentativa de etapa falhou: estourou o tempo, o run do agente terminou em erro, o JSON do schema nunca veio válido, limite de uso do plano, teto de tokens (`budget`: o run do agente foi cancelado no turno que passou do teto da etapa ou do run, e a etapa não tenta de novo), o run foi cancelado, ou exceção.
 
 ```ts
 type ErrorKind = "timeout" | "run-error" | "schema" | "rate-limit" | "budget" | "cancelled" | "exception";
+```
+
+### ExecOutcome
+
+Como um comando de `ctx.exec` terminou: `exit` (o processo terminou sozinho, com qualquer código), `timeout` (morto ao passar do tempo), `cancelled` (o run foi cancelado e o comando morto) ou `spawn-error` (o processo não chegou a rodar).
+
+```ts
+type ExecOutcome = "exit" | "timeout" | "cancelled" | "spawn-error";
 ```
 
 ---

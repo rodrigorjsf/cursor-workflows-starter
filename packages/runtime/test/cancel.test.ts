@@ -109,18 +109,29 @@ test("a creation that never answers fails the step on its timeout instead of han
 
 test("schema re-prompts share the step timeout instead of restarting it", async () => {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  script.push(async () => (await sleep(250), { status: "finished", result: "no submit_result call" })); // the re-prompt follows
-  script.push(() => ({ hang: true }));
+  // Wide margins, so that a scheduling delay on a busy machine cannot reorder things: the first send ends a second before the
+  // step times out (a longer delay and the re-prompt would never start), and the step may end up to 0.75 s late before it
+  // is taken for one that restarted its timeout.
+  const stepTimeoutMs = 2_000;
+  const firstSendMs = 1_000;
+  let firstSendAt = 0;
+  let repromptAt = 0;
+  script.push(async () => ((firstSendAt = Date.now()), await sleep(firstSendMs), { status: "finished", result: "no submit_result call" })); // the re-prompt follows
+  script.push(() => ((repromptAt = Date.now()), { hang: true }));
   const wf = defineWorkflow({
     meta: { name: "reprompt-timeout", description: "reprompt" },
     defaults: { model },
-    run: (ctx) => ctx.agent("x", { label: "x", retries: 0, timeoutMs: 400, schema: { type: "object", properties: { a: { type: "string" } } } }),
+    run: (ctx) => ctx.agent("x", { label: "x", retries: 0, timeoutMs: stepTimeoutMs, schema: { type: "object", properties: { a: { type: "string" } } } }),
   });
   const outcome = await runWorkflow(wf, {}, { cwd, runId: "r-reprompt" });
   assert.equal(outcome.status, "failed");
   const stepEnd = eventsOf("r-reprompt").find((e) => e.type === "step-end");
   assert.ok(stepEnd && stepEnd.type === "step-end" && stepEnd.errorKind === "timeout");
-  assert.ok(stepEnd.durationMs! < 600, `the re-prompt had the rest of the 400 ms, not a fresh 400 ms (took ${stepEnd.durationMs} ms)`);
+  assert.equal(stepEnd.schemaReprompts, 1, "the first send answered without submit_result, so a re-prompt followed it");
+  // The first send ran for `beforeReprompt` ms before the re-prompt began. With the rest of the allowance the step ends at
+  // `stepTimeoutMs`; with a fresh one, at `beforeReprompt + stepTimeoutMs`. The line is three quarters of the way to the second.
+  const beforeReprompt = repromptAt - firstSendAt;
+  assert.ok(stepEnd.durationMs! < stepTimeoutMs + beforeReprompt * 0.75, `the re-prompt had the rest of the ${stepTimeoutMs} ms, not a fresh ${stepTimeoutMs} ms (took ${stepEnd.durationMs} ms, the re-prompt started after ${beforeReprompt} ms)`);
   assert.equal(stats.cancelled, 1, "the hung re-prompt run was cancelled");
 });
 
@@ -399,4 +410,93 @@ test("a revert goes back to the start of the step, not of the attempt that was r
   });
   assert.equal(outcome.status, "cancelled");
   assert.ok(!existsSync(join(repo, "partial.txt")), "what the first attempt left is gone too");
+});
+
+// ── A retried write step starts from a clean tree (`revertOnRetry`) ────────────────────
+
+/** A workflow of one write step whose first attempt fails; `onRetry` is what the second attempt sees when it starts. */
+function retryingWriter(repo: string, revertOnRetry: boolean | undefined) {
+  return defineWorkflow({
+    meta: { name: "retry-writer", description: "writes, fails, is retried" },
+    defaults: { model },
+    run: (ctx) => ctx.agent("edit", { label: "edit", cwd: repo, retries: 1, timeoutMs: 5000, revertOnRetry }),
+  });
+}
+
+/** Attempt 1 leaves a new file, a changed tracked file and a staged change, then fails; attempt 2 looks at the directory and succeeds. */
+function failThenLook(repo: string, seen: { newFile?: boolean; tracked?: string; status?: string }) {
+  script.push(() => {
+    writeFileSync(join(repo, "partial.txt"), "left by the failed first attempt\n");
+    writeFileSync(join(repo, "tracked.txt"), "half-made edit\n");
+    if (existsSync(join(repo, ".git"))) git(repo, "add", "tracked.txt");
+    return { status: "error", error: { message: "boom" } };
+  });
+  script.push(() => {
+    Object.assign(seen, { newFile: existsSync(join(repo, "partial.txt")), tracked: read(repo, "tracked.txt"), status: existsSync(join(repo, ".git")) ? git(repo, "status", "--porcelain") : undefined });
+    return { status: "finished", result: "ok" };
+  });
+}
+
+test("with revertOnRetry a retried write step starts from the directory as it was before the step; the failed attempt's step-end says it was reverted", async () => {
+  const repo = makeRepo();
+  const seen: { newFile?: boolean; tracked?: string; status?: string } = {};
+  failThenLook(repo, seen);
+  const outcome = await runWorkflow(retryingWriter(repo, true), {}, { cwd, runId: "r-clean-retry" });
+
+  assert.equal(outcome.status, "finished");
+  assert.equal(seen.newFile, false, "the file the first attempt created is gone");
+  assert.equal(seen.tracked, "original\n", "its edit is undone");
+  assert.equal(seen.status, "", "and so is what it staged: the retry sees a clean tree");
+  const ends = eventsOf("r-clean-retry").filter((e) => e.type === "step-end");
+  assert.deepEqual(ends.map((e) => (e.type === "step-end" ? [e.ok, e.reverted] : [])), [[false, true], [true, undefined]]);
+});
+
+test("without revertOnRetry the retry meets what the failed attempt left: other workflows keep their behaviour", async () => {
+  const repo = makeRepo();
+  const seen: { newFile?: boolean; tracked?: string } = {};
+  failThenLook(repo, seen);
+  const outcome = await runWorkflow(retryingWriter(repo, undefined), {}, { cwd, runId: "r-dirty-retry" });
+
+  assert.equal(outcome.status, "finished");
+  assert.equal(seen.newFile, true);
+  assert.equal(seen.tracked, "half-made edit\n");
+  assert.ok(eventsOf("r-dirty-retry").every((e) => e.type !== "step-end" || e.reverted === undefined));
+});
+
+test("a retry that cannot be reverted (not a git repository) still runs, with a warning that says why", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "wf-retry-plain-"));
+  repos.push(dir);
+  const seen: { newFile?: boolean; tracked?: string } = {};
+  failThenLook(dir, seen);
+  const outcome = await runWorkflow(retryingWriter(dir, true), {}, { cwd, runId: "r-plain-retry" });
+
+  assert.equal(outcome.status, "finished", "the step still finishes");
+  assert.equal(seen.newFile, true, "nothing could be undone");
+  const warning = eventsOf("r-plain-retry").find((e) => e.type === "warning" && /is not a git repository/.test(e.message));
+  assert.ok(warning && warning.type === "warning" && warning.message.includes(dir) && /retr/.test(warning.message), "the warning names the directory and the retry");
+});
+
+test("a cancel after a retry was reverted still goes back to the start of the step, not to the retry's start", async () => {
+  const repo = makeRepo();
+  script.push(() => {
+    writeFileSync(join(repo, "partial.txt"), "first attempt\n");
+    return { status: "error", error: { message: "boom" } };
+  });
+  script.push(() => {
+    writeFileSync(join(repo, "second.txt"), "second attempt\n");
+    writeFileSync(join(repo, "tracked.txt"), "second attempt edit\n");
+    return { hang: true };
+  });
+  const controller = new AbortController();
+  const outcome = await runWorkflow(retryingWriter(repo, true), {}, {
+    cwd,
+    runId: "r-cancel-after-retry",
+    signal: controller.signal,
+    onEvent: (e) => {
+      if (e.type === "step-start" && e.attempt === 2) setTimeout(() => controller.abort(), 10);
+    },
+  });
+  assert.equal(outcome.status, "cancelled");
+  assert.ok(!existsSync(join(repo, "partial.txt")) && !existsSync(join(repo, "second.txt")), "both attempts' files are gone");
+  assert.equal(read(repo, "tracked.txt"), "original\n");
 });

@@ -22,8 +22,10 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   ├── runtime/
 │       │   │   ├── workflow.ts     # tipos públicos + defineWorkflow()
 │       │   │   ├── engine.ts       # agent/parallel/pipeline/phase, retries, modelo, teto de custo
+│       │   │   ├── backend.ts      # AgentBackend: onde cada tentativa roda (hoje só o backend local, que fala com o SDK)
 │       │   │   ├── events.ts       # o tipo dos eventos (a referência 6.1 é gerada dele)
-│       │   │   ├── run-store.ts    # log de eventos, journal e lock de cada run
+│       │   │   ├── outcome.ts      # a classe de um run terminado (entregue, falhou, cancelado…): o recorder e o `wf gc` leem a mesma
+│       │   │   ├── run-store.ts    # log de eventos, journal, lock de cada run e locks nomeados do repositório (`.workflows/locks/`)
 │       │   │   ├── structured.ts   # saída estruturada via custom tool submit_result + Ajv
 │       │   │   ├── journal.ts      # resume sem repetir etapas concluídas
 │       │   │   ├── jobs.ts         # jobs: processo destacado, heartbeat, cancelamento e estado projetado do log
@@ -39,12 +41,12 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   ├── kit-version.ts      # versão do kit e a faixa `kit` que o repositório declara
 │       │   ├── upgrade.ts          # wf upgrade: leva o kit instalado à tag mais nova e roda o install.sh --refresh dela
 │       │   ├── unified-diff.ts     # o diff que o wf init imprime
-│       │   ├── cli.ts              # wf login | whoami | models | list | init | doctor | upgrade | config | run | start | wait | status | cancel | jobs | stats | metrics
+│       │   ├── cli.ts              # wf login | whoami | models | list | init | doctor | upgrade | config | run | start | wait | status | cancel | jobs | gc | stats | metrics
 │       │   └── mcp-server.ts       # tools MCP: list_workflows, start_workflow, wait_workflow, get_workflow_status, cancel_workflow
 │       ├── workflows/
 │       │   ├── smoke.ts            # teste de fumaça: uma etapa estruturada, num modelo incluído, com teto de 50 mil tokens
 │       │   ├── implement-issue.ts  # exemplo: TDD fatia a fatia conferido pelo código → review em 3 eixos → PR com evidência
-│       │   └── implement-issue/    # prompts (paráfrases das skills de mattpocock/skills), laço TDD, review, corpo do PR
+│       │   └── implement-issue/    # prompts (paráfrases das skills de mattpocock/skills), laço TDD, review, corpo do PR, `gc.ts` (o `wf gc`)
 │       └── test/                   # testes offline (fake SDK)
 ├── skills/                 # skills distribuídas (autossuficientes: SKILL.md + references/)
 │   ├── run-workflow/       # /run-workflow <nome> <args>: dispara e acompanha

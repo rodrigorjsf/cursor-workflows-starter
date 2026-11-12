@@ -26,6 +26,10 @@ Behaviour is configured in JSON, in two files, and the user's file holds the onl
   Zero is never read as unset.
 - **Roles are a public contract.** A workflow declares its roles in its metadata, and a config key that names a role the
   workflow did not declare is an error. `WF_MODEL_*` variables keep working as shortcuts for roles, model params included.
+- **Workflow settings are the other public contract.** A workflow also declares its own tunable limits, with code
+  defaults, in its metadata (`meta.settings`), and the files tune them under `workflows.<name>.settings`. They use only
+  the code < global < repo layers: no env var, flag or chat override reaches them, and no cap clamps them (they are
+  not spending or reach). A name the workflow did not declare is an error, as for roles.
 - **Validated and recorded.** A JSON Schema shipped with the kit validates both files (Ajv; errors name the field path).
   The config is re-read on every `start_workflow`. Each run records the effective config and the source of every value.
 - **Default caps the installer writes:** 3,000,000 tokens per run; 600,000 tokens per step; 500 cents per run; all
@@ -36,8 +40,8 @@ Behaviour is configured in JSON, in two files, and the user's file holds the onl
 - A pull request cannot raise spend, allow the `"all"` setting source, enable cloud steps or loosen sandboxing: those
   are caps, and a repo file only tightens them.
 - "Why did this run use that model or that cap?" has an answer in the run's first event, not in someone's memory.
-- The role names of a workflow become API: renaming one breaks every config that mentions it, and that failure is loud
-  on purpose.
+- The role names and the setting names of a workflow become API: renaming one breaks every config that mentions it, and
+  that failure is loud on purpose.
 - There are two files and a precedence chain to learn. The cost is paid back by `wf config show`, which prints the
   effective config and its provenance for the current repo.
 - A cap that is a bare `null` is a decision to remove protection; it is allowed in the global file and visible in the
