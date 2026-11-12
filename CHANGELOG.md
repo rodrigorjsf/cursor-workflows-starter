@@ -10,6 +10,10 @@
   `skill-to-workflow`) passam para `skills/`, em inglês, e `.agents/skills/` aponta para elas por links simbólicos.
   `templates/agents-md-block.md` guarda as regras para repositórios-alvo. `npm run wf`, `mcp`, `dash`, `stats`,
   `typecheck` e `npm test` seguem iguais na raiz.
+- **As skills distribuídas são autossuficientes.** Cada uma carrega em `references/` tudo o que instrui (API do
+  runtime, regras, receitas, checklist de custo, observabilidade, testes, onde cada harness procura cada coisa), sem
+  apontar para `docs/`, `scripts/` nem para outra skill; as referências que duas skills dividem são cópias idênticas,
+  e o `npm test` confere. A `skill-to-workflow` troca `ORIGEM.md` por `references/origin-cases.md`.
 - **`CLAUDE.md` é o guia canônico do mantenedor, em inglês, e `AGENTS.md` é um link simbólico para ele.** As regras do
   antigo `AGENTS.md` foram divididas: as de manutenção ficam em `CLAUDE.md`, as de repositórios-alvo em
   `templates/agents-md-block.md`.

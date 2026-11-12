@@ -62,8 +62,8 @@ The runtime's messages are in Portuguese. This skill quotes the ones it matches,
 ## Without the MCP server
 
 If the `workflows` tools are not available, use the CLI from the terminal. The `argsSchema` from step 1 lives in the
-`meta` of the workflow file (`packages/runtime/workflows/<name>.ts` in the kit or `.agents/workflows/<name>.ts`):
-`wf list` returns only the name and description. The CLI writes the same job state, so steps 3 to 5 apply equally,
+`meta` of the workflow file (a file in the kit's built-in `workflows/` folder or in the repository's
+`.agents/workflows/`): `wf list` returns only the name and description. The CLI writes the same job state, so steps 3 to 5 apply equally,
 with `--resume <runId>` in place of `resumeRunId` (relaunch with `start`, also when `next` shows `run`). The MCP caps
 live in the `env` of the `workflows` server in `mcp.json` and do not reach the shell: pass the values of
 `WF_MAX_CENTS` and `WF_MAX_TOKENS` as `--max-cents` and `--max-tokens`.

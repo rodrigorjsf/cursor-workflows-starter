@@ -1,8 +1,7 @@
 # Origin cases
 
-Reference for `/skill-to-workflow`, for origins that bring one of these cases. The reference conversion,
-`packages/runtime/workflows/implement-issue.ts` (with `packages/runtime/workflows/implement-issue/`), has an example
-of each case, except "Origin subagent".
+Reference for `/skill-to-workflow`, for origins that bring one of these cases. The kit's built-in `implement-issue`
+workflow, converted from several skills, shows each case except "Origin subagent".
 
 ## Conversation with the user
 
@@ -11,7 +10,7 @@ The origin skill talks to the user in three ways:
 | In the origin | In the workflow |
 |---|---|
 | Asks for an input ("what is the fixed point?", "where is the spec?") | `args`, or a value the code derives (base commit, issue via `gh`) |
-| Asks for approval of an intermediate result ("confirm the seams with the user") | A **checkpoint** across two runs of the same workflow: recipe `Checkpoint em dois runs` in `docs/05-escrevendo-workflows.md` (in `implement-issue`, `seams-proposed` and `approveSeams`) |
+| Asks for approval of an intermediate result ("confirm the seams with the user") | A **checkpoint** across two runs of the same workflow: recipe "Checkpoint across two runs" in [recipes.md](recipes.md) (in `implement-issue`, `seams-proposed` and `approveSeams`) |
 | Open conversation (interview, brainstorming) | Stays a skill; goes into the report as not converted |
 
 A step that presents options to the user and recommends one ("compare the designs and recommend") becomes a judge
@@ -21,7 +20,7 @@ step with a schema, and its result is what the checkpoint shows.
 
 - **A skill cited by another** (`tdd` says to use the `codebase-design` vocabulary): the step runs without it (with
   `settingSources: []`, no skill is loaded). Paraphrase the passage the step uses into a constant imported by every
-  prompt that needs it (`DESIGN_VOCABULARY` in `packages/runtime/workflows/implement-issue/prompts.ts`).
+  prompt that needs it (for example a `DESIGN_VOCABULARY` constant).
 - **A reference file next to the `SKILL.md`** (`mocking.md`, `DESIGN-IT-TWICE.md`): the passage that changes the
   step's behavior becomes part of its constant; the rest stays out.
 - **Conditional reading** ("read `GLOSSARY.md`, if it exists"): the code checks with `existsSync` and lists the paths
@@ -38,12 +37,12 @@ constraints) fire sub-agents in parallel. In the workflow:
   and goes in the prompt; the sub-agent keeps read-only tools, without `shell`;
 - the code checks the minimum number of results (`design-failed` with fewer than 2 designs, `review-failed` if an
   axis fails);
-- the skill's aggregation becomes code (each axis with its own report, side by side; recipe `Review em eixos`) or a
+- the skill's aggregation becomes code (each axis with its own report, side by side; recipe "Review by axes" in [recipes.md](recipes.md)) or a
   judge step with a schema (choose or combine designs).
 
 ## Third-party skill
 
-- Check the skill's license and that of whoever it credits (its `CREDITS.md` or `metadata`; `pr` credits `show-me`).
+- Check the skill's license and that of whoever it credits (its credits file or `metadata`; the `pr` skill credits `show-me`).
 - Paraphrase the instructions into the constants and cite origin, version, author and license in the header of the
   prompts module and in `CREDITS.md`.
 - The original skill stays as it is: in a plugin cache, the next update would undo any edit.
@@ -61,7 +60,7 @@ Besides `name`, `description`, `model` and the body as the prompt:
   subagent may not be the parent's. A `model` passed on the invocation takes precedence, and with
   `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` on, Claude Code ignores the field
   ([DOC](https://code.claude.com/docs/en/sub-agents)).
-- `model: inherit` becomes an explicit tier (rule 4 of `cursor-workflow-authoring`).
+- `model: inherit` becomes an explicit tier (rule 4 in [rules.md](rules.md)).
 
 | Claude Code field | In the workflow |
 |---|---|

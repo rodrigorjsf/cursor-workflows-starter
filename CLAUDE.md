@@ -11,8 +11,8 @@ A runtime for **deterministic workflows** on the Cursor SDK (`@cursor/sdk`), as 
 - `packages/runtime/`: the product. Engine, CLI (`src/cli.ts`), MCP server (`src/mcp-server.ts`), built-in
   workflows (`workflows/`) and their offline tests (`test/`).
 - `skills/`: the skills distributed to users. `.agents/skills/` symlinks to them for dogfooding; never copy them.
-- `templates/`: files `wf init` writes into a target repo, such as the `AGENTS.md` rules block
-  (`templates/agents-md-block.md`).
+- `templates/`: files the kit's setup writes into a target repo. Today that is the `AGENTS.md` rules block
+  (`templates/agents-md-block.md`), which `wf init` (spec #2, not built yet) will append.
 - The repo root is the dev space: this guide, the dogfood MCP config (`.mcp.json`, `.cursor/mcp.json`), `docs/`,
   `scripts/`, repo-level tests (`test/`).
 
@@ -31,6 +31,13 @@ Workflows live in `packages/runtime/workflows/*.ts` (built in) and `.agents/work
 - `@cursor/sdk` is pinned. When upgrading, check the `.d.ts` files in `node_modules/@cursor/sdk/dist/esm/` and rerun
   the tests.
 - Keep distributed skills, templates and other agent-facing text in English. The docs book and README are pt-BR.
+
+## Skills
+
+- A skill is self-contained: every instruction lives in its own folder (`SKILL.md` plus `references/`), and nothing
+  points at a document outside that folder. Reference two skills share is copied into both; `npm test` keeps the copies
+  identical.
+- Create and update every skill with `/mattpocock-skills:writing-for-agents`.
 
 ## Rules
 
