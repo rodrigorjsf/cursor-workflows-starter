@@ -330,6 +330,9 @@ export interface Exchange {
  */
 export type SettleRun = (run: Run) => Promise<RunResult>;
 
+/** Disposes of `agent`, ignoring a failure: the attempt is done with it either way. */
+export const disposeQuietly = (agent: SDKAgent): Promise<void> => agent[Symbol.asyncDispose]().catch(() => {});
+
 /**
  * Runs one attempt around an agent, the same wherever the agent runs: creates it (an abort that arrives meanwhile disposes
  * it), reports it, hands `converse` the way to send a message and wait for the answer, and reports how the attempt ended.
@@ -350,7 +353,7 @@ export async function runAttempt(
   let outcome: AttemptOutcome;
   try {
     signal.throwIfAborted(); // no agent is created for an attempt that is already over
-    const created = await within(signal, createAgent(), (late) => void late[Symbol.asyncDispose]().catch(() => {}));
+    const created = await within(signal, createAgent(), disposeQuietly);
     agent = created;
     onEvent({ type: "agent", agentId: created.agentId });
     signal.throwIfAborted();
@@ -383,7 +386,7 @@ export async function runAttempt(
     return { outcome, agentId: agent?.agentId, model, usage };
   } finally {
     canceller.dispose();
-    if (agent) await agent[Symbol.asyncDispose]().catch(() => {});
+    if (agent) await disposeQuietly(agent);
   }
 }
 

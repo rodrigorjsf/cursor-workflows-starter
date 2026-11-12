@@ -29,6 +29,7 @@ import {
   agentBase,
   classifyError,
   converse,
+  disposeQuietly,
   runAttempt,
   within,
 } from "./backend.js";
@@ -103,8 +104,8 @@ interface Resumed {
  * finds: the user stopped the run, and the agent must not go on spending.
  */
 async function resumeInterrupted(o: StepOptions, agentId: string, signal: AbortSignal): Promise<Resumed | undefined> {
-  const agent = await within(signal, Agent.resume(agentId, agentBase(o)), (late) => void late[Symbol.asyncDispose]().catch(() => {}));
-  const release = () => agent[Symbol.asyncDispose]().catch(() => {});
+  const agent = await within(signal, Agent.resume(agentId, agentBase(o)), disposeQuietly);
+  const release = () => disposeQuietly(agent);
   /** The run of `runs` to wait for: the one still going wins, then the newest by its creation time (the order of the cloud's list is not documented). */
   const pick = (runs: Run[]) => runs.find((run) => run.status === "running") ?? runs.toSorted((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0];
   const stop = (runs: Run[]) => {
