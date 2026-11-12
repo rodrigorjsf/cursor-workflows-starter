@@ -111,8 +111,9 @@ export async function runnerConfigChanged(cmd: Commands, cwd: string, before: st
     try {
       return JSON.parse(await cmd.gitRead(cwd, "show", `${tree}:package.json`)) as Record<string, unknown>;
     } catch (err) {
-      if (err instanceof CommandError || err instanceof SyntaxError) return {}; // sem package.json na árvore, ou ele não é JSON
-      throw err; // um run cancelado não é "sem package.json"
+      // O git respondeu que não há package.json na árvore (saiu com erro), ou ele não é JSON: não mudou o que roda.
+      if ((err instanceof CommandError && err.result.exitCode !== null) || err instanceof SyntaxError) return {};
+      throw err; // o git estourou o tempo, não iniciou, ou o run foi cancelado: não é uma resposta
     }
   };
   const a = await read(before);
@@ -130,8 +131,11 @@ export interface TestRun {
   ok: boolean;
   /** O fim da saída (4000 caracteres). */
   output: string;
-  /** passed; failed (a suíte rodou e falhou); timeout (morta no teto de tempo). Só "failed" vale como red. */
-  kind: "passed" | "failed" | "timeout";
+  /**
+   * passed; failed (a suíte rodou e falhou); timeout (morta no teto de tempo); killed (um sinal a matou, o OOM killer por
+   * exemplo, ou ela nem iniciou: não é resultado de teste). Só "failed" vale como red.
+   */
+  kind: "passed" | "failed" | "timeout" | "killed";
 }
 
 /**
@@ -141,10 +145,11 @@ export interface TestRun {
  * `node --test` aninhado herda essa variável e sai com 0 mesmo com teste falhando (medido no 22.13 e 22.23). Com teto de
  * tempo: um teste red de comportamento assíncrono que ainda não existe costuma travar.
  */
-export async function runTests(cmd: Commands, command: string, cwd: string, o: { timeoutMs: number; label: string }): Promise<TestRun> {
-  const r = await cmd.exec("bash", ["-c", command], { cwd, env: { NODE_TEST_CONTEXT: undefined }, timeoutMs: o.timeoutMs, label: o.label });
+export async function runTests(cmd: Commands, command: string, cwd: string, opts: { timeoutMs: number; label: string }): Promise<TestRun> {
+  const r = await cmd.exec("bash", ["-c", command], { cwd, env: { NODE_TEST_CONTEXT: undefined }, timeoutMs: opts.timeoutMs, label: opts.label });
   const output = (r.error ? `${r.error}\n${r.tail}` : r.tail).slice(-4000);
   if (r.timedOut) return { ok: false, output, kind: "timeout" };
+  if (r.exitCode === null) return { ok: false, output, kind: "killed" };
   return { ok: r.ok, output, kind: r.ok ? "passed" : "failed" };
 }
 

@@ -10,7 +10,9 @@ import type { ContentEvent, ExecEndEvent, ExecStartEvent, WorkflowEvent } from "
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import implementIssue from "../workflows/implement-issue.js";
-import { SUB_CODE, failGh, fx, gh, git, issue, run, setup, submit, teardown, write } from "./implement-issue.fixture.js";
+import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
+import { runnerConfigChanged } from "../workflows/implement-issue/tdd.js";
+import { SUB_CODE, SUB_TEST, failGh, fx, gh, git, issue, run, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
 
 beforeEach(setup);
 afterEach(teardown);
@@ -73,6 +75,12 @@ test("the suite runs with the caller's PATH, not the login shell's", async () =>
   const events = eventsOf(r.runId);
   const baseline = execStarts(events).find((s) => s.label === "suite:baseline")!;
   assert.match(outputOf(events, baseline), /npm-from-the-caller/);
+});
+
+test("a suite that was killed (not by its limit) is not a red: tests-killed, and no agent is asked to make it pass", async () => {
+  issue(["complexity:low"]);
+  const r = await run({ testCommand: "kill -9 $$" }); // what the OOM killer does to a runner that eats the memory
+  assert.equal(res(r).status, "tests-killed", JSON.stringify(res(r)));
 });
 
 test("a failing suite is red even when the workflow itself runs under `node --test` (NODE_TEST_CONTEXT is not inherited)", async () => {
@@ -204,4 +212,44 @@ test("a secret at the top of a diff longer than the tail of a command's output s
   assert.equal(res(r).status, "secret-blocked", JSON.stringify(res(r)));
   assert.ok(!JSON.stringify(res(r)).includes(key));
   assert.ok(!onOrigin());
+});
+
+// ── Failures of git are not answers ───────────────────────────────────────────────────
+
+test("a git that times out is an error, not 'there is no package.json': a step is never judged on a command that did not answer", async () => {
+  const limits = { localMs: 1000, networkMs: 1000 };
+  const timedOut: Exec = async () => ({ ok: false, exitCode: null, timedOut: true, tail: "" });
+  await assert.rejects(runnerConfigChanged(new Commands(timedOut, limits), "/x", "tree-a", "tree-b"), /timed out after 1s/);
+
+  const noSuchFile: Exec = async () => ({ ok: false, exitCode: 128, timedOut: false, tail: "fatal: path 'package.json' does not exist in 'tree-a'" });
+  assert.equal(await runnerConfigChanged(new Commands(noSuchFile, limits), "/x", "tree-a", "tree-b"), false, "a tree without package.json on both sides did not change it");
+});
+
+// ── Cancelling in the middle of a write step ──────────────────────────────────────────
+
+test("cancelling in the middle of a write step leaves the worktree as before the step, and the resume goes on to deliver", async () => {
+  issue(["complexity:low"]);
+  fx.handlers["codigo-1"] = (o) => {
+    write(o, "src/math.js", `${SUB_CODE}// half-made edit\n`);
+    return { hang: true };
+  };
+  const controller = new AbortController();
+  const first = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test" } as any, {
+    cwd: fx.repo,
+    signal: controller.signal,
+    onEvent: (e) => {
+      if (e.type === "step-start" && e.label === "codigo-1") setTimeout(() => controller.abort(), 100);
+    },
+  });
+  assert.equal(first.status, "cancelled");
+  const math = readFileSync(join(worktreeOf(), "src", "math.js"), "utf8");
+  assert.ok(!math.includes("half-made"), "the step's edit is undone");
+  assert.equal(readFileSync(join(worktreeOf(), "test", "sub.test.js"), "utf8"), SUB_TEST, "the slice's test, made before the step, stays");
+
+  fx.handlers["codigo-1"] = (o) => {
+    write(o, "src/math.js", SUB_CODE);
+    submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
+  };
+  const second = await run({}, first.runId);
+  assert.equal(res(second).status, "done", JSON.stringify(res(second)));
 });

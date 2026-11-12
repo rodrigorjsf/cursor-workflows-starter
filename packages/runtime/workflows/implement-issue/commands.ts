@@ -18,13 +18,17 @@ export interface CommandTimeouts {
 
 /** What a command that had to succeed did instead. `result` is what `ctx.exec` handed back. */
 export class CommandError extends Error {
+  readonly line: string;
   constructor(
-    readonly line: string,
+    command: string,
+    args: string[],
     readonly result: ExecResult,
     timeoutMs: number,
   ) {
+    const line = `${command} ${args.join(" ")}`.slice(0, 200);
     super(failureMessage(line, result, timeoutMs));
     this.name = "CommandError";
+    this.line = line;
   }
 }
 
@@ -64,7 +68,7 @@ export class Commands {
     const r = await this.exec("git", args, this.options("git", args, cwd, this.timeouts.localMs));
     if (r.ok) return true;
     if (r.exitCode === 1) return false;
-    throw new CommandError(commandLine("git", args), r, this.timeouts.localMs);
+    throw new CommandError("git", args, r, this.timeouts.localMs);
   }
 
   /** `git push`: a network command. */
@@ -85,7 +89,7 @@ export class Commands {
     const r = await this.read("gh", args, cwd, this.timeouts.networkMs);
     if (r.ok) return r.stdout;
     if (r.exitCode === 1 && nothing.test(r.tail)) return undefined;
-    throw new CommandError(commandLine("gh", args), r, this.timeouts.networkMs);
+    throw new CommandError("gh", args, r, this.timeouts.networkMs);
   }
 
   private options(command: string, args: string[], cwd: string, timeoutMs: number): ExecOptions {
@@ -94,12 +98,12 @@ export class Commands {
 
   private async succeed(command: string, args: string[], cwd: string, timeoutMs: number): Promise<void> {
     const r = await this.exec(command, args, this.options(command, args, cwd, timeoutMs));
-    if (!r.ok) throw new CommandError(commandLine(command, args), r, timeoutMs);
+    if (!r.ok) throw new CommandError(command, args, r, timeoutMs);
   }
 
   private async succeedRead(command: string, args: string[], cwd: string, timeoutMs: number): Promise<string> {
     const r = await this.read(command, args, cwd, timeoutMs);
-    if (!r.ok) throw new CommandError(commandLine(command, args), r, timeoutMs);
+    if (!r.ok) throw new CommandError(command, args, r, timeoutMs);
     return r.stdout;
   }
 
@@ -108,19 +112,16 @@ export class Commands {
     const dir = mkdtempSync(join(tmpdir(), "wf-stdout-"));
     const file = join(dir, "stdout");
     try {
-      // The path goes in the environment, not in the arguments: the node's id in the log comes from the arguments, and a
-      // resume has to number the same call alike.
+      // The path goes in the environment, not in the arguments: the node's id in the log is derived from the arguments, and
+      // a temp path would give the same call another id every time.
       const result = await this.exec("bash", ["-c", 'exec "$@" >"$WF_STDOUT"', "read", command, ...args], {
         ...this.options(command, args, cwd, timeoutMs),
         env: { WF_STDOUT: file },
       });
-      if (existsSync(file) && statSync(file).size > MAX_STDOUT_BYTES) throw new Error(`${commandLine(command, args)}: the output is larger than ${MAX_STDOUT_BYTES / 1024 / 1024} MiB`);
+      if (existsSync(file) && statSync(file).size > MAX_STDOUT_BYTES) throw new Error(`${command} ${args[0] ?? ""}: the output is larger than ${MAX_STDOUT_BYTES / 1024 / 1024} MiB`);
       return { ...result, stdout: existsSync(file) ? readFileSync(file, "utf8") : "" };
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   }
 }
-
-/** The command as one line, for an error message. */
-const commandLine = (command: string, args: string[]) => `${command} ${args.join(" ")}`.slice(0, 200);

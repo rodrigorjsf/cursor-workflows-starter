@@ -41,19 +41,20 @@ The round goes in the prompt (journal key, rule 1). After the fix, re-review onl
 ## Fix until it passes (with a cap)
 
 ```ts
-let t = await runTests(cmd, worktree);
-for (let round = 1; t.kind === "failed" && round <= 2; round++) {   // a timeout is not a code failure
+let t = await runTests(testCommand, worktree);
+for (let round = 1; t.kind === "failed" && round <= 2; round++) {   // a timeout or a killed suite is not a code failure
   await ctx.agent(`${FIX_INSTRUCTIONS}\n\n## Round ${round}\n\n## Test output\n${t.output}`, {
     label: `fix-${round}`, model: MODELS.HIGH, cwd: worktree, schema: IMPL_SCHEMA,
   });
-  t = await runTests(cmd, worktree);
+  t = await runTests(testCommand, worktree);
 }
 if (!t.ok) return { status: t.kind === "failed" ? "tests-failed" : `tests-${t.kind}`, output: t.output };
 ```
 
 `runTests` runs the project's test command with `ctx.exec` (`bash -c`, with a time limit) and returns `kind` (`passed`,
-`failed`, `timeout`) plus the end of the `output`. The run is a command node in the event log. It unsets
-`NODE_TEST_CONTEXT`, which makes a nested `node --test` exit 0 even when it fails.
+`failed`, `timeout`, `killed`) plus the end of the `output`; `killed` is a suite ended by a signal (the OOM killer, say),
+which is not a test result. The run is a command node in the event log. It unsets `NODE_TEST_CONTEXT`, which makes a
+nested `node --test` exit 0 even when it fails.
 
 ## Fan-out with isolation
 
@@ -135,7 +136,7 @@ await ctx.agent(`${TEST_INSTRUCTIONS}\n\n${sliceBlock}`, { label: `test-${n}`, c
 const changed = await changesBetween(worktree, before, await snapshotTree(worktree));
 if (changed.some((c) => !isTestFile(c.path) || c.status === "D")) { await revertTo(worktree, before); /* retry */ }
 const red = await runTests(testCommand, worktree);
-if (red.kind === "timeout") { await revertTo(worktree, before); /* end: tests-timeout */ }
+if (red.kind === "timeout" || red.kind === "killed") { await revertTo(worktree, before); /* end: tests-timeout or tests-killed */ }
 if (red.kind === "passed") { /* the test is not red: retry, or alreadySatisfied with the evidence */ }
 ```
 

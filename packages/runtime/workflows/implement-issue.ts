@@ -12,7 +12,7 @@
 //     runtime não pausa para perguntar. Sem plano proposto no progresso (outro runId ou outro --cwd), `approveSeams`
 //     para com "seams-not-proposed" em vez de aprovar um plano novo; para pular o checkpoint, passe `seams`;
 //   - a suíte tem de estar verde antes da primeira fatia ("baseline-red"; um runner sem nenhum teste conta como
-//     verde); `setupCommand` opcional antes; os testes têm teto de tempo ("tests-timeout");
+//     verde); `setupCommand` opcional antes; os testes têm teto de tempo ("tests-timeout"), e uma suíte morta por um sinal não conta como red ("tests-killed");
 //   - cada fatia é um ciclo red → green controlado pelo código. Red: o que a etapa mudar fora dos testes é
 //     descartado (medido: o composer-2.5 implementa junto com o teste), nenhum teste é apagado, e a suíte FALHA (ou a etapa declara, com a suíte verde, que o
 //     comportamento já existia). Green, correções e refactor: nenhum teste, configuração do runner (`protectedGlobs`,
@@ -490,7 +490,7 @@ export default defineWorkflow<Args>({
         if (!setup.ok) return { ...base, status: "setup-failed", worktree, output: setup.output };
       }
       const baseline = await suite("baseline");
-      if (baseline.kind === "timeout") return { ...base, status: `tests-${baseline.kind}`, worktree, output: baseline.output };
+      if (baseline.kind === "timeout" || baseline.kind === "killed") return { ...base, status: `tests-${baseline.kind}`, worktree, output: baseline.output };
       if (!baseline.ok && !looksLikeNoTests(baseline.output)) return { ...base, status: "baseline-red", worktree, output: baseline.output };
       if (!baseline.ok) ctx.log("the baseline suite has no tests: counted as green");
       progress.data.baselineGreen = true;
@@ -584,10 +584,10 @@ export default defineWorkflow<Args>({
             continue;
           }
           const res = await suite(`red:${sfx}`);
-          if (res.kind === "timeout") {
+          if (res.kind === "timeout" || res.kind === "killed") {
             await revertTo(cmd, worktree, before);
             settle();
-            return "tests-timeout";
+            return `tests-${res.kind}`;
           }
           if (res.ok) {
             if (t.alreadySatisfied) {
@@ -662,7 +662,7 @@ export default defineWorkflow<Args>({
         settle();
         res = await suite(`fix:${sfx}:${round}`);
       }
-      if (res.kind === "timeout") return "tests-timeout";
+      if (res.kind === "timeout" || res.kind === "killed") return `tests-${res.kind}`;
       if (!res.ok) return "tests-failed";
       Object.assign(rec, { green: res.output, done: true });
       progress.upsert(rec);

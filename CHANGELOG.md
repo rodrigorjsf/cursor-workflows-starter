@@ -127,8 +127,10 @@
   do PR existente (autenticação, rede) passa a falhar o run com a mensagem dele; antes virava "não há PR" e o
   workflow tentava criar outro. As respostas do `git` e do `gh` que o workflow lê (diffs, listas de arquivos, a issue
   e seus comentários) vêm inteiras, não do `tail` de 32768 caracteres do `ctx.exec`: a trava de segredos continua
-  vendo o diff todo. O `runTests` agora é assíncrono e não devolve mais `overflow`, porque a saída não passa por um
-  buffer; o teste que era dessa classe agora termina normalmente.
+  vendo o diff todo. Essa saída (dados que o código lê, como um diff ou o JSON da issue) não vai para o log de eventos,
+  que mostra o comando, o `stderr` e o resultado; a saída das suítes, do `git push` e do `git commit` vai. O `runTests` agora é assíncrono e não devolve mais `overflow`, porque a saída não passa por um
+  buffer. Uma suíte morta por um sinal (o OOM killer, por exemplo) deixa de contar como red: o run para com
+  `tests-killed`, em vez de pedir a um agente que "faça passar" um runner que caiu.
 - **A execução do agente fica atrás de uma interface, o `AgentBackend`.** O motor deixa de falar com o SDK: cada
   tentativa de uma etapa vai a `AgentBackend.run(prompt, opções resolvidas, sinal de aborto, callback de eventos)`, que
   devolve o resultado da tentativa. A execução local (criar o agente, enviar, esperar, entregar o resultado estruturado,
