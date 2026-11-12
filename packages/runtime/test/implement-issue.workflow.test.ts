@@ -211,9 +211,9 @@ test("o comentário das seams avisa quais fatias ficam fora pelo limite do tier"
   const r = await run({});
   assert.equal((r.result as any).status, "seams-proposed");
   const comment = gh().comments[0]!;
-  assert.match(comment, /4\. comportamento 4 .*\(adiada/);
-  assert.match(comment, /limite do tier MED \(3 fatias\)/);
-  assert.doesNotMatch(comment, /3\. comportamento 3 .*\(adiada/);
+  assert.match(comment, /4\. comportamento 4 .*\(deferred/);
+  assert.match(comment, /tier MED slice cap \(3 slices\)/);
+  assert.doesNotMatch(comment, /3\. comportamento 3 .*\(deferred/);
 });
 
 test("planejador e juiz recebem o teto de fatias do tier", async () => {
@@ -221,7 +221,7 @@ test("planejador e juiz recebem o teto de fatias do tier", async () => {
   let planPrompt = "";
   fx.handlers.planejar = (o, msg) => { planPrompt = msg; submit(o, PLAN); };
   await run({});
-  assert.match(planPrompt, /até 3 fatias/);
+  assert.match(planPrompt, /up to 3 slices/);
 
   issue(["complexity:high"]);
   let judgePrompt = "";
@@ -229,5 +229,5 @@ test("planejador e juiz recebem o teto de fatias do tier", async () => {
   for (const k of ["desenhar:minima", "desenhar:flexivel", "desenhar:comum"]) fx.handlers[k] = design;
   fx.handlers.julgar = (o, msg) => { judgePrompt = msg; submit(o, PLAN); };
   await run({});
-  assert.match(judgePrompt, /até 5 fatias/);
+  assert.match(judgePrompt, /up to 5 slices/);
 });

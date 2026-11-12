@@ -189,8 +189,8 @@ const PR_SCHEMA = {
 };
 const CLASSIFY_SCHEMA = { type: "object", required: ["tier", "reason"], properties: { tier: { enum: ["LOW", "MED", "HIGH"] }, reason: str } };
 const CLASSIFY_INSTRUCTIONS =
-  "Classifique a complexidade de implementação da issue em LOW (mecânica, 1 arquivo), MED (típica) ou HIGH " +
-  "(arquitetural, segurança, vários módulos). Responda só pela tool submit_result.";
+  "Classify the issue's implementation complexity as LOW (mechanical, 1 file), MED (typical) or HIGH " +
+  "(architectural, security, several modules). Answer only through the submit_result tool.";
 
 const AXIS_INSTRUCTIONS: Record<Axis, string> = {
   standards: P.STANDARDS_INSTRUCTIONS,
@@ -199,7 +199,7 @@ const AXIS_INSTRUCTIONS: Record<Axis, string> = {
 };
 
 const issueBlock = (i: { number: number; title: string; body: string }) => `## Issue #${i.number}: ${i.title}\n\n${i.body}`;
-const sliceBlock = (s: Slice) => `## Fatia\n- Comportamento: ${s.behavior}\n- Seam: ${s.seam}\n- Ideia de teste: ${s.testIdea}`;
+const sliceBlock = (s: Slice) => `## Slice\n- Behaviour: ${s.behavior}\n- Seam: ${s.seam}\n- Test idea: ${s.testIdea}`;
 const listBlock = (title: string, items: string[]) => (items.length ? `## ${title}\n${items.map((f) => `- ${f}`).join("\n")}` : "");
 const tail = (s: string | undefined, n = 3000) => (s ?? "").slice(-n);
 /** Aspas simples para shell: o comando de relançamento postado na issue não quebra com `'` nos args. */
@@ -251,14 +251,14 @@ function diffSinceBase(cwd: string, base: string): string {
   const diff = sh("git", ["diff", "--cached", "--no-color", base], cwd);
   if (diff.length <= MAX_DIFF_CHARS) return "```diff\n" + diff + "\n```";
   const stat = sh("git", ["diff", "--cached", "--stat", base], cwd);
-  return `(diff truncado: leia os arquivos para o resto)\n\n${stat}\n\n\`\`\`diff\n${diff.slice(0, MAX_DIFF_CHARS)}\n\`\`\``;
+  return `(diff truncated: read the files for the rest)\n\n${stat}\n\n\`\`\`diff\n${diff.slice(0, MAX_DIFF_CHARS)}\n\`\`\``;
 }
 
 /** Regras de segredo para qualquer texto que vai sair da máquina. Devolve a regra que disparou, nunca o trecho. */
 export function findSecretInText(text: string, knownSecrets: string[] = savedSecrets()): string | undefined {
-  if (/crsr_[A-Za-z0-9_-]{16,}/.test(text)) return "chave do Cursor (crsr_)";
-  if (/\bsk-[A-Za-z0-9_-]{20,}/.test(text)) return "chave sk-";
-  if (knownSecrets.some((k) => k.length >= 16 && text.includes(k))) return "a chave salva do SDK ou CURSOR_API_KEY";
+  if (/crsr_[A-Za-z0-9_-]{16,}/.test(text)) return "Cursor key (crsr_)";
+  if (/\bsk-[A-Za-z0-9_-]{20,}/.test(text)) return "sk- key";
+  if (knownSecrets.some((k) => k.length >= 16 && text.includes(k))) return "the saved SDK key or CURSOR_API_KEY";
   return undefined;
 }
 
@@ -271,15 +271,15 @@ export function findStagedSecret(worktree: string, knownSecrets: string[] = save
   const git = (...a: string[]) => execFileSync("git", a, { cwd: worktree, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   for (const name of git("diff", "--cached", "--name-only", ...(base ? [base] : [])).split("\n").filter(Boolean)) {
     const file = basename(name);
-    if (file === "auth.json") return "arquivo auth.json no commit";
-    if (file === ".env" || file.startsWith(".env.")) return "arquivo .env no commit";
+    if (file === "auth.json") return "auth.json file in the commit";
+    if (file === ".env" || file.startsWith(".env.")) return "a .env file in the commit";
   }
   const added = git("diff", "--cached", "--no-color", "-U0", ...(base ? [base] : []))
     .split("\n")
     .filter((l) => l.startsWith("+") && !l.startsWith("+++"))
     .join("\n");
   const hit = findSecretInText(added, knownSecrets);
-  return hit ? `${hit} no diff` : undefined;
+  return hit ? `${hit} in the diff` : undefined;
 }
 
 /** A chave salva por `wf login` e a de CURSOR_API_KEY, lidas só em memória para a comparação. */
@@ -301,7 +301,7 @@ export default defineWorkflow<Args>({
     description:
       "Implements a GitHub issue with slice-by-slice TDD (red → green checked by the code), a three-axis review (Standards, Spec, Security) and a PR in the Summary/Evidence/Merge Danger template.",
     whenToUse: "When the user asks to implement or resolve a specific issue by number.",
-    phases: [{ title: "Triagem" }, { title: "Plano" }, { title: "Implementação" }, { title: "Review" }, { title: "Entrega" }],
+    phases: [{ title: "Triage" }, { title: "Plan" }, { title: "Implementation" }, { title: "Review" }, { title: "Delivery" }],
     // Roles: the keys of `workflows.implement-issue.roles` in the config. Each role's model is a code default that the
     // config and WF_MODEL_<ROLE> replace. `fix` and `design` declare no model: it depends on the tier or on the step.
     // `cloud`: steps that write to the local worktree never go to a cloud agent; read-only ones may, once the cloud
@@ -347,7 +347,7 @@ export default defineWorkflow<Args>({
     const progress = new ProgressStore(ctx.cwd, ctx.runId);
 
     // ── Triagem: dados da issue via gh (código, sem modelo) ─────────────────────────────
-    ctx.phase("Triagem");
+    ctx.phase("Triage");
     const repoFlag = repo ? ["--repo", repo] : [];
     const issue = JSON.parse(sh("gh", ["issue", "view", String(number), ...repoFlag, "--json", "number,title,body,labels"], ctx.cwd)) as Issue;
     let tier = issue.labels.map((l) => LABEL_TIERS[l.name.toLowerCase()]).find(Boolean);
@@ -362,34 +362,34 @@ export default defineWorkflow<Args>({
       tier = c.tier;
     }
     const base = { issue: issue.number, tier };
-    ctx.log(`Issue #${issue.number} → tier ${tier} (papel ${implementRole(tier)})`);
+    ctx.log(`Issue #${issue.number} → tier ${tier} (role ${implementRole(tier)})`);
     ctx.metric("tier", tier); // covariável de dificuldade: compare modelos dentro do mesmo tier
     ctx.metric("tier_source", issue.labels.some((l) => LABEL_TIERS[l.name.toLowerCase()]) ? "label" : "classifier");
     const ctxFiles = CONTEXT_FILES.filter((f) => existsSync(join(ctx.cwd, f)));
-    const contextBlock = listBlock("Arquivos de contexto do repositório (leia os que importam)", ctxFiles);
+    const contextBlock = listBlock("Repository context files (read the ones that matter)", ctxFiles);
 
     // ── Plano (codebase-design): LOW uma fatia; MED planejador; HIGH "Design it twice" ─────
     let plan: Plan;
     if (tier === "LOW") {
       plan = {
-        seams: [{ name: "interface pública afetada", interface: "escolhida pela etapa de teste", why: "LOW: uma fatia, sem planejador" }],
-        slices: [{ behavior: issue.title, seam: "a interface pública mais próxima do comportamento pedido", testIdea: "use um exemplo do enunciado da issue como valor esperado" }],
+        seams: [{ name: "affected public interface", interface: "chosen by the test step", why: "LOW: one slice, no planner" }],
+        slices: [{ behavior: issue.title, seam: "the public interface closest to the requested behaviour", testIdea: "use an example from the issue as the expected value" }],
         testCommand: ctx.args.testCommand ?? "npm test",
       };
     } else if (ctx.args.approveSeams && !ctx.args.seams?.length && !progress.data.proposedPlan) {
       // Aprovar exige um plano mostrado: sem ele, um planejador novo produziria um plano que ninguém viu.
-      return { ...base, status: "seams-not-proposed", runId: ctx.runId, hint: "rode sem approveSeams para propor as seams, ou retome o run que as propôs com o mesmo --cwd" };
+      return { ...base, status: "seams-not-proposed", runId: ctx.runId, hint: "run without approveSeams to propose the seams, or resume the run that proposed them with the same --cwd" };
     } else if (ctx.args.approveSeams && !ctx.args.seams?.length && progress.data.proposedPlan) {
       plan = progress.data.proposedPlan as Plan; // aprova exatamente o que foi mostrado na issue
-      ctx.log("seams aprovadas: usando o plano proposto no primeiro run");
+      ctx.log("seams approved: using the plan proposed by the first run");
     } else {
-      ctx.phase("Plano");
-      const approved = listBlock("Seams aprovadas (use exatamente estas)", ctx.args.seams ?? []);
+      ctx.phase("Plan");
+      const approved = listBlock("Approved seams (use exactly these)", ctx.args.seams ?? []);
       // O planejador sabe o teto: sem isso, propôs 5 fatias para um tier de 3 na issue #8, e o PR saiu parcial.
       const capBlock =
-        `## Limite de fatias\nEste tier faz até ${SLICE_CAP[tier]} fatias. Para a issue caber inteira, uma fatia pode cobrir ` +
-        "casos de um mesmo comportamento que se testam juntos (o caso ímpar e o par de uma função; o valor e o erro). " +
-        "Se ainda assim não couber, ponha por último o que pode ficar para depois.";
+        `## Slice cap\nThis tier does up to ${SLICE_CAP[tier]} slices. To fit the whole issue, one slice may cover ` +
+        "cases of one behaviour that are tested together (the odd and the even case of a function; the value and the error). " +
+        "If it still does not fit, put last what can wait.";
       const planData = `${issueBlock(issue)}\n\n${capBlock}\n\n${contextBlock}${approved ? `\n\n${approved}` : ""}`;
       if (tier === "MED") {
         plan = await ctx.agent<Plan>(`${P.PLAN_INSTRUCTIONS}\n\n${planData}`, {
@@ -404,9 +404,9 @@ export default defineWorkflow<Args>({
         const kinds = ["minima", "flexivel", "comum"] as const;
         const designs = await ctx.parallel(
           kinds.map((k) => () =>
-            ctx.agent<Record<string, string>>(`${P.DESIGN_INSTRUCTIONS}\n\n## Restrição\n${P.DESIGN_CONSTRAINTS[k]}\n\n${issueBlock(issue)}\n\n${contextBlock}`, {
+            ctx.agent<Record<string, string>>(`${P.DESIGN_INSTRUCTIONS}\n\n## Constraint\n${P.DESIGN_CONSTRAINTS[k]}\n\n${issueBlock(issue)}\n\n${contextBlock}`, {
               label: `desenhar:${k}`,
-              phase: "Plano",
+              phase: "Plan",
               role: "design",
               model: COMPOSER,
               tools: READ_ONLY,
@@ -417,7 +417,7 @@ export default defineWorkflow<Args>({
         );
         const done = designs.flatMap((d, i) => (d ? [{ constraint: kinds[i], ...d }] : []));
         if (done.length < 2) return { ...base, status: "design-failed", designs: done.length };
-        plan = await ctx.agent<Plan>(`${P.JUDGE_INSTRUCTIONS}\n\n${planData}\n\n## Desenhos\n${JSON.stringify(done, null, 2)}`, {
+        plan = await ctx.agent<Plan>(`${P.JUDGE_INSTRUCTIONS}\n\n${planData}\n\n## Designs\n${JSON.stringify(done, null, 2)}`, {
           label: "julgar",
           role: "design",
           model: GROK_HIGH,
@@ -433,34 +433,34 @@ export default defineWorkflow<Args>({
         const relaunch = `npm run wf -- run implement-issue --args ${shellQuote(JSON.stringify({ ...ctx.args, approveSeams: true }))} --resume ${ctx.runId}`;
         const comment = [
           SEAMS_MARKER,
-          `## Seams propostas pelo workflow \`implement-issue\` (tier ${tier})`,
+          `## Seams proposed by the \`implement-issue\` workflow (tier ${tier})`,
           "",
           ...plan.seams.map((s) => `- **${s.name}**: \`${s.interface}\` — ${s.why}`),
           "",
-          "### Fatias (uma por ciclo red → green)",
+          "### Slices (one per red → green cycle)",
           "",
           ...plan.slices.map(
-            (s, i) => `${i + 1}. ${s.behavior} (seam: ${s.seam}; teste: ${s.testIdea})${i >= SLICE_CAP[tier] ? " (adiada)" : ""}`,
+            (s, i) => `${i + 1}. ${s.behavior} (seam: ${s.seam}; test: ${s.testIdea})${i >= SLICE_CAP[tier] ? " (deferred)" : ""}`,
           ),
           ...(plan.slices.length > SLICE_CAP[tier]
-            ? ["", `As fatias marcadas como adiadas ficam fora pelo limite do tier ${tier} (${SLICE_CAP[tier]} fatias): o PR só referencia a issue, sem fechá-la.`]
+            ? ["", `The slices marked deferred are left out by the tier ${tier} slice cap (${SLICE_CAP[tier]} slices): the PR only references the issue, without closing it.`]
             : []),
           "",
-          `Comando de teste: \`${ctx.args.testCommand ?? plan.testCommand}\``,
-          ...(plan.rationale ? ["", `### Por que este desenho\n\n${plan.rationale}`] : []),
+          `Test command: \`${ctx.args.testCommand ?? plan.testCommand}\``,
+          ...(plan.rationale ? ["", `### Why this design\n\n${plan.rationale}`] : []),
           "",
-          "### Para aprovar",
+          "### To approve",
           "",
-          "Relance com os mesmos args e `approveSeams: true`, no mesmo diretório (ou com o mesmo `--cwd`) deste run; ele executa exatamente este plano:",
+          "Relaunch with the same args and `approveSeams: true`, in the same directory as this run (or with the same `--cwd`); it executes exactly this plan:",
           "",
           "```bash",
           relaunch,
           "```",
           "",
-          `No chat: \`/run-workflow implement-issue\` com \`resumeRunId: "${ctx.runId}"\` e \`approveSeams: true\`. Para trocar as seams, passe \`seams: [...]\` no lugar de \`approveSeams\`.`,
+          `In the chat: \`/run-workflow implement-issue\` with \`resumeRunId: "${ctx.runId}"\` and \`approveSeams: true\`. To change the seams, pass \`seams: [...]\` instead of \`approveSeams\`.`,
         ].join("\n");
         const leak = findSecretInText(comment);
-        if (leak) return { ...base, status: "secret-blocked", reason: `${leak} no comentário das seams` };
+        if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the seams comment` };
         const existing = JSON.parse(sh("gh", ["issue", "view", String(issue.number), ...repoFlag, "--json", "comments"], ctx.cwd)) as { comments: Array<{ body: string }> };
         if (!existing.comments.some((c) => c.body.includes(SEAMS_MARKER) && c.body.includes(ctx.runId))) {
           withBodyFile(comment, (f) => sh("gh", ["issue", "comment", String(issue.number), ...repoFlag, "--body-file", f], ctx.cwd));
@@ -470,13 +470,13 @@ export default defineWorkflow<Args>({
     }
 
     // ── Implementação (tdd): worktree, base verde, fatias red → green ──────────────────
-    ctx.phase("Implementação");
+    ctx.phase("Implementation");
     const branch = `wf/issue-${issue.number}`;
     const worktree = join(ctx.cwd, ".workflows", "worktrees", branch.replace("/", "-"));
-    if (existsSync(worktree)) ctx.log(`worktree ${worktree} já existe; reaproveitando`);
+    if (existsSync(worktree)) ctx.log(`worktree ${worktree} already exists; reusing it`);
     else if (progress.data.baseCommit && branchExists(ctx.cwd, branch)) sh("git", ["worktree", "add", worktree, branch], ctx.cwd); // resume: mantém os commits
     else {
-      if (branchExists(ctx.cwd, branch)) ctx.log(`branch ${branch} de um run anterior foi recriada a partir de HEAD`);
+      if (branchExists(ctx.cwd, branch)) ctx.log(`branch ${branch} from an earlier run was recreated from HEAD`);
       sh("git", ["worktree", "add", "-B", branch, worktree], ctx.cwd);
     }
     if (!progress.data.baseCommit) {
@@ -485,7 +485,7 @@ export default defineWorkflow<Args>({
     }
     // Uma etapa de escrita interrompida (o processo caiu no meio): volta ao estado de antes dela.
     if (progress.data.inFlight) {
-      ctx.log(`desfazendo a etapa interrompida ${progress.data.inFlight.id}`);
+      ctx.log(`undoing the interrupted step ${progress.data.inFlight.id}`);
       revertTo(worktree, progress.data.inFlight.before);
       progress.data.inFlight = undefined;
       progress.save();
@@ -500,7 +500,7 @@ export default defineWorkflow<Args>({
       const baseline = suite();
       if (baseline.kind === "timeout" || baseline.kind === "overflow") return { ...base, status: `tests-${baseline.kind}`, worktree, output: baseline.output };
       if (!baseline.ok && !looksLikeNoTests(baseline.output)) return { ...base, status: "baseline-red", worktree, output: baseline.output };
-      if (!baseline.ok) ctx.log("a suíte de base não tem nenhum teste: conta como verde");
+      if (!baseline.ok) ctx.log("the baseline suite has no tests: counted as green");
       progress.data.baselineGreen = true;
       progress.save();
     }
@@ -517,7 +517,7 @@ export default defineWorkflow<Args>({
       progress.data.inFlight = { id, before, resumes: 0 };
       progress.save();
       try {
-        const value = await ctx.agent<T>(`${prompt}\n\n<!-- etapa de escrita ${seq} -->`, { ...opts, cwd: worktree });
+        const value = await ctx.agent<T>(`${prompt}\n\n<!-- write step ${seq} -->`, { ...opts, cwd: worktree });
         return { value, before };
       } catch (err) {
         revertTo(worktree, before);
@@ -535,11 +535,11 @@ export default defineWorkflow<Args>({
       const tests = changed.filter(isTest);
       const guarded = changed.filter((f) => matchesAny(f, protectedGlobs));
       const problems: string[] = [];
-      if (tests.length) problems.push(`alterou arquivos de teste (${tests.join(", ")})`);
-      if (guarded.length) problems.push(`alterou a configuração do runner (${guarded.join(", ")})`);
-      if (runnerConfigChanged(worktree, before, after)) problems.push("alterou scripts ou a configuração de testes do package.json");
-      if (rec?.testFile && fileHash(worktree, rec.testFile) !== rec.testHash) problems.push(`o teste da fatia (${rec.testFile}) mudou ou sumiu`);
-      return problems.length ? `Você ${problems.join("; ")}. A mudança foi desfeita: o teste é a especificação, mude só o código.` : "";
+      if (tests.length) problems.push(`changed test files (${tests.join(", ")})`);
+      if (guarded.length) problems.push(`changed the runner configuration (${guarded.join(", ")})`);
+      if (runnerConfigChanged(worktree, before, after)) problems.push("changed the scripts or the test configuration in package.json");
+      if (rec?.testFile && fileHash(worktree, rec.testFile) !== rec.testHash) problems.push(`the slice's test (${rec.testFile}) changed or is gone`);
+      return problems.length ? `You ${problems.join("; ")}. The change was undone: the test is the specification, change only the code.` : "";
     };
 
     let tddRetries = 0;
@@ -561,7 +561,7 @@ export default defineWorkflow<Args>({
           progress.upsert(rec);
           const { value: t, before } = await writeStep<TestOut>(
             `red:${key}:${attempt}`,
-            `${P.TEST_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Comando de teste\n\`${testCommand}\`${problem ? `\n\n## Corrija\n${problem}` : ""}`,
+            `${P.TEST_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Test command\n\`${testCommand}\`${problem ? `\n\n## Fix\n${problem}` : ""}`,
             { label: attempt === 1 ? `teste-${sfx}` : `teste-${sfx}:${attempt}`, role: implementRole(tier), schema: TEST_SCHEMA },
           );
           let after = snapshotTree(worktree);
@@ -572,7 +572,7 @@ export default defineWorkflow<Args>({
           if (nonTest.length) {
             restorePaths(worktree, before, nonTest);
             redDiscarded += nonTest.length;
-            ctx.log(`fatia ${sfx}: a etapa red alterou ${nonTest.join(", ")}; essas mudanças foram descartadas, só o teste fica`);
+            ctx.log(`slice ${sfx}: the red step changed ${nonTest.join(", ")}; those changes were discarded, only the test stays`);
             after = snapshotTree(worktree);
           }
           const deleted = changes.filter((c) => c.status === "D" && isTest(c.path)).map((c) => c.path);
@@ -580,8 +580,8 @@ export default defineWorkflow<Args>({
             revertTo(worktree, before);
             settle();
             problem =
-              `A mudança foi desfeita: ${deleted.length ? `você apagou testes (${deleted.join(", ")})` : "você mudou a configuração do runner"}. ` +
-              "Escreva ou atualize testes, sem apagar nenhum.";
+              `The change was undone: ${deleted.length ? `you deleted tests (${deleted.join(", ")})` : "you changed the runner configuration"}. ` +
+              "Write or update tests, without deleting any.";
             lastProblem = problem;
             if (attempt === 2) return "tdd-violation";
             continue;
@@ -595,15 +595,15 @@ export default defineWorkflow<Args>({
           if (res.ok) {
             if (t.alreadySatisfied) {
               settle(); // o comportamento já existia: o teste fica como regressão, sem etapa de código
-              Object.assign(rec, { testFile: t.testFile, testName: t.testName, alreadySatisfied: t.evidence ?? "confirmado pela etapa de teste", green: res.output, done: true });
+              Object.assign(rec, { testFile: t.testFile, testName: t.testName, alreadySatisfied: t.evidence ?? "confirmed by the test step", green: res.output, done: true });
               progress.upsert(rec);
               return undefined;
             }
             revertTo(worktree, before);
             settle();
             problem =
-              "O teste passou sem implementação. Se o comportamento já existe, responda alreadySatisfied: true com a evidência; " +
-              "senão, escreva um teste que falhe porque o comportamento da fatia falta.";
+              "The test passed without implementation. If the behaviour already exists, answer alreadySatisfied: true with the evidence; " +
+              "otherwise, write a test that fails because the slice's behaviour is missing.";
             lastProblem = problem;
             if (attempt === 2) return "test-not-red";
             continue;
@@ -611,7 +611,7 @@ export default defineWorkflow<Args>({
           settle();
           if (!res.output.includes(t.testName) && !res.output.includes(basename(t.testFile))) {
             redUnattributed++;
-            ctx.log(`fatia ${sfx}: a saída red não cita ${t.testName}; confira se a falha é do teste novo`);
+            ctx.log(`slice ${sfx}: the red output does not name ${t.testName}; check that the failure comes from the new test`);
           }
           Object.assign(rec, { testFile: t.testFile, testName: t.testName, red: res.output, redTree: after, testHash: fileHash(worktree, t.testFile) });
           progress.upsert(rec);
@@ -628,7 +628,7 @@ export default defineWorkflow<Args>({
           progress.upsert(rec);
           const { before } = await writeStep<Impl>(
             `green:${key}:${attempt}`,
-            `${P.CODE_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Teste que falha\n\`${rec.testName}\` em \`${rec.testFile}\`\n\n## Saída da suíte\n${tail(rec.red)}${problem ? `\n\n## Corrija\n${problem}` : ""}`,
+            `${P.CODE_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Failing test\n\`${rec.testName}\` in \`${rec.testFile}\`\n\n## Suite output\n${tail(rec.red)}${problem ? `\n\n## Fix\n${problem}` : ""}`,
             { label: attempt === 1 ? `codigo-${sfx}` : `codigo-${sfx}:${attempt}`, role: implementRole(tier), schema: IMPL_SCHEMA },
           );
           problem = codeViolation(before, snapshotTree(worktree), rec);
@@ -647,10 +647,10 @@ export default defineWorkflow<Args>({
       }
       let res = suite();
       for (let round = (rec.fixRound ?? 0) + 1; res.kind === "failed" && round <= MAX_FIX_ROUNDS; round++) {
-        ctx.log(`fatia ${sfx}: testes falharam; correção ${round}/${MAX_FIX_ROUNDS}`);
+        ctx.log(`slice ${sfx}: tests failed; fix ${round}/${MAX_FIX_ROUNDS}`);
         rec.fixRound = round;
         progress.upsert(rec);
-        const { before } = await writeStep<Impl>(`fix:${key}:${round}`, `${P.FIX_INSTRUCTIONS}\n\n${sliceBlock(sl)}\n\n## Saída dos testes\n${res.output}`, {
+        const { before } = await writeStep<Impl>(`fix:${key}:${round}`, `${P.FIX_INSTRUCTIONS}\n\n${sliceBlock(sl)}\n\n## Test output\n${res.output}`, {
           label: `corrigir-${sfx}-${round}`,
           role: "fix",
           model: tier === "LOW" ? GROK : GROK_HIGH, // escala o modelo na correção
@@ -676,7 +676,7 @@ export default defineWorkflow<Args>({
 
     const planned = plan.slices.slice(0, SLICE_CAP[tier]);
     const deferred = plan.slices.slice(SLICE_CAP[tier]).map((s) => `${s.behavior} (seam: ${s.seam})`);
-    if (deferred.length) ctx.log(`limite de ${SLICE_CAP[tier]} fatias no tier ${tier}: ${deferred.length} adiada(s)`);
+    if (deferred.length) ctx.log(`cap of ${SLICE_CAP[tier]} slices at tier ${tier}: ${deferred.length} deferred`);
     ctx.metric("slices_planned", plan.slices.length);
     for (const [i, sl] of planned.entries()) {
       const start = sliceStart();
@@ -700,17 +700,17 @@ export default defineWorkflow<Args>({
       }
       const diff = diffSinceBase(worktree, progress.data.baseCommit!);
       const extra: Record<Axis, string> = {
-        standards: listBlock("Arquivos de padrão do repositório", standardsFiles) || "## Arquivos de padrão do repositório\nNenhum: use só a baseline de smells.",
-        spec: listBlock("Fatias adiadas pelo limite (não são 'missing')", deferred),
+        standards: listBlock("Repository standards files", standardsFiles) || "## Repository standards files\nNone: use only the smell baseline.",
+        spec: listBlock("Slices deferred by the cap (not 'missing')", deferred),
         security: "",
       };
       // A rodada entra no prompt: sem ela, a rodada 2 de um resume teria a mesma chave de journal da rodada 1 e
       // receberia a resposta antiga. Na rodada 2 o revisor vê também a resposta da correção (o agente pode discordar).
       const roundBlock =
-        round === 1 ? "## Rodada 1" : `## Rodada ${round}, depois da correção\n${progress.data.refactorSummary ?? "Só fatias extras: veja o diff."}`;
+        round === 1 ? "## Round 1" : `## Round ${round}, after the fix\n${progress.data.refactorSummary ?? "Extra slices only: see the diff."}`;
       const results = await ctx.parallel(
         axes.map((axis) => () =>
-          ctx.agent<any>(`${AXIS_INSTRUCTIONS[axis]}\n\n${extra[axis]}\n\n${issueBlock(issue)}\n\n${roundBlock}\n\n## Diff desde a base\n${diff}`, {
+          ctx.agent<any>(`${AXIS_INSTRUCTIONS[axis]}\n\n${extra[axis]}\n\n${issueBlock(issue)}\n\n${roundBlock}\n\n## Diff since the base\n${diff}`, {
             label: `review:${axis}:${round}`,
             phase: "Review",
             role: "review",
@@ -740,10 +740,10 @@ export default defineWorkflow<Args>({
       // Requisito faltando ou errado: comportamento novo, então nova fatia TDD (red → green), com teto.
       for (const [i, f] of [...b.missing, ...b.wrong].slice(0, EXTRA_SLICE_CAP).entries()) {
         const behavior = f.behavior ?? f.note;
-        const seam = f.seam ?? "a interface pública mais próxima";
+        const seam = f.seam ?? "the closest public interface";
         const key = sliceKey("x", behavior, seam);
         const start = sliceStart();
-        const failed = await runSlice(key, `extra-${i + 1}`, { behavior, seam, testIdea: `requisito da issue: "${f.quote}"` });
+        const failed = await runSlice(key, `extra-${i + 1}`, { behavior, seam, testIdea: `issue requirement: "${f.quote}"` });
         if (failed) {
           if (failed !== "tdd-violation" && failed !== "test-not-red") revertTo(worktree, start);
           return { ...base, status: failed, slice: `extra-${i + 1}`, reason: lastProblem || undefined, worktree };
@@ -756,7 +756,7 @@ export default defineWorkflow<Args>({
       if (toRefactor.length && !progress.data.refactorDone) {
         const { value: fix, before } = await writeStep<Impl>(
           "refactor",
-          `${P.REFACTOR_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n## Achados\n${JSON.stringify(toRefactor, null, 2)}`,
+          `${P.REFACTOR_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n## Findings\n${JSON.stringify(toRefactor, null, 2)}`,
           { label: "refatorar-1", role: implementRole(tier), schema: IMPL_SCHEMA },
         );
         const refactorProblem = codeViolation(before, snapshotTree(worktree));
@@ -785,7 +785,7 @@ export default defineWorkflow<Args>({
     ctx.metric("slices_done", progress.data.slices.filter((s) => s.done).length);
 
     // ── Entrega (pr): suíte verde, commit e PR feitos pelo código; idempotentes no resume ─
-    ctx.phase("Entrega");
+    ctx.phase("Delivery");
     const final = suite();
     if (!final.ok) return { ...base, status: final.kind === "failed" ? "tests-failed" : `tests-${final.kind}`, worktree, output: final.output };
     const baseCommit = progress.data.baseCommit!;
@@ -798,7 +798,7 @@ export default defineWorkflow<Args>({
       if (secret) {
         // Nada de commit, push ou PR. O worktree fica para inspeção; o motivo não repete o segredo.
         ctx.metric("secret_blocked", 1);
-        ctx.log(`entrega bloqueada: ${secret}`);
+        ctx.log(`delivery blocked: ${secret}`);
         return { ...base, status: "secret-blocked", reason: secret, branch, worktree, spentCents: ctx.budget.spentCents() };
       }
       if (hasStagedChanges(worktree)) sh("git", ["commit", "-m", `feat: ${issue.title} (#${issue.number})`], worktree);
@@ -823,7 +823,7 @@ export default defineWorkflow<Args>({
           worktree,
         });
         const leak = findSecretInText(body);
-        if (leak) return { ...base, status: "secret-blocked", reason: `${leak} no corpo do PR`, branch, worktree };
+        if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the PR body`, branch, worktree };
         sh("git", ["push", "-u", "origin", branch], worktree);
         prUrl = withBodyFile(body, (f) =>
           sh("gh", ["pr", "create", "--head", branch, "--title", `${issue.title} (#${issue.number})`, "--body-file", f, ...repoFlag], worktree).trim(),

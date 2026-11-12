@@ -49,7 +49,7 @@ test("trava de segredos: bloqueia auth.json, .env, chaves crsr_/sk- e a chave sa
     [{ ".env.local": "TOKEN=1" }, undefined, /\.env/],
     [{ "src/a.js": `const k = "${key}";\n` }, undefined, /crsr_/],
     [{ "src/b.js": `const k = "sk-${"b".repeat(30)}";\n` }, undefined, /sk-/],
-    [{ "src/c.js": "const k = 'segredo-salvo-1234567890';\n" }, "segredo-salvo-1234567890", /chave salva/],
+    [{ "src/c.js": "const k = 'segredo-salvo-1234567890';\n" }, "segredo-salvo-1234567890", /saved SDK key/],
   ];
   for (const [files, saved, rule] of cases) {
     const dir = stagedRepo(files);
@@ -74,7 +74,7 @@ import { CODE_INSTRUCTIONS, FIX_INSTRUCTIONS, REFACTOR_INSTRUCTIONS, SCOPE_RULE,
 
 test("toda etapa que escreve leva a regra de escopo: teste, código, correção e refactor", () => {
   for (const p of [TEST_INSTRUCTIONS, CODE_INSTRUCTIONS, FIX_INSTRUCTIONS, REFACTOR_INSTRUCTIONS]) assert.ok(p.includes(SCOPE_RULE));
-  assert.match(SCOPE_RULE, /Altere apenas arquivos dentro deste repositório/);
+  assert.match(SCOPE_RULE, /Change only files inside this repository/);
 });
 
 test("runTests não se engana com node --test aninhado (NODE_TEST_CONTEXT do runner)", () => {
@@ -117,7 +117,7 @@ test("saída de teste no PR troca a pasta pessoal e o worktree por marcadores", 
 });
 
 test("a etapa red manda atualizar os testes que fixam o comportamento antigo", () => {
-  assert.match(TEST_INSTRUCTIONS, /atualize esses testes/);
+  assert.match(TEST_INSTRUCTIONS, /update those tests/);
   assert.match(TEST_INSTRUCTIONS, /alreadySatisfied/);
 });
 

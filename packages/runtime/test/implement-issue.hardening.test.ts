@@ -91,7 +91,7 @@ test("red que apaga um teste existente é desfeito: tdd-violation", async () => 
   };
   const r = await run({});
   assert.equal(res(r).status, "tdd-violation", JSON.stringify(res(r)));
-  assert.match(res(r).reason ?? "", /apagou/, "o resultado diz por que violou");
+  assert.match(res(r).reason ?? "", /deleted tests/, "o resultado diz por que violou");
   assert.ok(!names().includes("codigo-1"));
 });
 
