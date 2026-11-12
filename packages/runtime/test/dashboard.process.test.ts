@@ -3,7 +3,7 @@
 // per-user home; nothing here touches the user's real `~/.cursor-workflows`.
 import assert from "node:assert/strict";
 import { createServer as createHttpServer } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, beforeEach, test } from "node:test";
@@ -11,7 +11,7 @@ import { type DashboardStatus, dashboardPidPath, ensureDashboard, readInstance, 
 import { isAlive } from "../src/runtime/pid.js";
 import { dashboardListens, dashboardLog, freePort } from "./dashboard-fixtures.js";
 
-const KEYS = ["WF_HOME", "WF_DASH_PORT", "WF_DASH_AUTOSTART", "WF_DASH_START_TIMEOUT_MS", "WF_METRICS"] as const;
+const KEYS = ["WF_HOME", "WF_DASH_PORT", "WF_DASH_AUTOSTART", "WF_DASH_START_TIMEOUT_MS", "WF_METRICS", "CURSOR_API_KEY"] as const;
 const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
 let home: string;
 let port: number;
@@ -183,6 +183,17 @@ test("a start that fails before the process exists leaves no claim, so the next 
   const next = running(await ensureDashboard({ startTimeoutMs: 15_000 }));
   assert.equal(next.started, true);
   assert.ok(Date.now() - begun < 10_000, "it did not wait out the earlier claim");
+});
+
+test("the dashboard it starts keeps CURSOR_API_KEY: its cloud-agent cancel reaches the Cursor API with the key the SDK finds there", async () => {
+  process.env.CURSOR_API_KEY = "test-key-not-a-secret";
+  const probe = join(home, "probe-dashboard.mjs");
+  const seen = join(home, "key-seen.txt");
+  // Records only whether the key arrived, never the key; then stays alive without listening, like the slow dashboard below.
+  writeFileSync(probe, `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(seen)}, String(process.env.CURSOR_API_KEY === "test-key-not-a-secret"));\nsetInterval(() => {}, 1000);\n`);
+  await ensureDashboard({ entry: probe, startTimeoutMs: 1_500 });
+  await until("the dashboard process to record its environment", () => existsSync(seen));
+  assert.equal(readFileSync(seen, "utf8"), "true");
 });
 
 test("a dashboard that is still starting when the wait ends is reported with its link, and is not killed", async () => {
