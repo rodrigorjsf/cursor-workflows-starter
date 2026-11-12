@@ -112,9 +112,11 @@ test("a step runs through the backend: prompt, resolved options and a live signa
 const usedTokens = (tokens: number) => ({ report: { usage: { inputTokens: tokens - 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: tokens }, runs: [] } });
 const turn = (tokens: number): AttemptEvent => ({ type: "turn", usage: { inputTokens: tokens - 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 } });
 const nextMacrotask = () => new Promise((resolve) => setImmediate(resolve));
+/** What a streaming stub saw of its attempt: the turns it emitted and why it was stopped. */
+type Seen = { turns: number; reason?: unknown };
 /** What a backend does for an attempt that streams turns of `tokens` tokens until it is aborted, as an agent that never finishes would. */
 const streamsUntilAborted =
-  (tokens: number, seen: { turns: number; reason?: unknown } = { turns: 0 }): Behaviour =>
+  (tokens: number, seen: Seen = { turns: 0 }): Behaviour =>
   async ({ signal, onEvent }) => {
     while (!signal.aborted) {
       await nextMacrotask();
@@ -125,6 +127,7 @@ const streamsUntilAborted =
     seen.reason = signal.reason;
     return { outcome: { kind: "aborted", reason: signal.reason }, agentId: "agent-x", usage: usedTokens(seen.turns * tokens) };
   };
+/** Settles once the signal aborts (at once if it already has). */
 const whenAborted = (signal: AbortSignal) =>
   new Promise<void>((resolve) => {
     if (signal.aborted) resolve();
@@ -135,7 +138,7 @@ const whenAborted = (signal: AbortSignal) =>
  * i-th turn (of `tokens` tokens), and each turn waits for the one before it, through promises, never event-loop timing. After
  * its last turn an attempt waits to be aborted, as an agent that never finishes would. `seen` is keyed by prompt.
  */
-const turnsInOrder = (order: readonly string[], tokens: number, seen: Record<string, { turns: number; reason?: unknown }>): Behaviour => {
+const turnsInOrder = (order: readonly string[], tokens: number, seen: Record<string, Seen>): Behaviour => {
   const emitted = order.map(() => Promise.withResolvers<void>());
   return async ({ prompt, signal, onEvent }) => {
     const mine = seen[prompt]!;
@@ -220,7 +223,7 @@ test("cancelling the run aborts the attempt's signal with the cancellation as it
   const seen: { reason?: unknown } = {};
   const { backend, handed } = stubBackend(async ({ signal }) => {
     setTimeout(() => controller.abort(), 10);
-    await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+    await whenAborted(signal);
     seen.reason = signal.reason;
     return { outcome: { kind: "aborted", reason: signal.reason }, agentId: "agent-1", usage: { report } };
   }, finished("done"));
@@ -252,7 +255,7 @@ test("a signal that is already aborted starts no attempt", async () => {
 test("the step's timeout aborts the attempt's signal with a timeout as its reason", async () => {
   const seen: { reason?: unknown } = {};
   const { backend } = stubBackend(async ({ signal }) => {
-    await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+    await whenAborted(signal);
     seen.reason = signal.reason;
     return { outcome: { kind: "aborted", reason: signal.reason }, agentId: "agent-1", usage: { report } };
   });
