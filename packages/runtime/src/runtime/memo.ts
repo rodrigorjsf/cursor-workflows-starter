@@ -9,10 +9,11 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ToolName } from "@cursor/sdk";
 import { stateDir } from "./state.js";
+import { writeFileAtomic } from "./state-files.js";
 
 /** Tools que não alteram o repositório nem o mundo externo. */
 export const READ_ONLY_TOOLS: readonly ToolName[] = ["read", "grep", "glob", "ls", "semSearch", "readLints", "readTodos"];
@@ -51,6 +52,6 @@ export class MemoStore {
     return existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as { result: unknown }).result : undefined;
   }
   set(key: string, result: unknown): void {
-    writeFileSync(join(this.dir, `${key}.json`), JSON.stringify({ result }));
+    writeFileAtomic(join(this.dir, `${key}.json`), JSON.stringify({ result }));
   }
 }

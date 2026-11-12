@@ -2,6 +2,20 @@
 
 ## Não lançado
 
+### Adicionado
+
+- **Log de eventos por run como fonte de verdade.** Todo evento é acrescentado a `.workflows/runs/<runId>/events.jsonl`
+  com versão do esquema, horário e id do run. As etapas levam `stepId`, `parentId` e `groupId`, e `parallel`/`pipeline`
+  emitem `group-start`/`group-end`: a estrutura do run se refaz só com o log. Etapas servidas do journal ou do memo
+  também emitem `step-start`. A referência dos eventos (`docs/reference/events.md`) é gerada do tipo
+  (`npm run docs:events`), e o `npm test` falha se ela divergir.
+- **Runs mais robustos.** Uma última linha incompleta no log ou no journal não impede o resume; um lock por run recusa
+  a segunda execução do mesmo `runId` (`já está em execução`); todo arquivo de estado é gravado de forma atômica;
+  retomar um run cujo workflow mudou grava um aviso; cada run novo entra no índice global
+  `~/.cursor-workflows/runs.jsonl` (`WF_HOME` muda o diretório do usuário).
+- **O estado do runtime funciona em worktree ligado e submódulo**, onde `.git` é um arquivo: antes, qualquer acesso a
+  `.workflows/` falhava com `ENOTDIR`.
+
 ### Mudado
 
 - **O repositório vira npm workspaces.** O runtime (engine, CLI, servidor MCP, workflows embutidos e seus testes

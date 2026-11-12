@@ -7,8 +7,9 @@
 // resultado (porque o prompt delas muda) — não "tudo depois dela".
 
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { appendJsonl, readJsonl } from "./state-files.js";
 
 export interface JournalEntry {
   key: string;
@@ -19,19 +20,16 @@ export interface JournalEntry {
   totalTokens: number;
 }
 
+const isEntry = (v: unknown): v is JournalEntry => typeof v === "object" && v !== null && typeof (v as { key?: unknown }).key === "string";
+
 export class Journal {
   private readonly cache = new Map<string, JournalEntry>();
   private readonly occurrences = new Map<string, number>();
 
   constructor(private readonly file: string) {
     mkdirSync(dirname(file), { recursive: true });
-    if (existsSync(file)) {
-      for (const line of readFileSync(file, "utf8").split("\n")) {
-        if (!line.trim()) continue;
-        const entry = JSON.parse(line) as JournalEntry;
-        this.cache.set(entry.key, entry);
-      }
-    }
+    // A torn line (crash mid-append) is skipped: the step it recorded is simply not in the journal, so it runs again.
+    for (const entry of readJsonl(file, isEntry).records) this.cache.set(entry.key, entry);
   }
 
   /** Calcula a chave determinística da chamada. Deve ser chamado de forma síncrona no início de agent(). */
@@ -48,6 +46,6 @@ export class Journal {
 
   record(entry: JournalEntry): void {
     this.cache.set(entry.key, entry);
-    appendFileSync(this.file, JSON.stringify(entry) + "\n");
+    appendJsonl(this.file, entry);
   }
 }

@@ -55,6 +55,9 @@ The runtime's messages are in Portuguese. This skill quotes the ones it matches,
      step ends with the relay.
    - `Teto de custo atingido` or `Teto de tokens atingido`: a resume restarts the count from zero, with the whole cap
      again. Offer to resume while saying so, and the user decides.
+   - `já está em execução`: another process is still executing that run, so a second execution is refused. Do not
+     resume again; follow the job that is already running (`wait_workflow` or `get_workflow_status` with its
+     `jobId`), and tell the user if you do not have it.
    - Anything else (a step that failed, a process that died): offer to relaunch **resuming**: `start_workflow` with
      the same `name` and `args` and `resumeRunId` equal to the job's `runId`. Completed steps are not repeated.
    On a relaunch, go back to step 3 with the new `jobId`.

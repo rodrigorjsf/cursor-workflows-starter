@@ -1,14 +1,14 @@
 // Abertura do banco de métricas por usuário (SQLite via node:sqlite, sem dependência nova).
 //
-// - Caminho: $WF_METRICS_DB ou ~/.cursor-workflows/metrics.db (dir 0700, arquivo 0600).
+// - Caminho: $WF_METRICS_DB ou ~/.cursor-workflows/metrics.db ($WF_HOME muda o diretório; dir 0700, arquivo 0600).
 // - WAL + busy_timeout: MCP server e jobs destacados escrevem ao mesmo tempo. WAL não funciona bem em disco de
 //   rede nem em /mnt/c no WSL: mantenha o banco no disco local (o default em ~ atende).
 // - `node:sqlite` é carregado por import dinâmico só quando métricas estão ligadas, e só o ExperimentalWarning
 //   dele é filtrado (stderr do MCP server fica limpo; outros avisos continuam aparecendo).
 
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { userDir } from "../runtime/state.js";
 import { MIGRATIONS, SCHEMA_VERSION } from "./schema.js";
 
 export type Db = import("node:sqlite").DatabaseSync;
@@ -18,7 +18,7 @@ export function metricsEnabled(): boolean {
 }
 
 export function defaultDbPath(): string {
-  return process.env.WF_METRICS_DB ?? join(homedir(), ".cursor-workflows", "metrics.db");
+  return process.env.WF_METRICS_DB ?? join(userDir(), "metrics.db");
 }
 
 let warningFilterInstalled = false;

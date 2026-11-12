@@ -20,7 +20,8 @@
     "dash": "tsx packages/runtime/src/observability/dashboard.ts",
     "stats": "tsx packages/runtime/src/cli.ts stats",
     "docs:check": "tsx scripts/check-docs.ts",
-    "docs:mermaid": "tsx scripts/check-mermaid.ts"
+    "docs:mermaid": "tsx scripts/check-mermaid.ts",
+    "docs:events": "tsx scripts/events-reference.ts"
   },
   "devDependencies": {
     "@types/node": "^22.13.0",

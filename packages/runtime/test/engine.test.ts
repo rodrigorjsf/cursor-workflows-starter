@@ -1,6 +1,7 @@
 // Testes offline do engine (sem rede): `npm test`.
 process.env.WF_METRICS = "off"; // estes testes não gravam no banco do usuário
 import assert from "node:assert/strict";
+import "./isolate-home.js";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";

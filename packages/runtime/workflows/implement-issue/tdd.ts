@@ -3,8 +3,9 @@
 // que já passou, e para desfazer o que uma etapa interrompida deixou pela metade).
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { writeFileAtomic } from "../../src/runtime/state-files.js";
 
 /** O que conta como arquivo de teste quando o run não informa `testGlobs`. */
 export const DEFAULT_TEST_GLOBS = [
@@ -226,6 +227,6 @@ export class ProgressStore {
   }
   save(): void {
     mkdirSync(dirname(this.file), { recursive: true });
-    writeFileSync(this.file, JSON.stringify(this.data, null, 2));
+    writeFileAtomic(this.file, JSON.stringify(this.data, null, 2));
   }
 }

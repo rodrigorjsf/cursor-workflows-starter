@@ -16,7 +16,8 @@ flowchart TB
   CLI --> ENG
   JOBS --> ENG[engine.ts<br/>agent · parallel · pipeline · phase]
   REG[registry.ts<br/>workflows/ + .agents/workflows/] --> ENG
-  ENG --> JR[journal.ts<br/>.workflows/runs/&lt;runId&gt;/journal.jsonl]
+  ENG --> JR[run-store.ts<br/>.workflows/runs/&lt;runId&gt;/<br/>events.jsonl · journal.jsonl · run.lock]
+  ENG -->|1 linha por run| IDX[("~/.cursor-workflows/runs.jsonl")]
   ENG --> ST[structured.ts<br/>submit_result + Ajv]
   ENG -->|"Agent.create({model, local:{cwd, settingSources, customTools}})"| SDK["@cursor/sdk<br/>(loop local)"]
   SDK -->|inferência + cobrança| CUR[Backend Cursor]
@@ -117,6 +118,11 @@ flowchart TB
 | O modelo de cada etapa é o do código, e um ID não liberado falha | Validação do SDK contra o catálogo da conta |
 | Teto de gasto checado antes de cada tentativa (não é gasto máximo) | Teto por run (centavos e tokens) + `RateLimitError`. Etapa iniciada não é interrompida e não tem teto de tokens próprio, só o `timeoutMs` de cada envio: a ultrapassagem chega a concorrência × uma etapa sem limite (medido: 344 mil tokens com `--max-tokens 300000`, [verificações locais](../research/verificacoes-locais.md) §9). O teto em centavos depende do custo do `getUsage()`: em uso cobrado por request (passo 3) e quando o `getUsage()` falha (passo 7), só o de tokens vale, contado pelos eventos `turn-ended` |
 | Retomar sem repetir etapas | Journal + `runId` gravado no job desde o início |
+| Todo evento do run fica registrado, e a estrutura do run dá para refazer só com o log | Log de eventos por run (`events.jsonl`): `v`, `ts` e `runId` em todo evento; `stepId`, `parentId` e `groupId` nas etapas; `group-start`/`group-end` em `parallel` e `pipeline`. Campos em [Referência de eventos](reference/events.md), gerada do tipo |
+| Uma queda no meio de uma gravação não impede o resume | Log e journal em JSON Lines: a última linha incompleta é ignorada, e a seguinte começa em linha nova. Os demais arquivos de estado (job, memo, progresso do workflow) são trocados por inteiro (arquivo temporário + `rename`) |
+| Um run não roda duas vezes ao mesmo tempo | `run.lock` no diretório do run: o segundo processo é recusado com `já está em execução`; o lock de um processo que morreu é retomado |
+| Retomar um run com o workflow alterado não passa em silêncio | O `workflowHash` do `run-start` é comparado ao da execução anterior; mudou, o log recebe um `warning` |
+| Os runs de todos os repositórios são encontráveis | Cada run novo acrescenta uma linha (id, repositório, workflow, início) a `~/.cursor-workflows/runs.jsonl` (`WF_HOME` muda o diretório) |
 | Workflow não dispara workflow por acidente | MCP inline `workflows` sem tools nas etapas, que encobre o do `.cursor/mcp.json` (passo 4), + `WF_INSIDE_WORKFLOW` herdado pelo shell, com recusa no CLI. Medido em 2026-11-11: sem o inline, a etapa via `start_workflow`; com ele, só `FetchMcpResource` e `submit_result`. Não é fronteira de segurança (ver abaixo) |
 
 ## O que ele não garante
