@@ -40,10 +40,13 @@ test("before the API answers, the header claims no state", () => {
   assert.match(header.label, /looking/i);
 });
 
-test("a replay shows the events: replaying while it plays, and what the log says at its end", () => {
+test("a replay says replaying while it plays, and at its end names the run as the API does: a dead run is failed, not a second name", () => {
   const graph = graphOf(endedInCloud);
   assert.equal(headerStatus({ api: { status: "failed" }, run: graphOf(deadInCloud.slice(0, 3), false).run, replaying: true, settled: false }).key, "replaying");
   assert.equal(headerStatus({ api: { status: "failed" }, run: graph.run, replaying: true, settled: true }).label, "failed");
+  const dead = graphOf(deadInCloud);
+  assert.equal(dead.run.status, "interrupted", "the events alone only say they stopped");
+  assert.deepEqual(headerStatus({ api: { status: "failed", error: DEAD_ERROR }, run: dead.run, replaying: true, settled: true }), { key: "failed", label: "failed", error: DEAD_ERROR });
 });
 
 test("a run whose process died with a cloud agent still working offers to cancel that agent; nothing else does", () => {

@@ -33,8 +33,9 @@ export interface HeaderStatus {
 }
 
 export function headerStatus({ api, run, replaying, settled }: HeaderInput): HeaderStatus {
-  if (replaying) return settled ? { key: run.status, label: EVENTS_TEXT[run.status], error: run.error } : { key: "replaying", label: "replaying" };
-  if (api?.status === undefined) return { key: "pending", label: "looking for the run…" };
+  if (replaying && !settled) return { key: "replaying", label: "replaying" };
+  // At its end a replay shows the run as it is, under the API's name like everywhere else.
+  if (api?.status === undefined) return replaying ? { key: run.status, label: EVENTS_TEXT[run.status], error: run.error } : { key: "pending", label: "looking for the run…" };
   return { key: api.status, label: api.status, error: api.error };
 }
 

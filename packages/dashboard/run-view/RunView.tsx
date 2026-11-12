@@ -102,7 +102,7 @@ function Canvas({ graph, layout, now, selectedId, onOpen }: { graph: RunGraph; l
   const { fitView } = useReactFlow();
   const pane = useStore((s) => ({ width: s.width, height: s.height }), (a, b) => a.width === b.width && a.height === b.height);
   const userMoved = useRef(false);
-  const firstFrame = useRef(frameOf(graph, layout, paneOrWindow(pane)));
+  const firstFrame = useRef(frameOf(graph, layout, paneOrWindow(pane), selectedId));
   const settled = graph.nodes.every((n) => n.state !== "running");
   const drawn = useRef(false);
   useEffect(() => {
@@ -114,7 +114,7 @@ function Canvas({ graph, layout, now, selectedId, onOpen }: { graph: RunGraph; l
     let cancelled = false;
     const attempt = async (tries: number) => {
       if (cancelled) return;
-      if (!(await fitView({ ...frameOf(graph, layout, paneOrWindow(pane)), duration: 250 })) && tries < 10) setTimeout(() => void attempt(tries + 1), 60);
+      if (!(await fitView({ ...frameOf(graph, layout, paneOrWindow(pane), selectedId), duration: 250 })) && tries < 10) setTimeout(() => void attempt(tries + 1), 60);
     };
     const timer = setTimeout(() => void attempt(0), 80); // the new nodes are measured by the browser after this render
     return () => {

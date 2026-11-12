@@ -65,6 +65,26 @@ test("on a phone, a run too big to read whole is framed in part: what is framed 
   }
 });
 
+/** The ids `frameOf` frames, after checking they fit at a readable zoom. */
+async function framedIds(drafts: Draft[], settled: boolean, pane: { width: number; height: number }, selectedId?: string): Promise<string[]> {
+  const graph = buildRunGraph(stamp(drafts), { settled });
+  const layout = await layoutRunGraph(graph);
+  const frame = frameOf(graph, layout, pane, selectedId);
+  assert.ok(frame.nodes && frame.nodes.length > 0, "a part of the run is framed");
+  const zoom = fitZoom(boundsOf(frame.nodes.map((n) => layout.nodes[n.id]!)), pane, FRAME_PADDING);
+  assert.ok(zoom >= READABLE_ZOOM, `the framed nodes need zoom ${zoom.toFixed(2)}, under the floor`);
+  return frame.nodes.map((n) => n.id);
+}
+
+test("a framed part holds what the reader came for: the step whose log is open, else the step that failed", async () => {
+  const LAPTOP = { width: 760, height: 700 }; // a laptop screen with the log panel open beside the canvas
+  for (const pane of [PHONE, LAPTOP]) {
+    assert.ok((await framedIds(long(false), true, pane, "s3")).includes("s3"), `${pane.width}px: the open step is in view`);
+    const failed = [...long(false).slice(0, -2), stepStart("s4", "push", { parentId: "s3" }), { type: "step-end", stepId: "s4", parentId: "s3", groupId: null, attemptId: "s4#1", stepKey: "s4:k", label: "push", ok: false, errorKind: "agent-error", cached: false, chargedCents: 0 }, { type: "run-end", status: "failed", error: "push failed" }];
+    assert.ok((await framedIds(failed, true, pane)).includes("s4"), `${pane.width}px: the failed step is in view`);
+  }
+});
+
 test("a run that fits a wide screen at a readable zoom is framed whole", async () => {
   const graph = buildRunGraph(stamp(long(false)), { settled: true });
   const layout = await layoutRunGraph(graph);

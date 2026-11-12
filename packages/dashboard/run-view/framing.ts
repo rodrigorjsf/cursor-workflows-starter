@@ -27,19 +27,24 @@ export function boundsOf(boxes: Box[]): Box {
 
 /**
  * How to frame the run in a pane of `pane` pixels: all of it when that stays readable; otherwise as many nodes as fit at a
- * readable zoom, from the latest of a live run back, or from the first of a run that is over (to be read from the start).
- * The user pans to the rest; Fit View shows it all.
+ * readable zoom around a focus, the nearest first. The focus is the node whose log is open; else, in a run that is over, the
+ * first node that failed or stopped (what the reader came for), or its first step (to be read from the start); in a live run,
+ * the latest node. The user pans to the rest; Fit View shows it all.
  */
-export function frameOf(graph: RunGraph, layout: RunLayout, pane: { width: number; height: number }): FitViewOptions {
+export function frameOf(graph: RunGraph, layout: RunLayout, pane: { width: number; height: number }, selectedId?: string): FitViewOptions {
   const options: FitViewOptions = { padding: FRAME_PADDING, maxZoom: 1, minZoom: READABLE_ZOOM };
   if (layout.width === 0 || fitZoom({ x: 0, y: 0, width: layout.width, height: layout.height }, pane) >= READABLE_ZOOM) return options;
   const settled = graph.nodes.every((n) => n.state !== "running");
   const placed = graph.nodes.filter((n) => layout.nodes[n.id] !== undefined);
-  // The first step comes first, then the start node in front of it when there is room, then what follows.
-  const first = placed.findIndex((n) => n.kind !== "start");
-  const order = settled ? [placed[first]!, ...placed.filter((_, i) => i !== first)] : [...placed].reverse();
+  const work = placed.filter((n) => n.kind !== "start");
+  const focus =
+    placed.find((n) => n.id === selectedId) ??
+    (settled ? (work.find((n) => n.state === "failed" || n.state === "interrupted") ?? work[0]) : (work.findLast((n) => n.state === "running") ?? work.at(-1))) ??
+    placed[0]!;
+  const centre = (id: string) => layout.nodes[id]!.x + layout.nodes[id]!.width / 2;
+  const order = [focus, ...placed.filter((n) => n !== focus).sort((a, b) => Math.abs(centre(a.id) - centre(focus.id)) - Math.abs(centre(b.id) - centre(focus.id)))];
   const picked: string[] = [];
-  for (const node of first < 0 ? placed : order) {
+  for (const node of order) {
     const boxes = [...picked, node.id].map((id) => layout.nodes[id]!);
     if (picked.length > 0 && fitZoom(boundsOf(boxes), pane) < READABLE_ZOOM) break;
     picked.push(node.id);
