@@ -85,10 +85,10 @@ log.
   dropped.
 - **A service that owns the state:** it would have to run all the time, and the kit's runs must survive without one
   ([ADR-0003](0003-detached-jobs.md)).
-- **Write the cancel mark into the event log.** The canceller does not hold the run's lock, and it writes the mark while
-  the killed process may still be there, so two processes would append to one log. A run end written for it would project
-  the run as `cancelled`, not `failed`, while a killed process, like any process that ended without finishing, writes
-  nothing to the log by design ([ADR-0007](0007-cancel-stops-cloud-agents.md)).
+- **Write the cancel mark into the event log.** The canceller would write into a log whose run lock it does not hold: it
+  writes the mark right after the kill, while the killed process may still hold the lock until it is gone. A run end
+  written for the killed execution would also project the run as `cancelled`, not `failed`, and the kill leaves the
+  run's end unwritten on purpose, as after a crash, so that the run stays resumable the same way.
 - **Keep the mark in a separate file.** A third store, with its own path, writer and cleanup, for one timestamp about one
   job. The job record is already the file that holds a job's own facts, and it is already replaced atomically.
 
