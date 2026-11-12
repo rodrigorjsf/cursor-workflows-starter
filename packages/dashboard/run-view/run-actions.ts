@@ -1,4 +1,5 @@
 // What the buttons of the Run view ask of the dashboard.
+import { runApiPath } from "./location.js";
 
 /** What a cancel came to: the job's state and what was done (`note`), or why nothing was done (`error`). */
 export type CancelOutcome = { ok: true; status: string; note: string } | { ok: false; error: string };
@@ -12,7 +13,7 @@ export async function cancelRun(runId: string): Promise<CancelOutcome> {
     const tokenReply = await fetch("/api/csrf");
     if (!tokenReply.ok) return { ok: false, error: `the dashboard answered ${tokenReply.status} to the token request` };
     const { csrfToken } = (await tokenReply.json()) as { csrfToken: string };
-    const reply = await fetch(`/api/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST", headers: { "x-csrf-token": csrfToken } });
+    const reply = await fetch(`${runApiPath(runId)}/cancel`, { method: "POST", headers: { "x-csrf-token": csrfToken } });
     const body = (await reply.json().catch(() => ({}))) as { status?: string; note?: string; error?: string };
     if (!reply.ok) return { ok: false, error: body.error ?? `the dashboard answered ${reply.status}` };
     return { ok: true, status: body.status ?? "running", note: body.note ?? "" };

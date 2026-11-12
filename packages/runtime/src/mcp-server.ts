@@ -29,7 +29,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { type LimitOverrides, limitOverridesSchema, loadEffectiveConfig, parseLimitOverrides } from "./config/index.js";
 import { assertKitCompatible, readKitPackage } from "./kit-version.js";
-import { type DashboardStatus, ensureDashboard } from "./runtime/dashboard-instance.js";
+import { type DashboardStatus, ensureDashboard, runPageUrl } from "./runtime/dashboard-instance.js";
 import { INSIDE_WORKFLOW_ENV } from "./runtime/engine.js";
 import { installCrashHandlers, spawnJob } from "./runtime/jobs.js";
 import { cancelJob, readJob, waitJob } from "./runtime/job-state.js";
@@ -105,7 +105,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 
 /** What `start_workflow` says about the dashboard: the link to the run's page (the Board is one menu away), or why there is none. Nothing when auto-start is off. */
 const dashboardFields = (d: DashboardStatus, runId: string) =>
-  d.status === "running" ? { dashboardUrl: `${d.url}/runs/${encodeURIComponent(runId)}` } : d.status === "unavailable" ? { dashboardWarning: d.reason } : {};
+  d.status === "running" ? { dashboardUrl: runPageUrl(d.url, runId) } : d.status === "unavailable" ? { dashboardWarning: d.reason } : {};
 
 const text = (v: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(v, null, 2) }] });
 const fail = (v: unknown) => ({ ...text(v), isError: true });

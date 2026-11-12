@@ -8,6 +8,7 @@
 // - Events are handed over in batches: a command that prints a thousand lines is a few renders, not a thousand.
 import { useEffect, useRef, useState } from "react";
 import { batcher } from "./batch.js";
+import { runApiPath } from "./location.js";
 import { readable } from "./run-graph.js";
 import type { ContentItem } from "./step-log.js";
 
@@ -44,7 +45,7 @@ export function useStepLog(runId: string, stepId: string, live: boolean): StepLo
     };
     const batch = batcher<ContentItem>(add, BATCH_MS);
 
-    const base = `/api/runs/${encodeURIComponent(runId)}`;
+    const base = runApiPath(runId);
     void (async () => {
       try {
         const reply = await fetch(`${base}/steps/${encodeURIComponent(stepId)}/content`);

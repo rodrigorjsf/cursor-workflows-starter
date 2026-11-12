@@ -1,7 +1,7 @@
 // Seam: the address of the Run view page. `runHref(runId)` is the link the Board and the Runs table put on a run; `runIdOf(pathname)` is how the page learns which run it shows from `/runs/<runId>`.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { runIdOf } from "../run-view/location.js";
+import { runApiPath, runIdOf } from "../run-view/location.js";
 import { runHref } from "../app/format.js";
 
 test("the run id is the second segment of /runs/<runId>, percent-decoded", () => {
@@ -19,4 +19,9 @@ test("the link a card or a row carries is an address the Run view reads back to 
   for (const runId of ["smoke-47b80529", "a b/c", "100%", "x?y#z", "é", "a/../b", "%2F"]) {
     assert.equal(runIdOf(new URL(runHref(runId), "http://127.0.0.1:4317").pathname), runId, runId);
   }
+});
+
+test("the API of a run sits under /api/runs/<runId>, with the id percent-encoded as one segment", () => {
+  assert.equal(runApiPath("smoke-47b80529"), "/api/runs/smoke-47b80529");
+  assert.equal(runApiPath("a b/c"), "/api/runs/a%20b%2Fc");
 });

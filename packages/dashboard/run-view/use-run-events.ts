@@ -8,6 +8,7 @@
 import type { JobStart } from "./resume-command.js";
 import { useEffect, useRef, useState } from "react";
 import { batcher } from "./batch.js";
+import { runApiPath } from "./location.js";
 import type { RunEvent } from "./run-graph.js";
 
 /** `waiting`: the API does not know the run yet. `closed`: the stream was read to the end and shut. */
@@ -66,7 +67,7 @@ export function useRunEvents(runId: string): RunFeed {
     const poll = async () => {
       if (!document.hidden) {
         try {
-          const reply = await fetch(`/api/runs/${encodeURIComponent(runId)}`);
+          const reply = await fetch(runApiPath(runId));
           if (stopped) return;
           if (reply.ok) {
             const detail = (await reply.json()) as { status: ApiStatus; workflow?: string; repo?: string; start?: JobStart };
@@ -97,7 +98,7 @@ export function useRunEvents(runId: string): RunFeed {
 
   useEffect(() => {
     if (!readable) return;
-    const source = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events?content=false&lastEventId=${lastId.current}`);
+    const source = new EventSource(`${runApiPath(runId)}/events?content=false&lastEventId=${lastId.current}`);
     let quietTimer: ReturnType<typeof setTimeout> | undefined;
     const batch = batcher<{ id: number; event: RunEvent }>(
       (arrived) => setFeed((before) => ({ events: before.events.concat(arrived.map((a) => a.event)), ids: before.ids.concat(arrived.map((a) => a.id)) })),
