@@ -1,0 +1,18 @@
+{
+  "name": "@cursor-workflows/dashboard",
+  "version": "0.3.0",
+  "private": true,
+  "description": "The kit's local dashboard: a read-only web server over the runs and the metrics of every repo.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --tsconfig ../runtime/tsconfig.test.json --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@cursor-workflows/runtime": "*"
+  }
+}

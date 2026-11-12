@@ -141,12 +141,10 @@ export interface ExecutionState {
 }
 
 /**
- * The state of the execution that job `jobId` started: the events from the `run-start` that carries its id up to the next
- * `run-start`. Undefined when the log has no such execution yet (the job exists, its process has not started the run).
+ * The state of the execution that starts at `events[start]` (a `run-start`): the events from there up to the next
+ * `run-start`. The run's spend is replayed up to the end of the execution.
  */
-export function projectExecution(events: readonly WorkflowEvent[], jobId: string): ExecutionState | undefined {
-  const start = events.findIndex((e) => e.type === "run-start" && e.jobId === jobId);
-  if (start < 0) return undefined;
+function projectFrom(events: readonly WorkflowEvent[], start: number): ExecutionState | undefined {
   const next = events.findIndex((e, i) => i > start && e.type === "run-start");
   const end = next < 0 ? events.length : next;
   const runStart = events[start]!;
@@ -172,4 +170,19 @@ export function projectExecution(events: readonly WorkflowEvent[], jobId: string
   }
   state.recent = state.recent.slice(-RECENT_LINES);
   return state;
+}
+
+/**
+ * The state of the execution that job `jobId` started: the events from the `run-start` that carries its id up to the next
+ * `run-start`. Undefined when the log has no such execution yet (the job exists, its process has not started the run).
+ */
+export function projectExecution(events: readonly WorkflowEvent[], jobId: string): ExecutionState | undefined {
+  const start = events.findIndex((e) => e.type === "run-start" && e.jobId === jobId);
+  return start < 0 ? undefined : projectFrom(events, start);
+}
+
+/** The state of the latest execution of the run, whichever job (or `wf run`) started it. Undefined when the log has no `run-start`. */
+export function projectLatestExecution(events: readonly WorkflowEvent[]): ExecutionState | undefined {
+  const start = events.findLastIndex((e) => e.type === "run-start");
+  return start < 0 ? undefined : projectFrom(events, start);
 }

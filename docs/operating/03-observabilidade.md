@@ -33,6 +33,7 @@ Configuração por variáveis de ambiente:
 | `WF_METRICS=off` | Desliga a gravação. O `node:sqlite` nem é carregado |
 | `WF_METRICS_DB` | Muda o caminho do banco |
 | `WF_DASH_PORT` | Porta do dashboard (default 4317) |
+| `WF_DASH_AUTOSTART=off` | O `start_workflow` não inicia o dashboard (veja a [seção 5](#5-dashboard)) |
 
 ## 2. O que é medido, e o que não dá para medir
 
@@ -220,11 +221,42 @@ por exemplo de subagents ou de compactação.
 
 ## 5. Dashboard
 
+O dashboard é um servidor local, um só por usuário, para os runs de **todos** os repositórios. Ele mora no pacote
+`packages/dashboard/` (as dependências dele nunca entram no runtime) e lê dois lugares: o índice global de runs
+(`~/.cursor-workflows/runs.jsonl`, que aponta o repositório de cada run) e, por run, o log de eventos
+(`<repositório>/.workflows/runs/<runId>/events.jsonl`); mais o banco de métricas, em modo leitura. Ele nunca escreve.
+
+**Como abrir.** O `start_workflow` garante que o dashboard está rodando (inicia um processo destacado se nada responde
+na porta) e devolve `dashboardUrl` ao lado do `jobId`; a skill `run-workflow` abre o link no navegador embutido do
+Cursor. Só um dashboard roda por porta, por mais `start_workflow` que cheguem juntos. `npm run dash` o inicia à mão. Se o
+dashboard não consegue subir (porta ocupada por outro programa, pacote ausente na instalação), a resposta traz
+`dashboardWarning` com o motivo e o job começa do mesmo jeito.
+
+Para desligar o início automático, ponha `{"dashboard": {"autoStart": false}}` no arquivo global
+(`~/.cursor-workflows/config.json`; no do repositório não tem efeito) ou exporte `WF_DASH_AUTOSTART=off` no `env` do
+servidor `workflows`. Um dashboard que já está de pé continua sendo informado em `dashboardUrl`. O processo grava o pid
+em `~/.cursor-workflows/dashboard.pid` e a saída em `dashboard.log`; `kill $(jq -r .pid ~/.cursor-workflows/dashboard.pid)`
+o encerra.
+
+**API JSON** (`GET`, só leitura):
+
+| Rota | Resposta |
+|---|---|
+| `/api/runs?limit=` | `{runs}`: os runs de todos os repositórios, do mais novo ao mais antigo (até 200, no máximo 1000), cada um com `status` (`running`, `finished`, `failed`, `cancelled` ou `missing`), `repo`, `workflow`, `phase`, `startedAt`, `finishedAt`, `error`, `executions` e o gasto |
+| `/api/runs/<runId>` | o mesmo run com `recent` (as últimas linhas de andamento), `result` e `usage` |
+| `/api/summary?days=` | o resumo de métricas dos painéis abaixo |
+| `/api/health` | `{app, pid}`: como quem chama sabe que é o dashboard que responde na porta |
+
+O `status` de um run vem da projeção do log. Um run cuja execução não escreveu o `run-end` só é `running` enquanto um
+processo segura o lock dele; sem processo, aparece como `failed`, com o comando para retomar. Numa máquina sem histórico
+(sem índice de runs e sem banco de métricas) a API devolve listas vazias, e o banco passa a ser lido assim que o primeiro
+run o cria, sem reiniciar o dashboard.
+
+Hoje a página inicial (`/`) é a das métricas:
+
 ![Dashboard com dados sintéticos gerados pelos testes](../img/dashboard.png)
 
 *Captura com dados sintéticos (SDK falso), não com uso real.*
-
-`npm run dash` abre `http://127.0.0.1:4317`, com:
 
 - **KPIs:** runs, custo, tokens, parcela em cache, tentativas falhas, etapas sem API, custos a reconciliar;
 - **Painel 1:** gasto diário por workflow;
@@ -236,14 +268,21 @@ por exemplo de subagents ou de compactação.
 Segurança:
 
 - escuta só em `127.0.0.1`;
-- recusa `Host` diferente de localhost (proteção contra DNS rebinding);
-- não envia cabeçalhos CORS;
+- recusa `Host` diferente de `127.0.0.1` e `localhost` (proteção contra DNS rebinding);
+- aceita só `GET` e `HEAD`, e não envia cabeçalhos CORS;
 - abre o banco em modo leitura;
 - não usa CDN nem bibliotecas: funciona offline e em rede corporativa restrita.
 
 Verificado em 2026-11-11 no WSL2: escuta só em `127.0.0.1`, responde 403 a um `Host` estranho, não envia
-cabeçalhos CORS e não é alcançável pelo IP do WSL. Abrir o dashboard no navegador do Windows (encaminhamento de
-localhost no modo NAT) ainda não foi testado.
+cabeçalhos CORS e não é alcançável pelo IP do WSL.
+
+**Navegador do Windows (WSL2 em modo NAT).** O link é `http://127.0.0.1:<porta>`. Verificado em 2026-11-12, com o servidor
+em WSL2 escutando só em `127.0.0.1`: o Chrome do Windows (pelo MCP `chrome-devtools`) abriu a página e `/api/runs` em
+`127.0.0.1`, e o `curl.exe` do Windows teve 200 em `127.0.0.1` e em `localhost`, e nenhuma resposta em `[::1]`. Numa
+medição de 2026-11-11 o Chrome tinha recusado `localhost` (o Windows resolve `localhost` para o IPv6 primeiro), e nesta o
+aceitou; o endereço IPv4 funcionou nas duas, por isso é ele que o kit devolve. Uma porta nova leva cerca de meio segundo
+para ser encaminhada ao Windows: um navegador que abre o link no mesmo instante em que o dashboard sobe pode precisar de um
+reload.
 
 ## 6. Instrumentando um workflow
 

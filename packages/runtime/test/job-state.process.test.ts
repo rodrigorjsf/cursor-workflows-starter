@@ -37,6 +37,7 @@ before(() => {
     TSX_TSCONFIG_PATH: join(PACKAGE, "tsconfig.test.json"),
     WF_HOME: join(sandbox, "home"),
     WF_METRICS: "off",
+    WF_DASH_AUTOSTART: "off", // the tests must not leave a dashboard behind
     WF_CWD: repo,
   };
 });

@@ -29,6 +29,7 @@ Os campos do modelo (`id`, `params`, `maxMode`) se combinam um a um: quem troca 
 Depois das camadas, os tetos do arquivo global limitam o resultado: **números** valem o menor entre o teto e o valor pedido, **listas** valem a interseção. O que a configuração pede acima de um teto é reduzido ao teto e registrado como **violação**, e o teto vale. Isso vale também para as flags. Os defaults do código acima de um teto são reduzidos sem violação.
 
 - Um `caps` no arquivo do repositório é violação e não tem efeito.
+- Um `dashboard` no arquivo do repositório é violação e não tem efeito: o dashboard é um só por usuário, para os runs de todos os repositórios.
 - Um `overrides` do chat que afrouxaria o valor em vigor é violação e não tem efeito; apertar o valor é permitido. O `maxTokensPerStep` do chat vale como teto de todos os papéis e globs de label.
 - Um valor que não é um limite válido (um `concurrency` 0, um `maxTokens` fracionário) numa flag, num `overrides` ou numa variável de ambiente é erro, com o nome de onde veio.
 - Um modelo fora de `allowedModels` pedido pela configuração não tem efeito. Um modelo padrão do código que a lista recusa vira uma violação da camada `default` no `run-start`, e as etapas desse papel falham até a configuração trocá-lo.
@@ -63,6 +64,7 @@ Valida os dois arquivos de configuração do kit: o global (`~/.cursor-workflows
 | `$schema` | `string` | não | Endereço deste esquema: dá autocompletar e validação no editor. |
 | `kit` | `string` | não | Faixa semver do kit que este repositório aceita (por exemplo `>=0.3.0 <0.4.0`). Só vale no arquivo do repositório: um kit fora da faixa é recusado. |
 | `caps` | [Tetos globais (caps)](#tetos-globais-caps) | não | Tetos rígidos. Só valem no arquivo global: o arquivo do repositório e o chat só podem apertá-los, nunca afrouxar. Um `caps` no arquivo do repositório é registrado como violação e não tem efeito. |
+| `dashboard` | [O dashboard](#o-dashboard) | não | O dashboard local. Só vale no arquivo global: ele é um só por usuário, para os runs de todos os repositórios. Um `dashboard` no arquivo do repositório é registrado como violação e não tem efeito. |
 | `workflows` | objeto: nome → [Preferências de um workflow](#preferências-de-um-workflow) | não | Preferências por workflow, pelo `meta.name` dele. Uma preferência acima de um teto global é reduzida ao teto e registrada como violação. |
 
 ## Tetos globais (caps)
@@ -77,6 +79,12 @@ Valida os dois arquivos de configuração do kit: o global (`~/.cursor-workflows
 | `allowedLocations` | `array de "local" \| "cloud" \| null` | não | Onde as etapas podem rodar. Hoje só `local` existe; `cloud` é reservado. `null` libera todos. |
 | `maxConcurrency` | `integer \| null` | não | Máximo de agentes simultâneos num run. `null` desliga. |
 | `requireSandbox` | `boolean \| null` | não | `true` liga o sandbox local do SDK em toda etapa, mesmo quando o código do workflow o desliga: um pull request que edita um workflow não afrouxa o sandbox. Ausente, `false` ou `null`: vale o `sandbox` de cada etapa. |
+
+## O dashboard
+
+| Campo | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `autoStart` | `boolean` | não | `false` impede o `start_workflow` de iniciar o dashboard quando ele não está rodando (a variável de ambiente `WF_DASH_AUTOSTART=off` faz o mesmo). Um dashboard que já está de pé continua sendo informado na resposta (`dashboardUrl`). Padrão: `true`. |
 
 ## Preferências de um workflow
 

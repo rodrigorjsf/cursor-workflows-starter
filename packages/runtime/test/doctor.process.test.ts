@@ -58,6 +58,7 @@ function env(bins: string[], extra: Record<string, string> = {}, userHome = home
     WF_HOME: join(userHome, ".cursor-workflows"),
     TSX_TSCONFIG_PATH: join(kit, "packages", "runtime", "tsconfig.test.json"),
     WF_METRICS: "off",
+    WF_DASH_AUTOSTART: "off", // the tests must not leave a dashboard behind
     ...extra,
   };
 }

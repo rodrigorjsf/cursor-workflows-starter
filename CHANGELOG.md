@@ -4,6 +4,22 @@
 
 ### Adicionado
 
+- **Dashboard local: servidor, API de runs e início automático.** O dashboard agora é o pacote `packages/dashboard/`
+  (`@cursor-workflows/dashboard`), separado do runtime: as dependências dele nunca entram nele, e ele só importa do runtime
+  `@cursor-workflows/runtime/observe`. É um só por usuário, para os runs de todos os repositórios: `GET /api/runs` lista os
+  runs do índice global (`~/.cursor-workflows/runs.jsonl`) com o status lido do log de eventos de cada um, `GET
+  /api/runs/<runId>` traz a projeção de um run (linhas de andamento, resultado, tokens) e `/api/summary` mantém o resumo
+  de métricas. Um run sem `run-end` e sem processo segurando o lock aparece como `failed`, com o comando para retomar.
+  Ele sobe numa máquina sem histórico (antes saía com `banco de métricas não encontrado`): sem índice de runs e sem banco
+  a API devolve listas vazias, e o banco passa a ser lido assim que o primeiro run o cria. Escuta só em `127.0.0.1`, recusa
+  `Host` que não seja `127.0.0.1` ou `localhost`, aceita só `GET` e `HEAD`. O `start_workflow` inicia o dashboard
+  destacado quando nada responde na porta (`WF_DASH_PORT`, padrão 4317; um só processo, mesmo com chamadas simultâneas;
+  pid em `~/.cursor-workflows/dashboard.pid`, saída em `dashboard.log`) e devolve `dashboardUrl`
+  (`http://127.0.0.1:<porta>`, o endereço que o navegador do Windows alcança quando o kit roda no WSL2); se não consegue
+  subir, devolve `dashboardWarning` com o motivo e o job começa do mesmo jeito. `dashboard.autoStart: false` no arquivo
+  global de configuração, ou `WF_DASH_AUTOSTART=off`, desliga o início (um `dashboard` no arquivo do repositório é
+  violação e não tem efeito). A skill `run-workflow` abre o `dashboardUrl` no navegador embutido do Cursor. `npm run dash`
+  continua iniciando o dashboard à mão.
 - **`wf gc`: limpa o que os runs do `implement-issue` deixam.** Cada run tem o seu worktree, a sua branch local e, depois
   do push, a sua branch no origin, e nada as removia. `wf gc` lista o que vai remover e remove: o worktree, a branch
   local e a branch do origin de um run cujo PR foi mergeado ou fechado, e os de um run que falhou há mais de

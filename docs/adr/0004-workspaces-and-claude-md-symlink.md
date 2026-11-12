@@ -14,8 +14,9 @@ that the runtime must never install. And three readers (Claude Code, Cursor, Cod
 **The repository is npm workspaces plus a dev space, and one maintainer guide is shared by every reader through a symlink.**
 
 - **The runtime is its own package**, `packages/runtime/` (`@cursor-workflows/runtime`): the engine, the run store, the
-  config resolver, the backends, the CLI, the MCP server, the built-in workflows and the config JSON Schema. A dashboard
-  package is reserved for a later spec, so its dependencies never enter the runtime.
+  config resolver, the backends, the CLI, the MCP server, the built-in workflows and the config JSON Schema. The dashboard
+  is its own package, `packages/dashboard/` (`@cursor-workflows/dashboard`), so its dependencies never enter the runtime. It
+  reaches the runtime through one entry point only, `@cursor-workflows/runtime/observe`.
 - **Distributed assets have their own folders:** `skills/` for the skills the kit ships (`.agents/skills/` symlinks to them
   so the repo dogfoods the real files) and `templates/` for what `wf init` writes into a target repo. Distributed skills
   are self-contained: nothing in a skill points outside its folder.

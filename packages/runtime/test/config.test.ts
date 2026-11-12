@@ -280,6 +280,24 @@ test("a repo file cannot set caps: they are reported as a violation and ignored"
   assert.equal(start.violations[0]!.path, "/caps");
 });
 
+test("the dashboard switch is valid in the global file; in a repo file it is a violation with no effect", async () => {
+  writeGlobalConfig({ dashboard: { autoStart: false } });
+  assert.deepEqual((await startOf()).violations, []);
+
+  clearConfig(cwd);
+  writeRepoConfig(cwd, { dashboard: { autoStart: false } });
+  const start = await startOf();
+  assert.equal(start.violations.length, 1);
+  assert.equal(start.violations[0]!.layer, "repo");
+  assert.equal(start.violations[0]!.path, "/dashboard");
+  assert.match(start.violations[0]!.message, /dashboard.*global file/);
+
+  writeGlobalConfig({ dashboard: { autoStart: "no" } });
+  const bad = await runWorkflow(configWorkflow(), {}, { cwd });
+  assert.equal(bad.status, "failed");
+  assert.match(bad.error!, /\/dashboard\/autoStart/, "a value that is not a boolean names its path");
+});
+
 test("explicit null disables a cap or a preference; an absent key inherits", async () => {
   writeGlobalConfig({ caps: { maxTokens: null } });
   writeRepoConfig(cwd, { workflows: { cfg: { maxTokens: 9_000_000, maxCents: null, maxTokensPerStep: 100_000, roles: { classify: { maxTokensPerStep: null } } } } });

@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit",
     "models": "tsx packages/runtime/src/cli.ts models",
     "test": "npm run test --workspaces --if-present && tsx --test test/*.test.ts",
-    "dash": "tsx packages/runtime/src/observability/dashboard.ts",
+    "dash": "tsx packages/dashboard/src/main.ts",
     "stats": "tsx packages/runtime/src/cli.ts stats",
     "docs:check": "tsx scripts/check-docs.ts",
     "docs:mermaid": "tsx scripts/check-mermaid.ts",

@@ -167,6 +167,15 @@ test("the validate reference names what the kit ships: its scripts exist, the ch
   assert.match(four, /openPr/, "scenario 4 must ask the chat to open the PR");
 });
 
+test("the run-workflow skill opens the dashboard link that start_workflow returns in Cursor's built-in browser", () => {
+  const skill = read("skills", "run-workflow", "SKILL.md");
+  const step2 = skill.slice(skill.indexOf("\n2. Call `start_workflow`"), skill.indexOf("\n3. Chain `wait_workflow`"));
+  assert.match(step2, /`dashboardUrl`/, "step 2 must tell the agent what to do with dashboardUrl");
+  assert.match(step2, /built-in browser/i, "the link opens in Cursor's built-in browser");
+  assert.match(step2, /`dashboardWarning`/, "a dashboard that could not start is relayed, not ignored");
+  assert.match(step2, /once per conversation/i, "one dashboard shows every run: the link is opened once, not on every start");
+});
+
 test("reference files two skills share stay identical", () => {
   const authoring = join("skills", "cursor-workflow-authoring", "references");
   const conversion = join("skills", "skill-to-workflow", "references");
@@ -177,4 +186,24 @@ test("reference files two skills share stay identical", () => {
 test("the runtime package and the repo carry the same version", () => {
   const version = (...p: string[]) => JSON.parse(read(...p, "package.json")).version;
   assert.equal(version("packages", "runtime"), version(), "the MCP server reports the runtime package's version: bump both together");
+  assert.equal(version("packages", "dashboard"), version(), "the workspace packages are released together: bump them together");
+});
+
+test("the dashboard is its own workspace package: its dependencies never enter the runtime, and it reaches the runtime through one entry point", () => {
+  const manifest = (...p: string[]) => JSON.parse(read(...p, "package.json"));
+  const runtime = manifest("packages", "runtime");
+  const dashboard = manifest("packages", "dashboard");
+  assert.equal(dashboard.name, "@cursor-workflows/dashboard");
+  assert.ok(manifest().workspaces.includes("packages/*"));
+  assert.deepEqual(Object.keys(dashboard.dependencies), ["@cursor-workflows/runtime"], "the dashboard needs nothing the runtime does not already ship");
+  assert.equal(Object.keys(runtime.dependencies).some((name) => name.startsWith("@cursor-workflows/")), false, "the runtime depends on no workspace package");
+  assert.deepEqual(Object.keys(runtime.exports).sort(), ["./observe", "./package.json"], "the runtime's only public entry points");
+
+  // Whatever the dashboard imports from the runtime goes through that entry point, never a path into its sources.
+  const sources = readdirSync(join(ROOT, "packages", "dashboard", "src")).filter((f) => f.endsWith(".ts"));
+  assert.ok(sources.length >= 3);
+  for (const file of sources) {
+    const text = read("packages", "dashboard", "src", file);
+    assert.doesNotMatch(text, /from "(\.\.\/)+runtime\/|from "@cursor-workflows\/runtime\/(?!observe")/, `${file} reaches into the runtime's sources`);
+  }
 });

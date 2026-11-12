@@ -1,45 +1,10 @@
-#!/usr/bin/env node
-// Dashboard local das métricas: `npm run dash` → http://127.0.0.1:4317
-//
-// - Escuta só em 127.0.0.1; recusa Host diferente de localhost/127.0.0.1 (proteção contra DNS rebinding);
-//   sem CORS. Banco aberto em modo leitura.
-// - Uma página, quatro painéis (SVG gerado no navegador, sem bibliotecas nem CDN):
-//   1. gasto diário por workflow  2. custo por entrega  3. custo/1k tokens e taxa de sucesso por faixa de contexto
-//   4. desperdício (falhas, re-prompts) e economia (journal/memo)
+// The metrics page: one HTML document, four panels drawn as SVG in the browser, with no library and no CDN, so it works
+// offline and under a strict content security policy:
+//   1. daily spend per workflow  2. cost per delivery  3. cost per 1k tokens and success rate per context band
+//   4. waste (failures, re-prompts) and savings (journal/memo)
+// It reads `/api/summary`. Until the app shell (runs, board, DAG) exists, this is the page the dashboard serves at `/`.
 
-import { createServer } from "node:http";
-import { defaultDbPath, openDb } from "./db.js";
-import { summary } from "./queries.js";
-
-const port = Number(process.env.WF_DASH_PORT ?? 4317);
-const db = await openDb(defaultDbPath(), { readOnly: true });
-
-const server = createServer((req, res) => {
-  const host = (req.headers.host ?? "").split(":")[0];
-  if (host !== "127.0.0.1" && host !== "localhost") {
-    res.writeHead(403).end("host não permitido");
-    return;
-  }
-  const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
-  if (url.pathname === "/api/summary") {
-    const days = Math.min(Math.max(Number(url.searchParams.get("days") ?? 30) || 30, 1), 3650);
-    res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
-    res.end(JSON.stringify(summary(db, days)));
-    return;
-  }
-  if (url.pathname === "/") {
-    res.writeHead(200, {
-      "content-type": "text/html; charset=utf-8",
-      "content-security-policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'",
-    });
-    res.end(PAGE);
-    return;
-  }
-  res.writeHead(404).end();
-});
-server.listen(port, "127.0.0.1", () => process.stderr.write(`dashboard em http://127.0.0.1:${port} (banco: ${defaultDbPath()})\n`));
-
-const PAGE = /* html */ `<!doctype html>
+export const METRICS_PAGE = /* html */ `<!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Workflow Metrics</title>
 <style>
