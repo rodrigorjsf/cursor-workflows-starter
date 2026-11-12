@@ -331,9 +331,10 @@ para um run em andamento e para um que já terminou):
   pelos eventos que mudam o desenho: o log de uma etapa aparece inteiro quando ela termina; a barra deixa parar em
   qualquer evento).
 - Um run grande (o `implement-issue` passa de 50 comandos) não cabe na tela em tamanho legível: a tela enquadra só os nós
-  que cabem com o texto legível, em volta de um foco (o nó com o log aberto; num run que terminou, o primeiro nó que falhou
-  ou foi interrompido, ou senão a primeira etapa: um nó cancelado não é foco; num run em andamento, o nó mais recente), e
-  **Fit View** mostra tudo.
+  que cabem com o texto legível, em volta de um foco (o nó com o log aberto; num run que terminou, o primeiro nó que
+  falhou, foi cancelado ou foi interrompido, ou senão a primeira etapa; num run em andamento, o nó mais recente), e
+  **Fit View** mostra tudo. Ao chegar pelo Tab a um nó fora da tela, a tela o centraliza no mesmo zoom; a partir daí não
+  acompanha mais o run até **Fit View**.
 
 A página lê a API: o stream `?content=false` do run (o conteúdo das etapas vem só do painel de log, que pede o de uma etapa
 por vez), `GET /api/runs/<runId>` para o status e o repositório, que ela consulta a cada poucos segundos, e só age para
@@ -374,8 +375,9 @@ No cabeçalho da página do run:
   uma etapa na nuvem interrompida e o agente registrado no log) chama a mesma rota: ela cancela, pela API da Cursor e com a
   chave do usuário, os cloud agents que o run deixou rodando e a página mostra a nota da resposta (`200`), que os nomeia, no
   lugar do botão. O cancelamento não fica registrado no log, então depois de recarregar a página o botão volta; quando não
-  há mais nada a cancelar, a rota responde `409` e a página mostra a mensagem. Um resume depois disso não reanexa aos
-  agentes cancelados: cria outros, que custam de novo ([6.2 §Etapas na nuvem](../reference/config.md#etapas-na-nuvem)).
+  há mais nada a cancelar, a rota responde `409` e a página mostra a mensagem, como resultado concluído, não como erro.
+  Um resume depois disso não reanexa aos agentes cancelados: cria outros, que custam de novo
+  ([6.2 §Etapas na nuvem](../reference/config.md#etapas-na-nuvem)).
   Quando a nota diz que um agente não foi alcançado, a página a mostra como falha e mantém o botão.
 - **Um run travado** (o processo do job vivo, mas sem heartbeat há mais de 30 s) aparece como `failed`, com o erro
   `no heartbeat for <N>s`, embora o processo ainda segure o lock. A rota acha esse job (`cancelRun` procura o processo que
@@ -423,7 +425,8 @@ dashboard não sobe e diz o motivo.
 
 *Captura do painel Metrics com dados sintéticos (SDK falso), não com uso real.*
 
-- **KPIs:** runs, custo, tokens, parcela em cache, tentativas falhas, etapas sem API, custos a reconciliar;
+- **KPIs:** runs, custo, tokens, parcela em cache, tentativas falhas, etapas sem API, custos a reconciliar. O KPI runs
+  conta todo run da janela, também os que só rodam comandos, como a coluna Runs do painel de custo por entrega;
 - **Painel 1:** gasto diário por workflow;
 - **Painel 2:** custo por entrega;
 - **Painel 3:** faixa de contexto × ¢/1k tokens × taxa de sucesso, por modelo;
