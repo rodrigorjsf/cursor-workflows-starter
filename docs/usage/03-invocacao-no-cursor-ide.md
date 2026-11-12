@@ -172,7 +172,7 @@ que a forma B precisa e imprime o diff do que mudou; não faz commit nem `git ad
 | `.mcp.json` | O mesmo servidor para o Claude Code, com `${HOME}` no lugar de `${userHome}` |
 | `.agents/workflows/config.json` | `$schema` (autocompletar no editor) e `kit`, a faixa de versão do kit que rodou o `init` (`>=0.2.0 <0.3.0` para o kit 0.2.x). O que o arquivo já tem fica, a faixa inclusive |
 | `.gitignore` | A linha `.workflows/`, a não ser que uma forma usual dela já esteja lá |
-| `AGENTS.md` | Um bloco de quatro linhas entre `<!-- cursor-workflows:begin -->` e `<!-- cursor-workflows:end -->`: as regras de segurança e o link do guia de instalação. O arquivo é criado se não existir |
+| `AGENTS.md` | Um bloco de quatro linhas entre `<!-- cursor-workflows:begin -->` e `<!-- cursor-workflows:end -->`: as regras de segurança e o link do guia de instalação. O arquivo é criado se não existir. O Claude Code lê o `CLAUDE.md`, não o `AGENTS.md` ([ADR-0004](../adr/0004-workspaces-and-claude-md-symlink.md)): quando o `CLAUDE.md` não importa o `AGENTS.md` (`@AGENTS.md`), o `init` avisa no stderr e não edita o `CLAUDE.md` |
 
 Rodar de novo não muda nada, e um arquivo que já diz o que o `init` escreveria não é reescrito. Num `mcp.json` que já
 existe, só o servidor `workflows` muda: os outros servidores e as chaves extras dele ficam. Um arquivo que não é JSON

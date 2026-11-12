@@ -107,10 +107,11 @@ async function main(): Promise<number> {
       return 0;
     }
     case "init": {
-      const changes = initRepo({ cwd, skipAgentsMd: values["no-agents-md"], remove: values.remove });
+      const { changes, notes } = initRepo({ cwd, skipAgentsMd: values["no-agents-md"], remove: values.remove });
       // stdout is the diff alone (empty when there is nothing to change); the summary goes to stderr.
       for (const { path, before, after } of changes) process.stdout.write(unifiedDiff(path, before, after));
       process.stderr.write(changes.length ? `wf init: ${changes.length} arquivo(s) alterado(s) em ${cwd}. Nada foi commitado: revise o diff e faça o commit você mesmo.\n` : "wf init: nada a mudar, o repositório já está configurado.\n");
+      for (const note of notes) process.stderr.write(`wf init: ${note}\n`);
       return 0;
     }
     case "config": {

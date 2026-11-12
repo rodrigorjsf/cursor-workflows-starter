@@ -13,6 +13,10 @@ import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotoc
 const PACKAGE = join(import.meta.dirname, "..");
 const KIT_ROOT = join(PACKAGE, "..", "..");
 
+const BEGIN = "<!-- cursor-workflows:begin -->";
+const END = "<!-- cursor-workflows:end -->";
+const GUIDE_URL = "https://github.com/rodrigorjsf/cursor-workflows-starter/blob/main/INSTALL-AGENT.md";
+
 let sandbox: string;
 let home: string;
 let counter = 0;
@@ -40,14 +44,21 @@ const readJson = (repo: string, ...p: string[]) => JSON.parse(read(repo, ...p));
 
 const childEnv = (tsconfig: string) => ({ ...getDefaultEnvironment(), HOME: home, WF_HOME: home, TSX_TSCONFIG_PATH: tsconfig, WF_METRICS: "off" });
 
-/** Runs `wf init` of the kit at `kit` (the real one by default) in `repo`. */
-function init(repo: string, args: string[] = [], kit = KIT_ROOT) {
+/** Runs `wf <args>` of the kit at `kit` (the real one by default) against `repo`. */
+function wf(repo: string, args: string[], kit = KIT_ROOT) {
   const runtime = join(kit, "packages", "runtime");
-  const r = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), join(runtime, "src", "cli.ts"), "init", ...args, "--cwd", repo], {
+  const r = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), join(runtime, "src", "cli.ts"), ...args, "--cwd", repo], {
     env: childEnv(join(runtime, "tsconfig.test.json")),
     encoding: "utf8",
   });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+}
+const init = (repo: string, args: string[] = [], kit = KIT_ROOT) => wf(repo, ["init", ...args], kit);
+
+function git(cwd: string, ...args: string[]): string {
+  const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout.trim();
 }
 
 test("wf init writes the Cursor MCP config pointing at the per-user kit through ${userHome}, with no caps in env", () => {
@@ -113,7 +124,7 @@ test("both generated MCP configs start the kit's MCP server on the target repo, 
   }
 });
 
-test("wf init writes nothing outside the target repo", () => {
+test("wf init writes nothing in the user's home", () => {
   const before = readdirSync(home).sort();
   assert.equal(init(emptyRepo()).status, 0);
   assert.deepEqual(readdirSync(home).sort(), before);
@@ -132,10 +143,7 @@ test("wf init writes a repo config with the schema address and a kit version ran
   // The schema's own documented example uses the same address: one place to look it up.
   assert.equal(JSON.parse(readFileSync(join(PACKAGE, "schema", "config.schema.json"), "utf8")).examples[0].$schema, SCHEMA_URL);
 
-  const shown = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), join(PACKAGE, "src", "cli.ts"), "config", "show", "--cwd", repo], {
-    env: childEnv(join(PACKAGE, "tsconfig.test.json")),
-    encoding: "utf8",
-  });
+  const shown = wf(repo, ["config", "show"]);
   assert.equal(shown.status, 0, shown.stderr);
 });
 
@@ -162,6 +170,15 @@ test("the kit range of the repo config is the minor line (0.x) or the major line
   assert.equal(rangeFor("0.2.3"), ">=0.2.0 <0.3.0");
   assert.equal(rangeFor("1.4.2"), ">=1.0.0 <2.0.0");
   assert.equal(rangeFor("0.7.1-rc.1"), ">=0.7.0 <0.8.0");
+});
+
+test("wf init takes the AGENTS.md block from the templates of the kit it runs from, not from the checkout it was started in", () => {
+  const kit = kitAt("0.2.0");
+  const block = `${BEGIN}\n- a rule that only this copy of the kit has\n${END}\n`;
+  writeFileSync(join(kit, "templates", "agents-md-block.md"), block);
+  const repo = emptyRepo();
+  assert.equal(init(repo, [], kit).status, 0);
+  assert.equal(read(repo, "AGENTS.md"), block);
 });
 
 test("an existing repo config keeps its preferences and its own kit range; only what is missing is added", () => {
@@ -194,11 +211,6 @@ test("wf init leaves a .gitignore alone when it already ignores .workflows in an
 });
 
 test("wf init works in a linked git worktree, where .git is a file", () => {
-  const git = (cwd: string, ...args: string[]) => {
-    const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, encoding: "utf8" });
-    assert.equal(r.status, 0, r.stderr);
-    return r.stdout;
-  };
   const main = emptyRepo();
   git(main, "init", "-q");
   git(main, "commit", "-q", "--allow-empty", "-m", "base");
@@ -212,9 +224,6 @@ test("wf init works in a linked git worktree, where .git is a file", () => {
   assert.ok(existsSync(join(linked, ".mcp.json")) && existsSync(join(linked, ".agents", "workflows", "config.json")));
 });
 
-const BEGIN = "<!-- cursor-workflows:begin -->";
-const END = "<!-- cursor-workflows:end -->";
-const GUIDE_URL = "https://github.com/rodrigorjsf/cursor-workflows-starter/blob/main/INSTALL-AGENT.md";
 
 /** The lines of the kit block in `text`, markers included, or undefined. */
 function blockOf(text: string): string[] | undefined {
@@ -293,7 +302,8 @@ test("wf init replaces a block written by another version of the kit, in place",
   assert.ok(!r.stdout.includes("AGENTS.md"), "skipped");
   const replaced = init(repo);
   assert.equal(replaced.status, 0, replaced.stderr);
-  assert.ok(replaced.stdout.includes(`--- a/AGENTS.md\n+++ b/AGENTS.md\n@@ -1,7 +1,10 @@\n # Top\n \n ${BEGIN}\n-- an old rule\n+- Never print`), replaced.stdout);
+  assert.ok(replaced.stdout.includes(`--- a/AGENTS.md\n+++ b/AGENTS.md\n@@ -1,7 +1,`), replaced.stdout);
+  assert.ok(replaced.stdout.includes(`\n # Top\n \n ${BEGIN}\n-- an old rule\n+- Never print`), replaced.stdout);
   const text = read(repo, "AGENTS.md");
   assert.ok(!text.includes("an old rule"));
   assert.ok(text.startsWith("# Top\n\n" + BEGIN) && text.endsWith(END + "\n\n# Bottom\n"), text);
@@ -395,27 +405,23 @@ test("wf init prints the diff of everything it changed, as a unified diff", () =
 test("wf init --remove prints the removal as a diff, a deleted file included", () => {
   const repo = emptyRepo();
   assert.equal(init(repo).status, 0);
+  const lines = read(repo, "AGENTS.md").trimEnd().split("\n").length;
   const r = init(repo, ["--remove"]);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^--- a\/AGENTS\.md\n\+\+\+ \/dev\/null\n@@ -1,6 \+0,0 @@\n-<!-- cursor-workflows:begin -->\n/);
+  assert.ok(r.stdout.startsWith(`--- a/AGENTS.md\n+++ /dev/null\n@@ -1,${lines} +0,0 @@\n-${BEGIN}\n`), r.stdout);
   assert.doesNotMatch(r.stdout, /mcp\.json/);
 });
 
 test("wf init creates no commit and stages nothing", () => {
   const repo = emptyRepo();
-  const git = (...args: string[]) => {
-    const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: repo, encoding: "utf8" });
-    assert.equal(r.status, 0, r.stderr);
-    return r.stdout.trim();
-  };
-  git("init", "-q");
-  git("commit", "-q", "--allow-empty", "-m", "base");
-  const head = git("rev-parse", "HEAD");
+  git(repo, "init", "-q");
+  git(repo, "commit", "-q", "--allow-empty", "-m", "base");
+  const head = git(repo, "rev-parse", "HEAD");
 
   assert.equal(init(repo).status, 0);
-  assert.equal(git("rev-parse", "HEAD"), head);
-  assert.equal(git("diff", "--cached", "--name-only"), "", "nothing staged");
-  assert.deepEqual(git("status", "--porcelain").split("\n").map((l) => l.slice(3)).sort(), [".agents/", ".cursor/", ".gitignore", ".mcp.json", "AGENTS.md"]);
+  assert.equal(git(repo, "rev-parse", "HEAD"), head);
+  assert.equal(git(repo, "diff", "--cached", "--name-only"), "", "nothing staged");
+  assert.deepEqual(git(repo, "status", "--porcelain").split("\n").map((l) => l.slice(3)).sort(), [".agents/", ".cursor/", ".gitignore", ".mcp.json", "AGENTS.md"]);
 });
 
 test("wf init in a directory that does not exist is an error, not a new directory", () => {
@@ -424,4 +430,36 @@ test("wf init in a directory that does not exist is an error, not a new director
   assert.equal(r.status, 1);
   assert.match(r.stderr, /no-such-repo/);
   assert.ok(!existsSync(missing));
+});
+
+test("wf init tells a Claude Code user that CLAUDE.md, not AGENTS.md, is what Claude Code reads, unless one imports the other", () => {
+  const hint = /CLAUDE\.md.*@AGENTS\.md/s;
+
+  const withClaudeMd = emptyRepo();
+  put(join(withClaudeMd, "CLAUDE.md"), "# Guide\n");
+  const a = init(withClaudeMd);
+  assert.equal(a.status, 0, a.stderr);
+  assert.match(a.stderr, hint);
+  assert.equal(read(withClaudeMd, "CLAUDE.md"), "# Guide\n", "init only says it, it does not edit CLAUDE.md");
+
+  const withoutClaudeMd = emptyRepo();
+  assert.match(init(withoutClaudeMd).stderr, hint);
+
+  const importing = emptyRepo();
+  put(join(importing, "CLAUDE.md"), "@AGENTS.md\n");
+  assert.doesNotMatch(init(importing).stderr, hint);
+
+  const linked = emptyRepo();
+  put(join(linked, "CLAUDE.md"), "# Guide\n");
+  symlinkSync("CLAUDE.md", join(linked, "AGENTS.md"));
+  assert.doesNotMatch(init(linked).stderr, hint);
+});
+
+test("wf init does not give the Claude Code hint when it leaves AGENTS.md alone", () => {
+  const hint = /@AGENTS\.md/;
+  assert.doesNotMatch(init(emptyRepo(), ["--no-agents-md"]).stderr, hint);
+
+  const removing = emptyRepo();
+  assert.equal(init(removing).status, 0);
+  assert.doesNotMatch(init(removing, ["--remove"]).stderr, hint);
 });
