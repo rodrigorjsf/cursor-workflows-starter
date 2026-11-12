@@ -32,7 +32,7 @@ export const write = (o: any, file: string, content: string) => {
   writeFileSync(p, content);
 };
 export const gh = () =>
-  JSON.parse(readFileSync(fx.ghState, "utf8")) as { comments: string[]; prs: Array<{ url: string; body: string }>; calls: string[][]; fail?: Record<string, string> };
+  JSON.parse(readFileSync(fx.ghState, "utf8")) as { comments: string[]; prs: Array<{ url: string; body: string; head?: string; state?: string }>; calls: string[][]; fail?: Record<string, string> };
 /** From now on the fake gh fails `gh <command>` (for example "pr view") with `message` on stderr and exit code 1; `message` undefined restores it. */
 export function failGh(command: string, message: string | undefined) {
   const state = JSON.parse(readFileSync(fx.ghState, "utf8"));
@@ -40,6 +40,15 @@ export function failGh(command: string, message: string | undefined) {
   if (message === undefined) delete state.fail[command];
   else state.fail[command] = message;
   writeFileSync(fx.ghState, JSON.stringify(state));
+}
+
+/** From now on the fake gh answers `pr view <branch> --json state` with `state` for the PR opened on `branch` (a merge or a close that happened on GitHub). */
+export function setPrState(branch: string, state: "OPEN" | "MERGED" | "CLOSED") {
+  const st = JSON.parse(readFileSync(fx.ghState, "utf8")) as { prs: Array<{ head?: string; state?: string }> };
+  const pr = st.prs.filter((p) => p.head === branch).pop();
+  if (!pr) throw new Error(`the fake gh has no PR on ${branch}`);
+  pr.state = state;
+  writeFileSync(fx.ghState, JSON.stringify(st));
 }
 
 /** The branch and the worktree of a run on issue 7: each run owns its own (`wf/issue-<n>-<run>`), named after the run id without the workflow's name. */
@@ -70,10 +79,17 @@ if (a[0] === "issue" && a[1] === "view") {
   save(); process.stdout.write(JSON.stringify(out));
 } else if (a[0] === "issue" && a[1] === "comment") {
   st.comments.push(body()); save(); process.stdout.write("https://example.invalid/issues/1#c" + st.comments.length + "\\n");
+} else if (a[0] === "pr" && a[1] === "view" && flag("--json") === "state") {
+  // gh pr view <branch> --json state: the state of the latest PR whose head is that branch
+  save();
+  const pr = st.prs.filter((p) => p.head === a[2]).pop();
+  if (pr) process.stdout.write((pr.state || "OPEN") + "\\n"); else { process.stderr.write('no pull requests found for branch "' + a[2] + '"'); process.exit(1); }
 } else if (a[0] === "pr" && a[1] === "view") {
-  save(); if (st.prs.length) process.stdout.write(st.prs[0].url + "\\n"); else { process.stderr.write("no pull requests found"); process.exit(1); }
+  // A PR seeded by a test has no head and answers for every branch; one made by pr create answers for its own branch only
+  save(); const pr = st.prs.find((p) => !p.head || p.head === a[2]);
+  if (pr) process.stdout.write(pr.url + "\\n"); else { process.stderr.write("no pull requests found"); process.exit(1); }
 } else if (a[0] === "pr" && a[1] === "create") {
-  st.prs.push({ url: "https://example.invalid/pull/" + (st.prs.length + 1), body: body() }); save();
+  st.prs.push({ url: "https://example.invalid/pull/" + (st.prs.length + 1), body: body(), head: flag("--head"), state: "OPEN" }); save();
   process.stdout.write(st.prs[st.prs.length - 1].url + "\\n");
 } else { save(); process.stderr.write("fake gh: unsupported " + a.join(" ")); process.exit(2); }
 `;

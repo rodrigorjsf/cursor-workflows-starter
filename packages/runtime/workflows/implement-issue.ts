@@ -91,7 +91,7 @@ import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import { NamedLockedError, acquireNamedLock } from "../src/runtime/run-store.js";
 import { defineWorkflow, type AgentCallOptions } from "../src/runtime/workflow.js";
 import { buildPrBody, type PrText } from "./implement-issue/pr-body.js";
-import { CommandError, Commands, WORKFLOW_BRANCH_PREFIX } from "./implement-issue/commands.js";
+import { CommandError, Commands, LOCAL_GIT_TIMEOUT_MS, NETWORK_TIMEOUT_SEC, WORKFLOW_BRANCH_PREFIX } from "./implement-issue/commands.js";
 import * as P from "./implement-issue/prompts.js";
 import { AXES, AXIS_SCHEMAS, blockingAxes, blockingOf, type Axis, type ReviewReports } from "./implement-issue/review.js";
 import {
@@ -144,6 +144,8 @@ type Settings = {
   labelTiers: Record<string, Tier>;
   /** Quedas do processo que uma mesma etapa de escrita pode causar antes de o resume desistir dela. */
   maxStepCrashes: number;
+  /** `wf gc`: o run que falhou há mais dias que isto perde o worktree e as branches. Quem o lê é o `wf gc`, não o run. */
+  gcFailedAfterDays: number;
 };
 const SETTINGS: Settings = {
   sliceCaps: { LOW: 1, MED: 3, HIGH: 5 },
@@ -159,13 +161,11 @@ const SETTINGS: Settings = {
     security: "HIGH",
   },
   maxStepCrashes: 2,
+  gcFailedAfterDays: 14,
 };
 const READ_ONLY = ["read", "grep", "glob", "ls", "semSearch"];
 const REVIEW_TOOLS = ["read", "grep", "glob", "ls"];
 const NO_SETTING_SOURCES: SettingSource[] = [];
-/** Teto de tempo do `git` local (add, diff, commit com hooks…): passado disso há um hook ou um lock parado. */
-const LOCAL_GIT_TIMEOUT_MS = 5 * 60_000;
-const NETWORK_TIMEOUT_SEC = 120;
 const SEAMS_MARKER = "<!-- wf:implement-issue:seams -->";
 /** Arquivos que orientam o desenho e o review, quando existem no repositório. */
 const CONTEXT_FILES = ["GLOSSARY.md", "CONTEXT.md", "AGENTS.md", "CODING_STANDARDS.md", "CONTRIBUTING.md", "docs/adr"];
@@ -613,7 +613,17 @@ export default defineWorkflow<Args>({
       }
       if (existsSync(worktree)) ctx.log(`worktree ${worktree} is this run's; reusing it`);
       else if (await branchExists(cmd, ctx.cwd, branch)) await cmd.git(ctx.cwd, "worktree", "add", worktree, branch); // resume: mantém os commits
-      else await cmd.git(ctx.cwd, "worktree", "add", "-b", branch, worktree, progress.data.baseCommit ?? (await defaultBranchHead(cmd, ctx.cwd)));
+      else {
+        // Nem o worktree nem a branch: ou o run ainda não os fez, ou alguém os removeu (`wf gc`, ou à mão). Refazê-los vazios,
+        // com fatias já dadas como prontas, entregaria uma árvore vazia por cima do trabalho (o push dela tem o lease do próprio run).
+        const worked = progress.data.slices.length;
+        if (progress.data.baseCommit && worked) {
+          throw new Error(
+            `${worktree} and its branch ${branch} are gone, and the run had already worked in them (slices recorded: ${worked}): they were removed, by \`wf gc\` or by hand, so this run cannot go on. Start a new run`,
+          );
+        }
+        await cmd.git(ctx.cwd, "worktree", "add", "-b", branch, worktree, progress.data.baseCommit ?? (await defaultBranchHead(cmd, ctx.cwd)));
+      }
       if (!progress.data.baseCommit) {
         progress.data.baseCommit = (await cmd.gitRead(worktree, "rev-parse", "HEAD")).trim();
         progress.save();

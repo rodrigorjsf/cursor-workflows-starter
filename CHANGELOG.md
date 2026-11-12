@@ -4,13 +4,27 @@
 
 ### Adicionado
 
+- **`wf gc`: limpa o que os runs do `implement-issue` deixam.** Cada run tem o seu worktree, a sua branch local e, depois
+  do push, a sua branch no origin, e nada as removia. `wf gc` lista o que vai remover e remove: o worktree, a branch
+  local e a branch do origin de um run cujo PR foi mergeado ou fechado, e os de um run que falhou há mais de
+  `gcFailedAfterDays` dias (novo ajuste do `implement-issue`, padrão 14; falhou é terminar com erro ou com um status de
+  falha, ou o processo cair sem terminar, e um run cancelado não conta). `wf gc --dry-run` só imprime o plano. Nunca toca
+  num run que um processo está executando (o lock do run decide, e é tomado também durante a remoção), numa branch fora de
+  `wf/`, num caminho fora de `.workflows/worktrees/`, nem num commit do origin que o run não empurrou; a branch do
+  origin de um run que falhou também fica se o PR dela está aberto (apagar fecharia o PR). Uma branch `wf/` do origin que
+  nenhum run deste repositório possui (o run foi feito em outro clone) sai quando o PR dela foi mergeado ou fechado; sem
+  PR, ou com o PR aberto, fica. Para um run que falhou, o plano avisa o que se perde com ele: arquivos não commitados no
+  worktree e commits que não estão em nenhum remoto. O estado do run em `.workflows/runs/<runId>/` (log, journal) fica. Se o `gh` não diz o que houve com um PR, o run fica e o comando sai
+  com 1. Um run começado quando a branch era a fixa `wf/issue-<n>` aparece como mantido: o estado dele não diz qual é a
+  branch nem o worktree dele, então se remove à mão. A saída é um JSON em stdout (`remove`, `kept`, `errors`), e o plano
+  vai antes para o stderr.
 - **Ajustes de um workflow na configuração, e os limites do `implement-issue` entre eles.** Um workflow declara seus
   ajustes e os padrões em `meta.settings`, lê o resultado em `ctx.settings`, e os arquivos de configuração (global,
   depois o do repositório) os trocam em `workflows.<nome>.settings`; um nome que o workflow não declara é erro, com o
   caminho do campo. O `run-start` e o `wf config show` trazem os ajustes em vigor (`config.settings`) e a origem de
-  cada um. O `implement-issue` declara sete: `sliceCaps` (fatias por tier, padrão LOW 1, MED 3, HIGH 5), `extraSlices`
-  (2), `fixRounds` (2), `redGreenAttempts` (2), `maxDiffChars` (40000), `labelTiers` (o mapa label → tier) e
-  `maxStepCrashes` (2). O esquema os valida e a referência da configuração (`docs/reference/config.md`, regerada por
+  cada um. O `implement-issue` declara oito: `sliceCaps` (fatias por tier, padrão LOW 1, MED 3, HIGH 5), `extraSlices`
+  (2), `fixRounds` (2), `redGreenAttempts` (2), `maxDiffChars` (40000), `labelTiers` (o mapa label → tier),
+  `maxStepCrashes` (2) e `gcFailedAfterDays` (14, do `wf gc`). O esquema os valida e a referência da configuração (`docs/reference/config.md`, regerada por
   `npm run docs:config`) os documenta.
 - **`revertOnRetry` em `agent()`.** Antes de cada nova tentativa de uma etapa que escreve, o motor põe o `cwd` de volta
   como estava no começo da etapa (o mesmo desfazer do cancelamento). Opt-in: o desfazer restaura o diretório inteiro,
@@ -130,6 +144,11 @@
 
 ### Mudado
 
+- **Um resume não refaz, vazios, o worktree e a branch que alguém removeu.** Se nem o worktree nem a branch do run
+  existem mais (o `wf gc`, ou a mão, os removeu) e o run já tinha fatias, o resume falha dizendo isso e mandando começar um
+  run novo. Antes ele criava o worktree de novo a partir do commit-base, dava as fatias por prontas, entregava uma árvore
+  vazia e a empurrava por cima do trabalho no origin (o lease do push é o do próprio run). Um run que falhou antes da
+  primeira fatia continua podendo ser retomado: não havia nada a perder.
 - **O `implement-issue` fica robusto contra três falhas e tem limites configuráveis.**
   - **O tier vem da label mais alta.** Com `complexity:low` e `complexity:high` na mesma issue, vale HIGH, em qualquer
     ordem das labels; antes valia a primeira que casava, e a ordem podia rebaixar uma issue difícil. Uma label com o

@@ -141,6 +141,27 @@ function acquireLock(dir: string, runId: string): () => void {
   );
 }
 
+/** Is a live process executing run `runId` of the repo `cwd`? Only reads: it neither creates the run's directory nor takes its lock. */
+export function isRunExecuting(cwd: string, runId: string): boolean {
+  const file = join(runDirIn(cwd, runId), LOCK_FILE);
+  const holder = readLock(file);
+  return holder !== undefined && isHeld(holder, file);
+}
+
+/**
+ * Takes the lock of run `runId` of the repo `cwd`, or returns undefined when a process is executing it. For work on a run's
+ * leftovers (`wf gc`) that must not overlap an execution: while it holds the lock, a resume of the run is refused. Returns the
+ * release function.
+ */
+export function tryAcquireRunLock(cwd: string, runId: string): (() => void) | undefined {
+  try {
+    return acquireLock(runDirPath(cwd, runId), runId);
+  } catch (err) {
+    if (err instanceof RunLockedError) return undefined;
+    throw err;
+  }
+}
+
 /**
  * Takes the repo-wide lock `name` for run `runId`, or throws `NamedLockedError` naming the run that holds it. It is how a
  * workflow keeps two runs from working on the same thing at once (`implement-issue` locks `issue-<n>`). Held until the
@@ -159,9 +180,15 @@ export function acquireNamedLock(cwd: string, name: string, runId: string): () =
   );
 }
 
-/** Directory of a run's state in the target repo. */
+/** Where a run's state is in the target repo, whether or not it exists: nothing is created. */
+export function runDirIn(cwd: string, runId: string): string {
+  return join(cwd, ".workflows", "runs", runId);
+}
+
+/** Directory of a run's state in the target repo; makes `.workflows/runs/` if it is not there. */
 export function runDirPath(cwd: string, runId: string): string {
-  return join(stateDir(cwd, "runs"), runId);
+  stateDir(cwd, "runs");
+  return runDirIn(cwd, runId);
 }
 
 export function eventLogPath(cwd: string, runId: string): string {
