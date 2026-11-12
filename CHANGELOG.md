@@ -193,7 +193,8 @@
   run na mesma issue, depois do primeiro, abre um PR novo na sua branch. Um run começado antes desta mudança retoma na
   branch e no worktree antigos. Uma issue tem no máximo um run ativo: o segundo run volta
   `status: "issue-locked"` com o `activeRunId` do que está ativo, sem branch, worktree nem agente (o lock é o arquivo
-  `.workflows/locks/issue-<n>.lock`, do mesmo tipo do `run.lock`; o de um processo que morreu é retomado). A entrega
+  `.workflows/locks/issue-<n>.lock`, do mesmo tipo do `run.lock`, com um hash do `--repo` no nome quando o run o
+  passa, porque a issue #5 de outro repositório é outra issue; o de um processo que morreu é retomado). A entrega
   empurra com `--force-with-lease`, só em branch `wf/`: o resume depois de o PR existir refaz o commit e entrega por
   cima, em vez de falhar com non-fast-forward. Se a branch no origin tem um commit que o run não empurrou (alguém
   empurrou uma correção), o run volta `status: "push-refused"` e não sobrescreve nada; o trabalho fica no worktree.

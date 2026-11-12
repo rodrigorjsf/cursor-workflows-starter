@@ -40,7 +40,7 @@
 //     do run. Um erro do `gh` ou do `git` falha o run com a mensagem dele; "sem PR" é só a resposta conhecida do `gh`;
 //   - cada run tem a sua branch (`wf/issue-<n>-<run>`) e o seu worktree, criados a partir da cabeça ATUAL da branch padrão; o
 //     worktree só é reaproveitado pelo run que o registrou no progresso. Uma issue tem no máximo um run ativo: o segundo run
-//     devolve "issue-locked" com o id do que está ativo (lock `issue-<n>` no run store);
+//     devolve "issue-locked" com o id do que está ativo (lock `issue-<n>` no run store, por repositório);
 //   - a entrega empurra com `--force-with-lease`, só em branch `wf/`, e só quando o commit que o origin tem na branch é um que
 //     este run empurrou: o resume depois do PR refaz o commit e entrega por cima; commit de outra pessoa na branch dá
 //     "push-refused" e não é sobrescrito.
@@ -272,6 +272,15 @@ function tierOfLabels(labels: Array<{ name: string }>, labelTiers: Record<string
 
 const branchExists = (cmd: Commands, cwd: string, branch: string) => cmd.gitIs(cwd, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`);
 
+/**
+ * The name of the lock on an issue. Without `--repo` the issue is the cwd repository's (`issue-<n>`); with it, the name carries a
+ * hash of `owner/repo` (GitHub names ignore case), so the same number in another repository is another lock. Passing `--repo`
+ * with the cwd's own repository takes a lock apart from a run without it: nothing asks GitHub which repository the cwd is.
+ */
+function issueLockName(issue: number, repo: string | undefined): string {
+  return repo ? `issue-${issue}-${createHash("sha256").update(repo.toLowerCase()).digest("hex").slice(0, 12)}` : `issue-${issue}`;
+}
+
 const issueBranch = (issue: number) => `${WORKFLOW_BRANCH_PREFIX}issue-${issue}`;
 
 /**
@@ -438,10 +447,11 @@ export default defineWorkflow<Args>({
 
   async run(ctx) {
     // Uma issue tem no máximo um run ativo: dois runs na mesma issue brigariam pelo mesmo trabalho e abririam dois PRs. O lock
-    // fica no run store (`.workflows/locks/issue-<n>.lock`) e vale até o run terminar, qualquer que seja o jeito (status, erro, cancelamento).
+    // fica no run store (`.workflows/locks/issue-<n>.lock`, ou `issue-<n>-<hash do --repo>.lock`: a issue #5 de outro repositório
+    // é outra issue) e vale até o run terminar, qualquer que seja o jeito (status, erro, cancelamento).
     let releaseIssue: () => void;
     try {
-      releaseIssue = acquireNamedLock(ctx.cwd, `issue-${ctx.args.issue}`, ctx.runId);
+      releaseIssue = acquireNamedLock(ctx.cwd, issueLockName(ctx.args.issue, ctx.args.repo), ctx.runId);
     } catch (err) {
       if (!(err instanceof NamedLockedError)) throw err;
       return {

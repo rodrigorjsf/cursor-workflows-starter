@@ -133,6 +133,36 @@ test("a second run on an issue that has an active run is refused with that run's
   assert.equal(res(after).status, "done", `the run that ended released the issue: ${JSON.stringify(res(after))}`);
 });
 
+test("the lock is on the issue of one repository: issue #7 of another --repo is not locked out, the same --repo is", async () => {
+  issue(["complexity:low"]);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let reached!: () => void;
+  const atCodeStep = new Promise<void>((resolve) => (reached = resolve));
+  let held = false;
+  fx.handlers["codigo-1"] = async (o) => {
+    if (!held) {
+      held = true;
+      reached();
+      await gate;
+    }
+    write(o, "src/math.js", SUB_CODE);
+    submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
+  };
+  const first = run({ repo: "acme/a" }, "run-a");
+  try {
+    await atCodeStep;
+    const sameRepo = await run({ repo: "ACME/A" }, "run-b"); // GitHub names ignore case
+    assert.equal(res(sameRepo).status, "issue-locked", JSON.stringify(sameRepo));
+    assert.equal(res(sameRepo).activeRunId, "run-a");
+    const otherRepo = await run({ repo: "acme/b" }, "run-c");
+    assert.equal(res(otherRepo).status, "done", `issue #7 of acme/b is another issue: ${JSON.stringify(res(otherRepo))}`);
+  } finally {
+    release();
+  }
+  assert.equal(res(await first).status, "done");
+});
+
 test("a run that fails, and a run that stops with a status, release the issue", async () => {
   issue(["complexity:low"]);
   failGh("pr view", "HTTP 401: Bad credentials");
