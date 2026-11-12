@@ -166,7 +166,7 @@ test("cancelling a job that already ended changes nothing and says so; an unknow
 test("cancel does not signal a process that is not the job's (a recycled pid)", async () => {
   const bystander = spawn("sleep", ["60"], { stdio: "ignore" });
   strays.push(bystander.pid!);
-  const record = createJob(repo, "hold", "run-recycled", "recycled"); // fresh heartbeat, a live pid... that is not a job process
+  const record = createJob(repo, "hold", { runId: "run-recycled", jobId: "recycled" }); // fresh heartbeat, a live pid... that is not a job process
   writeJob(repo, { ...record, pid: bystander.pid! });
 
   const result = wf("cancel", "recycled");

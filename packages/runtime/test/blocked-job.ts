@@ -15,6 +15,6 @@ const blocking = defineWorkflow({
     return { status: "done" };
   },
 });
-const { done } = startJob(blocking, {}, { cwd }, createJob(cwd, "blocking", runId, jobId));
+const { done } = startJob(blocking, {}, { cwd }, createJob(cwd, "blocking", { runId, jobId }));
 await done;
 process.stdout.write("done\n");

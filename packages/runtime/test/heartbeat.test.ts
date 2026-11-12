@@ -31,7 +31,7 @@ const heartbeatOnDisk = (jobId: string) => (JSON.parse(readFileSync(join(jobsDir
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 test("a job whose process is alive but whose heartbeat is stale is reported as failed, with its run id for resume", () => {
-  const record = createJob(cwd, "w", "run-stale", "job-stale"); // pid: this process, which is alive
+  const record = createJob(cwd, "w", { runId: "run-stale", jobId: "job-stale" }); // pid: this process, which is alive
   writeJob(cwd, { ...record, heartbeat: new Date(Date.now() - 5 * 60_000).toISOString() });
   const state = readJob(cwd, "job-stale")!;
   assert.equal(state.status, "failed");
@@ -41,7 +41,7 @@ test("a job whose process is alive but whose heartbeat is stale is reported as f
 });
 
 test("a job with a fresh heartbeat and a live process is running", () => {
-  createJob(cwd, "w", "run-fresh", "job-fresh");
+  createJob(cwd, "w", { runId: "run-fresh", jobId: "job-fresh" });
   assert.equal(readJob(cwd, "job-fresh")!.status, "running");
 });
 

@@ -21,8 +21,18 @@ import { resumeHint } from "./projection.js";
 import { abortOpenRuns } from "./run-store.js";
 import type { WorkflowDefinition } from "./workflow.js";
 
+/** What a new job record may be given; the rest is generated: a new run id, a random job id, this process's pid. */
+export interface NewJob {
+  /** The run to execute: given to resume it, or a new one. */
+  runId?: string;
+  jobId?: string;
+  pid?: number;
+  /** How the job was started, kept so a resume can repeat it. */
+  start?: JobStart;
+}
+
 /** Creates the job record before the run (the CLI `start` writes it in the parent, before the spawn). */
-export function createJob(cwd: string, workflow: string, runId?: string, jobId: string = randomUUID().slice(0, 8), pid = process.pid, start?: JobStart): JobRecord {
+export function createJob(cwd: string, workflow: string, { runId, jobId = randomUUID().slice(0, 8), pid = process.pid, start }: NewJob = {}): JobRecord {
   // Date and time stay in the record, not in the workflow: the script must be deterministic for the resume.
   const record: JobRecord = { jobId, runId: runId ?? newRunId(workflow), pid, heartbeat: new Date().toISOString(), ...(start ? { start } : {}) };
   writeJob(cwd, record);
@@ -90,7 +100,7 @@ export function startJob<A>(
   opts: RunOptions,
   existing?: JobRecord,
 ): { job: JobRecord; done: Promise<JobState> } {
-  const job = existing ?? createJob(opts.cwd, def.meta.name, opts.runId);
+  const job = existing ?? createJob(opts.cwd, def.meta.name, { runId: opts.runId });
   const heartbeat = startHeartbeat(opts.cwd, job);
   const done = (async () => {
     try {
@@ -135,7 +145,7 @@ export function spawnJob(o: SpawnJobOptions): { job: JobRecord; log: string } {
     ...(o.maxTokens === undefined ? {} : { maxTokens: o.maxTokens }),
     ...(o.overrides && Object.keys(o.overrides).length ? { overrides: o.overrides } : {}),
   };
-  const job = createJob(o.cwd, o.workflow, o.resumeRunId, undefined, undefined, start);
+  const job = createJob(o.cwd, o.workflow, { runId: o.resumeRunId, start });
   const log = jobLogPath(o.cwd, job.jobId);
   const cli = fileURLToPath(new URL("../cli.ts", import.meta.url)); // the runtime's own CLI, wherever the kit is installed
   const flags = [
