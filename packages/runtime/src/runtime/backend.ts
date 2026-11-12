@@ -37,7 +37,7 @@ import {
 } from "@cursor/sdk";
 import type { CloudAgentEvent, TurnUsage } from "./events.js";
 import { errorText } from "./error-text.js";
-import { type Capture, SUBMIT_TOOL, repromptMessage, schemaInstruction, submitResultTool } from "./structured.js";
+import { type Capture, SUBMIT_TOOL, type Validated, repromptMessage, schemaInstruction, submitResultTool } from "./structured.js";
 import type { AgentCallOptions } from "./workflow.js";
 
 /** Where a step runs. The global cap `allowedLocations` decides which ones a run may use. */
@@ -391,7 +391,7 @@ export async function runAttempt(
 }
 
 /** What a structured step's answer holds: the validated result, or why there is none and what to tell the agent. */
-export type Delivery = { ok: true; value: unknown } | { ok: false; message: string; reprompt: string };
+export type Delivery = Validated | { ok: false; message: string; reprompt: string };
 
 /**
  * Sends `message` and, for a structured step (`check` given), re-prompts in the SAME conversation, up to `schemaRetries`

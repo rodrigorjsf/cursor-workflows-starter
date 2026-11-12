@@ -91,8 +91,11 @@ function lastJsonBlock(text: string): string | undefined {
   return last;
 }
 
+/** A structured result that passed its schema: the success arm of every result a step reads. */
+export type Validated = { ok: true; value: unknown };
+
 /** A structured result read from an answer: the validated value, or why there is none. */
-export type Parsed = { ok: true; value: unknown } | { ok: false; error: string };
+export type Parsed = Validated | { ok: false; error: string };
 
 /** What `text` holds as a result for `schema`: the object, or why it is not one. `what` names where the text came from. */
 function resultFromJson(text: string, schema: JsonSchema, what: string): Parsed {
