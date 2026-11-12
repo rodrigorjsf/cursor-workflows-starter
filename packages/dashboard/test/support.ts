@@ -111,7 +111,6 @@ export function http(url: string, path: string, opts: { host?: string; method?: 
 export interface Frame {
   /** The `id:` field: the event's line number in the log. */
   id?: string;
-  event?: string;
   /** The `data:` lines, joined with a newline. */
   data: string;
 }
@@ -140,11 +139,10 @@ function parseFrame(raw: string): Frame | undefined {
     const field = colon < 0 ? line : line.slice(0, colon);
     const value = colon < 0 ? "" : line.slice(colon + 1).replace(/^ /, "");
     if (field === "id") frame.id = value;
-    else if (field === "event") frame.event = value;
     else if (field === "data") data.push(value);
   }
   frame.data = data.join("\n");
-  return data.length > 0 || frame.event !== undefined ? frame : undefined;
+  return data.length > 0 ? frame : undefined;
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));

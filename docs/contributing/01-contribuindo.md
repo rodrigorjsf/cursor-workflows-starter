@@ -18,7 +18,7 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 ├── CLAUDE.md               # guia canônico do mantenedor, em inglês (AGENTS.md é um link simbólico para ele)
 ├── packages/
 │   ├── dashboard/          # o dashboard local (workspace npm @cursor-workflows/dashboard): servidor HTTP só de leitura sobre os runs e as métricas
-│   │   ├── src/            # server.ts (API JSON), main.ts (o processo), metrics-page.ts (a página)
+│   │   ├── src/            # server.ts (API JSON e stream SSE), main.ts (o processo), metrics-page.ts (a página)
 │   │   └── test/           # testes do servidor por HTTP, sobre diretórios de run de mentira
 │   └── runtime/            # o produto (workspace npm @cursor-workflows/runtime)
 │       ├── src/
@@ -33,6 +33,7 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   │   ├── journal.ts      # resume sem repetir etapas concluídas
 │       │   │   ├── jobs.ts         # jobs: processo destacado, heartbeat, cancelamento e estado projetado do log
 │       │   │   ├── run-view.ts     # os runs de todos os repositórios, lidos do índice global e do log, para quem observa de fora (o dashboard)
+│       │   │   ├── run-tail.ts     # o log de eventos de um run lido por posição (cada linha tem um id): o stream ao vivo e o conteúdo de uma etapa
 │       │   │   ├── dashboard-instance.ts  # onde o dashboard escuta, o pid file e o `ensureDashboard` que o `start_workflow` chama
 │       │   │   ├── heartbeat-worker.mjs  # thread que atualiza o heartbeat do job mesmo com a principal bloqueada
 │       │   │   ├── worktree-snapshot.ts  # registra e restaura os arquivos de uma etapa que escreve (cancelamento)

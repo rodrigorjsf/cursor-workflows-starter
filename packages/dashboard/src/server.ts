@@ -38,8 +38,11 @@ function hostAllowed(header: string | undefined): boolean {
   }
 }
 
+/** Sent with every API answer and stream: a run's state is never cached, and a body is never sniffed into another type. */
+const API_HEADERS = { "cache-control": "no-store", "x-content-type-options": "nosniff" };
+
 function send(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8", ...API_HEADERS });
   res.end(JSON.stringify(body));
 }
 
@@ -98,7 +101,7 @@ function resumeId(req: IncomingMessage, url: URL): number | undefined {
 
 /** Sends the events of `tail` as server-sent events, now and as the run appends them, until the client goes away. */
 function stream(req: IncomingMessage, res: ServerResponse, tail: RunTail): void {
-  res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
+  res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", ...API_HEADERS });
   if (req.method === "HEAD") {
     res.end();
     return;
@@ -162,7 +165,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
         if (rest === "events") {
           const after = resumeId(req, url);
           if (Number.isNaN(after)) return send(res, 400, { error: "Last-Event-ID must be a whole number: the id of the last event received" });
-          const tail = tailRun(runId, { after, content: url.searchParams.get("content") !== "false" });
+          const tail = tailRun(runId, { after, content: url.searchParams.get("content") !== "false", stepId: url.searchParams.get("stepId") ?? undefined });
           return tail ? stream(req, res, tail) : send(res, 404, { error: "run not found" });
         }
         const step = /^steps\/([^/]+)\/content$/.exec(rest);

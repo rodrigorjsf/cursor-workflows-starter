@@ -48,6 +48,9 @@ export interface RunDetail extends RunSummary {
 
 const NO_USAGE: UsageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0 };
 
+/** Where the run's event log is, whether or not the file exists. */
+const logOf = (entry: RunsIndexEntry): string => join(runDirIn(entry.repo, entry.runId), EVENTS_FILE);
+
 function detailOf(entry: RunsIndexEntry): RunDetail {
   const base = { runId: entry.runId, repo: entry.repo, workflow: entry.workflow, startedAt: entry.startedAt };
   const missing = (error: string): RunDetail => ({
@@ -61,7 +64,7 @@ function detailOf(entry: RunsIndexEntry): RunDetail {
     recent: [],
     usage: withRatio(NO_USAGE),
   });
-  const log = join(runDirIn(entry.repo, entry.runId), EVENTS_FILE);
+  const log = logOf(entry);
   // A log this code cannot read or project (damage, or events a newer or older kit wrote) is that run's problem: it shows as
   // `missing` with the reason, and never fails the listing of the other runs.
   let events;
@@ -114,14 +117,19 @@ export function listRuns(limit = 200): RunSummary[] {
     });
 }
 
+/** The run's entry in the runs index. Undefined when the index has no such run. The run id is only compared with the index, never used as a path. */
+function indexedRun(runId: string): RunsIndexEntry | undefined {
+  return indexedRuns().find((e) => e.runId === runId);
+}
+
 /** One run with its progress lines, result and token usage. Undefined when the runs index has no such run. */
 export function readRun(runId: string): RunDetail | undefined {
-  const entry = indexedRuns().find((e) => e.runId === runId);
+  const entry = indexedRun(runId);
   return entry && detailOf(entry);
 }
 
-/** Where the event log of an indexed run is, whether or not the file exists. Undefined when the runs index has no such run. The run id is only compared with the index, never used as a path. */
+/** Where the event log of an indexed run is, whether or not the file exists. Undefined when the runs index has no such run. */
 export function eventLogOf(runId: string): string | undefined {
-  const entry = indexedRuns().find((e) => e.runId === runId);
-  return entry && join(runDirIn(entry.repo, entry.runId), EVENTS_FILE);
+  const entry = indexedRun(runId);
+  return entry && logOf(entry);
 }

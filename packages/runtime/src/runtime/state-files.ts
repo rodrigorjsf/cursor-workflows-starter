@@ -60,6 +60,16 @@ export function hasTornTail(file: string): boolean {
   }
 }
 
+/** The record on one line of a JSON Lines file, or undefined when the line does not parse or fails `isRecord`. */
+export function parseJsonlLine<T>(line: string, isRecord: (value: unknown) => value is T): T | undefined {
+  try {
+    const value: unknown = JSON.parse(line);
+    return isRecord(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface JsonlRead<T> {
   records: T[];
   /** Lines that were not a valid record: a torn last line after a crash, or damage elsewhere in the file. */
@@ -77,13 +87,9 @@ export function readJsonl<T>(file: string, isRecord: (value: unknown) => value i
   let skipped = 0;
   for (const line of text.split("\n")) {
     if (!line.trim() || ignore?.(line)) continue;
-    try {
-      const value: unknown = JSON.parse(line);
-      if (isRecord(value)) records.push(value);
-      else skipped++;
-    } catch {
-      skipped++;
-    }
+    const record = parseJsonlLine(line, isRecord);
+    if (record === undefined) skipped++;
+    else records.push(record);
   }
   return { records, skipped };
 }

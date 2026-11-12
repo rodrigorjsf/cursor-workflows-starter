@@ -25,8 +25,10 @@
   Server-Sent Events do log do run: reenvia o que já está no log e depois cada evento que o run acrescenta, cada um com o
   número da linha dele no log como `id`. O `Last-Event-ID` (o `EventSource` reconecta com ele sozinho) ou `?lastEventId=`
   retoma de onde o cliente parou, sem lacuna e sem repetição, mesmo se a retenção reescreveu o log nesse meio-tempo;
-  `?content=false` deixa o conteúdo das etapas de fora. Uma linha só sai quando está completa, e as linhas danificadas ou
-  em branco só gastam o número delas. Eventos de outra versão do esquema ou de tipo desconhecido passam sem alteração.
+  `?content=false` deixa o conteúdo das etapas de fora e `?stepId=` deixa só os eventos de uma etapa (o log ao vivo de uma
+  etapa é o conteúdo dela mais um stream aberto a partir do `lastEventId` que ele devolve). Uma linha só sai quando está
+  completa, e as linhas danificadas ou em branco só gastam o número delas. Eventos de outra versão do esquema ou de tipo
+  desconhecido passam sem alteração.
   `GET /api/runs/<runId>/steps/<stepId>/content` devolve o conteúdo de uma etapa (prompt, mensagens do agente, chamadas de
   tool e saída de comandos, como o log os guardou, já sem segredos) e o `id` da última linha lida, para abrir o stream a
   partir dele. Um log que a projeção não consegue ler derrubava `GET /api/runs` inteiro com `500`; agora só aquele run

@@ -174,6 +174,34 @@ test("?content=false leaves the content events out of the stream, and the ids ke
   assert.deepEqual(brief(await lean.take(1)), [["8", "log"]], "content that arrives live is left out too");
 });
 
+// ---- one step's live log ----
+
+test("?stepId= keeps only the events of that step, so a step's live log is its content plus a stream that continues from where the content stopped", async () => {
+  seedSteps();
+  const repo = box.repo("repo-steps");
+  const snapshot = (await http(dash.url, `/api/runs/${RUN}/steps/s-1/content`)).json;
+
+  const live = await stream(`/api/runs/${RUN}/events?stepId=s-1&lastEventId=${snapshot.lastEventId}`);
+  assert.deepEqual(await live.within(300), [], "nothing of s-1 happened after the snapshot");
+
+  appendLog(repo, RUN, [
+    eventLine(RUN, at(60), content("s-2", "b1", { kind: "agent-message", text: "another step" })),
+    eventLine(RUN, at(61), content("s-1", "a2", { kind: "agent-message", text: "s-1 again" })),
+    eventLine(RUN, at(62), { type: "step-end", ...ref("s-1"), attemptId: "a2", attempt: 2, stepKey: "k1", label: "review", ok: true, cached: false, chargedCents: 0 }),
+    eventLine(RUN, at(63), { type: "log", message: "run level, no step" }),
+  ].join("\n") + "\n");
+  const frames = await live.take(2);
+  assert.deepEqual(frames.map((f) => [f.id, JSON.parse(f.data).type, JSON.parse(f.data).stepId]), [
+    [String(snapshot.lastEventId + 2), "content", "s-1"],
+    [String(snapshot.lastEventId + 3), "step-end", "s-1"],
+  ]);
+  assert.deepEqual(await live.within(150), []);
+
+  const command = await stream(`/api/runs/${RUN}/events?stepId=x-1&content=false`);
+  assert.deepEqual(brief(await command.take(1)), [["11", "exec-start"]]);
+  assert.deepEqual(await command.within(150), [], "its content is left out, as everywhere");
+});
+
 // ---- events the dashboard does not know ----
 
 /** Lines of other schema versions and types, written as other versions of the kit might have: no `ts`, no `runId`, `v` 0 or 7, a type nobody defined. */

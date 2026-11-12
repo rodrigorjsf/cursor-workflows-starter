@@ -268,6 +268,8 @@ Uma linha só é enviada quando está completa.
   começa do início. Um valor que não é um número inteiro é `400`.
 - **`?content=false`** deixa os eventos `content` (prompts, texto do agente, saída de comandos: o grosso do log) fora do
   stream. Os `id` continuam contando as linhas deles.
+- **`?stepId=<stepId>`** deixa só os eventos daquela etapa (uma chamada de `agent()` ou um comando de `ctx.exec`): o
+  `step-start`, os `turn`, o `content` e o `step-end` dela. Os `id` continuam sendo os números de linha do log inteiro.
 - O stream não termina sozinho: um run retomado continua no mesmo log. Quem lê decide quando parar (o `run-end` do último
   `run-start` é o fim de uma execução) e fecha a conexão.
 - Eventos de outra versão do esquema (`v` diferente) e de tipo desconhecido passam como estão, sem campo acrescentado nem
@@ -279,8 +281,9 @@ Uma linha só é enviada quando está completa.
 (uma chamada de `agent()` ou um comando de `ctx.exec`), na ordem do log e entre todas as tentativas e execuções (o
 `attemptId` de cada um as separa). Cada item é o evento do log com o seu `id`; o `text` já saiu do log sem segredos
 conhecidos (`[REDACTED]`), e o dashboard não o altera. Num run fora da retenção os itens continuam, com `chars` e sem
-`text`. `lastEventId` é o `id` da última linha do log nesse instante: abrir o stream com `Last-Event-ID` igual a ele
-continua de onde a leitura parou, sem lacuna e sem repetição. Uma etapa sem conteúdo (servida do journal) devolve a lista
+`text`. `lastEventId` é o `id` da última linha do log nesse instante. **O log ao vivo de uma etapa** é este endpoint mais um stream
+aberto a partir dele: `/api/runs/<runId>/events?stepId=<stepId>&lastEventId=<lastEventId>` continua de onde a leitura parou,
+sem lacuna e sem repetição, e só traz os eventos da etapa. Uma etapa sem conteúdo (servida do journal) devolve a lista
 vazia; um run ou uma etapa que o log não tem é `404`.
 
 Um log que o dashboard não consegue ler ou projetar (danificado, ou com eventos que o código não entende) deixa só aquele
