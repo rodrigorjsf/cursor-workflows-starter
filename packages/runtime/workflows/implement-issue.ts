@@ -1034,7 +1034,9 @@ export default defineWorkflow<Args>({
           if (!after.ok) {
             await revertTo(cmd, worktree, before); // volta ao último verde
             settle();
-            return { ...base, status: "tests-failed-after-review", worktree, output: after.output };
+            // Como em toda suíte: passar do teto ou morrer por um sinal não é uma suíte vermelha.
+            const status = after.kind === "timeout" || after.kind === "killed" ? `tests-${after.kind}` : "tests-failed-after-review";
+            return { ...base, status, worktree, output: after.output };
           }
           settle();
           progress.data.refactorDone = true;
