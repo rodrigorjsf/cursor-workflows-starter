@@ -2,7 +2,7 @@
 import { Handle, type Node, type NodeProps, Position } from "@xyflow/react";
 import { NodeRows } from "./NodeRows.js";
 import { describeNode, runsInCloud } from "./node-details.js";
-import { NODE_SIZE } from "./run-layout.js";
+import { LANE_TITLE, NODE_SIZE } from "./run-layout.js";
 import type { GraphNode, NodeState } from "./run-graph.js";
 
 export interface WorkNodeData extends Record<string, unknown> {
@@ -95,5 +95,14 @@ export function StartNode({ data }: NodeProps<Node<WorkNodeData, "start">>) {
 
 /** A phase: a band behind the nodes with its title on top. */
 export function LaneNode({ data }: NodeProps<Node<LaneNodeData, "lane">>) {
-  return <div className="lane">{data.title !== "" && <span className="lane-title">{data.title}</span>}</div>;
+  const { top, left, height } = LANE_TITLE;
+  return (
+    <div className="lane">
+      {data.title !== "" && (
+        <span className="lane-title" style={{ top, left, right: left, height, lineHeight: `${height}px` }}>
+          {data.title}
+        </span>
+      )}
+    </div>
+  );
 }

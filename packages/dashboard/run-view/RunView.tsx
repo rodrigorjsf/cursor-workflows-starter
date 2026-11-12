@@ -1,14 +1,16 @@
 // The Run view: a run drawn as a graph that grows as its events arrive, with the phases as lanes, and a replay of a finished
 // run. The data comes from `useRunEvents`, the graph from `buildRunGraph` and the positions from `layoutRunGraph`; this file
 // puts them on a React Flow canvas.
-import { Background, Controls, type Edge, type FitViewOptions, type Node, ReactFlow, ReactFlowProvider, useReactFlow, useStore } from "@xyflow/react";
+import { Background, Controls, type Edge, type Node, ReactFlow, ReactFlowProvider, useReactFlow, useStore } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { JunctionNode, LaneNode, type LaneNodeData, StartNode, WorkNode, type WorkNodeData } from "./nodes.js";
 import { RunActions } from "./RunActions.js";
 import { argsHashOf } from "./resume-command.js";
 import { StepLogPanel } from "./StepLogPanel.js";
+import { frameOf } from "./framing.js";
 import { formatCents, formatDuration } from "../app/format.js";
-import { type ProgressStatus, type RunGraph, buildRunGraph, isWork } from "./run-graph.js";
+import { type RunGraph, buildRunGraph, isWork } from "./run-graph.js";
+import { headerStatus } from "./run-status.js";
 import { type RunLayout, layoutRunGraph } from "./run-layout.js";
 import { type Connection, useRunEvents } from "./use-run-events.js";
 
@@ -84,22 +86,11 @@ function toFlow(graph: RunGraph, layout: RunLayout, now: number, selectedId: str
   return { nodes: [...(layout.lanes.some((l) => l.title !== "") ? lanes : []), ...work], edges };
 }
 
-/** The smallest zoom at which a node's text can still be read. A run that would need less to fit on screen is framed in part. */
-const READABLE_ZOOM = 0.45;
-/** How many nodes a partial frame holds. */
-const FRAME_NODES = 5;
 /** The height the page's header takes, to guess the size of the canvas before it is measured. */
 const HEADER_PX = 70;
 
-/** How to frame the run: all of it when that stays readable, otherwise the latest nodes of a live run, or the first ones of a run that is over (to be read from the start). */
-function frameOf(graph: RunGraph, layout: RunLayout, pane: { width: number; height: number }): FitViewOptions {
-  const size = pane.width > 0 && pane.height > 0 ? pane : { width: window.innerWidth, height: window.innerHeight - HEADER_PX };
-  const options: FitViewOptions = { padding: 0.15, maxZoom: 1, minZoom: READABLE_ZOOM };
-  if (Math.min(size.width / layout.width, size.height / layout.height) >= READABLE_ZOOM) return options;
-  const settled = graph.nodes.every((n) => n.state !== "running");
-  const work = graph.nodes.filter((n) => n.kind !== "start");
-  return { ...options, nodes: (settled ? work.slice(0, FRAME_NODES) : work.slice(-FRAME_NODES)).map((n) => ({ id: n.id })) };
-}
+/** The pane's size, or a guess from the window's before React Flow has measured it. */
+const paneOrWindow = (pane: { width: number; height: number }) => (pane.width > 0 && pane.height > 0 ? pane : { width: window.innerWidth, height: window.innerHeight - HEADER_PX });
 
 /**
  * The canvas. It keeps the run in view as it grows, until the user moves the view themselves. The first drawing is framed
@@ -111,7 +102,7 @@ function Canvas({ graph, layout, now, selectedId, onOpen }: { graph: RunGraph; l
   const { fitView } = useReactFlow();
   const pane = useStore((s) => ({ width: s.width, height: s.height }), (a, b) => a.width === b.width && a.height === b.height);
   const userMoved = useRef(false);
-  const firstFrame = useRef(frameOf(graph, layout, pane));
+  const firstFrame = useRef(frameOf(graph, layout, paneOrWindow(pane)));
   const settled = graph.nodes.every((n) => n.state !== "running");
   const drawn = useRef(false);
   useEffect(() => {
@@ -123,7 +114,7 @@ function Canvas({ graph, layout, now, selectedId, onOpen }: { graph: RunGraph; l
     let cancelled = false;
     const attempt = async (tries: number) => {
       if (cancelled) return;
-      if (!(await fitView({ ...frameOf(graph, layout, pane), duration: 250 })) && tries < 10) setTimeout(() => void attempt(tries + 1), 60);
+      if (!(await fitView({ ...frameOf(graph, layout, paneOrWindow(pane)), duration: 250 })) && tries < 10) setTimeout(() => void attempt(tries + 1), 60);
     };
     const timer = setTimeout(() => void attempt(0), 80); // the new nodes are measured by the browser after this render
     return () => {
@@ -163,14 +154,6 @@ function Canvas({ graph, layout, now, selectedId, onOpen }: { graph: RunGraph; l
     </ReactFlow>
   );
 }
-
-const STATUS_TEXT: Record<ProgressStatus, string> = {
-  running: "running",
-  finished: "finished",
-  failed: "failed",
-  cancelled: "cancelled",
-  interrupted: "stopped without finishing",
-};
 
 const CONNECTION_TEXT: Record<Connection, string> = { waiting: "waiting for the run", live: "live", reconnecting: "reconnecting…", closed: "", "not-found": "" };
 
@@ -220,7 +203,7 @@ export function RunView({ runId }: { runId: string }) {
   /** In a replay, the log line it has reached; at its end, and outside a replay, the whole log. */
   const upTo = replaying && replayAt < events.length ? (ids[replayAt - 1] ?? 0) : undefined;
   const counts = { steps: graph.nodes.filter((n) => n.kind === "step").length, commands: graph.nodes.filter((n) => n.kind === "command").length };
-  const shownStatus = replaying && !settled ? "replaying" : STATUS_TEXT[run.status];
+  const header = headerStatus({ run, replaying, settled });
   const elapsed = run.startedAt === undefined ? undefined : Math.max(0, (run.endedAt !== undefined ? Date.parse(run.endedAt) : now) - Date.parse(run.startedAt));
 
   if (connection === "not-found") {
@@ -241,7 +224,7 @@ export function RunView({ runId }: { runId: string }) {
         <h1>
           <span className="workflow">{run.workflow ?? "…"}</span> <code>{runId}</code>
         </h1>
-        <span className={`badge status-${replaying && !settled ? "replaying" : run.status}`}>{shownStatus}</span>
+        <span className={`badge status-${header.key}`}>{header.label}</span>
         <span className="totals">
           {counts.steps} steps · {counts.commands} commands · {run.tokens.toLocaleString("en-US")} tokens · {formatCents(run.costCents)}
           {elapsed !== undefined && ` · ${formatDuration(elapsed)}`}
@@ -299,9 +282,9 @@ export function RunView({ runId }: { runId: string }) {
         </div>
         {!replaying && <RunActions runId={runId} status={status} info={info} argsHash={argsHashOf(events)} onChanged={refresh} />}
       </header>
-      {run.error !== undefined && (
+      {header.error !== undefined && (
         <p className="run-error" role="alert">
-          {run.error}
+          {header.error}
         </p>
       )}
       <div className="workspace">

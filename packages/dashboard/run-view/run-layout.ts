@@ -37,6 +37,12 @@ export const NODE_SIZE: Record<NodeKind, { width: number; height: number }> = {
 /** Space around the nodes of the first and last lane, inside the band. */
 const LANE_PADDING = 24;
 
+/** Where a lane's title sits inside its band: `LaneNode` places the title with these, and the title is cut to the box. */
+export const LANE_TITLE = { top: 8, left: 12, height: 17 } as const;
+
+/** The box a lane's title takes, in the coordinates of the layout. */
+export const laneTitleBox = (lane: LaneBand): Box => ({ x: lane.x + LANE_TITLE.left, y: LANE_TITLE.top, width: Math.max(0, lane.width - 2 * LANE_TITLE.left), height: LANE_TITLE.height });
+
 const elk = new ELK();
 
 export async function layoutRunGraph(graph: RunGraph): Promise<RunLayout> {

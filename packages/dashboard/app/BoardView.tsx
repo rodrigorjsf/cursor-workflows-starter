@@ -27,7 +27,7 @@ export function BoardView() {
   );
 }
 
-function WorkflowBoard({ board }: { board: Board }) {
+export function WorkflowBoard({ board }: { board: Board }) {
   return (
     <section className="board" aria-label={`${board.workflow} board`}>
       <h2>

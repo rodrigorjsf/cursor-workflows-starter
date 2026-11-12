@@ -43,7 +43,7 @@ function Table({ rows, cols }: { rows: Row[]; cols: Column[] }) {
   );
 }
 
-function DailyBars({ days, series }: { days: string[]; series: Row[] }) {
+export function DailyBars({ days, series }: { days: string[]; series: Row[] }) {
   const W = 520;
   const H = 200;
   const P = 30;
@@ -101,7 +101,7 @@ const CONTEXT_COLUMNS: Column[] = [
   ["summaries", "compactações"],
 ];
 
-function ContextLines({ rows }: { rows: Row[] }) {
+export function ContextLines({ rows }: { rows: Row[] }) {
   if (rows.length === 0) return <div className="note">sem tentativas com custo do Cursor nesta faixa</div>;
   const W = 520;
   const H = 200;
@@ -160,7 +160,7 @@ export function MetricsView() {
   );
 }
 
-function Panels({ data, days, onDays }: { data: Summary; days: string; onDays: (days: string) => void }) {
+export function Panels({ data, days, onDays }: { data: Summary; days: string; onDays: (days: string) => void }) {
   const [chosen, setChosen] = useState("");
   const totals = data.totals?.[0] ?? {};
   const models = [...new Set((data.contextBuckets ?? []).map((r) => String(r.model_key)))];

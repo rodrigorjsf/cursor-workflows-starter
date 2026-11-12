@@ -10,8 +10,13 @@ export function RunsView() {
   const poll = usePoll<{ runs: RunSummary[] }>("/api/runs", POLL_MS);
   return (
     <Loaded poll={poll} what="the runs">
-      {({ runs }) =>
-        runs.length === 0 ? (
+      {({ runs }) => <RunsTable runs={runs} />}
+    </Loaded>
+  );
+}
+
+export function RunsTable({ runs }: { runs: RunSummary[] }) {
+  return runs.length === 0 ? (
           <p className="note">No runs yet.</p>
         ) : (
           <div className="table-wrap">
@@ -56,8 +61,5 @@ export function RunsView() {
               </tbody>
             </table>
           </div>
-        )
-      }
-    </Loaded>
-  );
+        );
 }
