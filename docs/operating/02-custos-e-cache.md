@@ -1,4 +1,4 @@
-# 08 · Custos, cache e boas práticas
+# 5.2 · Custos, cache e boas práticas
 
 Este documento reúne o que torna um workflow barato sem perder a garantia de execução. É a referência da
 seção de custo das skills `cursor-workflow-authoring` e `/skill-to-workflow`.
@@ -8,7 +8,7 @@ seção de custo das skills `cursor-workflow-authoring` e `/skill-to-workflow`.
 > - **[DOC]**: doc oficial. Quando há link, ele aponta para a página oficial (acesso em 2026-11-11).
 > - **[FÓRUM]**: relato no fórum oficial do Cursor (indica quando a equipe respondeu).
 > - **[TESTE]**: medido contra a API real em 2026-11-11
->   ([docs/research/verificacoes-locais.md](research/verificacoes-locais.md)).
+>   ([docs/research/verificacoes-locais.md](../research/verificacoes-locais.md)).
 > - **[I]**: inferência.
 >
 > Preços e comportamento de cache mudam com frequência. Confira a página
@@ -29,7 +29,7 @@ contexto acumulado. A maior parte do custo de um agente de código costuma ser *
 escrita [I].
 
 **Quanto custa o Auto.** No catálogo do SDK, o Auto é o ID `default` (alias `auto`); `auto-low` não existe
-[[TESTE]](research/verificacoes-locais.md). O Auto **não** tem preço fixo por token. Ele tem três modos: Cost,
+[[TESTE]](../research/verificacoes-locais.md). O Auto **não** tem preço fixo por token. Ele tem três modos: Cost,
 Balance e Intelligence [[DOC]](https://cursor.com/docs/models-and-pricing#auto-modes)
 [[DOC]](https://cursor.com/help/models-and-usage/available-models):
 
@@ -81,7 +81,7 @@ paralelos em geral, nem a doc nem o fórum dizem o mesmo. A equipe já mostrou u
 prefixo gravado por outros chats do mesmo repositório [[FÓRUM]](https://forum.cursor.com/t/151439) (resposta da
 equipe do Cursor).
 
-Medido com agentes do SDK [[TESTE]](research/verificacoes-locais.md): quatro etapas com o mesmo prompt e as mesmas
+Medido com agentes do SDK [[TESTE]](../research/verificacoes-locais.md): quatro etapas com o mesmo prompt e as mesmas
 opções (`composer-2.5`, `tools: ["read"]`, `settingSources: []`), cada uma um agente novo, lendo 3 arquivos.
 
 | Etapa | `inputTokens` | `cacheReadTokens` | Leitura |
@@ -98,7 +98,7 @@ este kit **não** promete economia de cache entre agentes. Ele mede (`cacheHitRa
 ## 3. Medir antes de otimizar
 
 > Tudo o que está abaixo também fica gravado por run no banco de métricas, com histórico, views e dashboard. Veja
-> [09 · Observabilidade](09-observabilidade.md). A análise de **faixa de contexto × custo** está lá.
+> [5.3 · Observabilidade](03-observabilidade.md). A análise de **faixa de contexto × custo** está lá.
 
 Todo run devolve `spentCents`, `chargedCents` e `usage` com tokens por tipo e `cacheHitRatio`. Cada etapa emite
 `step-end` com o próprio `usage`, `chargedCents` e `rawCents` (o `rawCostCents` do Cursor):
@@ -110,10 +110,10 @@ Todo run devolve `spentCents`, `chargedCents` e `usage` com tokens por tipo e `c
 ```
 
 O `usage` acima é de uma run real (`composer-2.5`, lendo 4 arquivos), e `spentCents` 0 é o que essa conta
-reporta, porque lá o `getUsage()` dá `feature_unavailable` [[TESTE]](research/verificacoes-locais.md).
+reporta, porque lá o `getUsage()` dá `feature_unavailable` [[TESTE]](../research/verificacoes-locais.md).
 
 - **`inputTokens` já inclui cache read e cache write**, e `totalTokens` = input + output. Medido duas vezes
-  [[TESTE]](research/verificacoes-locais.md): 3.377 = 3.345 + 32 e 11.516 = 11.260 + 256, com o cache read contido
+  [[TESTE]](../research/verificacoes-locais.md): 3.377 = 3.345 + 32 e 11.516 = 11.260 + 256, com o cache read contido
   no input. A doc Python bate com o dado; a fórmula de `totalTokens` da doc TypeScript, não. Por isso o kit usa
   `cacheHitRatio = cacheRead / input`, e a soma dos eventos `turn-ended` deu os mesmos números de
   `RunResult.usage`. Compare runs entre si, não com números de outros clientes.
@@ -136,8 +136,8 @@ reporta, porque lá o `getUsage()` dá `feature_unavailable` [[TESTE]](research/
   `turn-ended`, e o teto de tokens vale. O custo fica desconhecido, e o teto em centavos não conta a tentativa. A
   doc sugere ler tokens de `run.usage` e o custo no dashboard de uso. Isso acontece em plano pago: num Premium,
   toda chamada deu `feature_unavailable`, inclusive o `Agent.getUsage(agentId)` estático depois do descarte
-  [[TESTE]](research/verificacoes-locais.md). O custo dos testes saiu só da estimativa da tabela `pricing`
-  (`cost_source = estimate`, ver [09](09-observabilidade.md)).
+  [[TESTE]](../research/verificacoes-locais.md). O custo dos testes saiu só da estimativa da tabela `pricing`
+  (`cost_source = estimate`, ver [5.3](03-observabilidade.md)).
 - Use tokens para comparar runs.
 - Rotina sugerida: rode o workflow uma vez com `--max-cents` e `--max-tokens` baixos e leia os `step-end` no stderr
   do CLI ou em `recent` do job. Ataque primeiro as **duas etapas mais caras**: costuma haver uma que relê o
@@ -175,7 +175,7 @@ O contexto fixo é pago em **toda** chamada de **toda** etapa. Ele cresce com o 
 
 | Fonte de contexto | Como reduzir |
 |---|---|
-| `settingSources: "project"`: `AGENTS.md`, regras, **descrições de skills**, hooks e **tools dos MCP servers do `.cursor/mcp.json`** | Por etapa, `settingSources: ["team","mdm"]` tira o `AGENTS.md` e mantém a governança, mas **não** as skills: o SDK carregou as mesmas 58 skills com ele e com `"project"` ([[TESTE]](research/verificacoes-locais.md) §7). Só `[]` zerou as skills, e aí saem também os hooks do time e do MDM. Mesmo prompt com `shell` e `mcp`: 30,4 mil tokens de input com `"project"` × 25,5 mil com `[]` ([[TESTE]](research/verificacoes-locais.md) §7). A origem das 58 skills não foi isolada. Para etapas só de leitura, mesmo as que leem o repositório (planejar, revisar, escrever o texto do PR; o classificar nem o lê), `[]` corta mais: no lugar do `AGENTS.md`, o código lista no prompt os arquivos de contexto que importam e existem (padrões, glossário, ADRs). Se o time exige hooks de time ou MDM em toda run, fique com `["team","mdm"]` |
+| `settingSources: "project"`: `AGENTS.md`, regras, **descrições de skills**, hooks e **tools dos MCP servers do `.cursor/mcp.json`** | Por etapa, `settingSources: ["team","mdm"]` tira o `AGENTS.md` e mantém a governança, mas **não** as skills: o SDK carregou as mesmas 58 skills com ele e com `"project"` ([[TESTE]](../research/verificacoes-locais.md) §7). Só `[]` zerou as skills, e aí saem também os hooks do time e do MDM. Mesmo prompt com `shell` e `mcp`: 30,4 mil tokens de input com `"project"` × 25,5 mil com `[]` ([[TESTE]](../research/verificacoes-locais.md) §7). A origem das 58 skills não foi isolada. Para etapas só de leitura, mesmo as que leem o repositório (planejar, revisar, escrever o texto do PR; o classificar nem o lê), `[]` corta mais: no lugar do `AGENTS.md`, o código lista no prompt os arquivos de contexto que importam e existem (padrões, glossário, ADRs). Se o time exige hooks de time ou MDM em toda run, fique com `["team","mdm"]` |
 | `"user"`: `~/.cursor/agents`, `~/.cursor/skills`, `~/.claude/skills`, MCP do usuário | O kit **não** carrega `user` por padrão. Um relato mostra mais de 60 subagents em `~/.cursor/agents` somando cerca de 10 mil tokens no início de cada chat (11,4 k → 1,4 k ao tirá-los da pasta). Uma resposta no fórum, provavelmente da equipe do Cursor, confirmou a causa [[FÓRUM]](https://forum.cursor.com/t/162001) |
 | Tool `task`: a descrição lista nome e descrição de **todo subagent custom** (`.cursor/agents/`, `~/.cursor/agents/`). O contexto cresce linearmente com o número deles, e o catálogo de subagents não tinha limite em maio de 2026, ao contrário do de skills [[FÓRUM]](https://forum.cursor.com/t/162001) (resposta provavelmente da equipe do Cursor). A doc diz só que a descrição aparece nas dicas da tool Task [[DOC]](https://cursor.com/docs/subagents). Nenhuma fonte diz se os subagents nativos (`explore`, `browser`) entram do mesmo jeito | Use allowlist de `tools` sem `"task"`, salvo se a etapa precisar delegar |
 | Definições de tools | Allowlist de `tools`. `[]` = só texto (o kit acrescenta `mcp` quando há schema) |
@@ -193,7 +193,7 @@ O cache do provedor reaproveita só o **prefixo idêntico**. Então:
   instruções. Isso também preserva o journal e o memo, que usam o prompt na chave.
 - **Mesma configuração entre irmãos:** mesmo modelo, ordem de `tools`, schema e `settingSources` em etapas
   paralelas parecidas. Agentes novos com configuração idêntica leram do cache o prefixo fixo (~4,2 mil tokens)
-  ([[TESTE]](research/verificacoes-locais.md) §8; números em §2 deste doc). Que mudar qualquer um muda o prefixo
+  ([[TESTE]](../research/verificacoes-locais.md) §8; números em §2 deste doc). Que mudar qualquer um muda o prefixo
   não foi medido [I, por analogia com o Claude Code].
 - **Schema estável:** o schema vira `inputSchema` da tool `submit_result`, que faz parte das definições de tools.
 
@@ -221,7 +221,7 @@ N agentes em paralelo pagam N vezes o contexto fixo, e nenhuma fonte garante cac
 *Project* do Cursor, a equipe confirmou que os workers **não** compartilham (§2)
 [[FÓRUM]](https://forum.cursor.com/t/173200). Com agentes do SDK de configuração idêntica, o prefixo fixo (~4,2 mil
 tokens) veio do cache em todo agente novo, e o trecho variável (o conteúdo dos arquivos) foi reaproveitado uma vez
-entre duas etapas paralelas e nenhuma entre duas em sequência ([[TESTE]](research/verificacoes-locais.md) §8;
+entre duas etapas paralelas e nenhuma entre duas em sequência ([[TESTE]](../research/verificacoes-locais.md) §8;
 números em §2 deste doc). O
 cache reduz o preço de parte do contexto, sem garantia; o volume de input continua N vezes maior.
 
@@ -235,7 +235,7 @@ Laços de correção com teto, `timeoutMs` por etapa, `retries` pequeno (default
 juntos por run (um cobre o ponto cego do outro; ver §3), um teto padrão declarado pelo workflow em `budget` (vale
 quando o run não informa outro; o `implement-issue` declara 3 milhões de tokens, porque o texto da issue pode empurrar
 o run para o pior caso), e polling barato no chat (modelo barato e esperas de
-45–50 s; ver [04](04-invocacao-no-cursor-ide.md)).
+45–50 s; ver [2.3](../usage/03-invocacao-no-cursor-ide.md)).
 
 ## 5. Skills e subagents: o que custam no IDE e como ficam no workflow
 
@@ -279,6 +279,10 @@ custo ≈ Σ etapas × turnos_estimados × (contexto_fixo + prompt + histórico_
 
 Na prática, a estimativa mais confiável é empírica: rode cada caminho uma vez com teto baixo, anote `usage` e
 o custo por etapa (`rawCents` e `chargedCents` do `step-end`; o `spentCents` do run soma o maior dos dois; se o
-`getUsage()` não responde, a estimativa `cost_cents` da `v_attempts`, [09 §3](09-observabilidade.md#3-modelo-de-dados)) e
+`getUsage()` não responde, a estimativa `cost_cents` da `v_attempts`, [5.3 §3](03-observabilidade.md#3-modelo-de-dados)) e
 registre a faixa num comentário no topo do workflow. A `/skill-to-workflow` gera esse quadro no relatório de
 conversão.
+
+---
+
+[← Anterior: 5.1 · Governança e custos (Cursor Teams/Enterprise)](01-governanca-e-custos.md) · [Índice](../README.md) · [Próximo: 5.3 · Observabilidade: custo, tokens, contexto e eficiência →](03-observabilidade.md)

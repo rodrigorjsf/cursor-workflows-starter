@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# WHAT: Builds a throwaway repo for the verify-* workflows: AGENTS.md with a marker word, Cursor and Claude Code
+#   hooks, and an MCP config.
+# WHY: The verify-* workflows measure what settingSources loads and what the recursion guard blocks; they need a repo
+#   that has all of it.
+# WHEN: Before running verify-structured, verify-context or verify-cache on a new account (see
+#   scripts/verify/README.md).
+# HOW: `scripts/verify/setup-probe-repo.sh <new-directory>`. Refuses a directory that already exists.
+
 # Monta um repositório descartável para os workflows de scripts/verify/:
 #   - AGENTS.md com uma palavra marcadora;
 #   - .cursor/hooks.json (beforeShellExecution e postToolUse) que grava em .probe/cursor-hooks.log;

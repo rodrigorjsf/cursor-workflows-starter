@@ -17,6 +17,17 @@
 - **`CLAUDE.md` é o guia canônico do mantenedor, em inglês, e `AGENTS.md` é um link simbólico para ele.** As regras do
   antigo `AGENTS.md` foram divididas: as de manutenção ficam em `CLAUDE.md`, as de repositórios-alvo em
   `templates/agents-md-block.md`.
+- **A documentação vira um livro.** [`docs/README.md`](docs/README.md) é o índice, com a ordem de leitura e por onde
+  cada perfil (usuário, autor de workflows, mantenedor) começa. Os nove capítulos e os dois relatórios de pesquisa
+  foram para a pasta da sua parte (`usage/`, `internals/`, `authoring/`, `operating/`, `research/`), numerados
+  `parte.posição` (o antigo "04" é o 2.3), cada um com um rodapé de anterior/próximo. Medições datadas e citações
+  `[DOC]` ficam como estavam; mudaram só os caminhos e as referências cruzadas. O `CONTRIBUTING.md` virou a seção
+  `docs/contributing/`, com as convenções do livro, as dos diagramas e a tabela de scripts do mantenedor.
+- **O `npm test` confere a documentação.** `scripts/check-docs.ts` (`npm run docs:check`) falha em link relativo
+  quebrado, âncora quebrada, capítulo fora do índice, H1 diferente do índice e rodapé errado. O CI ganha o job
+  `mermaid` (`npm run docs:mermaid`), que renderiza todo bloco Mermaid e reprova em erro de sintaxe. Todo script de
+  `scripts/` tem um cabeçalho WHAT/WHY/WHEN/HOW, e `.claude/rules/diagrams.md` aponta o Claude Code para as
+  convenções de diagramas nos arquivos `*.md`.
 
 ## 0.2.0 (pré-release, 2026-11-11)
 

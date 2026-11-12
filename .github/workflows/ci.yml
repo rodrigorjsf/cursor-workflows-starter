@@ -26,3 +26,16 @@ jobs:
       - run: npm run typecheck
       # Testes offline: SDK falso, sem rede, sem conta Cursor e sem segredos.
       - run: npm test
+
+  # Renderiza todo bloco Mermaid do repositório e falha em erro de sintaxe. Só aqui: o mermaid-cli usa um Chromium
+  # headless, que trava na máquina do mantenedor (docs/contributing/03-diagramas.md).
+  mermaid:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - run: npm ci
+      - run: npm run docs:mermaid

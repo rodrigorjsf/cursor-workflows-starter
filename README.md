@@ -72,11 +72,13 @@ Cursor, que não tem esse runtime nativo. O porquê e a comparação completa es
 ├── .cursor/mcp.json        # MCP server no Cursor
 ├── .mcp.json               # o mesmo MCP server no Claude Code
 ├── scripts/
+│   ├── check-docs.ts           # confere links, âncoras, índice e rodapés do livro (roda no npm test)
+│   ├── check-mermaid.ts        # renderiza os diagramas Mermaid (job do CI)
 │   ├── link-claude-skills.sh   # expõe .agents/skills ao Claude Code (que não lê .agents/)
 │   ├── probe-sdk.ts            # sonda o SDK contra a API real (eventos, uso, custo)
 │   └── verify/                 # workflows e scripts que reproduzem as verificações
 ├── SECURITY.md · PROVENANCE.md · CHANGELOG.md
-└── docs/
+└── docs/                   # o livro: README.md é o índice; uma pasta por parte (usage/, internals/, operating/, ...)
 ```
 
 ## Começo rápido
@@ -95,12 +97,12 @@ npm run dash                 # dashboard em http://127.0.0.1:4317
 ```
 
 Defina sempre os dois tetos. O de centavos depende do custo que o Cursor informa, e pode ficar cego; os dois são
-checados antes de cada etapa, então uma etapa sozinha pode passar do teto ([02 §3](docs/02-configuracao-inicial.md#3-teto-de-custo)).
+checados antes de cada etapa, então uma etapa sozinha pode passar do teto ([2.2 §3](docs/usage/02-configuracao-inicial.md#3-teto-de-custo)).
 Para reproduzir as medições numa conta sua, use [`scripts/verify/`](scripts/verify/README.md).
 
 **Ainda não testado:** no Cursor IDE, habilite o MCP server `workflows` em **Customize**, na barra lateral
 ([DOC](https://cursor.com/docs/mcp), acesso em 2026-11-11). No Enterprise, o admin pode precisar liberar o servidor
-antes ([01 §6](docs/01-instalacao.md#6-habilitar-no-cursor-ide)). Depois, digite no chat:
+antes ([2.1 §6](docs/usage/01-instalacao.md#6-habilitar-no-cursor-ide)). Depois, digite no chat:
 
 ```
 /run-workflow implement-issue 123
@@ -108,21 +110,13 @@ antes ([01 §6](docs/01-instalacao.md#6-habilitar-no-cursor-ide)). Depois, digit
 
 ## Documentação
 
-| Documento | Conteúdo |
-|---|---|
-| [01 · Instalação](docs/01-instalacao.md) | Requisitos, dependências, instalação, teste de fumaça |
-| [02 · Configuração inicial](docs/02-configuracao-inicial.md) | Autenticação (conta do usuário × service account), modelos, teto de custo, variáveis |
-| [03 · Arquitetura](docs/03-arquitetura.md) | Como o runtime funciona e o que ele garante (e o que não garante) |
-| [04 · Invocação no Cursor IDE](docs/04-invocacao-no-cursor-ide.md) | MCP, CLI, skill, hooks; paridade com o Claude Code |
-| [05 · Escrevendo workflows](docs/05-escrevendo-workflows.md) | O porquê das regras, efeitos garantidos × pedidos, receitas, prompts de etapa, testes (API e regras na skill `cursor-workflow-authoring`) |
-| [06 · Convertendo skills e subagents](docs/06-convertendo-skills-e-subagents.md) | O processo da skill `/skill-to-workflow`, com um exemplo |
-| [07 · Governança e custos (Enterprise)](docs/07-governanca-e-custos.md) | Orçamento por usuário, políticas de admin, auditoria, riscos |
-| [08 · Custos, cache e boas práticas](docs/08-custos-e-cache.md) | De onde vem o custo, que caches existem (e quem controla), memo, contexto mínimo, prefixo estável, checklist |
-| [09 · Observabilidade](docs/09-observabilidade.md) | Banco SQLite por usuário, o que é medido (e o que não dá), views, receitas SQL, dashboard localhost, export, privacidade |
-| [Relatório de pesquisa](docs/research/relatorio-pesquisa.md) | Por que o kit existe: Workflow do Claude Code × Cursor SDK, autenticação e cobrança, paridade |
-| [Verificações locais](docs/research/verificacoes-locais.md) | O que foi testado contra a doc ao vivo e a API real, com evidência, e o que ficou pendente |
-| [Segurança](SECURITY.md) · [Proveniência](PROVENANCE.md) · [Mudanças](CHANGELOG.md) | Riscos e como reportar; de onde o kit veio; o que mudou em cada versão |
-| [Contribuindo](CONTRIBUTING.md) | Testes antes do PR e a política de custo dos testes contra a API real |
+A documentação é um livro em pt-BR. O [índice](docs/README.md) traz a ordem de leitura e por onde cada perfil começa:
+
+- **Usuário:** [2.1 · Instalação](docs/usage/01-instalacao.md), depois [2.2 · Configuração inicial](docs/usage/02-configuracao-inicial.md) e [2.3 · Invocação no Cursor IDE](docs/usage/03-invocacao-no-cursor-ide.md).
+- **Autor de workflows:** [4.1 · Escrevendo workflows](docs/authoring/01-escrevendo-workflows.md) e [4.2 · Convertendo skills e subagents](docs/authoring/02-convertendo-skills-e-subagents.md).
+- **Mantenedor:** [9.1 · Contribuindo](docs/contributing/01-contribuindo.md) (testes antes do PR e a política de custo dos testes contra a API real) e [3.1 · Arquitetura](docs/internals/01-arquitetura.md).
+
+Fora do livro: [Segurança](SECURITY.md) · [Proveniência](PROVENANCE.md) · [Mudanças](CHANGELOG.md).
 
 ## Transparência: o que este kit faz por baixo
 
@@ -130,12 +124,12 @@ antes ([01 §6](docs/01-instalacao.md#6-habilitar-no-cursor-ide)). Depois, digit
   cobrada na conta da chave usada.
 - Os agentes **executam tools sem pedir aprovação** (é o padrão das runs locais do SDK) e podem escrever fora do
   repositório: isso já aconteceu num teste ([SECURITY.md](SECURITY.md)). O kit limita as tools por etapa, pede às
-  etapas que não saiam do repositório e bloqueia commits com segredos. Leia [07 · Governança](docs/07-governanca-e-custos.md)
+  etapas que não saiam do repositório e bloqueia commits com segredos. Leia [5.1 · Governança](docs/operating/01-governanca-e-custos.md)
   antes de usar em um repositório sensível.
 - O estado fica em `.workflows/` (journal, jobs, logs, worktrees) do repositório onde o workflow roda. O runtime
   o adiciona a `.git/info/exclude`, sem mexer no `.gitignore` do repositório.
 - Cada run grava métricas (tokens, custo, modelo, passos, resultado) em `~/.cursor-workflows/metrics.db`. Os prompts
-  ficam só como hash. Desligue com `WF_METRICS=off` (ver [09](docs/09-observabilidade.md)).
+  ficam só como hash. Desligue com `WF_METRICS=off` (ver [5.3](docs/operating/03-observabilidade.md)).
 - Por padrão, os agentes das etapas carregam `AGENTS.md`, regras, skills, hooks e MCP do projeto, e hooks do time
   e Enterprise (`settingSources: ["project","team","mdm"]`). No `implement-issue`, as etapas só de leitura usam
   `[]`: nada disso chega a elas, nem os hooks do time e do MDM. Uma guarda evita que uma etapa dispare outro workflow

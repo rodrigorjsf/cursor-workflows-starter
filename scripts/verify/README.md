@@ -7,7 +7,7 @@ nova, por exemplo a Enterprise do seu time, antes de adotar.
 **Custam tokens.** Na medição de 2026-11-11, com `composer-2.5`: `verify-structured` usou cerca de 110 mil tokens,
 `verify-context` cerca de 60 mil e `verify-cache` cerca de 46 mil. Rode sempre com `--max-tokens`. Prefira os modelos
 incluídos no plano; modelos que consomem cota paga são permitidos quando o teste precisar deles
-([política de custo](../../CONTRIBUTING.md#testes-contra-a-api-real-política-de-custo)).
+([política de custo](../../docs/contributing/01-contribuindo.md#testes-contra-a-api-real-política-de-custo)).
 
 ```bash
 scripts/verify/setup-probe-repo.sh ~/tmp/wf-probe-repo      # repositório descartável (AGENTS.md, hooks, mcp.json)

@@ -1,7 +1,7 @@
-# 06 · Convertendo skills e subagents em workflows
+# 4.2 · Convertendo skills e subagents em workflows
 
 O processo está codificado na skill
-[`skills/skill-to-workflow/SKILL.md`](../skills/skill-to-workflow/SKILL.md). Use assim:
+[`skills/skill-to-workflow/SKILL.md`](../../skills/skill-to-workflow/SKILL.md). Use assim:
 
 ```
 /skill-to-workflow .agents/skills/implementar-feature/SKILL.md .cursor/agents/reviewer.md .claude/agents/tester.md
@@ -17,7 +17,7 @@ Ela aceita artefatos de qualquer um destes lugares:
 - **instruções** em `AGENTS.md`, `CLAUDE.md` e `.cursor/rules/`.
 
 O inventário registra **em quais harnesses cada artefato é descoberto hoje** (matriz em
-[04](04-invocacao-no-cursor-ide.md#onde-cada-harness-procura-cada-coisa)). Por exemplo, uma skill em
+[2.3](../usage/03-invocacao-no-cursor-ide.md#onde-cada-harness-procura-cada-coisa)). Por exemplo, uma skill em
 `.agents/skills/` roda no Cursor e só chega ao Claude Code pelos links de `scripts/link-claude-skills.sh`. Depois da conversão, o fluxo deixa de depender de
 onde cada harness procura: as etapas são código, e as instruções compartilhadas ficam em `AGENTS.md`.
 
@@ -31,7 +31,7 @@ onde cada harness procura: as etapas são código, e as instruções compartilha
 | O custo precisa de teto previsível | — |
 
 Uma **aprovação** no meio do fluxo ("confirme as seams com o usuário") não impede a conversão: vira um checkpoint
-em dois runs ([05 · Checkpoint em dois runs](05-escrevendo-workflows.md#checkpoint-em-dois-runs)).
+em dois runs ([4.1 · Checkpoint em dois runs](01-escrevendo-workflows.md#checkpoint-em-dois-runs)).
 
 ## As seis etapas da conversão
 
@@ -43,7 +43,7 @@ em dois runs ([05 · Checkpoint em dois runs](05-escrevendo-workflows.md#checkpo
    o critério de pronto estão no passo 2 da skill).
 3. **Mapeamento** para `ctx.agent`, `ctx.parallel`, `ctx.pipeline`, `execFileSync` e laços com teto. A tabela
    completa está na skill.
-4. **Otimização de custo** (obrigatória): checklist de [08](08-custos-e-cache.md#6-checklist-de-custo) etapa por
+4. **Otimização de custo** (obrigatória): checklist de [5.2](../operating/02-custos-e-cache.md#6-checklist-de-custo) etapa por
    etapa e estimativa de custo por caminho, no caso típico e no pior caso.
 5. **Geração** de `packages/runtime/workflows/<nome>.ts` e `packages/runtime/test/<nome>.test.ts` neste kit, seguida de
    `npm run typecheck && npm test`; com o kit instalado fora, cópia para `.agents/workflows/` do repositório alvo.
@@ -52,10 +52,10 @@ em dois runs ([05 · Checkpoint em dois runs](05-escrevendo-workflows.md#checkpo
 
 ## Exemplo: `implement-issue` a partir de quatro skills de terceiros
 
-O [`packages/runtime/workflows/implement-issue.ts`](../packages/runtime/workflows/implement-issue.ts) é a conversão de referência. Ele segue, em
+O [`packages/runtime/workflows/implement-issue.ts`](../../packages/runtime/workflows/implement-issue.ts) é a conversão de referência. Ele segue, em
 código, os fluxos das skills `tdd`, `codebase-design`, `code-review` e `pr` de
 [mattpocock/skills](https://github.com/mattpocock/skills) 1.3.1 (MIT); os créditos estão em
-[`CREDITS.md`](../CREDITS.md).
+[`CREDITS.md`](../../CREDITS.md).
 
 **Inventário** (resumo):
 
@@ -82,16 +82,16 @@ código, os fluxos das skills `tdd`, `codebase-design`, `code-review` e `pr` de
 **Otimização de custo:** a tabela por etapa (modelo, tools, `settingSources`, `memo`) e as estimativas por caminho
 estão no cabeçalho do workflow. As etapas que só leem (classificar, planejar, desenhar, julgar, revisar, escrever o
 texto do PR) rodam com `settingSources: []`, a única configuração medida que corta as skills
-([08 §4.3](08-custos-e-cache.md#43-contexto-fixo-mínimo-por-etapa)). No lugar do `AGENTS.md`, o código lista no prompt
+([5.2 §4.3](../operating/02-custos-e-cache.md#43-contexto-fixo-mínimo-por-etapa)). No lugar do `AGENTS.md`, o código lista no prompt
 os arquivos de contexto que existem no planejar, desenhar, julgar e no texto do PR, e os de padrão no eixo Standards;
 o classificar recebe só a issue, e os eixos Spec e Segurança, a issue e o diff. Testes, diff, commit, comentário e PR são código: zero tokens.
 As etapas que escrevem (teste, código, correção, refactor) ficam com todas as tools, `task` inclusive, e o default do
 engine (`["project","team","mdm"]`): é a exceção do workflow ao item de `tools` do
-[checklist](08-custos-e-cache.md#6-checklist-de-custo).
+[checklist](../operating/02-custos-e-cache.md#6-checklist-de-custo).
 
-O que a conversão exigiu além dos passos da skill virou receita em [05](05-escrevendo-workflows.md#receitas)
+O que a conversão exigiu além dos passos da skill virou receita em [4.1](01-escrevendo-workflows.md#receitas)
 (invariantes entre etapas, resume com invariantes, checkpoint em dois runs, review em eixos) e referência em
-[`origin-cases.md`](../skills/skill-to-workflow/references/origin-cases.md) (skill citada por outra, sub-agents em paralelo, skill
+[`origin-cases.md`](../../skills/skill-to-workflow/references/origin-cases.md) (skill citada por outra, sub-agents em paralelo, skill
 de terceiros).
 
 ## Pós-conversão
@@ -102,6 +102,10 @@ de terceiros).
   e no Claude Code ([DOC](https://code.claude.com/docs/en/skills#control-who-invokes-a-skill)). No Claude Code, ela
   também deixa de ser pré-carregada em subagents que a listam em `skills`. Skill de terceiros fica como está.
 - Compare os dois com tetos baixos (`--max-cents` e `--max-tokens`), olhando custo, taxa de conclusão e
-  retrabalho ([02 §3](02-configuracao-inicial.md#3-teto-de-custo) explica por que os dois tetos).
+  retrabalho ([2.2 §3](../usage/02-configuracao-inicial.md#3-teto-de-custo) explica por que os dois tetos).
 - Se o fluxo era do Claude Code e você também quer o runtime nativo de lá, a mesma estrutura vira um
-  `.claude/workflows/<nome>.js` (ver [04](04-invocacao-no-cursor-ide.md#paridade-cursor--claude-code)).
+  `.claude/workflows/<nome>.js` (ver [2.3](../usage/03-invocacao-no-cursor-ide.md#paridade-cursor--claude-code)).
+
+---
+
+[← Anterior: 4.1 · Escrevendo workflows](01-escrevendo-workflows.md) · [Índice](../README.md) · [Próximo: 5.1 · Governança e custos (Cursor Teams/Enterprise) →](../operating/01-governanca-e-custos.md)
