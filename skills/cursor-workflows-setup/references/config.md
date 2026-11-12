@@ -76,8 +76,11 @@ Under `workflows.<name>`:
     classifier decides. Setting it replaces the default map whole.
   - `maxStepCrashes`: how many times one write step may take the process down and be resumed; the next time the run
     ends `step-crash-loop`.
-  - `testTimeoutSec`: the time limit, in seconds, of each test run (and the `setupCommand`); past it the run ends
-    `tests-timeout`.
+  - `testTimeoutSec`: the time limit, in seconds, of each test run and of the `setupCommand`; past it the command is
+    killed. A suite past it ends the run `tests-timeout` (baseline, red, green, fix and final suites), except the
+    suite after the review's refactor, which ends it `tests-failed-after-review`. A `setupCommand` past it ends the
+    run `setup-failed`, as any failed setup does: before you read `setup-failed` as a broken setup command, check
+    whether it ran this long.
   - `networkTimeoutSec`: the time limit, in seconds, of each network command (`git push`, `git ls-remote`, every `gh`),
     for the workflow and `wf gc`.
   - `gcFailedAfterDays`: `wf gc` removes a failed run's worktree and branches once it failed more days ago than this; a
