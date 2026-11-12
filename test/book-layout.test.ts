@@ -103,6 +103,39 @@ test("the contributor section documents the book, the diagrams and the maintaine
   assert.match(read("docs/contributing/04-scripts-do-mantenedor.md"), /^\| Script \| O que faz \| Quando usar \| Como \|$/m);
 });
 
+/** Every chapter the index numbers, as `docs/...` path → its number (`5.3`). */
+function chapterNumbers(): Map<string, string> {
+  const numbers = new Map<string, string>();
+  for (const m of read("docs/README.md").matchAll(/^- \[(\d+\.\d+) · [^\]]*\]\(([^)#]+)\)/gm)) numbers.set(posix.join("docs", m[2]!), m[1]!);
+  return numbers;
+}
+
+// Wording-keyed: a footer link is recognised by the footer's own words ("← Anterior: ", "Próximo: "), and a cited
+// number is the `N.M` (or `ADR-NNNN`) a label starts with. Rewording the footer means updating FOOTER_PREFIX.
+const FOOTER_PREFIX = /^(?:← Anterior|Próximo): /;
+test("the book cites another chapter by its number (02-convencoes-do-livro.md §Numeração), and the number is the chapter's", () => {
+  const numbers = chapterNumbers();
+  assert.ok(numbers.size >= 20, "the index should number the book's chapters");
+  const wrong: string[] = [];
+  for (const file of markdownFiles(ROOT, "docs")) {
+    if (file.startsWith("docs/agents/")) continue;
+    parseMarkdown(read(file)).lines.forEach((line, i) => {
+      for (const m of line.replace(/`[^`]*`/g, "").matchAll(/(?<!!)\[([^\]]*)\]\(([^)\s]+)\)/g)) {
+        const [label, target] = [m[1]!, m[2]!];
+        const path = target.split("#")[0]!;
+        if (path === "" || /^[a-z][a-z0-9+.-]*:/i.test(target)) continue;
+        const resolved = posix.normalize(posix.join(posix.dirname(file), path));
+        const number = numbers.get(resolved);
+        // Research reports are cited by name (§Numeração), and a chapter's links to itself need no number.
+        if (number === undefined || resolved === file || resolved.startsWith("docs/research/")) continue;
+        const cited = /^(\d+\.\d+)(?!\d)/.exec(label.replace(FOOTER_PREFIX, ""))?.[1];
+        if (cited !== number && !/^ADR-\d{4}\b/.test(label)) wrong.push(`${file}:${i + 1}: [${label}](${target}) should cite ${number}`);
+      }
+    });
+  }
+  assert.deepEqual(wrong, [], "cite another chapter by number, e.g. [5.3 §5](../operating/03-observabilidade.md#5-dashboard)");
+});
+
 test("a path-scoped Claude Code rule points *.md files at the diagram conventions", () => {
   const rule = read(".claude/rules/diagrams.md");
   const frontmatter = /^---\n([\s\S]*?)\n---\n/.exec(rule);

@@ -46,7 +46,7 @@ Configuração por variáveis de ambiente:
 | Turnos, passos, tool calls por nome, compactações | `onDelta`: `turn-ended`, `step-completed`, `tool-call-started`, `summary-completed` [PKG] | `turn-ended` cobre **um turno inteiro do agente**, com vários passos. Um `step-completed` pode agrupar várias tools e várias chamadas ao modelo: 1 `send` que leu 4 arquivos gerou 4 tool calls, 2 `thinking-completed` e **1** `step-completed` [TESTE](../research/verificacoes-locais.md) |
 | Re-prompts de schema, tentativas, tipo de erro, duração | runtime | `error_kind`: timeout, run-error, schema, rate-limit, budget (cancelada por passar do teto de tokens da etapa ou do run), cancelled, exception |
 | Modelo e parâmetros | `ModelSelection` [DOC](https://cursor.com/docs/sdk/typescript#modelselection) | `model_key` = id + params ordenados, mais `max` quando há `maxMode` (ex.: `grok-4.7[reasoning_effort=high]`), então esforço e contexto viram "braços" distintos. O `maxMode` aparece nas [notas de versão do SDK](https://cursor.com/docs/release-notes/sdk), não na referência do `ModelSelection`. O banco grava o modelo **pedido**. O ID resolvido (`RunResult.model`: alias `composer` → `composer-2.5`; com `default`, o Auto, volta `default` [TESTE](../research/verificacoes-locais.md)) só sai no evento `step-end`, como `resolvedModel`, e não vai para o banco |
-| Resultado do run | `result.status` do workflow + `ctx.metric()` | `outcome_class`: delivered, failed, error, cancelled, unknown |
+| Resultado do run | `result.status` do workflow + `ctx.metric()` | `outcome_class`: delivered, pending, failed, error, cancelled, unknown |
 | Versão do workflow | hash de `meta` + `defaults` + código de `run` | Compare só runs da mesma versão |
 
 O teto de custo usa os dois campos: soma, por tentativa, o maior entre `rawCostCents` e `chargedCents` (ver
@@ -302,7 +302,7 @@ para um run em andamento e para um que já terminou):
 
 - **Nós.** O começo do run, cada etapa de agente e cada comando de `ctx.exec`. Um `parallel` ou `pipeline` abre num nó
   (`parallel ×3`) e fecha num círculo, onde os ramos voltam a se juntar; o que vem depois do grupo continua desse círculo. O
-  grafo sai só dos campos `stepId`, `parentId` e `groupId` dos eventos (veja a [referência de eventos](../reference/events.md)),
+  grafo sai só dos campos `stepId`, `parentId` e `groupId` dos eventos (veja a referência de eventos, [6.1](../reference/events.md)),
   então um nó aparece quando o `step-start` ou o `exec-start` dele chega.
 - **Raias.** Cada fase (`ctx.phase`) é uma faixa, na ordem em que aparecem. Um nó fica na raia da fase que ele declara, ou
   numa raia mais adiante quando continua de um nó que já está lá: nenhuma aresta volta para uma raia anterior.
@@ -430,7 +430,7 @@ cartão muda de coluna logo depois de o run mudar de fase. O servidor só relê 
 ou a data de modificação mudou), então os runs terminados não custam nada por consulta.
 
 **O que o cartão mostra** é o workflow que decide, com `ctx.card({ title, subtitle?, links?, badges? })`. Cada chamada
-grava um evento `card` ([referência de eventos](../reference/events.md#card)), e o quadro mostra o **último** de cada run,
+grava um evento `card` ([6.1 §card](../reference/events.md#card)), e o quadro mostra o **último** de cada run,
 de qualquer execução (um resume que não chama `ctx.card` continua com o cartão do run). Sem nenhum, o título é o id do run.
 Todo cartão mostra também o repositório, o custo e a duração do run, que vêm do log e não do workflow. O que o log diz de
 um cartão não é confiável: o dashboard só mostra links `http:` e `https:`, descarta itens do tipo errado e corta os
@@ -455,9 +455,13 @@ aberta, 1 hora depois de mesclada ou fechada, e 5 minutos quando o `gh` não con
   recusa um pedido que declare outra origem (`Origin` ou `Sec-Fetch-Site`); os outros métodos e as outras rotas dão `405`;
 - não envia cabeçalhos CORS;
 - abre o banco em modo leitura;
-- não carrega nada de fora: os apps web são empacotados localmente, sem CDN, sem fontes nem imagens remotas. A página
-  inicial vai com a política `default-src 'self'; script-src 'self'; style-src 'self'`, sem código inline, e a página do
-  run com `default-src 'none'` (scripts e conexões só da própria origem): funciona offline e em rede corporativa restrita;
+- não carrega nada de fora: os apps web são empacotados localmente, sem CDN, sem fontes nem imagens remotas, e funcionam
+  offline e em rede corporativa restrita. As duas páginas vão com a política de conteúdo (CSP)
+  `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`:
+  scripts, folhas de estilo, imagens e conexões só da própria origem, nenhum `<script>` nem `<style>` inline, e nenhuma
+  outra página pode emoldurá-las. A página do run acrescenta `style-src-attr 'unsafe-inline'`, porque o React Flow
+  posiciona os nós do grafo com o atributo `style` de cada elemento; essa diretiva libera só atributos `style`, nunca
+  um elemento `<style>` nem um script;
 - só escreve um endereço de fora: o link do agente de uma etapa na nuvem (`https://cursor.com/agents/<id>`). Ele só abre
   quando você clica, numa nova aba e sem `Referer`; o dashboard não faz nenhum pedido a ele.
 
@@ -490,6 +494,8 @@ return { status: "tests-failed", ... };      // qualquer outro status = o workfl
 - run cancelado (`wf cancel`, `cancel_workflow`, Ctrl-C) → `cancelled`;
 - run que lançou erro ou estourou o teto → `error`;
 - `status` em `done/delivered/ok/success/succeeded` → `delivered`;
+- `status` em `seams-proposed/pending` → `pending`: o run parou esperando a decisão de alguém (como a aprovação das
+  seams do `implement-issue`), o que não é entrega nem falha;
 - outro `status` → `failed`;
 - sem `status` → `unknown`.
 

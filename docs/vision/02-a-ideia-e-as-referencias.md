@@ -69,7 +69,8 @@ numa conversa. O `implement-issue`, o workflow de exemplo do kit, é a conversã
 skill pede ao modelo (combinar as seams antes dos testes, red antes de green, não misturar os eixos do review), o
 workflow confere. Isso é também o exemplo de referência da conversão ([4.2](../authoring/02-convertendo-skills-e-subagents.md)).
 Este repositório é mantido com as mesmas skills: specs e tickets viram issues do GitHub
-([`docs/agents/`](../agents/issue-tracker.md)) e as decisões difíceis de reverter viram [ADRs](../adr/0001-layered-config-with-hard-caps.md).
+([`docs/agents/`](../agents/issue-tracker.md)) e as decisões difíceis de reverter viram ADRs (a
+[parte 7](../README.md#parte-7--decisões-adrs) do livro, a partir do [7.1](../adr/0001-layered-config-with-hard-caps.md)).
 
 ### O `dag-task-runner` do cookbook do Cursor
 
