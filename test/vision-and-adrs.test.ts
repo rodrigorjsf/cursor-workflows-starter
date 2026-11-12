@@ -96,20 +96,21 @@ const ADRS: Array<{ file: string; number: string; topic: RegExp[] }> = [
   { file: "docs/adr/0005-cloud-backend-and-location-cap.md", number: "0005", topic: [/cloud/i, /location/i, /\bcap\b/i] },
   { file: "docs/adr/0006-cloud-steps-as-built.md", number: "0006", topic: [/cloud/i, /read-only/, /fast-forward/i, /supersedes/i] },
   { file: "docs/adr/0007-cancel-stops-cloud-agents.md", number: "0007", topic: [/cloud/i, /read-only/, /fast-forward/i, /supersedes/i, /cancel/i] },
+  { file: "docs/adr/0008-job-record-keeps-what-the-log-cannot.md", number: "0008", topic: [/event log/i, /source of truth/i, /job record/i, /killedByCancel/, /supersedes/i] },
 ];
 
-test("part 7 lists seven ADRs, one per load-bearing decision, in order", () => {
+test("part 7 lists eight ADRs, one per load-bearing decision, in order", () => {
   assert.deepEqual(
     indexPart(7),
     ADRS.map((adr) => adr.file),
   );
 });
 
-/** Every ADR on disk, not only the seven: the format below binds the ones added later too. */
+/** Every ADR on disk, not only the eight: the format below binds the ones added later too. */
 const adrFiles = () => readdirSync(join(ROOT, "docs/adr")).filter((name) => /^\d{4}-.*\.md$/.test(name)).map((name) => `docs/adr/${name}`);
 
 test("every ADR is titled ADR-NNNN, names its status and records the context, the decision, the consequences and the options considered", () => {
-  assert.ok(adrFiles().length >= ADRS.length, "the seven ADRs are on disk");
+  assert.ok(adrFiles().length >= ADRS.length, "the eight ADRs are on disk");
   for (const file of adrFiles()) {
     const number = /\/(\d{4})-/.exec(file)![1]!;
     const doc = parseMarkdown(read(file));
@@ -124,7 +125,7 @@ test("every ADR is titled ADR-NNNN, names its status and records the context, th
   }
 });
 
-test("each of the seven ADRs is about its decision", () => {
+test("each of the eight ADRs is about its decision", () => {
   for (const adr of ADRS) for (const pattern of adr.topic) assert.match(read(adr.file), pattern, `${adr.file}: should be about ${pattern}`);
 });
 
@@ -176,4 +177,22 @@ test("ADR-0006's lifecycle changed, so ADR-0007 supersedes it: 0006 keeps its te
   // what the rule costs: the resume that follows pays for a new agent
   assert.match(flat, /newest run was cancelled/, "a resume does not reattach to an agent whose run was cancelled");
   assert.match(flat, /pays (again|for a new agent)/i);
+});
+
+test("ADR-0002's job record changed, so ADR-0008 supersedes it: 0002 keeps its text, 0008 names what the record holds beside identity", () => {
+  const old = read("docs/adr/0002-event-log-source-of-truth.md");
+  assert.match(old, /^\*\*Status:\*\* superseded by ADR-0008/m);
+  assert.match(old, /The job\s+record keeps only identity \(job id, run id, pid, heartbeat\)/, "the original decision text");
+  const adr = read("docs/adr/0008-job-record-keeps-what-the-log-cannot.md");
+  assert.match(adr, /^\*\*Status:\*\* accepted .*supersedes \[ADR-0002\]/m);
+  const flat = adr.replace(/\s+/g, " ");
+  // what ADR-0002 decided and still holds
+  assert.match(flat, /everything else about the run's progress is derived from it/);
+  assert.match(flat, /Status is a projection/);
+  // the change: identity plus the facts the job's process cannot put in the log, each named
+  for (const field of ["start", "refused", "killedByCancel"]) assert.ok(flat.includes(`\`${field}\``), `ADR-0008 names \`${field}\``);
+  // killing a frozen job writes nothing in the log: the job stays failed, and only a resume reads the mark
+  assert.match(flat, /Killing a frozen job writes nothing in the log/);
+  assert.match(flat, /the job stays `failed`/);
+  assert.match(flat, /wasKilledByCancel/);
 });

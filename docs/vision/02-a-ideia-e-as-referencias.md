@@ -54,7 +54,7 @@ e depurar ([DOC](https://docs.n8n.io/workflows/), acesso em 2026-11-12). O kit t
 - **o processo é um artefato fixado por quem o escreve**, fora de qualquer modelo, e por isso pode ser versionado,
   revisado e testado;
 - **cada rodada é uma execução inspecionável**, não uma conversa: no kit, essa é a função do
-  log de eventos ([1.3](03-conceitos.md)) e do [ADR-0002](../adr/0002-event-log-source-of-truth.md).
+  log de eventos ([1.3](03-conceitos.md)) e do [ADR-0008](../adr/0008-job-record-keeps-what-the-log-cannot.md).
 
 E difere em duas: o n8n desenha o processo como um grafo de nós numa tela; o kit o escreve em TypeScript, e por isso
 ramos, laços, tentativas e verificações são código comum. E os nós do kit não são conectores genéricos, são sempre

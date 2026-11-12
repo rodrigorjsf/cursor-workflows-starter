@@ -119,4 +119,4 @@ enforced before any cloud code exists.
 
 ---
 
-[← Anterior: 7.6 · ADR-0006: Cloud steps as built](0006-cloud-steps-as-built.md) · [Índice](../README.md) · [Próximo: 8.1 · Cursor SDK como motor de workflows determinísticos: relatório de pesquisa →](../research/relatorio-pesquisa.md)
+[← Anterior: 7.6 · ADR-0006: Cloud steps as built](0006-cloud-steps-as-built.md) · [Índice](../README.md) · [Próximo: 7.8 · ADR-0008: The job record keeps what the event log cannot →](0008-job-record-keeps-what-the-log-cannot.md)

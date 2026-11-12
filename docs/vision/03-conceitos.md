@@ -51,7 +51,7 @@ _Evite_: execução (ambíguo com a de uma etapa), sessão.
 
 **Job**:
 O run em segundo plano que `start_workflow` (MCP) ou `wf start` (CLI) disparam, em um processo destacado que sobrevive ao
-MCP server e ao Cursor. Tem identidade própria (job id, run id, pid, heartbeat; o registro guarda também os args do start e a marca de um cancelamento que matou o processo), e o que `wait_workflow` e
+MCP server e ao Cursor. Tem identidade própria (job id, run id, pid, heartbeat; o registro guarda também o que o log não pode guardar: os args do start, o motivo de uma recusa e a marca de um cancelamento que matou o processo, [ADR-0008](../adr/0008-job-record-keeps-what-the-log-cannot.md)), e o que `wait_workflow` e
 `get_workflow_status` respondem é uma projeção do log de eventos do run. Um job termina `finished`, `failed` ou
 `cancelled` (`cancel_workflow`, `wf cancel`, Ctrl-C): cancelar um job em execução não é falhar (um job travado ou já
 terminado continua `failed`), e o run continua retomável.
@@ -67,7 +67,7 @@ _Evite_: histórico, log.
 O `events.jsonl` do run: cada fato do run, em ordem. Todo evento leva a versão do schema, o horário e o `runId`, e os
 das etapas levam também `stepId`, `parentId` e `groupId`. É a fonte da verdade do status, das linhas recentes e do gasto
 de um run, e a base de qualquer visão futura (kanban, DAG, replay). Decisão em
-[ADR-0002](../adr/0002-event-log-source-of-truth.md); campos em [6.1](../reference/events.md).
+[ADR-0008](../adr/0008-job-record-keeps-what-the-log-cannot.md); campos em [6.1](../reference/events.md).
 _Evite_: log (sozinho), progresso.
 
 **Location**:
