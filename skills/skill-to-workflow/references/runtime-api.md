@@ -97,7 +97,8 @@ if (!tests.ok) { /* tests.exitCode, tests.timedOut, tests.tail: the last 32768 c
 | `env` | Variables added to the process's own environment. |
 
 - There is **no shell**: `command` and its `args` go to the program as they are. Use `["bash", ["-c", line]]` when you
-  need one (`bash -c`, not `bash -lc`: rules.md, rule 3).
+  need one (`bash -c`, not `bash -lc`: rules.md, rule 3). The command has no stdin and no controlling terminal, so a
+  `git push` that would ask for credentials fails at once instead of waiting; a stalled network call is the timeout's job.
 - A command that exits non-zero, times out (`timedOut: true`, `exitCode: null`) or cannot start (`error` says why) is a
   **result**, not an exception: the code decides what it means. A cancelled run kills the command and throws, so the
   workflow does not go on.

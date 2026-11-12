@@ -155,7 +155,7 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 | `kind` | `ContentKind` | sim | O que o `text` guarda. |
 | `tool` | `string` | não | O nome da tool (`shell`, `read`…), em `tool-call` e `command-output`. `exec` marca um comando de `ctx.exec`: o `tool-call` traz o comando, os argumentos e o cwd; os `command-output` trazem a saída. |
 | `callId` | `string` | não | O id da chamada de tool no stream do agente: liga o `tool-call` ao `command-output` dela. Num comando de `ctx.exec`, é o `attemptId` dele. |
-| `stream` | `"stdout" \| "stderr"` | não | De qual saída vem o `text` de um `command-output` de `ctx.exec`. A saída de um comando chega em vários eventos, em ordem, cortada em linhas inteiras quando dá. Ausente na saída de uma tool de agente, que junta as duas. |
+| `stream` | `OutputStream` | não | De qual saída vem o `text` de um `command-output` de `ctx.exec`. A saída de um comando chega em vários eventos, em ordem, cortada em linhas inteiras quando dá. Ausente na saída de uma tool de agente, que junta as duas. |
 | `text` | `string` | não | O conteúdo, já sem segredos e cortado em 32768 caracteres. Ausente depois que a retenção o apagou. |
 | `chars` | `number` | sim | Tamanho do conteúdo em caracteres antes do corte. Fica depois que a retenção apaga o `text`. |
 | `truncated` | `boolean` | não | true quando o `text` é só o começo do conteúdo. |
@@ -353,6 +353,14 @@ O que um `content` guarda: o que foi enviado ao agente, o que ele disse, as tool
 
 ```ts
 type ContentKind = "prompt" | "agent-message" | "tool-call" | "command-output";
+```
+
+### OutputStream
+
+De qual saída de um comando vem um texto: `stdout` ou `stderr`.
+
+```ts
+type OutputStream = "stdout" | "stderr";
 ```
 
 ### ErrorKind

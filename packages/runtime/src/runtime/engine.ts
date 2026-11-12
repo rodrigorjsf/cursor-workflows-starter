@@ -31,7 +31,7 @@ import { Ajv } from "ajv";
 import { type AgentBackend, localBackend } from "./backend.js";
 import { type CommandOutcome, EXEC_FLUSH_MS, EXEC_LOG_MAX_CHARS, outputLog, runCommand } from "./command-runner.js";
 import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedConfig, type StepOverrides, allowedSources, isModelAllowed, loadEffectiveConfig } from "../config/index.js";
-import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type NewEvent, type RunStatus, type StepRef, type TurnUsage, type WorkflowEvent } from "./events.js";
+import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type OutputStream, type NewEvent, type RunStatus, type StepRef, type TurnUsage, type WorkflowEvent } from "./events.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
 import { addUsage, emptyUsage, resumeHint, withRatio } from "./projection.js";
 import { CONTENT_MAX_CHARS, RunLockedError, RunStore } from "./run-store.js";
@@ -315,7 +315,7 @@ interface EventChannel {
 }
 
 interface AttemptContent {
-  write(kind: ContentKind, raw: string, extra?: { tool?: string; callId?: string; stream?: "stdout" | "stderr" }): void;
+  write(kind: ContentKind, raw: string, extra?: { tool?: string; callId?: string; stream?: OutputStream }): void;
   /** Adds a piece of what the agent is saying. */
   say(delta: string): void;
   /** Writes what the agent said since the last flush as one message. */
@@ -363,7 +363,7 @@ async function openEventChannel(store: RunStore, runId: string, opts: RunOptions
    * not to the metrics recorder, not to `onEvent` listeners. Agent text arrives in deltas and is written one message per turn.
    */
   const attemptContent = (ref: StepRef, attemptId: string): AttemptContent => {
-    const write = (kind: ContentKind, raw: string, extra: { tool?: string; callId?: string; stream?: "stdout" | "stderr" } = {}) => {
+    const write = (kind: ContentKind, raw: string, extra: { tool?: string; callId?: string; stream?: OutputStream } = {}) => {
       const { text, chars, truncated } = store.prepareContent(raw);
       append(stamp({ type: "content", ...ref, attemptId, kind, ...extra, text, chars, truncated: truncated || undefined }));
     };
@@ -841,7 +841,15 @@ async function executeRun<A, R>(
     const key = journal.keyFor(prompt, fingerprint);
     const ref: StepRef = { stepId: stepIdOf(key), parentId: flow.last, groupId: flow.groupId };
     const step: StepContext = { o, role, promptHash, label, phase, sources, mKey, fingerprint, key, ref, started: false, tokenCap: overrides.maxTokensPerStep, tokens: 0 };
-    const running = runStep<T>(prompt, step);
+    return inNode(runStep<T>(prompt, step), flow, ref, () => step.started);
+  }
+
+  /**
+   * Awaits one node of the run (an agent step, a command) as a task in flight: a cancelled run waits for it to stop before
+   * it ends, and a cancellation that reaches it marks the run interrupted. Whatever comes next in the flow continues from
+   * the node, once `started()` says it has begun.
+   */
+  async function inNode<T>(running: Promise<T>, flow: Flow, ref: StepRef, started: () => boolean): Promise<T> {
     inFlight.add(running);
     try {
       return await running;
@@ -850,7 +858,7 @@ async function executeRun<A, R>(
       throw err;
     } finally {
       inFlight.delete(running);
-      if (step.started) flow.last = ref.stepId; // whatever comes next in this flow continues from this step
+      if (started()) flow.last = ref.stepId;
     }
   }
 
@@ -1110,7 +1118,7 @@ async function executeRun<A, R>(
     }
   }
 
-  /** How many times each shape of `ctx.exec` call has been made in this execution: the same call twice is two nodes, and a resume numbers them alike. */
+  /** How many times each call has been made in this execution, by its shape and the branch that made it: the same call twice is two nodes, and a resume numbers them alike. */
   const execOccurrences = new Map<string, number>();
 
   /** One `ctx.exec` call: a step node of the run. The command runs in its own process, and the call returns what the command did. */
@@ -1123,22 +1131,13 @@ async function executeRun<A, R>(
       interrupted = true; // a cancelled run starts no command: no node either
       throw new RunCancelledError(cancelMessage);
     }
-    // The node's id comes from the shape of the call, computed before any await: parallel branches number their calls in code order.
-    const shape = sha(JSON.stringify([command, args, cwd]));
+    // The node's id comes from the call's shape and its branch (`flow.prefix`: where it sits in the groups), computed before
+    // any await: the numbering does not depend on which parallel branch gets there first.
+    const shape = sha(JSON.stringify([flow.prefix, command, args, cwd]));
     const occurrence = execOccurrences.get(shape) ?? 0;
     execOccurrences.set(shape, occurrence + 1);
     const ref: StepRef = { stepId: `x-${shape.slice(0, 12)}.${occurrence}`, parentId: flow.last, groupId: flow.groupId };
-    const running = runExec(command, args, cwd, timeoutMs, callOpts, ref);
-    inFlight.add(running); // a cancelled run waits for its commands to stop before it ends
-    try {
-      return await running;
-    } catch (err) {
-      if (err instanceof RunCancelledError) interrupted = true;
-      throw err;
-    } finally {
-      inFlight.delete(running);
-      flow.last = ref.stepId; // whatever comes next in this flow continues from this command
-    }
+    return inNode(runExec(command, args, cwd, timeoutMs, callOpts, ref), flow, ref, () => true); // runExec opens the node at once
   }
 
   async function runExec(command: string, args: string[], cwd: string, timeoutMs: number, callOpts: ExecOptions, ref: StepRef): Promise<ExecResult> {

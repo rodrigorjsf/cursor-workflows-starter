@@ -9,7 +9,6 @@
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import type { ConfigSource, ConfigViolation, EffectiveCaps, EffectiveConfig, EffectiveLimits, EffectiveRole } from "../runtime/events.js";
 import type { WorkflowDefinition, WorkflowRole } from "../runtime/workflow.js";
-import { DEFAULT_EXEC_TIMEOUT_MS } from "../runtime/command-runner.js";
 import { globMatches, literalLength } from "./glob.js";
 import { ConfigError, type ConfigIssue, type LoadedConfig, type Pointer, type RolePrefs, type WorkflowPrefs, pointerOf } from "./file.js";
 
@@ -75,6 +74,8 @@ interface Cell {
 }
 
 const DEFAULT_CONCURRENCY = 4;
+/** How long a `ctx.exec` command may run when neither the call nor the config says: a long test run is of this order. */
+const DEFAULT_EXEC_TIMEOUT_MS = 10 * 60_000;
 type WorkflowBudget = WorkflowDefinition["budget"];
 /**
  * The per-run limits, one row each: the global cap that clamps it, its bounds, whether `null` (no limit) is allowed, its

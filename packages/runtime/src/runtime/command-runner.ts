@@ -2,15 +2,10 @@
 // runs or events: it spawns, hands the output to a callback as it arrives, keeps the tail, and never leaves a process
 // behind. The engine turns a call into a step node and the output into `content` events (`ctx.exec`).
 import { type ChildProcess, spawn } from "node:child_process";
-import type { ExecOutcome } from "./events.js";
-
-/** How long a command may run when neither the call nor the config says: the longest test run a workflow starts is of this order. */
-export const DEFAULT_EXEC_TIMEOUT_MS = 10 * 60_000;
+import type { ExecOutcome, OutputStream } from "./events.js";
 
 /** How much of a command's output a call hands back: the last characters of stdout and stderr, in arrival order. */
 export const TAIL_MAX_CHARS = 32_768;
-
-export type OutputStream = "stdout" | "stderr";
 
 /** How much of one command's output the event log keeps. What follows is dropped from the log (the call's `tail` still has the end), and the command's end event says so. */
 export const EXEC_LOG_MAX_CHARS = 262_144;
@@ -101,8 +96,13 @@ export function runCommand(spec: CommandSpec, onOutput: (stream: OutputStream, t
       resolve(end);
     };
     const ended = () => result(outcome, exited?.code ?? null, exited?.signal ?? null);
-    /** Stops waiting for the pipes (something the command left running holds them open) and ends the call. */
+    /**
+     * Stops waiting for the pipes and ends the call. Something the command left running still holds them, so its process
+     * group is alive: it is killed here, since nothing else would (the call is over, and the exit hook looks at calls
+     * in flight only).
+     */
     const abandonPipes = () => {
+      killTree(child, "SIGKILL");
       child.stdout?.destroy();
       child.stderr?.destroy();
       finish(ended());
@@ -156,24 +156,40 @@ export interface OutputLog {
   readonly truncated: boolean;
 }
 
+/** The start of the line where a private key block that has not ended begins in `text`, or -1. Its BEGIN line is here and its END line is not. */
+function openKeyBlock(text: string): number {
+  let open = -1;
+  for (const begin of text.matchAll(/-----BEGIN [A-Z ]*PRIVATE KEY-----/g)) {
+    const from = begin.index ?? 0;
+    if (!/-----END [A-Z ]*PRIVATE KEY-----/.test(text.slice(from))) open = text.lastIndexOf("\n", from) + 1;
+  }
+  return open;
+}
+
 /**
- * Cuts a command's output into the pieces that go to the event log. A piece ends at a line break, so a secret printed
- * across two reads of the pipe is redacted whole (redaction sees one piece at a time), and no piece passes `pieceMax`
- * (the event's own limit, past which text is cut). Each stream has its own pending line. At most `logMax` characters are
- * written for the command.
+ * Cuts a command's output into the pieces that go to the event log. Redaction sees one piece at a time, so a piece must
+ * hold whatever a secret is made of: it ends at a line break (a token printed across two reads of the pipe is redacted
+ * whole), a private key block waits for its END line, and a batch longer than `pieceMax` (the event's own limit, past
+ * which text is cut) is cut at the last line break that fits. Only a single line longer than `pieceMax` is cut inside.
+ * Each stream has its own pending text. At most `logMax` characters are written for the command.
  */
 export function outputLog(write: (stream: OutputStream, text: string) => void, limits: { pieceMax: number; logMax: number }): OutputLog {
   const pending: Record<OutputStream, string> = { stdout: "", stderr: "" };
   let written = 0;
   let truncated = false;
   const emit = (stream: OutputStream, text: string) => {
-    for (let at = 0; at < text.length; at += limits.pieceMax) {
+    for (let at = 0; at < text.length; ) {
       const room = limits.logMax - written;
       if (room <= 0) {
         truncated = true;
         return;
       }
-      let piece = text.slice(at, at + limits.pieceMax);
+      let end = Math.min(at + limits.pieceMax, text.length);
+      if (end < text.length) {
+        const lineEnd = text.lastIndexOf("\n", end - 1) + 1; // 0 when the batch has no line break before the cut
+        if (lineEnd > at) end = lineEnd;
+      }
+      let piece = text.slice(at, end);
       if (piece.length > room) {
         piece = piece.slice(0, room);
         truncated = true;
@@ -181,13 +197,15 @@ export function outputLog(write: (stream: OutputStream, text: string) => void, l
       write(stream, piece);
       written += piece.length;
       if (truncated) return;
+      at = end;
     }
   };
   return {
     push: (stream, text) => void (pending[stream] += text),
     flush() {
       for (const stream of ["stdout", "stderr"] as const) {
-        const whole = pending[stream].lastIndexOf("\n") + 1;
+        const open = openKeyBlock(pending[stream]);
+        const whole = open >= 0 ? open : pending[stream].lastIndexOf("\n") + 1;
         if (whole > 0) {
           emit(stream, pending[stream].slice(0, whole));
           pending[stream] = pending[stream].slice(whole);

@@ -391,6 +391,9 @@ export interface ExecEndEvent extends EventBase, StepRef {
   outputTruncated?: true;
 }
 
+/** De qual saída de um comando vem um texto: `stdout` ou `stderr`. */
+export type OutputStream = "stdout" | "stderr";
+
 /** O que um `content` guarda: o que foi enviado ao agente, o que ele disse, as tools que chamou, a saída dos comandos. */
 export type ContentKind = "prompt" | "agent-message" | "tool-call" | "command-output";
 
@@ -412,7 +415,7 @@ export interface ContentEvent extends EventBase, StepRef {
   /** O id da chamada de tool no stream do agente: liga o `tool-call` ao `command-output` dela. Num comando de `ctx.exec`, é o `attemptId` dele. */
   callId?: string;
   /** De qual saída vem o `text` de um `command-output` de `ctx.exec`. A saída de um comando chega em vários eventos, em ordem, cortada em linhas inteiras quando dá. Ausente na saída de uma tool de agente, que junta as duas. */
-  stream?: "stdout" | "stderr";
+  stream?: OutputStream;
   /** O conteúdo, já sem segredos e cortado em 32768 caracteres. Ausente depois que a retenção o apagou. */
   text?: string;
   /** Tamanho do conteúdo em caracteres antes do corte. Fica depois que a retenção apaga o `text`. */

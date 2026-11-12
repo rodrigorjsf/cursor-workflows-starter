@@ -138,14 +138,17 @@ poderia estourar o tempo dela e a saída dela ficaria invisível.
 2. **Processo assíncrono, num grupo de processos próprio.** Sem shell e sem stdin. A saída chega em pedaços, e o motor a
    grava no log como eventos `content` (`command-output`, com `stream` `stdout` ou `stderr`) enquanto o comando roda,
    em linhas inteiras: o motor redige cada pedaço sozinho, e um segredo partido entre duas leituras do pipe escaparia
-   da redação. Valem a mesma redação, o mesmo corte de 32768 caracteres por evento e a mesma retenção do conteúdo de um
-   agente. O log guarda no máximo 256 KiB da saída de um comando (`outputTruncated` no `exec-end` avisa quando passa
-   disso); o workflow recebe o fim dela, 32768 caracteres, em `tail`. A linha de comando (programa, argumentos e cwd)
+   da redação. Um bloco de chave privada espera pela linha `END` antes de ser gravado, e um lote maior que um evento é
+   cortado entre linhas. Valem a mesma redação, o mesmo corte de 32768 caracteres por evento e a mesma retenção do
+   conteúdo de um agente. O log guarda no máximo 262144 caracteres da saída de um comando (`outputTruncated` no
+   `exec-end` avisa quando passa disso); o workflow recebe o fim dela, 32768 caracteres, em `tail`. A linha de comando (programa, argumentos e cwd)
    é conteúdo: vai num `content` do tipo `tool-call`, e o `exec-start` leva só o nome do programa.
 3. **Tempo.** O comando morre no `timeoutMs` da chamada ou, sem ele, no `execTimeoutMs` do workflow na configuração
    (padrão: 10 minutos, [6.2](../reference/config.md)): `SIGTERM` ao grupo inteiro e, dois segundos depois, `SIGKILL`.
    O resultado (`ok`, `exitCode`, `timedOut`, `tail`, `error`) volta ao workflow, que decide o que fazer; código de saída
-   diferente de zero, tempo estourado e programa que não inicia não lançam erro.
+   diferente de zero, tempo estourado e programa que não inicia não lançam erro. O comando não tem stdin nem terminal
+   de controle (processo em sessão própria): um `git push` que pediria credenciais falha na hora, em vez de esperar.
+   Um processo que o comando deixou rodando, segurando a saída depois de ele sair, é morto um segundo depois.
 4. **Cancelamento.** O cancelamento do run mata o grupo do comando, fecha o nó como `cancelled`, e a chamada lança
    `RunCancelledError`: o workflow não segue. O run espera o comando parar antes de gravar o `run-end`. Um segundo sinal
    (que sai do processo na hora) mata antes todos os comandos que ainda rodam.

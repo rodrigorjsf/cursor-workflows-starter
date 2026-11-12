@@ -203,9 +203,11 @@ test("secrets are redacted from the output in the log, also one split across two
   const [one, two] = [token.slice(0, 20), token.slice(20)];
   process.env.EXEC_TEST_API_KEY = "env-secret-value-1234";
   try {
-    // The halves travel in the env: the command line (logged too) must not carry them.
-    const code = `const e = process.env; process.stdout.write(e.ONE + e.TWO + '\\n'); process.stderr.write(e.EXEC_TEST_API_KEY + '\\n'); process.stdout.write('split ' + e.ONE); ${sleepJs(600)} process.stdout.write(e.TWO + '\\n');`;
-    const wf = workflow((ctx) => ctx.exec(...node(code), { label: "leaky", env: { ONE: one, TWO: two } }));
+    // The halves travel in the env: the command line (logged too) must not carry them. The pause after the stderr write keeps the
+    // two pipes' arrival order fixed, so the real output has the token whole.
+    const code = `const e = process.env; process.stdout.write(e.ONE + e.TWO + '\\n'); process.stderr.write(e.EXEC_TEST_API_KEY + '\\n'); ${sleepJs(300)} process.stdout.write('split ' + e.ONE); ${sleepJs(600)} process.stdout.write(e.TWO + '\\n');`;
+    // The workflow returns a flag, not the tail: a result is the workflow's to return, and the tail is real output.
+    const wf = workflow(async (ctx) => (await ctx.exec(...node(code), { label: "leaky", env: { ONE: one, TWO: two } })).tail.includes(token));
     const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });
     assert.equal(r.status, "finished");
     const events = eventsOf(r.runId);
@@ -214,10 +216,73 @@ test("secrets are redacted from the output in the log, also one split across two
     assert.ok(!log.includes("env-secret-value-1234"), "the value of a secret-named variable is not in the log");
     assert.equal(outputText(events, "stdout"), "[REDACTED]\nsplit [REDACTED]\n");
     assert.equal(outputText(events, "stderr"), "[REDACTED]\n");
-    assert.ok((r.result as ExecResult).tail.includes(token), "the call's tail is the real output");
+    assert.equal(r.result, true, "the call's tail is the real output");
   } finally {
     delete process.env.EXEC_TEST_API_KEY;
   }
+});
+
+test("a private key block written across several reads is redacted whole, not only its first piece", async () => {
+  const env = { BEGIN: "-----BEGIN RSA PRIVATE KEY-----", END: "-----END RSA PRIVATE KEY-----", L1: "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7", L2: "VwnRmTqDyH3Yp0Hn5cJd0k2yQ9Lr8XgS1eT4uZb7NfW6aMiOvPxK" };
+  const code = `const e = process.env; process.stdout.write('before\\n' + e.BEGIN + '\\n' + e.L1 + '\\n'); ${sleepJs(600)} process.stdout.write(e.L2 + '\\n' + e.END + '\\nafter\\n');`;
+  const r = await runWorkflow(workflow((ctx) => ctx.exec(...node(code), { env })), {}, { cwd, metricsDb: false });
+  const events = eventsOf(r.runId);
+  const log = JSON.stringify(events);
+  assert.ok(!log.includes(env.L1) && !log.includes(env.L2), "no line of the key is in the log");
+  assert.equal(outputText(events, "stdout"), "before\n[REDACTED]\nafter\n");
+});
+
+test("a batch longer than an event holds is cut between lines, so a token is never cut in two", async () => {
+  const token = `ghp_${"a1B2".repeat(9)}`;
+  // 327 lines of 100 characters, then a line whose token starts at offset 32750 of the batch and so straddles the 32768 cut.
+  const code = `const e = process.env; process.stdout.write(('x'.repeat(99) + '\\n').repeat(327) + 'y'.repeat(50) + e.TOKEN_SHAPE + ' end\\n' + 'z'.repeat(40000) + '\\n');`;
+  const r = await runWorkflow(workflow((ctx) => ctx.exec(...node(code), { env: { TOKEN_SHAPE: token } })), {}, { cwd, metricsDb: false });
+  const events = eventsOf(r.runId);
+  const text = outputText(events, "stdout");
+  assert.ok(!JSON.stringify(events).includes(token.slice(0, 20)) && !JSON.stringify(events).includes(token.slice(20)), "no part of the token is in the log");
+  assert.ok(text.includes(`${"y".repeat(50)}[REDACTED] end\n`));
+  assert.ok(text.endsWith(`${"z".repeat(40000)}\n`), "an over-long line is still written whole");
+});
+
+test("the numbering of the same call in parallel branches does not depend on which branch gets there first", async () => {
+  const wf = workflow(async (ctx) => {
+    const slow = (ctx.args as { slow: number }).slow;
+    await ctx.parallel([0, 1].map((i) => async () => {
+      await new Promise((r) => setTimeout(r, slow === i ? 300 : 0));
+      return ctx.exec(...node("0"), { label: `branch-${i}` });
+    }));
+  });
+  const first = await runWorkflow(wf, { slow: 0 }, { cwd, metricsDb: false });
+  const second = await runWorkflow(wf, { slow: 1 }, { cwd, metricsDb: false, runId: first.runId });
+  assert.equal(second.status, "finished");
+  const starts = execStarts(eventsOf(first.runId));
+  assert.equal(starts.length, 4);
+  const idOf = (execution: ExecStartEvent[], label: string) => execution.find((e) => e.label === label)!.stepId;
+  for (const label of ["branch-0", "branch-1"]) assert.equal(idOf(starts.slice(2), label), idOf(starts.slice(0, 2), label), `${label} keeps its id across executions`);
+  assert.notEqual(idOf(starts, "branch-0"), idOf(starts, "branch-1"), "the branches are two nodes");
+});
+
+test("a process the command left running, holding its output, is killed when the call ends: nothing outlives the call", async () => {
+  const r = await runWorkflow(workflow((ctx) => ctx.exec("bash", ["-c", "sleep 60 & echo $!"], { label: "leaves-one" })), {}, { cwd, metricsDb: false });
+  const result = r.result as ExecResult;
+  assert.equal(result.ok, true, "the command itself exited 0");
+  const child = Number(result.tail.trim());
+  assert.ok(child > 1);
+  await until("the process left behind to be gone", () => !alive(child) || undefined, 3_000).catch(() => {
+    process.kill(child, "SIGKILL");
+    assert.fail(`process ${child} outlived the call`);
+  });
+});
+
+test("a command has no stdin and no terminal: whatever would wait for someone to type (a credential prompt) fails at once", async () => {
+  const started = Date.now();
+  const wf = workflow(async (ctx) => [await ctx.exec("bash", ["-c", "cat; echo read-stdin-ended"], { label: "stdin", timeoutMs: 20_000 }), await ctx.exec("bash", ["-c", "echo asking > /dev/tty"], { label: "tty", timeoutMs: 20_000 })] as const);
+  const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });
+  const [stdin, tty] = r.result as [ExecResult, ExecResult];
+  assert.deepEqual([stdin.ok, stdin.tail], [true, "read-stdin-ended\n"], "stdin is empty, not an open terminal");
+  assert.equal(tty.ok, false, "there is no controlling terminal to open");
+  assert.equal(tty.timedOut, false);
+  assert.ok(Date.now() - started < 10_000);
 });
 
 test("the output is pruned with the rest of the content: the text goes, the node and the sizes stay", async () => {
@@ -388,7 +453,7 @@ test("the process stays responsive while a command runs: its event loop is never
   }
   const gaps = ticks.slice(1).map((t, i) => t - ticks[i]!);
   assert.ok(ticks.length > 40, `${ticks.length} ticks in 1.5 s`);
-  assert.ok(Math.max(...gaps) < 400, `the longest stall was ${Math.max(...gaps)} ms`);
+  assert.ok(Math.max(...gaps) < 1_000, `the longest stall was ${Math.max(...gaps)} ms`); // a blocked loop would stall for the command's 1.5 s
 });
 
 async function until<T>(what: string, read: () => T | undefined, ms = 10_000): Promise<T> {
