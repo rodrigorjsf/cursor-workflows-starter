@@ -1,158 +1,157 @@
 ---
 name: skill-to-workflow
-description: Converte skills e subagents existentes em um workflow determinístico deste kit, com teste offline e relatório de custo.
+description: Converts existing skills and subagents into a deterministic workflow of this kit, with an offline test and a cost report.
 disable-model-invocation: true
 ---
 
-# Converter skills e subagents em workflow
+# Convert skills and subagents into a workflow
 
-**Entrada:** caminhos para um ou mais `SKILL.md` (`.agents/skills/`, `.cursor/skills/`, `.claude/skills/`,
-`.codex/skills/`, ou uma skill de terceiros num cache de plugin ou noutro repositório), arquivos de subagent
-(`.cursor/agents/*.md`, `.claude/agents/*.md`, `.codex/agents/*.md`) e, se existirem, instruções (`AGENTS.md`,
-`CLAUDE.md`, `.cursor/rules/`), comandos ou hooks que participam do fluxo.
+**Input:** paths to one or more `SKILL.md` files (`.agents/skills/`, `.cursor/skills/`, `.claude/skills/`,
+`.codex/skills/`, or a third-party skill in a plugin cache or another repository), subagent files
+(`.cursor/agents/*.md`, `.claude/agents/*.md`, `.codex/agents/*.md`) and, if they exist, instructions (`AGENTS.md`,
+`CLAUDE.md`, `.cursor/rules/`), commands or hooks that take part in the flow.
 
-**Saída:** `workflows/<nome>.ts` neste kit, onde typecheck e testes rodam, com prompts e checagens numa pasta
-`workflows/<nome>/` quando o módulo cresce; `test/<nome>.test.ts`; `CREDITS.md` quando a origem é de terceiros; e um
-relatório de conversão no chat. Se o fluxo é de outro repositório (kit instalado fora), o passo 5 termina copiando o
-workflow para `.agents/workflows/` de lá. A conversão de referência é `workflows/implement-issue.ts` (skills `tdd`,
-`codebase-design`, `code-review` e `pr`; o cabeçalho resume as decisões), com `test/implement-issue.workflow.test.ts`.
+**Output:** `packages/runtime/workflows/<name>.ts` in this kit, where typecheck and tests run, with prompts and checks
+in a `packages/runtime/workflows/<name>/` folder when the module grows; `packages/runtime/test/<name>.test.ts`;
+`CREDITS.md` when the origin is third-party; and a conversion report in the chat. If the flow comes from another
+repository (kit installed elsewhere), step 5 ends by copying the workflow to `.agents/workflows/` there. The reference
+conversion is `packages/runtime/workflows/implement-issue.ts` (skills `tdd`, `codebase-design`, `code-review` and
+`pr`; the header summarizes the decisions), with `packages/runtime/test/implement-issue.workflow.test.ts`.
 
-Antes de começar, carregue a skill `cursor-workflow-authoring`: a API do runtime e as regras que os passos 3 a 5
-aplicam.
+Before starting, load the `cursor-workflow-authoring` skill: the runtime API and the rules that steps 3 to 5 apply.
 
-## Passo 1: inventário (só leitura)
+## Step 1: inventory (read-only)
 
-Leia cada arquivo indicado e tudo o que ele referencia: scripts, templates, outras skills (a `tdd` chama a
-`codebase-design`), os arquivos de referência ao lado do `SKILL.md`, outros agentes, MCP servers e, numa skill de
-terceiros, a licença e os créditos dela. Monte esta tabela:
+Read each indicated file and everything it references: scripts, templates, other skills (`tdd` calls
+`codebase-design`), the reference files next to the `SKILL.md`, other agents, MCP servers and, in a third-party skill,
+its license and credits. Build this table:
 
-| Unidade | Caminho | Tipo | Gatilho atual | Harnesses que descobrem hoje | Entradas | Saídas | Tools | Modelo | Efeitos externos |
+| Unit | Path | Type | Current trigger | Harnesses that discover it today | Inputs | Outputs | Tools | Model | External effects |
 |---|---|---|---|---|---|---|---|---|---|
 
-Para "Harnesses que descobrem hoje", use a matriz de `docs/04-invocacao-no-cursor-ide.md` (§ Onde cada harness
-procura cada coisa) e confira se `.claude/skills/` tem links para `.agents/skills/` (`scripts/link-claude-skills.sh`):
-com eles, o Claude Code também descobre a skill. Numa skill de plugin ou de outro repositório, anote onde ela está
-instalada e qual harness a carrega. Essa coluna alimenta a paridade do relatório (passo 6).
+For "Harnesses that discover it today", use the matrix in `docs/04-invocacao-no-cursor-ide.md` (section
+`Onde cada harness procura cada coisa`) and check whether `.claude/skills/` has links to `.agents/skills/`
+(`scripts/link-claude-skills.sh`): with them, Claude Code also discovers the skill. For a skill from a plugin or
+another repository, note where it is installed and which harness loads it. This column feeds the report's parity item
+(step 6).
 
-Os campos vêm destas fontes:
+The fields come from these sources:
 
-- **Skill**: os passos numerados, as condições ("se X, faça Y"), os scripts chamados e `disable-model-invocation`
-  (se a skill era explícita ou dependia do modelo para disparar).
-- **Subagent**: `name`, `description`, `model` e o corpo como prompt, mais os campos de cada harness (seção
-  "Subagent de origem" de [ORIGEM.md](ORIGEM.md)).
+- **Skill**: the numbered steps, the conditions ("if X, do Y"), the scripts called and `disable-model-invocation`
+  (whether the skill was explicit or relied on the model to trigger).
+- **Subagent**: `name`, `description`, `model` and the body as the prompt, plus each harness's fields (section
+  "Origin subagent" of [ORIGIN.md](ORIGIN.md)).
 
-Se a origem conversa com o usuário, cita outra skill, tem arquivos de referência ao lado do `SKILL.md` ou leitura
-condicional ("leia X, se existir"), dispara sub-agents em paralelo, é de terceiros ou inclui um subagent, leia a
-seção do caso em [ORIGEM.md](ORIGEM.md) antes do passo 2.
+If the origin talks to the user, cites another skill, has reference files next to the `SKILL.md` or conditional
+reading ("read X, if it exists"), fires sub-agents in parallel, is third-party or includes a subagent, read the
+matching case section in [ORIGIN.md](ORIGIN.md) before step 2.
 
-Pronto quando todo arquivo que as entradas referenciam tem uma linha na tabela ou está citado na linha de quem o
-referencia.
+Done when every file the inputs reference has a row in the table or is cited in the row of whatever references it.
 
-## Passo 2: achar as decisões implícitas
+## Step 2: find the implicit decisions
 
-Liste toda decisão que hoje **o modelo** toma. Sinais típicos:
+List every decision that **the model** makes today. Typical signals:
 
-- "quando relevante", "se necessário", "use o subagent X para…" (delegação decidida pelo modelo);
-- laço sem teto: "repita até…", "corrija até passar";
-- "verifique se os testes passam" (verificação feita por quem gerou o código);
-- regra imperativa do processo que o modelo policia sozinho ("red antes de green", "só toque arquivos de teste",
-  "não junte os relatórios"): vira **invariante** conferida pelo código entre etapas;
-- "confirme com o usuário", "pergunte": vira `args`, **checkpoint** ou fica como skill (seção "Conversa com o
-  usuário" de [ORIGEM.md](ORIGEM.md));
-- escolha de modelo implícita, quando tudo herda o modelo do chat.
+- "when relevant", "if necessary", "use the X subagent to…" (delegation decided by the model);
+- a loop with no cap: "repeat until…", "fix until it passes";
+- "check that the tests pass" (verification done by whoever generated the code);
+- an imperative process rule that the model polices itself ("red before green", "only touch test files", "do not
+  merge the reports"): becomes an **invariant** checked by the code between steps;
+- "confirm with the user", "ask": becomes `args`, a **checkpoint**, or stays a skill (section "Conversation with the
+  user" of [ORIGIN.md](ORIGIN.md));
+- an implicit model choice, when everything inherits the chat's model.
 
-Para cada decisão, proponha a regra em código que a substitui: um campo, uma label, uma contagem, um exit code ou
-um schema. Se não houver regra objetiva possível, ela vira uma etapa `ctx.agent` com `schema` (um classificador
-barato), e o **código** age sobre a resposta.
+For each decision, propose the code rule that replaces it: a field, a label, a count, an exit code or a schema. If no
+objective rule is possible, it becomes a `ctx.agent` step with a `schema` (a cheap classifier), and the **code** acts
+on the answer.
 
-Pronto quando toda condicional, laço, delegação, verificação, regra imperativa, pedido ao usuário e escolha de
-modelo dos passos e das `description` do inventário tem uma linha com a regra adotada.
+Done when every conditional, loop, delegation, verification, imperative rule, request to the user and model choice in
+the steps and `description`s of the inventory has a row with the adopted rule.
 
-## Passo 3: mapear para o runtime
+## Step 3: map to the runtime
 
-As receitas citadas estão em `docs/05-escrevendo-workflows.md` (seção Receitas).
+The recipes cited are in `docs/05-escrevendo-workflows.md` (the `Receitas` section).
 
-| Origem | Destino |
+| Origin | Destination |
 |---|---|
-| Instruções gerais (`CLAUDE.md`, `.cursor/rules/`) usadas pelo fluxo | O que for comum vai para `AGENTS.md`, que as etapas que escrevem carregam pelo default do engine (`["project","team","mdm"]`). Etapas só de leitura ficam com `[]` e recebem no prompt os arquivos que importam |
-| Passo de skill executado pelo modelo | `ctx.agent(prompt, { schema, tools, model })`. O prompt é o texto do passo, numa constante de instruções, mais as entradas explícitas |
-| Subagent chamado por delegação | `ctx.agent(corpoDoSubagent + tarefa, { model, tools })`; a condição da delegação vira código (passo 2) |
-| Vários subagents independentes, ou sub-agents que a própria skill dispara em paralelo | `ctx.parallel` (barreira) ou `ctx.pipeline` (por item); o código confere o mínimo de resultados, e a agregação da skill vira código ou etapa juiz |
-| Outra skill citada pela skill ("chame a skill X") | Seção "Outra skill citada e arquivos de referência" de [ORIGEM.md](ORIGEM.md) |
-| Script chamado pela skill (lint, testes, build) | `execFileSync` no workflow; o resultado decide o próximo passo |
-| Regra imperativa do processo | Receita "Invariantes entre etapas" |
-| Aprovação humana de um resultado intermediário | Receita "Checkpoint em dois runs" |
-| Laço sem teto | `for (let round = 1; round <= N && !ok; round++)` |
-| Revisão/crítica | Receita "Review em eixos": uma etapa por eixo, schema com as categorias de achado da própria skill, roteamento no código |
-| Hook de fim de turno que reabre o laço (Cursor: `stop`/`subagentStop` com `followup_message`; Claude Code: `Stop`/`SubagentStop` com `decision: "block"` e `reason`, ou exit 2) | Laço explícito no workflow, com teto; o hook deixa de ser necessário |
-| Efeito externo (commit, PR, comentário) | Código no fim, depois das verificações. A saída real que a skill pede no artefato (teste falhando, depois passando) é capturada pelo código; o agente escreve só o texto de julgamento |
-| Subagent que o workflow quer delegar *dentro* de uma etapa | `agents: { nome: { description, prompt, model } }` na opção da etapa, com `"task"` na allowlist de `tools` (é a tool que dispara os subagents) |
-| Campo de frontmatter de subagent (`readonly`, `model: inherit`, `isolation`, `maxTurns`, `effort`, `tools`…) | Seção "Subagent de origem" de [ORIGEM.md](ORIGEM.md) |
+| General instructions (`CLAUDE.md`, `.cursor/rules/`) used by the flow | What is common goes to `AGENTS.md`, which the steps that write load through the engine default (`["project","team","mdm"]`). Read-only steps keep `[]` and get the files that matter in the prompt |
+| Skill step executed by the model | `ctx.agent(prompt, { schema, tools, model })`. The prompt is the step's text, in an instructions constant, plus the explicit inputs |
+| Subagent called by delegation | `ctx.agent(subagentBody + task, { model, tools })`; the delegation condition becomes code (step 2) |
+| Several independent subagents, or sub-agents the skill itself fires in parallel | `ctx.parallel` (barrier) or `ctx.pipeline` (per item); the code checks the minimum number of results, and the skill's aggregation becomes code or a judge step |
+| Another skill cited by the skill ("call skill X") | Section "Another skill cited and reference files" of [ORIGIN.md](ORIGIN.md) |
+| Script called by the skill (lint, tests, build) | `execFileSync` in the workflow; the result decides the next step |
+| Imperative process rule | Recipe `Invariantes entre etapas` |
+| Human approval of an intermediate result | Recipe `Checkpoint em dois runs` |
+| Loop with no cap | `for (let round = 1; round <= N && !ok; round++)` |
+| Review/critique | Recipe `Review em eixos`: one step per axis, a schema with the skill's own finding categories, routing in code |
+| End-of-turn hook that reopens the loop (Cursor: `stop`/`subagentStop` with `followup_message`; Claude Code: `Stop`/`SubagentStop` with `decision: "block"` and `reason`, or exit 2) | An explicit loop in the workflow, with a cap; the hook is no longer needed |
+| External effect (commit, PR, comment) | Code at the end, after the checks. The real output the skill asks for in the artifact (a failing test, then passing) is captured by the code; the agent writes only the judgment text |
+| Subagent the workflow wants to delegate *inside* a step | `agents: { name: { description, prompt, model } }` in the step option, with `"task"` in the `tools` allowlist (the tool that fires subagents) |
+| Subagent frontmatter field (`readonly`, `model: inherit`, `isolation`, `maxTurns`, `effort`, `tools`…) | Section "Origin subagent" of [ORIGIN.md](ORIGIN.md) |
 
-Pronto quando toda linha do inventário e toda decisão do passo 2 têm destino nesta tabela ou numa tabela de
-[ORIGEM.md](ORIGEM.md), ou entram na lista do que não foi convertido (passo 6), com o motivo.
+Done when every row of the inventory and every decision from step 2 has a destination in this table or in a table of
+[ORIGIN.md](ORIGIN.md), or goes into the list of what was not converted (step 6), with the reason.
 
-## Passo 4: otimizar custo (obrigatório)
+## Step 4: optimize cost (mandatory)
 
-Antes de gerar, aplique a cada etapa **todos** os itens do checklist de custo de `docs/08-custos-e-cache.md` §6 e
-registre a decisão numa tabela, uma linha por etapa:
+Before generating, apply **all** the items of the cost checklist in `docs/08-custos-e-cache.md` §6 to each step and
+record the decision in a table, one row per step:
 
-| Etapa | Modelo (tier) | `tools` | `settingSources` | `memo` | Prefixo estável | Schema mínimo | Laço/timeout |
+| Step | Model (tier) | `tools` | `settingSources` | `memo` | Stable prefix | Minimal schema | Loop/timeout |
 |---|---|---|---|---|---|---|---|
 
-Item do checklist sem coluna (condição de etapa opcional, truncamento, fan-out, `mcpServers`, teto padrão) entra
-como nota da linha; item que não se aplica leva `n/a` e o motivo. O primeiro run real fica para o usuário (passo 6).
+A checklist item without a column (optional-step condition, truncation, fan-out, `mcpServers`, default cap) goes in as
+a note on the row; an item that does not apply gets `n/a` and the reason. The first real run is left to the user
+(step 6).
 
-Depois, **estime o custo por caminho** (`docs/08-custos-e-cache.md` §7): para cada combinação de ramos (ex.: LOW
-com uma fatia; HIGH com três desenhos, juiz e uma correção), conte as etapas de agente e o modelo de cada uma, no caso típico e no
-pior caso (todas as novas tentativas e correções). Compare com o fluxo original, em que tudo rodava no modelo do
-chat, com delegações que repetem o contexto fixo.
+Then **estimate the cost per path** (`docs/08-custos-e-cache.md` §7): for each combination of branches (e.g. LOW with
+one slice; HIGH with three designs, a judge and one fix), count the agent steps and each one's model, in the typical
+case and the worst case (all retries and fixes). Compare with the original flow, where everything ran on the chat's
+model, with delegations that repeat the fixed context.
 
-Pronto quando toda etapa tem uma linha, toda célula tem uma decisão ou `n/a` com motivo, e todo caminho tem
-estimativa.
+Done when every step has a row, every cell has a decision or `n/a` with a reason, and every path has an estimate.
 
-## Passo 5: gerar
+## Step 5: generate
 
-1. Escreva `workflows/<nome>.ts` seguindo `cursor-workflow-authoring`, inclusive "Observabilidade" e os itens
-   Custo e Testes offline de "Antes de entregar" (o run real fica para o usuário, passo 6). No topo, comente a tabela e a estimativa de custo do passo 4. `meta.whenToUse` é lido pelo agente do
-   chat: escreva-o com os gatilhos do fluxo original (a `description` da skill, se ela era invocada pelo modelo; o
-   pedido que levava o usuário a digitar `/nome`, se não era; o trabalho pedido, quando várias skills viram um
-   fluxo só).
-2. Escreva `test/<nome>.test.ts` com os casos de "Testes offline" em "Antes de entregar" de
-   `cursor-workflow-authoring`; os ramos são os que as regras do passo 2 criaram no código.
-3. Rode `npm run typecheck` e `npm test` até os dois passarem.
-4. Se o fluxo é de outro repositório, copie `workflows/<nome>.ts` e, se existir, a pasta `workflows/<nome>/` para
-   `.agents/workflows/` de lá, trocando `defineWorkflow({...})` e o import relativo do runtime por
-   `export default { meta, defaults, budget, async run(ctx) { ... } }`, o mesmo objeto (imports só de tipo podem
-   ficar), como em `docs/04-invocacao-no-cursor-ide.md` (§ Usar o kit em outros repositórios).
-5. Mantenha as skills e os subagents originais intactos: apagá-los é decisão do usuário, depois de comparar os dois
-   fluxos.
+1. Write `packages/runtime/workflows/<name>.ts` following `cursor-workflow-authoring`, including "Observability" and
+   the Cost and Offline tests items of "Before delivering" (the real run is left to the user, step 6). At the top,
+   comment the table and the cost estimate from step 4. `meta.whenToUse` is read by the chat agent: write it with the
+   original flow's triggers (the skill's `description`, if the model invoked it; the request that led the user to type
+   `/name`, if it did not; the requested work, when several skills become a single flow).
+2. Write `packages/runtime/test/<name>.test.ts` with the cases of "Offline tests" under "Before delivering" in
+   `cursor-workflow-authoring`; the branches are the ones the step 2 rules created in the code.
+3. Run `npm run typecheck` and `npm test` until both pass.
+4. If the flow comes from another repository, copy `packages/runtime/workflows/<name>.ts` and, if it exists, the
+   `packages/runtime/workflows/<name>/` folder to `.agents/workflows/` there, replacing `defineWorkflow({...})` and the
+   relative runtime import with `export default { meta, defaults, budget, async run(ctx) { ... } }`, the same object
+   (type-only imports may stay), as in `docs/04-invocacao-no-cursor-ide.md` (section
+   `Usar o kit em outros repositórios`).
+5. Keep the original skills and subagents intact: deleting them is the user's decision, after comparing the two flows.
 
-Pronto quando todo caso de "Testes offline" de "Antes de entregar" tem teste (os ramos são os que as regras do
-passo 2 criaram no código), a última execução de `npm run typecheck` e `npm test` passou, a cópia do item 4 está em
-`.agents/workflows/` do repositório de origem (fluxo de outro repositório) e os originais estão como estavam.
+Done when every "Offline tests" case under "Before delivering" has a test (the branches are the ones the step 2 rules
+created in the code), the last run of `npm run typecheck` and `npm test` passed, the copy from item 4 is in
+`.agents/workflows/` of the origin repository (flow from another repository) and the originals are as they were.
 
-## Passo 6: relatório no chat
+## Step 6: report in the chat
 
-- Tabela do passo 1 e lista de decisões implícitas, com a regra adotada para cada uma.
-- **Custo:** a tabela do passo 4, a estimativa por caminho e o que mudou em relação ao original (etapas
-  eliminadas por código, modelos rebaixados, etapas com memo, contexto reduzido).
-- O que **não** foi convertido e por quê: por exemplo, uma conversa aberta com o usuário, que fica como skill.
-- **Créditos:** origem, versão, autor e licença de cada skill de terceiros e de quem ela credita.
-- **Paridade:** pela coluna "Harnesses que descobrem hoje", onde o fluxo rodava e onde passa a rodar (todo harness
-  com o MCP `workflows`). Para cada harness que não descobria a origem, diga o que ele precisa para disparar o
-  workflow (no Claude Code: aprovar o servidor do `.mcp.json` e, para `/run-workflow`, os links de
-  `scripts/link-claude-skills.sh`). Se a origem tinha hooks do Claude Code em `.claude/settings.json`, avise que os
-  `PreToolUse` deles também rodam nas etapas com `settingSources: ["project"]` (`docs/04-invocacao-no-cursor-ide.md`,
-  § Paridade Cursor × Claude Code).
-- **Original:** numa skill do próprio repositório que o modelo ainda invoca, sugira `disable-model-invocation: true`
-  ou trocar o corpo por "use /run-workflow <nome>".
-- **Primeiro run real**, que é do usuário porque o workflow pode ter efeitos externos: o comando de "Um run real com
-  tetos baixos" em "Antes de entregar" (`cursor-workflow-authoring`), com `--cwd` no repositório de origem quando o
-  fluxo é de outro repositório (numa cópia descartável dele, se há efeito externo).
-  Depois, compare o custo por etapa com a estimativa (`npm run stats` ou `npm run dash`) e ajuste os tiers,
-  começando pelas duas etapas mais caras. Com alguns runs acumulados, compare custo por entrega com o fluxo
-  original.
+- The step 1 table and the list of implicit decisions, with the rule adopted for each.
+- **Cost:** the step 4 table, the estimate per path and what changed from the original (steps eliminated by code,
+  downgraded models, steps with memo, reduced context).
+- What was **not** converted and why: for example, an open conversation with the user, which stays a skill.
+- **Credits:** origin, version, author and license of each third-party skill and of whoever it credits.
+- **Parity:** from the "Harnesses that discover it today" column, where the flow ran and where it now runs (every
+  harness with the `workflows` MCP). For each harness that did not discover the origin, say what it needs to fire the
+  workflow (in Claude Code: approve the `.mcp.json` server and, for `/run-workflow`, the links from
+  `scripts/link-claude-skills.sh`). If the origin had Claude Code hooks in `.claude/settings.json`, warn that their
+  `PreToolUse` hooks also run in the steps with `settingSources: ["project"]` (`docs/04-invocacao-no-cursor-ide.md`,
+  section `Paridade Cursor × Claude Code`).
+- **Original:** for a skill of the repository itself that the model still invokes, suggest `disable-model-invocation:
+  true` or replacing the body with "use /run-workflow <name>".
+- **First real run**, which is the user's because the workflow may have external effects: the command from "A real run
+  with low caps" under "Before delivering" (`cursor-workflow-authoring`), with `--cwd` in the origin repository when the
+  flow comes from another repository (in a disposable copy of it, if there is an external effect).
+  Then compare the cost per step with the estimate (`npm run stats` or `npm run dash`) and adjust the tiers, starting
+  with the two most expensive steps. With a few runs accumulated, compare cost per delivery with the original flow.
 
-Pronto quando o relatório traz os sete itens acima, e o item que não se aplica (Créditos numa origem do próprio
-repositório, Original numa skill de terceiros) diz `n/a` e o motivo.
+Done when the report has the seven items above, and an item that does not apply (Credits for an origin in the
+repository itself, Original for a third-party skill) says `n/a` and the reason.

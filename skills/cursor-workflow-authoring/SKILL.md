@@ -1,170 +1,175 @@
 ---
 name: cursor-workflow-authoring
-description: Workflows defineWorkflow do Cursor SDK (workflows/*.ts, .agents/workflows/*.ts). Use antes de criar, editar ou testar um.
+description: Cursor SDK defineWorkflow workflows (packages/runtime/workflows/*.ts, .agents/workflows/*.ts). Use before creating, editing or testing one.
 ---
 
-# Escrever um workflow
+# Write a workflow
 
-Um workflow é um módulo TypeScript em `workflows/<nome>.ts` (do kit) ou `.agents/workflows/<nome>.ts` (do
-repositório alvo, que vence em nome repetido), com `export default defineWorkflow({...})`. Módulos auxiliares ficam
-na subpasta `<nome>/`, porque o runtime importa todo `.ts`, `.js` e `.mjs` do primeiro nível. Em
-`.agents/workflows/` de um repositório com o kit instalado fora, o import relativo do esqueleto não resolve: siga a
-forma B de `docs/04-invocacao-no-cursor-ide.md` (objeto exportado direto, só `import type`, desenvolvido e testado
-no kit).
+A workflow is a TypeScript module in `packages/runtime/workflows/<name>.ts` (built into the kit) or
+`.agents/workflows/<name>.ts` (in the target repository, which wins on a repeated name), with
+`export default defineWorkflow({...})`. Helper modules go in the `<name>/` subfolder, because the runtime imports
+every `.ts`, `.js` and `.mjs` at the first level. In `.agents/workflows/` of a repository with the kit installed
+elsewhere, the skeleton's relative import does not resolve: follow form B of `docs/04-invocacao-no-cursor-ide.md`
+(the object exported directly, `import type` only, developed and tested in the kit).
 
-O workflow é **determinístico**: o código decide o que roda, quando roda e quantas vezes roda; o modelo só executa
-cada etapa. Se uma decisão pode ser tomada por código (label, contagem, teste passou ou não, tamanho do diff), ela
-**tem** de ser tomada por código.
+The workflow is **deterministic**: the code decides what runs, when it runs and how many times; the model only
+executes each step. If code can make a decision (label, count, test passed or not, diff size), code **must** make it.
 
-## Esqueleto
+## Skeleton
 
 ```ts
-// Custo por caminho (docs/08-custos-e-cache.md §7): etapas × modelo, típico e pior caso.
+// Cost per path (docs/08-custos-e-cache.md §7): steps × model, typical and worst case.
 import { defineWorkflow } from "../src/runtime/workflow.js";
 
-const LISTAR = "Liste os arquivos que o alvo abaixo envolve.";  // instruções em constantes: prefixo estável
-const PROCESSAR = "Processe o arquivo abaixo.";
+const LIST = "List the files that the target below involves.";  // instructions in constants: stable prefix
+const PROCESS = "Process the file below.";
 
 export default defineWorkflow<{ target: string }>({
   meta: {
-    name: "meu-fluxo",                       // `name` do start_workflow (MCP) e de `wf run <nome>` (CLI)
-    description: "Uma linha.",
-    whenToUse: "Quando o usuário pedir X.",  // o agente do chat lê isto
-    phases: [{ title: "Descobrir" }, { title: "Executar" }],
+    name: "my-flow",                         // `name` of start_workflow (MCP) and of `wf run <name>` (CLI)
+    description: "One line.",
+    whenToUse: "When the user asks for X.",  // the chat agent reads this
+    phases: [{ title: "Discover" }, { title: "Execute" }],
     argsSchema: { type: "object", required: ["target"], properties: { target: { type: "string" } } },
   },
   defaults: { model: { id: "composer-2.5" }, timeoutMs: 20 * 60_000 },
-  budget: { maxTokens: 1_000_000 },          // teto padrão; --max-tokens troca
+  budget: { maxTokens: 1_000_000 },          // default cap; --max-tokens replaces it
   async run(ctx) {
-    ctx.phase("Descobrir");
-    const found = await ctx.agent<{ files: string[] }>(`${LISTAR}\n\n${ctx.args.target}`, {
-      label: "listar",
+    ctx.phase("Discover");
+    const found = await ctx.agent<{ files: string[] }>(`${LIST}\n\n${ctx.args.target}`, {
+      label: "list",
       tools: ["read", "grep", "glob", "ls"],
       settingSources: [],
       memo: true,
       schema: { type: "object", required: ["files"], properties: { files: { type: "array", items: { type: "string" } } } },
     });
-    ctx.phase("Executar");
-    // Uma etapa por arquivo no mesmo cwd; etapas que editam arquivos em comum pedem um worktree por item (regra 5).
+    ctx.phase("Execute");
+    // One step per file in the same cwd; steps that edit common files need one worktree per item (rule 5).
     const out = await ctx.pipeline(found.files, (f: string) =>
-      ctx.agent(`${PROCESSAR}\n\n${f}`, { label: `processar:${f}`, phase: "Executar" }));
+      ctx.agent(`${PROCESS}\n\n${f}`, { label: `process:${f}`, phase: "Execute" }));
     const failed = found.files.filter((_, i) => out[i] === null);
-    ctx.metric("arquivos", found.files.length);
-    ctx.metric("falhas", failed.length);
+    ctx.metric("files", found.files.length);
+    ctx.metric("failures", failed.length);
     if (failed.length) return { status: "items-failed", failed };
     return { status: "done", processed: found.files.length };
   },
 });
 ```
 
-## API do contexto
+## Context API
 
-| Chamada | O que faz |
+| Call | What it does |
 |---|---|
-| `ctx.agent(prompt, opts)` | Cria um agente novo do Cursor SDK e roda uma etapa. Com `schema`, devolve o objeto validado (o agente precisa chamar `submit_result`). Sem `schema`, devolve o texto final. **Lança erro** se falhar após `retries`. |
-| `ctx.parallel(thunks)` | Barreira: roda em paralelo e espera todos. Item que falha vira `null`. |
-| `ctx.pipeline(items, ...stages)` | Sem barreira: cada item segue pelos estágios de forma independente. Estágio que falha descarta o item (`null`). |
-| `ctx.phase(t)` / `ctx.log(m)` | Progresso, que aparece em `wait_workflow` e no CLI. |
-| `ctx.metric(nome, valor)` | Sinal de resultado ou de dificuldade do run, gravado na tabela `metrics` (ver Observabilidade). |
-| `ctx.args`, `ctx.cwd`, `ctx.runId` | Entrada, repositório e id do run (o mesmo no resume). |
-| `ctx.budget` | `remainingCents()`, `spentCents()`, `chargedCents()`, `spentTokens()` e `usage()`, para rebaixar o modelo ou parar antes do teto. Antes de escalonar por ele, leia a receita "Escalonar o modelo por orçamento": o sinal em centavos pode nunca cair. |
+| `ctx.agent(prompt, opts)` | Creates a new Cursor SDK agent and runs a step. With `schema`, returns the validated object (the agent must call `submit_result`). Without `schema`, returns the final text. **Throws** if it fails after `retries`. |
+| `ctx.parallel(thunks)` | Barrier: runs in parallel and waits for all. An item that fails becomes `null`. |
+| `ctx.pipeline(items, ...stages)` | No barrier: each item goes through the stages independently. A stage that fails drops the item (`null`). |
+| `ctx.phase(t)` / `ctx.log(m)` | Progress, shown in `wait_workflow` and in the CLI. |
+| `ctx.metric(name, value)` | A signal of the run's outcome or difficulty, written to the `metrics` table (see Observability). |
+| `ctx.args`, `ctx.cwd`, `ctx.runId` | Input, repository and run id (the same on resume). |
+| `ctx.budget` | `remainingCents()`, `spentCents()`, `chargedCents()`, `spentTokens()` and `usage()`, to downgrade the model or stop before the cap. Before escalating by it, read the `Escalonar o modelo por orçamento` recipe: the signal in cents may never drop. |
 
-Teto de centavos, teto de tokens, limite de uso do plano (`RateLimitError` não retentável) e conta sem acesso ao SDK
-(`plan_required`) abortam o run inteiro, também dentro de `parallel` e `pipeline`.
+The cents cap, the tokens cap, the plan's usage limit (a non-retryable `RateLimitError`) and an account without SDK
+access (`plan_required`) abort the whole run, also inside `parallel` and `pipeline`.
 
-Opções de `agent()`: a interface `AgentCallOptions` em `src/runtime/workflow.ts` documenta as opções e as restrições
-(`memo` só com `tools` de leitura; `schema` com `type: "object"` na raiz). O default de `settingSources`, quando a
-etapa não passa o seu, está em `RunOptions` (`src/runtime/engine.ts`).
+`agent()` options: the `AgentCallOptions` interface in `packages/runtime/src/runtime/workflow.ts` documents the
+options and the restrictions (`memo` only with read `tools`; `schema` with `type: "object"` at the root). The default
+`settingSources`, when the step passes none, is in `RunOptions` (`packages/runtime/src/runtime/engine.ts`).
 
-## Regras
+## Rules
 
-1. **Prompt e opções são a chave da etapa.** O journal (resume) reconhece uma etapa pelo hash do prompt e do
-   `fingerprint` de `agentCall` em `src/runtime/engine.ts` (modelo, schema, `cwd`, `tools`, `disallowedTools`, `agents`,
-   `settingSources`), mais a ordem em que esse hash aparece no run; `label`, `timeoutMs`, `mcpServers` e `sandbox` ficam
-   de fora; o `memo` e o cache do provedor também dependem do prompt.
-   Monte o prompt com as instruções em constantes de módulo e só dados
-   determinísticos: `args`, resultados de etapas e o que o código calcula deles e do disco (saída de teste, diff). Data
-   entra por `args`, não por `Date.now()`. Dê ao worktree um caminho derivado do
-   item, como a branch em `workflows/implement-issue.ts`. Duas chamadas que devem ser distintas (a mesma etapa em
-   rodadas diferentes) levam a rodada no prompt.
-2. **Schema em toda etapa cujo resultado o código lê**, só com os campos que ele lê. Texto livre só no fim, ou para
-   o humano.
-3. **Verificação é código.** Rode testes, lint e `git diff` com `execFileSync` dentro do workflow; o exit code
-   decide o próximo passo. Laços de correção sempre com teto (`for (round = 1; round <= N; ...)`).
-4. **O modelo é escolhido no código.** Use um mapa `tier → ModelSelection` e confirme cada ID em `npm run models`:
-   ID fora do catálogo da conta faz a etapa falhar. O Auto é `default`; com ele, as métricas registram `default`, e
-   não o modelo que o Router escolheu, então compare modelos com IDs explícitos.
-5. **Escrita em paralelo só com isolamento.** Duas etapas simultâneas não podem editar os mesmos arquivos. Crie um
-   `git worktree` por item e passe em `cwd`.
-6. **Efeitos externos ficam no código.** Commit, push, abrir PR e comentar em issue são feitos com `gh` ou `git` no
-   workflow, depois das verificações. Tudo o que sai da máquina passa antes pela trava de segredos
-   de `workflows/implement-issue.ts`: o diff staged desde a base, antes do commit (`findStagedSecret`, que também barra
-   `auth.json` e `.env`), e todo texto (corpo de PR, comentário), antes de publicar (`findSecretInText`).
-7. **Corte e falha sempre explícitos.** Ao limitar cobertura (top-N, amostragem), registre com `ctx.log` o que
-   ficou de fora. `ctx.parallel` e `ctx.pipeline` transformam falhas em `null`: quando o resultado é obrigatório
-   (um review exigido, por exemplo), confira os `null` e encerre o run com um `status` de falha explícito.
-8. **Efeitos idempotentes.** O resume reexecuta o código fora das etapas de agente, e o journal devolve o
-   resultado de uma etapa, não o efeito dela no disco. Proteja commit (`git diff --cached --quiet`), push e criação
-   de PR (`gh pr view` antes de `gh pr create`). Se o código confere o disco entre etapas, guarde o progresso por
-   item (receita "Resume com invariantes").
-9. **Componha com funções TypeScript compartilhadas**, chamadas a partir do `run`.
+1. **Prompt and options are the step's key.** The journal (resume) recognizes a step by the hash of the prompt and of
+   the `fingerprint` of `agentCall` in `packages/runtime/src/runtime/engine.ts` (model, schema, `cwd`, `tools`,
+   `disallowedTools`, `agents`, `settingSources`), plus the order in which that hash appears in the run; `label`,
+   `timeoutMs`, `mcpServers` and `sandbox` stay out; the `memo` and the provider cache also depend on the prompt.
+   Build the prompt with the instructions in module constants and only deterministic data: `args`, step results and
+   what the code computes from them and from disk (test output, diff). A date enters through `args`, not through
+   `Date.now()`. Give the worktree a path derived from the item, like the branch in
+   `packages/runtime/workflows/implement-issue.ts`. Two calls that must be distinct (the same step in different
+   rounds) carry the round in the prompt.
+2. **A schema on every step whose result the code reads**, with only the fields it reads. Free text only at the end,
+   or for the human.
+3. **Verification is code.** Run tests, lint and `git diff` with `execFileSync` inside the workflow; the exit code
+   decides the next step. Fix loops always have a cap (`for (round = 1; round <= N; ...)`).
+4. **The model is chosen in code.** Use a `tier → ModelSelection` map and confirm each ID with `npm run models`: an ID
+   outside the account's catalog makes the step fail. Auto is `default`; with it, the metrics record `default`, not
+   the model the Router chose, so compare models with explicit IDs.
+5. **Parallel writes only with isolation.** Two simultaneous steps cannot edit the same files. Create a `git
+   worktree` per item and pass it in `cwd`.
+6. **External effects stay in code.** Commit, push, opening a PR and commenting on an issue are done with `gh` or
+   `git` in the workflow, after the checks. Everything that leaves the machine first goes through the secrets guard
+   of `packages/runtime/workflows/implement-issue.ts`: the staged diff since the base, before the commit
+   (`findStagedSecret`, which also blocks `auth.json` and `.env`), and every text (PR body, comment), before
+   publishing (`findSecretInText`).
+7. **Cuts and failures are always explicit.** When limiting coverage (top-N, sampling), record with `ctx.log` what was
+   left out. `ctx.parallel` and `ctx.pipeline` turn failures into `null`: when the result is required (a mandatory
+   review, for example), check the `null`s and end the run with an explicit failure `status`.
+8. **Idempotent effects.** A resume re-executes the code outside the agent steps, and the journal returns a step's
+   result, not its effect on disk. Protect commit (`git diff --cached --quiet`), push and PR creation (`gh pr view`
+   before `gh pr create`). If the code checks the disk between steps, keep the progress per item (recipe
+   `Resume com invariantes`).
+9. **Compose with shared TypeScript functions**, called from `run`.
 
-## Observabilidade
+## Observability
 
-O runtime já mede cada etapa; o workflow registra se o run **entregou** (como cada `status` vira `outcome_class` e
-como consultar os números: `docs/09-observabilidade.md` §3, §4 e §6):
+The runtime already measures each step; the workflow records whether the run **delivered** (how each `status` becomes
+an `outcome_class` and how to query the numbers: `docs/09-observabilidade.md` §3, §4 and §6):
 
-- **Status:** devolva `{ status: "done", ... }` quando entregou e outro status explícito quando não entregou
-  (`"tests-failed"`, `"review-blocking"`…). Um checkpoint que espera o humano devolve `status: "pending"`, ou um
-  status acrescentado a `PENDING` em `src/observability/recorder.ts`, com `runId` e `next` (receita "Checkpoint em dois
-  runs"). Qualquer outro nome conta como falha no custo por entrega.
-- **`ctx.metric(nome, valor)`** para os sinais de resultado (testes passaram, achados de review, linhas de diff) e
-  para a **covariável de dificuldade** (ex.: `tier`). Sem ela, comparar modelos mistura tarefas fáceis e difíceis.
-- **`label` explícito** em toda etapa. Sem label, o runtime usa um hash, e a análise por etapa fica ilegível.
+- **Status:** return `{ status: "done", ... }` when it delivered and another explicit status when it did not
+  (`"tests-failed"`, `"review-blocking"`…). A checkpoint that waits for the human returns `status: "pending"`, or a
+  status added to `PENDING` in `packages/runtime/src/observability/recorder.ts`, with `runId` and `next` (recipe
+  `Checkpoint em dois runs`). Any other name counts as a failure in cost per delivery.
+- **`ctx.metric(name, value)`** for the outcome signals (tests passed, review findings, diff lines) and for the
+  **difficulty covariate** (e.g. `tier`). Without it, comparing models mixes easy and hard tasks.
+- **An explicit `label`** on every step. Without a label, the runtime uses a hash, and the per-step analysis becomes
+  unreadable.
 
-## Custo
+## Cost
 
-Antes de escrever a primeira etapa, leia o checklist de `docs/08-custos-e-cache.md` §6 e aplique cada item a cada
-etapa. Ele é a fonte única das regras de custo (`memo`, `settingSources`, allowlist de `tools`, prefixo estável,
-schema mínimo, truncagem, fan-out, teto padrão); o porquê de cada uma está nas §4.1–4.8.
+Before writing the first step, read the checklist in `docs/08-custos-e-cache.md` §6 and apply each item to every
+step. It is the single source of the cost rules (`memo`, `settingSources`, `tools` allowlist, stable prefix, minimal
+schema, truncation, fan-out, default cap); the reason for each is in §4.1–4.8.
 
-## Receitas
+## Recipes
 
-As receitas de `docs/05-escrevendo-workflows.md` (seção Receitas) trazem o código de cada padrão. Leia a do caso
-antes de escrever a etapa:
+The recipes in `docs/05-escrevendo-workflows.md` (the `Receitas` section) carry the code of each pattern. Read the
+one for your case before writing the step:
 
-- **roteamento por label**: o tier, e com ele o modelo, sai de um dado da entrada (label, tamanho do diff);
-- **corrigir até passar**: um laço de correção que termina num exit code;
-- **fan-out com isolamento**: o mesmo trabalho em itens independentes;
-- **verificação adversarial**: uma afirmação que só vale se sobreviver a refutadores paralelos;
-- **etapa de leitura barata e reaproveitável**: classificar, planejar ou revisar sem editar;
-- **escalonar o modelo por orçamento**: o tier cai com o gasto do run (escalonar na falha é `docs/08-custos-e-cache.md`
-  §4.2);
-- **invariante** entre etapas: uma regra do processo que o código confere (red antes de green, só arquivos de teste
-  mudam);
-- **checkpoint**: o fluxo precisa da aprovação de um humano no meio;
-- **resume com invariantes**: o código entre as etapas depende do estado do disco;
-- **review em eixos**: revisores paralelos cujos achados o código roteia.
+- **routing by label** (`Roteamento por label → modelo`): the tier, and with it the model, comes from an input datum (label,
+  diff size);
+- **fix until it passes** (`Corrigir até passar (com teto)`): a fix loop that ends on an exit code;
+- **fan-out with isolation** (`Fan-out com isolamento`): the same work on independent items;
+- **adversarial verification** (`Verificação adversarial`): a claim that only holds if it survives parallel
+  refuters;
+- **cheap, reusable read step** (`Etapa de leitura barata e reaproveitável`): classify, plan or review without
+  editing;
+- **escalate the model by budget** (`Escalonar o modelo por orçamento`): the tier drops with the run's spend
+  (escalating on failure is `docs/08-custos-e-cache.md` §4.2);
+- **invariants between steps** (`Invariantes entre etapas`): a process rule that the code checks (red before green, only test files
+  change);
+- **checkpoint** (`Checkpoint em dois runs`): the flow needs a human's approval in the middle;
+- **resume with invariants** (`Resume com invariantes`): the code between steps depends on the disk state;
+- **review by axes** (`Review em eixos`): parallel reviewers whose findings the code routes.
 
-## Antes de entregar
+## Before delivering
 
-O workflow só está entregue com os três itens cumpridos:
+The workflow is delivered only with all three items met:
 
-- **Custo:** cada item do checklist de `docs/08-custos-e-cache.md` §6 atendido ou com o motivo da exceção num
-  comentário.
-- **Testes offline:** `test/<nome>.test.ts` com o fake SDK (receitas e arnês em `docs/05-escrevendo-workflows.md`,
-  seção Testando), com um caso por ramo que o código decide (tier, etapa pulada, laço no teto), um por `status` de
-  retorno, um por invariante (violação, nova tentativa, status) e o resume (depois de `done` e depois de uma falha no
-  meio). `npm run typecheck` e `npm test` verdes, com o workflow em `workflows/`: o `tsconfig.json` do typecheck
-  não inclui `.agents/workflows/` nem `test/`.
-- **Um run real com tetos baixos.** Ele gasta cota e pode ter efeitos externos: rode-o só se o usuário pedir. Sem o
-  pedido, o item fica cumprido ao entregar a ele o comando, o `status` esperado e a estimativa (passo 6 da
+- **Cost:** every item of the checklist in `docs/08-custos-e-cache.md` §6 met, or the reason for the exception in a
+  comment.
+- **Offline tests:** `packages/runtime/test/<name>.test.ts` with the fake SDK (recipes and harness in
+  `docs/05-escrevendo-workflows.md`, the `Testando` section), with one case per branch the code decides (tier,
+  skipped step, loop at the cap), one per returned `status`, one per invariant (violation, retry, status) and the
+  resume (after `done` and after a failure in the middle). `npm run typecheck` and `npm test` green, with the
+  workflow in `packages/runtime/workflows/`: the typecheck `tsconfig.json` does not include `.agents/workflows/` or
+  the tests.
+- **A real run with low caps.** It spends quota and may have external effects: run it only if the user asks. Without
+  the request, the item is met by handing the user the command, the expected `status` and the estimate (step 6 of
   `/skill-to-workflow`):
-  `npm run wf -- run <nome> --args '{...}' --max-cents 100 --max-tokens <N>`, com `<N>` até o `budget.maxTokens` do
-  workflow e sempre com os dois tetos (o de centavos fica cego quando o Cursor não reporta custo;
-  `docs/02-configuracao-inicial.md` §3). Workflow com efeito externo roda com `--cwd` num repositório descartável:
-  com push, PR ou comentário, `scripts/verify/setup-sandbox-repo.sh <dono/repo-novo>` cria um no GitHub, com uma
-  issue; só com commit, basta o repositório local de `scripts/verify/setup-probe-repo.sh`. Pronto quando o run
-  devolve o `status` esperado e o uso de cada etapa (os `step-end` no stderr do CLI, ou as linhas da `v_attempts`
-  com o `run_id`, agrupadas por `label`: `docs/09-observabilidade.md` §3 e §4) cabe na estimativa; se não couber,
-  ajuste os tiers ou a estimativa.
+  `npm run wf -- run <name> --args '{...}' --max-cents 100 --max-tokens <N>`, with `<N>` up to the workflow's
+  `budget.maxTokens` and always with both caps (the cents cap goes blind when Cursor reports no cost;
+  `docs/02-configuracao-inicial.md` §3). A workflow with an external effect runs with `--cwd` in a disposable
+  repository: with push, PR or comment, `scripts/verify/setup-sandbox-repo.sh <owner/new-repo>` creates one on
+  GitHub, with an issue; with commit only, the local repository from `scripts/verify/setup-probe-repo.sh` is enough.
+  Done when the run returns the expected `status` and each step's usage (the `step-end` lines on the CLI's stderr, or
+  the `v_attempts` rows with the `run_id`, grouped by `label`: `docs/09-observabilidade.md` §3 and §4) fits the
+  estimate; if it does not, adjust the tiers or the estimate.

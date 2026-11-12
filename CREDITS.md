@@ -1,7 +1,7 @@
 # Créditos
 
 O workflow de exemplo `implement-issue` segue, em código, os fluxos de skills de outras pessoas. As instruções das
-etapas ficam em [`workflows/implement-issue/prompts.ts`](workflows/implement-issue/prompts.ts) e são paráfrases em
+etapas ficam em [`packages/runtime/workflows/implement-issue/prompts.ts`](packages/runtime/workflows/implement-issue/prompts.ts) e são paráfrases em
 pt-BR, não cópias.
 
 | Origem | Autor | Licença | O que o workflow usa |

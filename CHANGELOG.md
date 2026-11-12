@@ -1,5 +1,19 @@
 # Changelog
 
+## Não lançado
+
+### Mudado
+
+- **O repositório vira npm workspaces.** O runtime (engine, CLI, servidor MCP, workflows embutidos e seus testes
+  offline) fica no pacote `packages/runtime/` (`@cursor-workflows/runtime`) e resolve seus assets pelo local de
+  instalação, nunca pela raiz do repositório. As skills distribuídas (`run-workflow`, `cursor-workflow-authoring`,
+  `skill-to-workflow`) passam para `skills/`, em inglês, e `.agents/skills/` aponta para elas por links simbólicos.
+  `templates/agents-md-block.md` guarda as regras para repositórios-alvo. `npm run wf`, `mcp`, `dash`, `stats`,
+  `typecheck` e `npm test` seguem iguais na raiz.
+- **`CLAUDE.md` é o guia canônico do mantenedor, em inglês, e `AGENTS.md` é um link simbólico para ele.** As regras do
+  antigo `AGENTS.md` foram divididas: as de manutenção ficam em `CLAUDE.md`, as de repositórios-alvo em
+  `templates/agents-md-block.md`.
+
 ## 0.2.0 (pré-release, 2026-11-11)
 
 ### Mudado

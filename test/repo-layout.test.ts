@@ -3,7 +3,7 @@
 // agent would and assert the observable shape; none of them look at runtime internals.
 import assert from "node:assert/strict";
 import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { test } from "node:test";
 
 const ROOT = resolve(import.meta.dirname, "..");
@@ -92,4 +92,30 @@ test("the user-facing rules for target repos are a marked template block", () =>
   assert.doesNotMatch(text, NOT_ENGLISH, "the block is agent-facing text and must be in English");
   // Maintainer-only guidance must not leak into every target repo.
   assert.doesNotMatch(text, /npm (run|test)|fake-sdk|packages\/|CONTRIBUTING|metrics\.db/);
+});
+
+/** Every .md under a folder, relative to the repo root. */
+function markdownFiles(dir: string): string[] {
+  return readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? markdownFiles(join(dir, e.name)) : e.name.endsWith(".md") ? [join(dir, e.name)] : [],
+  );
+}
+
+/** Prose only: fenced blocks and inline code spans are quoted code, identifiers or runtime messages (Portuguese today). */
+const prose = (md: string) => md.replace(/```[\s\S]*?```/g, "").replace(/`[^`]*`/g, "");
+
+test("the distributed skills are written in English", () => {
+  const files = markdownFiles("skills");
+  assert.ok(files.length >= DISTRIBUTED_SKILLS.length);
+  for (const file of files) assert.doesNotMatch(prose(read(file)), NOT_ENGLISH, `${file} must be in English`);
+});
+
+test("the distributed skills point at the workspace layout, not at the old repo-root one", () => {
+  for (const file of markdownFiles("skills")) {
+    const text = read(file);
+    assert.doesNotMatch(text, /`(src|workflows|test)\//, `${file} names a path that moved into packages/runtime`);
+    for (const [, path] of text.matchAll(/`((?:packages|scripts|docs|skills)\/[^`\s*<>{}]+)`/g)) {
+      assert.ok(existsSync(join(ROOT, path!)), `${relative(ROOT, join(ROOT, file))} names ${path}, which does not exist`);
+    }
+  }
 });
