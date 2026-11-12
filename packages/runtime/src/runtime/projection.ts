@@ -94,7 +94,8 @@ export interface InterruptedCloudStep {
 /**
  * The cloud steps a run's log shows as interrupted, by `stepId`: the latest attempt of each whose agent was recorded
  * (`cloud-agent`) and that never ended (no `step-end`). That is a crash, or a process killed in the middle of the step; the
- * agent it started keeps working in the cloud, and a resume reattaches to it. (A step that delivered is in the journal, which
+ * agent it started keeps working in the cloud, and a resume reattaches to it (or starts a new one when that agent's run was
+ * cancelled). (A step that delivered is in the journal, which
  * a resume reads first; an execution that reattaches closes the attempt it takes over, so there is one at a time.)
  */
 export function interruptedCloudSteps(events: Iterable<WorkflowEvent>): Map<string, InterruptedCloudStep> {

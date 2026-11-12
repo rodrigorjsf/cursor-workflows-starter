@@ -51,9 +51,10 @@ _Evite_: execução (ambíguo com a de uma etapa), sessão.
 
 **Job**:
 O run em segundo plano que `start_workflow` (MCP) ou `wf start` (CLI) disparam, em um processo destacado que sobrevive ao
-MCP server e ao Cursor. Tem identidade própria (job id, run id, pid, heartbeat), e o que `wait_workflow` e
+MCP server e ao Cursor. Tem identidade própria (job id, run id, pid, heartbeat; o registro guarda também o que o log não pode guardar: os args do start, o motivo de uma recusa e a marca de um cancelamento que matou o processo, [ADR-0008](../adr/0008-job-record-keeps-what-the-log-cannot.md)), e o que `wait_workflow` e
 `get_workflow_status` respondem é uma projeção do log de eventos do run. Um job termina `finished`, `failed` ou
-`cancelled` (`cancel_workflow`, `wf cancel`, Ctrl-C): cancelar não é falhar, e o run continua retomável.
+`cancelled` (`cancel_workflow`, `wf cancel`, Ctrl-C): cancelar um job em execução não é falhar (um job travado ou já
+terminado continua `failed`), e o run continua retomável.
 Retomar um run abre outro job sobre o mesmo run. Decisão em [ADR-0003](../adr/0003-detached-jobs.md).
 _Evite_: tarefa, processo.
 
@@ -66,7 +67,7 @@ _Evite_: histórico, log.
 O `events.jsonl` do run: cada fato do run, em ordem. Todo evento leva a versão do schema, o horário e o `runId`, e os
 das etapas levam também `stepId`, `parentId` e `groupId`. É a fonte da verdade do status, das linhas recentes e do gasto
 de um run, e a base de qualquer visão futura (kanban, DAG, replay). Decisão em
-[ADR-0002](../adr/0002-event-log-source-of-truth.md); campos em [6.1](../reference/events.md).
+[ADR-0008](../adr/0008-job-record-keeps-what-the-log-cannot.md); campos em [6.1](../reference/events.md).
 _Evite_: log (sozinho), progresso.
 
 **Location**:
@@ -74,7 +75,7 @@ Onde uma etapa roda: `local` (o loop do agente roda na máquina do usuário, o p
 ambos a inferência é hospedada pela Cursor; a location só define onde o loop roda e onde o código fica. A configuração
 escolhe a location por role, o teto global `allowedLocations` a permite ou não (sem ele, só `local`), e o workflow declara
 a capacidade de cada role. Uma etapa pode rodar em `cloud` contra um snapshot do worktree: a de leitura devolve só o resultado, e a que
-escreve commita na branch de snapshot e o motor avança o worktree até o trabalho dela (um fast-forward, ou a etapa falha). A decisão é o [ADR-0006](../adr/0006-cloud-steps-as-built.md).
+escreve commita na branch de snapshot e o motor avança o worktree até o trabalho dela (um fast-forward, ou a etapa falha). A decisão é o [ADR-0006](../adr/0006-cloud-steps-as-built.md), substituído pelo [ADR-0007](../adr/0007-cancel-stops-cloud-agents.md).
 _Evite_: ambiente, runtime.
 
 ## Onde cada coisa mora no disco

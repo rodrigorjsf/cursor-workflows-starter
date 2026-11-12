@@ -2,7 +2,8 @@
 // the caller can show them; it never runs git, so it never commits. Running it again plans no change.
 
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { kitFileUrl, readKitPackage } from "./kit-version.js";
 import { writeFileAtomic } from "./runtime/state-files.js";
@@ -26,7 +27,7 @@ type Json = Record<string, unknown>;
 /** The semver range a repo declares for the kit that wrote its config: the minor line below 1.0, the major line from 1.0. */
 function kitRange(version: string): string {
   const parts = /^(\d+)\.(\d+)\.\d+/.exec(version);
-  if (!parts) throw new Error(`versão do kit ilegível: ${version}`);
+  if (!parts) throw new Error(`unreadable kit version: ${version}`);
   const [major, minor] = [Number(parts[1]), Number(parts[2])];
   return major === 0 ? `>=0.${minor}.0 <0.${minor + 1}.0` : `>=${major}.0.0 <${major + 1}.0.0`;
 }
@@ -60,7 +61,7 @@ function findBlock(text: string): { start: number; end: number } | undefined {
   const start = text.indexOf(BLOCK_BEGIN);
   if (start === -1) return undefined;
   const end = text.indexOf(BLOCK_END, start);
-  if (end === -1) throw new Error(`AGENTS.md: o bloco do kit começa em "${BLOCK_BEGIN}" e não tem o marcador "${BLOCK_END}"; corrija o arquivo e rode \`wf init\` de novo`);
+  if (end === -1) throw new Error(`AGENTS.md: the kit block starts at "${BLOCK_BEGIN}" and has no "${BLOCK_END}" marker; fix the file and run \`wf init\` again`);
   return { start, end: end + BLOCK_END.length };
 }
 
@@ -106,9 +107,9 @@ function parseObject(file: string, text: string | undefined): Json {
   try {
     value = JSON.parse(text);
   } catch (err) {
-    throw new Error(`${file}: JSON inválido (${err instanceof Error ? err.message : String(err)}); corrija o arquivo e rode \`wf init\` de novo`);
+    throw new Error(`${file}: invalid JSON (${err instanceof Error ? err.message : String(err)}); fix the file and run \`wf init\` again`);
   }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`${file}: esperava um objeto JSON`);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`${file}: expected a JSON object`);
   return value as Json;
 }
 
@@ -129,17 +130,90 @@ export interface InitResult {
   notes: string[];
 }
 
-/** Claude Code reads CLAUDE.md, not AGENTS.md (ADR-0004): says so unless CLAUDE.md is AGENTS.md or imports it. */
+/**
+ * The files that make Claude Code read them instead of AGENTS.md, in the working directory or any directory above it
+ * (docs/usage/03-invocacao-no-cursor-ide.md; code.claude.com/docs/en/memory, "When Claude Code reads AGENTS.md").
+ */
+const CLAUDE_MEMORY_FILES = ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"];
+
+/**
+ * The `@path` imports of a memory file, the way Claude Code reads them: outside fenced code blocks and code spans, each path
+ * relative to the file's folder (code.claude.com/docs/en/memory, "Import additional files"). Returns absolute paths.
+ */
+function importsOf(file: string): string[] {
+  const paths: string[] = [];
+  let fence: string | undefined;
+  for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence !== undefined) {
+      if (marker?.[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) fence = undefined;
+      continue;
+    }
+    if (marker !== undefined) {
+      fence = marker;
+      continue;
+    }
+    for (const [, path] of line.replace(/(`+).*?\1/g, "").matchAll(/(?:^|\s)@(\S+)/g)) {
+      paths.push(path.startsWith("~/") ? join(homedir(), path.slice(2)) : resolve(dirname(file), path));
+    }
+  }
+  return paths;
+}
+
+/** The real path of `path`, or undefined when it cannot be resolved (missing, a symlink loop, no permission). */
+function realOrUndefined(path: string): string | undefined {
+  try {
+    return realpathSync(path);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Claude Code reads AGENTS.md only when no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md sits in the repo or in a directory
+ * above it; ~/.claude/CLAUDE.md, the user's own memory, does not count, while ~/CLAUDE.md does. Says so when such a file
+ * exists and none of them is AGENTS.md or imports it, with the import line that works from the file to edit. A memory file
+ * it cannot stat, resolve or read (a symlink loop, no permission) is skipped: the note is advice, and init has already written.
+ */
 function claudeCodeNote(cwd: string): string | undefined {
-  const [agents, claude] = [join(cwd, "AGENTS.md"), join(cwd, "CLAUDE.md")];
-  if (existsSync(claude) && (realpathSync(claude) === realpathSync(agents) || readFileSync(claude, "utf8").includes("@AGENTS.md"))) return undefined;
-  return "O Claude Code lê o CLAUDE.md, não o AGENTS.md: para ele ver o bloco do kit, importe o AGENTS.md no CLAUDE.md (a linha `@AGENTS.md`). O wf init não edita o CLAUDE.md.";
+  const root = realpathSync(cwd);
+  const agents = realOrUndefined(join(root, "AGENTS.md"));
+  if (agents === undefined) return undefined;
+  const userMemory = join(homedir(), ".claude", "CLAUDE.md");
+  const userMemoryReal = realOrUndefined(userMemory) ?? userMemory;
+  const present: Array<{ path: string; real: string; imports: string[] }> = [];
+  for (let dir = root; ; dir = dirname(dir)) {
+    for (const file of CLAUDE_MEMORY_FILES) {
+      const path = join(dir, file);
+      try {
+        if (!statSync(path, { throwIfNoEntry: false })?.isFile()) continue;
+        const real = realpathSync(path);
+        if (real !== userMemoryReal) present.push({ path, real, imports: importsOf(path) });
+      } catch {
+        // Unreadable: skipped, neither named in the note nor counted as importing AGENTS.md.
+      }
+    }
+    if (dirname(dir) === dir) break;
+  }
+  if (present.length === 0) return undefined;
+  if (present.some(({ real, imports }) => real === agents || imports.some((target) => realOrUndefined(target) === agents))) return undefined;
+
+  // The repo's own files by their path in the repo, the ones above it by their absolute path.
+  const shown = present.map(({ path }) => (relative(root, path).startsWith("..") ? path : relative(root, path)));
+  const target = CLAUDE_MEMORY_FILES.find((file) => shown.includes(file));
+  const fix =
+    target === undefined
+      ? "create CLAUDE.md in the repository root with the line `@AGENTS.md`"
+      : target === ".claude/CLAUDE.md"
+        ? "add the line `@../AGENTS.md` to .claude/CLAUDE.md (an import resolves from the folder of the file that holds it)"
+        : `add the line \`@AGENTS.md\` to ${target}`;
+  return `Claude Code reads ${shown.join(" and ")}, not AGENTS.md: for it to see the kit block, ${fix}. wf init does not write Claude Code's memory files.`;
 }
 
 /** Plans the files, writes them, and returns what changed (nothing when the repo is already set up). */
 export function initRepo({ cwd, skipAgentsMd = false, remove = false }: InitOptions): InitResult {
-  if (!statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`o diretório do repositório não existe: ${cwd}`);
-  if (skipAgentsMd && remove) throw new Error("--remove e --no-agents-md se contradizem: --remove só desfaz o bloco do AGENTS.md");
+  if (!statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`the repository directory does not exist: ${cwd}`);
+  if (skipAgentsMd && remove) throw new Error("--remove and --no-agents-md contradict each other: --remove only takes out the AGENTS.md block");
   const { version } = readKitPackage();
   /** Returns the file's new text; undefined when it needs no change, null when it should be deleted. */
   type Plan = (existing: string | undefined, path: string) => string | null | undefined;
@@ -170,6 +244,7 @@ export function initRepo({ cwd, skipAgentsMd = false, remove = false }: InitOpti
     mkdirSync(dirname(file), { recursive: true });
     writeFileAtomic(existsSync(file) ? realpathSync(file) : file, after); // through a symlink, not over it
   }
-  const note = !remove && !skipAgentsMd && changes.some((c) => c.path === "AGENTS.md") ? claudeCodeNote(cwd) : undefined;
+  // On every run, not only when this one changed AGENTS.md: a memory file added after the first init hides the block all the same.
+  const note = !remove && !skipAgentsMd ? claudeCodeNote(cwd) : undefined;
   return { changes, notes: note ? [note] : [] };
 }

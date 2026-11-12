@@ -19,7 +19,7 @@ export interface CommandTimeouts {
   networkMs: number;
 }
 
-/** How long local `git` (add, diff, commit with hooks…) may run: past this a hook or a lock is stuck. */
+/** How long local `git` (add, diff, commit with hooks…) may run: past this a hook or a lock is stuck. `wf gc`'s default; a run's own local git takes the workflow's `execTimeoutMs`. */
 export const LOCAL_GIT_TIMEOUT_MS = 5 * 60_000;
 /** The default for how long `git push`, `git ls-remote` and every `gh` call may run, in seconds. */
 export const NETWORK_TIMEOUT_SEC = 120;

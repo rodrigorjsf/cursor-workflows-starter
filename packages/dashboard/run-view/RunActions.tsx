@@ -1,8 +1,10 @@
-// The actions of the Run view's header: cancel a running run, and copy the command that resumes one that stopped.
+// The actions of the Run view's header: cancel a running or frozen run, cancel the cloud agents a run whose process is gone
+// left working, and copy the command that resumes one that stopped.
 import { useEffect, useRef, useState } from "react";
 import { copyText } from "./clipboard.js";
 import { ARGS_PLACEHOLDER, canResume, resumeCommand } from "./resume-command.js";
-import { cancelRun } from "./run-actions.js";
+import { cancelResult, cancelRun } from "./run-actions.js";
+import type { OfferedActions } from "./run-status.js";
 import type { ApiStatus, RunInfo } from "./use-run-events.js";
 
 type CancelState = { step: "idle" } | { step: "confirm" } | { step: "sending" } | { step: "done"; message: string } | { step: "failed"; message: string };
@@ -10,6 +12,8 @@ type CancelState = { step: "idle" } | { step: "confirm" } | { step: "sending" } 
 export interface RunActionsProps {
   runId: string;
   status?: ApiStatus;
+  /** What the header offers (see `offeredActions`). */
+  offered: OfferedActions;
   info?: RunInfo;
   /** The `argsHash` of the run's latest execution (see `argsHashOf`). */
   argsHash?: string;
@@ -17,7 +21,7 @@ export interface RunActionsProps {
   onChanged(): void;
 }
 
-export function RunActions({ runId, status, info, argsHash, onChanged }: RunActionsProps) {
+export function RunActions({ runId, status, offered, info, argsHash, onChanged }: RunActionsProps) {
   const [cancel, setCancel] = useState<CancelState>({ step: "idle" });
   const [copied, setCopied] = useState<"yes" | "no">();
   const [shown, setShown] = useState(false);
@@ -29,12 +33,12 @@ export function RunActions({ runId, status, info, argsHash, onChanged }: RunActi
     before.current = status;
   }, [status]);
 
+  const cloudOnly = !offered.cancelRun && offered.leftCloudAgents.length > 0;
   const send = async () => {
     setCancel({ step: "sending" });
     const outcome = await cancelRun(runId);
     onChanged();
-    if (!outcome.ok) setCancel({ step: "failed", message: outcome.error });
-    else setCancel({ step: "done", message: outcome.status === "cancelled" ? "Cancelled." : `Cancelling: ${outcome.note}` });
+    setCancel(cancelResult(outcome, cloudOnly));
   };
 
   const command = info && canResume(status) ? resumeCommand({ workflow: info.workflow, runId, repo: info.repo, argsHash, start: info.start }) : undefined;
@@ -44,37 +48,50 @@ export function RunActions({ runId, status, info, argsHash, onChanged }: RunActi
     setCopied((await copyText(command)) ? "yes" : "no");
   };
 
+  const agents = offered.leftCloudAgents;
+  const offerCancel = (offered.cancelRun || cloudOnly) && cancel.step !== "done";
   return (
     <div className="actions">
-      {status === "running" && cancel.step !== "done" && (
+      {offerCancel && (
         <>
           {(cancel.step === "idle" || cancel.step === "failed") && (
-            <button type="button" className="danger" onClick={() => setCancel({ step: "confirm" })}>
-              Cancel run
+            <button
+              type="button"
+              className="btn danger"
+              title={
+                cloudOnly
+                  ? `The process of this run stopped while ${agents.join(", ")} worked in the cloud: ${agents.length > 1 ? "they" : "it"} may still be running, and spending`
+                  : offered.frozen
+                    ? "The process of this run stopped beating: cancelling kills it, without undoing the step in progress, and cancels the cloud agents it left; a resume afterwards starts new ones, at new cost"
+                    : undefined
+              }
+              onClick={() => setCancel({ step: "confirm" })}
+            >
+              {cloudOnly ? (agents.length > 1 ? `Cancel ${agents.length} cloud agents` : "Cancel cloud agent") : "Cancel run"}
             </button>
           )}
           {cancel.step === "confirm" && (
             <span
               className="confirm"
               role="group"
-              aria-label="Confirm cancelling the run"
+              aria-label={cloudOnly ? "Confirm cancelling the cloud agents" : "Confirm cancelling the run"}
               onKeyDown={(event) => {
                 if (event.key !== "Escape") return;
                 event.stopPropagation(); // Escape here means "keep running", not "close the log panel"
                 setCancel({ step: "idle" });
               }}
             >
-              Stop this run?
-              <button type="button" className="danger" onClick={() => void send()}>
-                Yes, cancel it
+              {cloudOnly ? `Stop ${agents.join(", ")} in the cloud?` : "Stop this run?"}
+              <button type="button" className="btn danger" onClick={() => void send()}>
+                Yes, cancel
               </button>
-              <button type="button" onClick={() => setCancel({ step: "idle" })}>
-                Keep running
+              <button type="button" className="btn" onClick={() => setCancel({ step: "idle" })}>
+                {cloudOnly || offered.frozen ? "Keep" : "Keep running"}
               </button>
             </span>
           )}
           {cancel.step === "sending" && (
-            <button type="button" disabled>
+            <button type="button" className="btn" disabled>
               Cancelling…
             </button>
           )}
@@ -87,7 +104,7 @@ export function RunActions({ runId, status, info, argsHash, onChanged }: RunActi
       )}
       {command !== undefined && (
         <>
-          <button type="button" onClick={() => void copy()}>
+          <button type="button" className="btn" onClick={() => void copy()}>
             Copy resume command
           </button>
           {copied === "yes" && (

@@ -27,10 +27,10 @@ O servidor `workflows` é registrado em `.cursor/mcp.json` (Cursor) e em `.mcp.j
 | Tool | Entrada | Saída |
 |---|---|---|
 | `list_workflows` | — | `name`, `description`, `whenToUse`, `phases`, `argsSchema` de cada workflow |
-| `start_workflow` | `{ name, args, resumeRunId?, overrides? }` | `{ jobId, runId }`, mais `dashboardUrl` (o link da página do run no [dashboard](../operating/03-observabilidade.md#5-dashboard), que o `start_workflow` inicia se nada responde na porta; `dashboardWarning` traz o motivo quando não sobe, e nenhum dos dois aparece com o início automático desligado). O workflow roda em segundo plano, em um processo destacado: reiniciar o servidor ou o Cursor não o interrompe |
+| `start_workflow` | `{ name, args, resumeRunId?, overrides? }` | `{ jobId, runId }`, mais `dashboardUrl` (o link da página do run no dashboard, [5.3 §5](../operating/03-observabilidade.md#5-dashboard), que o `start_workflow` inicia se nada responde na porta; `dashboardWarning` traz o motivo quando não sobe, e nenhum dos dois aparece com o início automático desligado). O workflow roda em segundo plano, em um processo destacado: reiniciar o servidor ou o Cursor não o interrompe |
 | `wait_workflow` | `{ jobId, timeoutSec ≤ 50 }` | Estado do job, projetado do log de eventos do run: `status`, `phase`, `recent` (até 20 linhas de resumo, uma linha cada, nunca texto de prompt ou de saída de agente; o custo de cada etapa é o maior entre bruto e cobrado), `result` (o que o workflow devolveu), `error`, `spentCents` (custo que o teto usa; acumula entre resumes), `chargedCents` (só o valor cobrado), `spentTokens` |
 | `get_workflow_status` | `{ jobId }` | Estado, sem esperar |
-| `cancel_workflow` | `{ jobId }` | Cancela o job: para os agentes ativos, desfaz a etapa que estava escrevendo e devolve o estado com `status: "cancelled"`. O run continua retomável. O agente do chat só chama quando o usuário pede para parar |
+| `cancel_workflow` | `{ jobId }` | Cancela o job: para os agentes ativos, desfaz a etapa que estava escrevendo e devolve o estado com `status: "cancelled"`. O run continua retomável. Um processo travado (vivo, sem heartbeat; o job já aparece `failed`) é encerrado com `SIGKILL`, sem desfazer a etapa. Depois desse `SIGKILL`, e num job cujo processo já morreu (uma queda), cancela os cloud agents que o run deixou rodando, a nota os nomeia e o job continua `failed`; um resume depois cria agentes novos no lugar deles, que custam de novo. O agente do chat só chama quando o usuário pede para parar |
 
 **Por que start/wait e não uma tool que bloqueia até o fim?** Um workflow de implementação leva minutos, e a
 doc do Cursor não dá o timeout de uma chamada de tool MCP no IDE. O FAQ de MCP só diz que, se o servidor cai ou
@@ -47,7 +47,9 @@ dura no máximo 50 s e o agente do chat repete a espera.
 
 **Se o processo do job morrer** (ou parar de dar sinal de vida: o heartbeat dele fica mais de 30 s sem atualizar),
 o job aparece como `failed` com o `runId`. Chame `start_workflow` com o mesmo `name` e `args` e com
-`resumeRunId: "<runId>"`; as etapas já concluídas saem do journal.
+`resumeRunId: "<runId>"`; as etapas já concluídas saem do journal. Se o resume volta `already running`, o processo
+travado ainda segura o run: `cancel_workflow` o encerra e cancela os cloud agents que o run deixou rodando, e o resume
+seguinte cria agentes novos no lugar deles, que custam de novo.
 
 **Para parar um run:** `cancel_workflow` (ou `wf cancel <jobId>`, ou Ctrl-C / `SIGTERM` no processo do run). O job
 termina como `cancelled`, com o `runId` para retomar.
@@ -72,7 +74,7 @@ Fallback quando o MCP não está habilitado, e caminho preferido em CI e em runs
 ```bash
 wf start implement-issue --args '{"issue":123}'   # processo destacado; log em .workflows/jobs/<id>.log
 wf wait <jobId> --timeout 240
-wf cancel <jobId>          # para o run (SIGTERM ao processo do job); o run continua retomável
+wf cancel <jobId>          # para o run (SIGTERM ao job em execução; SIGKILL ao travado); o run continua retomável
 wf gc --dry-run            # mostra os worktrees e branches de runs terminados que o gc removeria
 ```
 
@@ -193,7 +195,7 @@ que a forma B precisa e imprime o diff do que mudou; não faz commit nem `git ad
 | `.mcp.json` | O mesmo servidor para o Claude Code, com `${HOME}` no lugar de `${userHome}` |
 | `.agents/workflows/config.json` | `$schema` (autocompletar no editor) e `kit`, a faixa de versão do kit que rodou o `init` (`>=0.3.0 <0.4.0` para o kit 0.3.x). O que o arquivo já tem fica, a faixa inclusive |
 | `.gitignore` | A linha `.workflows/`, a não ser que uma forma usual dela já esteja lá |
-| `AGENTS.md` | Um bloco de quatro linhas entre `<!-- cursor-workflows:begin -->` e `<!-- cursor-workflows:end -->`: as regras de segurança e o link do guia de instalação. O arquivo é criado se não existir. O Claude Code lê o `CLAUDE.md`, não o `AGENTS.md` ([ADR-0004](../adr/0004-workspaces-and-claude-md-symlink.md)): quando o `CLAUDE.md` não importa o `AGENTS.md` (`@AGENTS.md`), o `init` avisa no stderr e não edita o `CLAUDE.md` |
+| `AGENTS.md` | Um bloco de quatro linhas entre `<!-- cursor-workflows:begin -->` e `<!-- cursor-workflows:end -->`: as regras de segurança e o link do guia de instalação. O arquivo é criado se não existir. Como diz a tabela de onde cada harness procura, o Claude Code não lê o `AGENTS.md` quando há um `CLAUDE.md`, `.claude/CLAUDE.md` ou `CLAUDE.local.md` na raiz do repositório ou em qualquer pasta acima dela, a pasta pessoal inclusive: `~/CLAUDE.md` conta, `~/.claude/CLAUDE.md` (a memória do usuário) não ([memória do Claude Code](https://code.claude.com/docs/en/memory); K02 em [8.2](../research/verificacoes-locais.md)). Se algum desses arquivos existe e nenhum deles é o próprio `AGENTS.md` nem o importa, o `init` avisa no stderr a cada execução, também quando não tem nada a mudar (`wf init: Claude Code reads <arquivos>, not AGENTS.md: ...`) e não cria nem edita esses arquivos. O aviso traz a linha que funciona no arquivo a editar, porque o Claude Code resolve um `@caminho` a partir da pasta do arquivo que o contém e ignora os que estão em bloco ou trecho de código: `@AGENTS.md` num `CLAUDE.md` ou `CLAUDE.local.md` da raiz, `@../AGENTS.md` no `.claude/CLAUDE.md`. Quando o arquivo está só numa pasta acima do repositório, o aviso sugere criar na raiz um `CLAUDE.md` com `@AGENTS.md`, em vez de importar no arquivo de cima: ele vale também para os outros repositórios abaixo dele. Sem nenhum desses arquivos o Claude Code lê o `AGENTS.md`, e não há aviso |
 
 Rodar de novo não muda nada, e um arquivo que já diz o que o `init` escreveria não é reescrito. Num `mcp.json` que já
 existe, só o servidor `workflows` muda: os outros servidores e as chaves extras dele ficam. Um arquivo que não é JSON
@@ -207,6 +209,8 @@ quando o kit está em `~/.cursor-workflows/kit`, onde o instalador ([2.1 §3](01
 O servidor MCP que não sobe deixa pistas só no log do MCP do IDE. O `wf doctor` (`wf doctor --cwd
 /caminho/do/repo`) roda as verificações abaixo e, a cada falha, diz o que corrigir. Sai com 1 se alguma falhar e, com
 `--json`, imprime o relatório em JSON (`ok` e `checks`, cada um com `id`, `status`, `message` e, nas falhas, `hint`).
+Sem `--json`, cada falha traz a dica depois de `how to fix:`, e a última linha é `All good: N checks passed.` ou
+`N of M checks failed.`
 
 | `id` | O que confere | Falha típica |
 |---|---|---|

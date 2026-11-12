@@ -3,7 +3,8 @@
 //   - text that has the shape of a well-known credential (GitHub, AWS, Slack, Google, npm, Stripe and Cursor keys, JWTs,
 //     bearer tokens, private key blocks, and the `sk-` keys of the model providers);
 //   - the value of any environment variable whose name contains KEY, TOKEN, SECRET or PASSWORD, plus keys handed to the run
-//     directly (the Cursor API key arrives this way, as `CURSOR_API_KEY` or the `apiKey` option).
+//     directly (the Cursor API key arrives this way, as `CURSOR_API_KEY` or the `apiKey` option), and those of the
+//     environment each `ctx.exec` command runs with (its `env` option, and process.env as it is when the command starts).
 // Best effort, not a guarantee: a secret in a format not listed here, held in a variable not named like one, passes through.
 
 export const REDACTED = "[REDACTED]";
@@ -41,6 +42,8 @@ export interface Redactor {
   text(text: string): string;
   /** A copy of `value` with every string inside it (at any depth) passed through `text`. Numbers, booleans and null are kept. */
   value<T>(value: T): T;
+  /** Redacts, from now on, the values of the secret-named variables of `env` too (the environment a command runs with, say). */
+  learn(env: Record<string, string | undefined>): void;
 }
 
 /** The values to redact: those of the secret-named variables of `env`, and `extra`, longest first (so one never hides inside another). */
@@ -52,7 +55,10 @@ export function secretValues(env: NodeJS.ProcessEnv, extra: ReadonlyArray<string
 }
 
 export function createRedactor(options: { env?: NodeJS.ProcessEnv; extra?: ReadonlyArray<string | undefined> } = {}): Redactor {
-  const secrets = secretValues(options.env ?? process.env, options.extra);
+  let secrets = secretValues(options.env ?? process.env, options.extra);
+  const learn = (env: Record<string, string | undefined>) => {
+    secrets = secretValues(env, secrets);
+  };
   const text = (input: string): string => {
     let out = input;
     for (const secret of secrets) if (out.includes(secret)) out = out.split(secret).join(REDACTED);
@@ -67,5 +73,5 @@ export function createRedactor(options: { env?: NodeJS.ProcessEnv; extra?: Reado
     }
     return input;
   };
-  return { text, value };
+  return { text, value, learn };
 }

@@ -225,14 +225,18 @@ etapa interrompida deixaria edições pela metade. Por isso o `implement-issue`:
   tentativa dela (`revertOnRetry`) parte do worktree de antes da etapa, não do que a tentativa que falhou deixou;
 - conta as quedas do processo no meio de cada etapa de escrita: quando um resume a encontra em andamento, soma uma; passado
   o limite (`maxStepCrashes`), o run encerra com `step-crash-loop` em vez de retomar a etapa de novo. Um cancelamento no
-  meio da etapa não é queda e não conta;
+  meio da etapa não é queda e não conta. Vale também para as etapas de correção: a rodada interrompida é refeita com o
+  mesmo id, não contada;
 - põe um número de sequência no prompt de cada etapa de escrita, para o journal nunca devolver uma escrita antiga;
 - guarda os relatórios de review por rodada, para o resume não pedir um review novo sobre um diff diferente;
 - reaproveita a branch existente no resume (sem `worktree add -B`, que a zeraria) e roda a suíte de novo antes do
   commit;
 - dá a cada run a sua branch e o seu worktree (o id do run no nome), registrados no progresso: um run novo parte da
-  cabeça atual da branch padrão e nunca reaproveita o worktree de outro; o lock `issue-<n>` (em `.workflows/locks/`, com um
-  hash do `--repo` quando o run o passa) recusa um segundo run na mesma issue;
+  cabeça atual da branch padrão e nunca reaproveita o worktree de outro; o lock `issue-<n>` (em `.workflows/locks/`)
+  recusa um segundo run na mesma issue. A issue do próprio repositório do cwd trava `issue-<n>`, com ou sem o arg
+  `repo`; o nome só ganha um hash do repositório quando `repo` aponta para outro repositório (comparado pela URL que o
+  `gh repo view --json url` devolve, em minúsculas; se o `gh` não responde, o hash é do valor de `repo` em minúsculas,
+  mesmo que ele nomeie o repositório do cwd, e o run registra isso no log);
 - entrega com `git push --force-with-lease=<branch>:<commit que o origin tem>`, só em branch `wf/`, e só quando esse
   commit é de um push do próprio run (o resume refaz o commit depois do PR; o commit de outra pessoa não é
   sobrescrito).

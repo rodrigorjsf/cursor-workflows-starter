@@ -1,6 +1,6 @@
 // The snapshot a cloud step runs against, and the way back from it. A cloud agent sees only what was pushed to a remote, never
 // the local worktree, so before a cloud step the worktree's state, uncommitted changes included, is committed to a throwaway
-// branch and pushed (ADR-0006); when the step ends the branch is deleted again.
+// branch and pushed (ADR-0007); when the step ends the branch is deleted again.
 //
 // The user's checkout is not disturbed to take it: the commit is built from a temporary copy of the index, so nothing is
 // staged, no branch moves, HEAD stays and the working files are only read. The snapshot holds what `git add -A` would

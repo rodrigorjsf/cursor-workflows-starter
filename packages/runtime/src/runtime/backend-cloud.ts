@@ -1,4 +1,4 @@
-// The cloud backend: one attempt of a step on a Cursor cloud agent (ADR-0006). A cloud agent is not a local agent somewhere
+// The cloud backend: one attempt of a step on a Cursor cloud agent (ADR-0007). A cloud agent is not a local agent somewhere
 // else: it rejects custom tools and tool allowlists, ignores setting sources, and sees only what was pushed to a remote. So
 // before the agent is created the worktree is pushed as a snapshot branch (cloud-snapshot.ts) and the agent starts from it;
 // when the attempt ends the branch is deleted. The backend never sends custom tools, allowlists or setting sources, and
@@ -92,13 +92,17 @@ interface Resumed {
   running?: Run;
 }
 
+/** Why an interrupted attempt's agent cannot be taken over, worded for the warning: the attempt then starts a new one. */
+type NotResumed = "is no longer there" | "was cancelled";
+
 /**
  * Resumes the agent an interrupted attempt left, and finds the run it was in the middle of: the one still going, or else the
- * latest. Undefined when the cloud no longer has the agent (it never got the first message, or it was deleted): the attempt
- * then starts a new one. Any other failure rejects. A run that is cancelled while this looks the agent up cancels the run it
+ * latest. When the cloud no longer has the agent (it never got the first message, or it was deleted), or the agent's latest
+ * run was cancelled (cancelling a run no process executes cancels the agents it left), it says why instead, and the attempt
+ * starts a new one. Any other failure rejects. A run that is cancelled while this looks the agent up cancels the run it
  * finds: the user stopped the run, and the agent must not go on spending.
  */
-async function resumeInterrupted(o: StepOptions, agentId: string, signal: AbortSignal): Promise<Resumed | undefined> {
+async function resumeInterrupted(o: StepOptions, agentId: string, signal: AbortSignal): Promise<Resumed | NotResumed> {
   const agent = await within(signal, Agent.resume(agentId, agentBase(o)), disposeQuietly);
   const release = () => disposeQuietly(agent);
   /** The run of `runs` to wait for: the one still going wins, then the newest by its creation time (the order of the cloud's list is not documented). */
@@ -114,10 +118,13 @@ async function resumeInterrupted(o: StepOptions, agentId: string, signal: AbortS
       await stop(items);
       throw signal.reason;
     }
-    return { agent, running: pick(items) };
+    const running = pick(items);
+    if (running?.status !== "cancelled") return { agent, running };
+    await release();
+    return "was cancelled";
   } catch (err) {
     await release();
-    if (isGone(err)) return undefined;
+    if (isGone(err)) return "is no longer there";
     throw err;
   }
 }
@@ -215,14 +222,16 @@ async function runCloudAttempt({ remote, runId, waitFloorMs = WAIT_FLOOR_MS }: C
   const previous = o.reattach;
   let resumed: Resumed | undefined;
   if (previous) {
+    let found: Resumed | NotResumed;
     try {
-      resumed = await resumeInterrupted(o, previous.agentId, signal);
+      found = await resumeInterrupted(o, previous.agentId, signal);
     } catch (err) {
       if (signal.aborted) return { outcome: { kind: "aborted", reason: signal.reason } };
       // Not "gone": the agent may well be running. Starting another would pay twice, so the attempt fails and the engine reattaches again.
       return { outcome: { ...classifyError(err), message: `could not reattach to cloud agent ${previous.agentId}: ${errorText(err)}` }, reattachFailed: true };
     }
-    if (!resumed) onEvent({ type: "warning", message: `cloud agent ${previous.agentId}, left by an interrupted attempt, is no longer there: starting a new one` });
+    if (typeof found === "string") onEvent({ type: "warning", message: `cloud agent ${previous.agentId}, left by an interrupted attempt, ${found}: starting a new one` });
+    else resumed = found;
   }
   let start: Start;
   if (resumed) {

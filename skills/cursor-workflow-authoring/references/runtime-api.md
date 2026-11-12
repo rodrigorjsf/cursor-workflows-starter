@@ -75,7 +75,7 @@ export default defineWorkflow<{ target: string }>({
 | `timeoutMs` | Time limit of each send (the request and each schema re-prompt get their own). Default 20 min. |
 | `retries` | Extra attempts when the run ends in error or is cancelled. Default 1. |
 | `schemaRetries` | Re-prompts when the agent skips `submit_result` or sends invalid JSON. Default 2. |
-| `settingSources` | Which config layers the step loads: `"project"` (AGENTS.md, rules, skills, hooks, project MCP), `"team"`, `"mdm"`, `"user"`. Default when omitted: `["project","team","mdm"]`. Every layer adds fixed context to every call (cost.md). |
+| `settingSources` | Which config layers the step loads: `"project"` (AGENTS.md, rules, skills, hooks, project MCP), `"team"`, `"mdm"`, `"user"`, `"plugins"`, `"all"` (the global cap `allowedSettingSources` leaves `"all"` out by default). Default when omitted: `["project","team","mdm"]`. Every layer adds fixed context to every call (cost.md). |
 | `memo` | Result cache across runs, keyed by prompt, model, schema, tools, context and repository state. Accepted only with read-only `tools`. |
 | `revertOnRetry` | Before each retry of a step that can write, puts `cwd` back as it was when the step started (files created are deleted, files changed are restored, the index is unstaged). Default off. Use it only when no other step writes in that directory at the same time (a worktree of the step's own): the undo restores the whole directory. In a directory that is not a git repository the retry runs anyway, with a warning. |
 | `sandbox` | Turns on the SDK's local sandbox for shell calls (Linux needs `bubblewrap`). Untested here; leave it off. |
@@ -151,8 +151,14 @@ if (!tests.ok) { /* tests.exitCode, tests.timedOut, tests.tail: the last 32768 c
   exists; if the process dies and the run is resumed, the step reattaches to that agent and takes the answer of the run it already
   has instead of paying for another (code that changes the step's prompt or options starts a new step, and the old agent finishes
   unwatched unless the run is cancelled). Cancelling a running run cancels its cloud runs. Cancelling a run whose process already
-  died (`wf cancel`, `cancel_workflow`, the dashboard's cancel route) cancels, through the Cursor API, the cloud runs of the agents
-  its log shows without an end. The client stops waiting for a cloud run after two hours: the engine asks
+  died, or whose job is frozen (its process is killed first) (`wf cancel`, `cancel_workflow`, the dashboard's cancel route),
+  cancels, through the Cursor API, the cloud runs of the agents
+  its log shows without an end; it writes nothing to the log, so those steps stay interrupted. Two cases make the resumed step
+  start a new cloud agent, at new cost, instead of reattaching, each with a warning: the cloud no longer has the agent
+  (`cloud agent <id>, left by an interrupted attempt, is no longer there: starting a new one`), or no run of the agent is going
+  and its newest was cancelled, as after that cancel
+  (`cloud agent <id>, left by an interrupted attempt, was cancelled: starting a new one`). The resume deletes the old agent's
+  snapshot branch, so what it committed there does not come back. The client stops waiting for a cloud run after two hours: the engine asks
   the cloud, and a run still going is waited for again, so only the step's `timeoutMs` bounds a long step.
 
 ## Caps

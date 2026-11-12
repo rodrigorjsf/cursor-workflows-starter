@@ -10,7 +10,8 @@ The workflow already defines the steps, each step's model, the reviews and the s
 as it came, and fixing or approving is their decision. While the job runs, the files belong to the workflow and your
 only calls are the waits in step 3.
 
-The runtime's messages are in Portuguese. This skill quotes the ones it matches, in code spans; match them verbatim.
+The runtime's messages are in English, the same from the MCP server and from the CLI. This skill quotes the ones it
+matches, in code spans; match them verbatim.
 
 ## Steps
 
@@ -22,9 +23,9 @@ The runtime's messages are in Portuguese. This skill quotes the ones it matches,
      resume: `implement-issue` (`additionalProperties: false`) fails with `invalid args`, and a workflow without
      that guard starts from scratch, without the journal.
 2. Call `start_workflow` with `{ name, args }` (and `resumeRunId`, if any). The step ends with the `jobId` in hand; a
-   return with `error` (`unknown workflow`, an invalid config with its file and field path, or a kit outside the
-   version range the repo declares) goes back to step 1, or to the user for the config and the kit version: tell them
-   to run `wf doctor`.
+   return with `error` (one that starts with `unknown workflow: `, an invalid config with its file and field path, or a
+   kit outside the version range the repo declares) goes back to step 1, or to the user for the config and the kit
+   version: tell them to run `wf doctor`.
    - A return with `dashboardUrl` is this run's live page on the dashboard, which also shows every other run of every
      repo (Board and Runs, one link away). Open it in Cursor's built-in browser, in one tab per conversation (a later
      start points that tab at its own link), and tell the user the link. A page that fails to load just
@@ -34,7 +35,7 @@ The runtime's messages are in Portuguese. This skill quotes the ones it matches,
      not depend on it. A return with neither means the user turned auto-start off: go on to step 3.
    - When the user asks for a tighter budget for this run, pass `overrides` (`maxTokens`, `maxCents`,
      `maxTokensPerStep`, `concurrency`). They only tighten: a looser value comes back in `violations` and has no
-     effect, so tell the user.
+     effect, so tell the user. Any other key fails the start with an error that starts with `unknown override: `.
 3. Chain `wait_workflow` calls with `{ jobId, timeoutSec: 45 }`, one right after the other, until `status` is no
    longer `running`. A return with `error` and no `status` (`job not found`) also ends the wait: relay the error
    and the `jobId` to the user.
@@ -80,7 +81,13 @@ The runtime's messages are in Portuguese. This skill quotes the ones it matches,
      `no heartbeat`): offer to relaunch **resuming**: `start_workflow` with the same `name` and `args` and
      `resumeRunId` equal to the job's `runId`. Completed steps are not repeated.
      With `no heartbeat` the process may still be alive and holding the run; if the resume then returns
-     `already running`, ask the user whether to cancel the job (`cancel_workflow` ends a frozen process), then resume.
+     `already running`, ask the user whether to cancel the job (`cancel_workflow` kills a frozen process with
+     SIGKILL), then resume. Say first that this cancel also cancels the cloud agents the run left running, so the
+     resume starts a new cloud agent for each of those steps and pays for it again (see "Cancelling").
+     A run with cloud steps may have left cloud agents running when its process died or froze, and they keep spending
+     until cancelled. If the user wants the run stopped rather than resumed, call `cancel_workflow` on the failed job:
+     it cancels those agents, after killing the process if it froze (see "Cancelling"). The job stays `failed` and the
+     run stays resumable; tell the user what a later resume then costs (see "Cancelling").
    On a relaunch, go back to step 3 with the new `jobId`.
 6. When `status` is `cancelled`, the run was stopped on purpose. Relay that with the `runId`, and offer to resume it
    as in step 5 if the user wants to continue; the steps it finished are not repeated.
@@ -89,24 +96,49 @@ The runtime's messages are in Portuguese. This skill quotes the ones it matches,
 
 Cancel when the user asks to stop the run, and at that request only: whether a run is going badly is the user's
 judgement. Call `cancel_workflow` with `{ jobId }`. It stops the active agent runs, reverts the step that was writing
-to the state it had before the step, and returns the job with `status: "cancelled"` (step 6).
+to the state it had before the step, and returns the job with `status: "cancelled"` (step 6). A stuck or already
+ended job is handled as the notes below say, and stays `failed`.
 
-- A `note` that the job already ended, or that the process is not the job's: relay it. Nothing was cancelled.
+- A `note` that starts with `the job already ended`: the job's process was gone, so no step was stopped or reverted.
+  The runtime still cancels any cloud agents the run left running. Relay the note as it came: it ends with
+  `nothing to cancel`, or names the agents after `cancelled the cloud agent it left running:` (`agents` when there are
+  several), or names one it `could not reach` and says to resume the run and cancel it.
+- A `note` that says the process is not the job's (`is not the job's process (was the pid reused?)`): the job's
+  process ended and another process got its pid. No signal was sent, and no step was stopped or reverted. As for a job
+  that already ended, the runtime cancels the cloud agents the run left running, and the note ends the same three ways:
+  `nothing to cancel`, the agents after `cancelled the cloud agent it left running:`, or one it `could not reach`.
+  Relay the note as it came. The job can still show `running` until its heartbeat goes stale (30 s by default); chain
+  `wait_workflow` (step 3) and it ends `failed`.
+- A `note` that starts with `process <pid> had no heartbeat and was killed (SIGKILL)`: the process was frozen, so it
+  was killed without undoing the step in progress, and the run stays resumable. The job stays `failed`. Once the
+  process is gone, the runtime cancels the cloud agents the run left running, as for a job that already ended: the note
+  goes on to name them after `cancelled the cloud agent it left running:`, or names one it `could not reach`. Relay it.
+  In the rare case the process `has not exited yet`, the note says those agents were not cancelled: call
+  `cancel_workflow` on the same `jobId` once more after a few seconds.
+- A `note` that starts with `could not signal process`: relay it. Nothing was cancelled.
 - `status` still `running` after the call: the process is stopping; chain `wait_workflow` (step 3) until it ends.
+- A resume after any cancel whose note names cloud agents after `cancelled the cloud agent it left running:`, whichever
+  note above it is, does not reattach to them. It starts a new cloud agent for each of those steps, at new cost, and
+  the work of the cancelled agents is lost; the log warns
+  `cloud agent <id>, left by an interrupted attempt, was cancelled: starting a new one`. Tell the user before
+  resuming. Only when no cancel named an agent does the resume reattach to it, and use its answer if its run already
+  finished.
 
 ## Without the MCP server
 
 If the `workflows` tools are not available, use the CLI from the terminal. The `argsSchema` from step 1 lives in the
 `meta` of the workflow file (a file in the kit's built-in `workflows/` folder or in the repository's
-`.agents/workflows/`): `wf list` returns only the name and description. The CLI writes the same job state, so steps 3 to 5 apply equally,
-with `--resume <runId>` in place of `resumeRunId` (relaunch with `start`, also when `next` shows `run`). Caps set in the
-`env` of the `workflows` server in `mcp.json` do not reach the shell, but the config files (global caps, repo config)
-do: pass `--max-cents` and `--max-tokens` to tighten this run further.
+`.agents/workflows/`): `wf list` returns only the name and description. The CLI writes the same job state and the
+same messages, so steps 3 to 6 apply equally, with `--resume <runId>` in place of `resumeRunId` (relaunch with
+`start`, also when `next` shows `run`). An unknown name fails with an error that starts with `unknown workflow: `
+(the CLI adds ``. Use `wf list`.``; back to step 1), and an unknown job returns an error that starts with
+`job not found` (step 3). Caps set in the `env` of the `workflows` server in `mcp.json` do not reach the shell, but
+the config files (global caps, repo config) do: pass `--max-cents` and `--max-tokens` to tighten this run further.
 
 ```bash
 wf start <name> --args '<json>' --max-cents <N> --max-tokens <N> [--resume <runId>]   # returns {jobId, runId, log}
 wf wait <jobId> --timeout 240   # repeat until status != running
-wf cancel <jobId>               # only when the user asks to stop; returns the job with status cancelled
+wf cancel <jobId>               # only when the user asks to stop; a running job ends cancelled, a stuck or ended one stays failed
 ```
 
 In Claude Code, run the `wait` with `timeout: 250000` on the Bash tool: its default (120000 ms) cuts the 240 s wait.

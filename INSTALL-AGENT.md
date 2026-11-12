@@ -5,7 +5,7 @@ guide is pinned to release `v0.3.0` and needs no other document. Run the steps i
 result: when you cannot reach it, stop and tell the user what failed, with the command output.
 
 The kit runs deterministic workflows on the Cursor SDK from the Cursor IDE chat (MCP), Claude Code or a terminal. The
-kit's messages are in Portuguese; this guide quotes the few it matches. Supported: Linux and WSL2.
+kit's messages are in English; this guide quotes the few it matches as they are printed. Supported: Linux and WSL2.
 
 Ground rules:
 
@@ -37,12 +37,16 @@ The installer:
 - writes `~/.cursor-workflows/config.json` with the default hard caps (3,000,000 tokens and 500 cents per run, 600,000
   tokens per step, concurrency 4, local steps only) when the file does not exist yet.
 
-Running it again is safe. Done when it exits 0 and `wf list` prints a JSON list that includes `implement-issue`.
+Running it again is safe. Done when it exits 0 after printing `kit ready at <kit>`, and `wf list` prints a JSON list
+that includes `implement-issue`.
 
-- A line starting `aviso:` is a warning, not a failure. Relay it. One of them says `~/.local/bin` is not on the PATH:
+- A line starting `warning:` is a warning, not a failure. Relay it. One of them says `~/.local/bin` is not on the PATH
+  (`... is not on the PATH, so the wf command will not be found.`):
   for this session run `export PATH="$HOME/.local/bin:$PATH"`, and tell the user to add that folder to their shell's
   profile (bash or zsh: `~/.profile`; fish: `fish_add_path ~/.local/bin`) and to restart the IDE afterwards.
-- A line starting `erro:` is a failure: fix what it names and run the installer again.
+- A line starting `error:` is a failure: fix what it names and run the installer again. For example,
+  `<tool> is not on the PATH; install it and run again` or `Node <have> (<path>) is too old: the kit needs <need> or
+  newer. Install a newer Node, put it on the PATH and run again`.
 
 ## 3. Log in to the Cursor SDK
 
@@ -65,8 +69,10 @@ It writes `.cursor/mcp.json` and `.mcp.json` (the `workflows` MCP server, with n
 for the whole team), `.agents/workflows/config.json` (editor autocomplete and the kit version range), the `.workflows/`
 line in `.gitignore`, and a short marked block of safety rules in `AGENTS.md`. Running it again changes nothing.
 
-Done when it exits 0 and you have shown the user the diff it printed on stdout. It never runs git: the user reviews the
-diff and commits. The user can decline the `AGENTS.md` block with `wf init --no-agents-md` and undo it later with
+Done when it exits 0, you have shown the user the diff it printed on stdout, and you have relayed, as printed, any stderr
+line that starts with `wf init: Claude Code reads`. That line means a Claude Code memory file (such as `CLAUDE.md`) hides
+`AGENTS.md`, so Claude Code does not see the kit's safety rules; it names the import line to add. The user decides:
+`wf init` does not write Claude Code's memory files. It never runs git: the user reviews the diff and commits. The user can decline the `AGENTS.md` block with `wf init --no-agents-md` and undo it later with
 `wf init --remove`.
 
 ## 5. Run the doctor

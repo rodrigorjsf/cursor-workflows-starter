@@ -601,4 +601,4 @@ condicional** sobre o Cursor SDK. Esse é o espaço que o starter kit ocupa.
 
 ---
 
-[← Anterior: 7.6 · ADR-0006: Cloud steps as built](../adr/0006-cloud-steps-as-built.md) · [Índice](../README.md) · [Próximo: 8.2 · Verificações locais (2026-11-11) →](verificacoes-locais.md)
+[← Anterior: 7.8 · ADR-0008: The job record keeps what the event log cannot](../adr/0008-job-record-keeps-what-the-log-cannot.md) · [Índice](../README.md) · [Próximo: 8.2 · Verificações locais (2026-11-11) →](verificacoes-locais.md)

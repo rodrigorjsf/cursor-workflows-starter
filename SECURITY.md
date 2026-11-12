@@ -24,6 +24,17 @@ falhas de segurança.
 - **Com `settingSources` contendo `"project"` (o default), o repositório alvo roda código na sua máquina:** hooks de
   `.cursor/hooks.json` e de `.claude/settings.json` e servidores MCP de `.cursor/mcp.json`. Não use o default em
   repositórios em que você não confia.
+- **O `start_workflow` sobe um dashboard local** (um servidor HTTP) quando nada responde na porta dele, a menos que
+  `dashboard.autoStart` seja `false` no config global ou `WF_DASH_AUTOSTART=off` esteja no ambiente. Ele escuta só em
+  `127.0.0.1`, recusa um `Host` estranho, abre o banco de métricas só para leitura e aceita um único `POST`, o de cancelar
+  um run, protegido por token CSRF. Num run cujo processo morreu, esse `POST` chama a API da Cursor com a sua chave para
+  cancelar os cloud agents que o run deixou rodando. Detalhes em
+  [5.3 §Segurança do dashboard](docs/operating/03-observabilidade.md#segurança-do-dashboard).
+- **Uma etapa na nuvem manda o seu código para fora da máquina.** Com `location: "cloud"` num papel (só vale se o teto
+  global `allowedLocations` incluir `cloud`, o que o instalador não faz), o motor empurra um snapshot do worktree,
+  **inclusive as mudanças não commitadas**, para uma branch `wf/cloud-snapshot/...` no remote `cloud.remote` (padrão
+  `origin`), e a etapa roda numa VM da Cursor a partir dele. Detalhes em
+  [6.2 §Etapas na nuvem](docs/reference/config.md#etapas-na-nuvem).
 
 ## A chave do Cursor
 

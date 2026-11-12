@@ -11,7 +11,7 @@
   cujo último evento tem mais de `gcSnapshotGraceHours` horas (ajuste novo do `implement-issue`, padrão 24: o cloud agent
   que o processo morto iniciou pode ainda estar partindo da branch). Fica, com o motivo no plano, a de um run em execução,
   de um run que não é deste repositório e de um run dentro da espera, e a de um run cortado no meio da etapa dona dela
-  fica por `gcFailedAfterDays` dias, e a de um run cancelado sem limite, como o próprio run (o resume reanexa ao agente e traz o trabalho dessa branch). Nenhuma delas vai para a
+  fica por `gcFailedAfterDays` dias, e a de um run cancelado sem limite, como o próprio run (o resume reanexa ao agente e traz o trabalho dessa branch, a não ser que o run do agente tenha sido cancelado: aí o resume cria um agente novo). Nenhuma delas vai para a
   busca de PR, e uma recusa do remote entra nos `errors` sem parar o resto da varredura. O plano ganhou a razão
   `snapshot` e o `remote` de cada ação; `Commands.remoteOwnedHeads` e `deleteOwned` aceitam o remote, e
   `cloud-snapshot.ts` exporta `snapshotRunSegment` e `snapshotBranchSegment`.
@@ -59,8 +59,9 @@
   tinha, sem reenviar o prompt, fecha no log a tentativa morta, cobra o uso do agente uma só vez e apaga a branch de snapshot
   que o crash deixou. Um agente que a nuvem não conhece mais é trocado por um novo, com aviso; qualquer outra falha ao
   alcançá-lo falha só a tentativa e a próxima reanexa de novo. Cancelar um run que executa cancela os runs dele na nuvem, o
-  reanexado inclusive, e um cancelamento no meio da busca do agente cancela o run que ele achar; um run cujo processo já morreu
-  não tem a quem cancelar (retome e cancele). O limite de espera de duas horas do cliente do SDK deixou de falhar a etapa: o backend pergunta à nuvem
+  reanexado inclusive, e um cancelamento no meio da busca do agente cancela o run que ele achar; cancelar um run cujo
+  processo já morreu cancela, pela API da Cursor e sem resume, os agentes que o log mostra sem fim. Um resume que encontra
+  o run do agente cancelado cria um agente novo, com aviso (e paga de novo). O limite de espera de duas horas do cliente do SDK deixou de falhar a etapa: o backend pergunta à nuvem
   (`Agent.getRun`) e espera de novo pelo run que continua. Novo workflow de verificação contra a API real,
   `scripts/verify/verify-cloud.ts` ([8.2 §14](docs/research/verificacoes-locais.md)), e o cenário 8 (opcional) do assistente
   de validação. O `AgentBackend` ganhou `StepOptions.reattach`, o evento `agent` ganhou `snapshot` e `reattached`, e
@@ -179,11 +180,12 @@
   também emitem `step-start`. A referência dos eventos (`docs/reference/events.md`) é gerada do tipo
   (`npm run docs:events`), e o `npm test` falha se ela divergir.
 - **Runs mais robustos.** Uma última linha incompleta no log ou no journal não impede o resume; um lock por run recusa
-  a segunda execução do mesmo `runId` (`já está em execução`); todo arquivo de estado é gravado de forma atômica;
+  a segunda execução do mesmo `runId` (`already running`); todo arquivo de estado é gravado de forma atômica;
   retomar um run cujo workflow mudou grava um aviso; cada run novo entra no índice global
   `~/.cursor-workflows/runs.jsonl` (`WF_HOME` muda o diretório do usuário).
-- **O estado de um job é projetado do log de eventos.** O registro do job (`.workflows/jobs/<jobId>.json`) guarda só id
-  do job, id do run, pid e heartbeat. `wf status`, `wf jobs`, `get_workflow_status` e `wait_workflow` calculam status,
+- **O estado de um job é projetado do log de eventos.** O registro do job (`.workflows/jobs/<jobId>.json`) guarda a
+  identidade (id do job, id do run, pid e heartbeat) e só os fatos que o processo do job não pode pôr no log (`start`,
+  `refused`, `killedByCancel`; [ADR-0008](docs/adr/0008-job-record-keeps-what-the-log-cannot.md)). `wf status`, `wf jobs`, `get_workflow_status` e `wait_workflow` calculam status,
   fase, gasto, resultado e as últimas linhas (`recent`) do log a cada leitura: não há arquivo de estado para ficar pela
   metade, e as linhas são resumos de uma linha, nunca texto de prompt ou de saída. O `run-end` passa a levar o `result`,
   e o `run-start`, o `jobId`. Um processo que cai com exceção não tratada fecha o run no log como `failed`.
@@ -201,7 +203,7 @@
   resumes inclusive, mais os turnos em andamento). Passou de um dos dois: o run do agente é cancelado na hora e a
   tentativa falha com o novo `errorKind: "budget"`, sem nova tentativa. A etapa que passa do próprio teto falha
   sozinha; o teto do run cancela todas as etapas ativas, nenhuma etapa nova começa e o run termina com
-  `Teto de tokens atingido`, depois de as etapas canceladas fecharem a conta. A ultrapassagem é de no máximo um turno
+  `Token cap reached`, depois de as etapas canceladas fecharem a conta. A ultrapassagem é de no máximo um turno
   por etapa ativa. Antes, um teto só era checado antes de cada tentativa.
 - **Configuração em camadas, com tetos globais e papéis.** Dois arquivos JSON, validados por um esquema que vai com o
   kit (`packages/runtime/schema/config.schema.json`): o global (`~/.cursor-workflows/config.json`, com os tetos
@@ -236,8 +238,9 @@
   (`${HOME}`), o `.agents/workflows/config.json` com `$schema` e a faixa de versão do kit, a linha `.workflows/` no
   `.gitignore` e um bloco de quatro linhas no `AGENTS.md` (criado se preciso). Imprime o diff do que mudou e não faz
   commit. Rodar de novo não muda nada; os outros servidores de um `mcp.json` existente ficam; `--no-agents-md` pula o
-  bloco e `--remove` o tira. Como o Claude Code lê o `CLAUDE.md` e não o `AGENTS.md`, o comando avisa no stderr quando o
-  `CLAUDE.md` não importa o `AGENTS.md` (não o edita). O `templates/agents-md-block.md` ganhou o link para o guia de instalação. O endereço
+  bloco e `--remove` o tira. Como o Claude Code lê o `CLAUDE.md` e não o `AGENTS.md`, o comando avisa no stderr, a cada
+  execução, quando um arquivo de memória do Claude Code (`CLAUDE.md`, `.claude/CLAUDE.md` ou `CLAUDE.local.md`, no
+  repositório ou acima dele) esconde o `AGENTS.md` sem importá-lo, com a linha de import que funciona (não o edita). O `templates/agents-md-block.md` ganhou o link para o guia de instalação. O endereço
   `$schema` do esquema passou a ser o da URL bruta (`raw.githubusercontent.com`): a da página do GitHub devolve HTML, que
   o editor não lê.
 - **`wf doctor` confere o ambiente que o IDE usa.** Roda oito verificações, cada falha com a dica de como corrigir:
@@ -270,6 +273,20 @@
   `.workflows/` falhava com `ENOTDIR`.
 
 ### Mudado
+
+- **Cancelar um run para os cloud agents dele, em qualquer estado do job** ([ADR-0007](docs/adr/0007-cancel-stops-cloud-agents.md),
+  que substitui o ADR-0006). Um job que executa recebe SIGTERM; um job congelado (processo vivo, sem heartbeat) é morto, o
+  que não desfaz a etapa em andamento, e os agentes que o log mostra sem fim são cancelados pela API da Cursor; um job cujo
+  processo já morreu tem os agentes cancelados pela API, sem resume. Um resume depois de qualquer um desses cancelamentos
+  cria um agente novo e paga de novo, inclusive depois de cancelar um job congelado só para liberar o run. No dashboard,
+  um run congelado aparece como `failed`, com o erro `no heartbeat for <N>s`, e ganha **Cancel run**, com ou sem etapa na
+  nuvem: o cancelamento mata o processo e cancela os cloud agents dele. Um run cujo processo morreu com agentes na nuvem
+  ganha **Cancel cloud agent**.
+- **As mensagens do kit são em inglês.** Tudo o que o runtime, o CLI e o instalador imprimem, devolvem ou lançam (os
+  prefixos `warning:` e `error:` do instalador inclusive); o guia de instalação e as skills citam as mensagens como saem.
+- **Dashboard redesenhado.** Runs, Board e Metrics com um só arquivo de tokens de cor (claro e escuro) e um formatador
+  en-US; na página do run, títulos de raia, zoom mínimo, log da etapa sobre o grafo no celular, foco do teclado que entra
+  no log e volta ao nó, e o enquadramento da etapa aberta ou da que falhou.
 
 - **O teto de tempo dos testes do `implement-issue` sai dos args do run.** `testTimeoutSec` passa a ser só um ajuste
   (`workflows.implement-issue.settings.testTimeoutSec`, padrão 600), como os outros limites: um run que ainda o passe
@@ -320,8 +337,8 @@
   run na mesma issue, depois do primeiro, abre um PR novo na sua branch. Um run começado antes desta mudança retoma na
   branch e no worktree antigos. Uma issue tem no máximo um run ativo: o segundo run volta
   `status: "issue-locked"` com o `activeRunId` do que está ativo, sem branch, worktree nem agente (o lock é o arquivo
-  `.workflows/locks/issue-<n>.lock`, do mesmo tipo do `run.lock`, com um hash do `--repo` no nome quando o run o
-  passa, porque a issue #5 de outro repositório é outra issue; o de um processo que morreu é retomado). A entrega
+  `.workflows/locks/issue-<n>.lock`, do mesmo tipo do `run.lock`, com um hash do repositório no nome só quando o
+  `repo` do run é outro repositório que não o do cwd, porque a issue #5 de outro repositório é outra issue; o de um processo que morreu é retomado). A entrega
   empurra com `--force-with-lease`, só em branch `wf/`: o resume depois de o PR existir refaz o commit e entrega por
   cima, em vez de falhar com non-fast-forward. Se a branch no origin tem um commit que o run não empurrou (alguém
   empurrou uma correção), o run volta `status: "push-refused"` e não sobrescreve nada; o trabalho fica no worktree. Um run que entregou antes

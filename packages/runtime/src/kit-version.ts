@@ -66,27 +66,27 @@ export function kitCompatibility(cwd: string, version: string = readKitPackage()
       version,
       range,
       problem: {
-        message: `a faixa "kit" de ${REPO_CONFIG_FILE} (${JSON.stringify(declared)}) não é uma faixa semver válida`,
-        hint: `Escreva uma faixa semver em "kit", por exemplo ">=1.0.0 <2.0.0" (o \`wf init\` escreve a do kit que o rodou).`,
+        message: `the "kit" range of ${REPO_CONFIG_FILE} (${JSON.stringify(declared)}) is not a valid semver range`,
+        hint: `Write a semver range in "kit", for example ">=1.0.0 <2.0.0" (\`wf init\` writes the range of the kit that ran it).`,
       },
     };
   }
   if (semver.satisfies(version, range)) return { version, range };
-  const where = `o kit instalado é a versão ${version}, fora da faixa "${range}" que o repositório declara em ${REPO_CONFIG_FILE} ("kit")`;
+  const where = `the installed kit is version ${version}, outside the range "${range}" the repository declares in ${REPO_CONFIG_FILE} ("kit")`;
   if (semver.ltr(version, range)) {
-    return { version, range, problem: { message: `${where}: ele é mais antigo que a faixa`, hint: `Atualize o kit com \`wf upgrade\` para uma versão dentro de "${range}".` } };
+    return { version, range, problem: { message: `${where}: it is older than the range`, hint: `Update the kit with \`wf upgrade\` to a version within "${range}".` } };
   }
   if (semver.gtr(version, range)) {
     return {
       version,
       range,
       problem: {
-        message: `${where}: ele é mais novo que a faixa`,
-        hint: `Instale um kit dentro de "${range}" ou, depois de conferir que o repositório funciona com o kit ${version}, atualize "kit" em ${REPO_CONFIG_FILE}.`,
+        message: `${where}: it is newer than the range`,
+        hint: `Install a kit within "${range}" or, after checking that the repository works with kit ${version}, update "kit" in ${REPO_CONFIG_FILE}.`,
       },
     };
   }
-  return { version, range, problem: { message: where, hint: `Instale um kit dentro de "${range}" ou ajuste "kit" em ${REPO_CONFIG_FILE}.` } };
+  return { version, range, problem: { message: where, hint: `Install a kit within "${range}" or change "kit" in ${REPO_CONFIG_FILE}.` } };
 }
 
 /** Throws when the running kit is outside the repo's declared range. Called before a run starts. */

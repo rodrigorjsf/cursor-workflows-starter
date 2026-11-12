@@ -17,8 +17,10 @@
 // has no PR, so it is judged by its run (`planSnapshots`): it goes when the run is one of this repo's, no process executes it,
 // and its last event is older than the grace period (`gcSnapshotGraceHours`: a cloud agent may still be starting from the ref
 // shortly after the process died). A run cut off in the middle of the cloud step that owns the branch keeps it longer, for as long
-// as gc keeps a failed run (`gcFailedAfterDays`), and for ever when the run was cancelled, which gc keeps too: a resume reattaches to
-// that agent and a write step's work is on that branch.
+// as gc keeps a failed run (`gcFailedAfterDays`), and for ever when the run was cancelled, which gc keeps too: a resume may reattach
+// to that agent, and a write step's work is on that branch. gc does not ask the cloud whether it will: when the agent is gone, or
+// its newest run was cancelled (any cancel of the run does that, whatever state its job was in), the resume starts a new agent instead. Either
+// way the resume deletes the branch.
 import { existsSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { SNAPSHOT_BRANCH_PREFIX, snapshotBranchSegment, snapshotRunSegment } from "../../src/runtime/cloud-snapshot.js";
@@ -323,7 +325,7 @@ async function planSnapshots(plan: GcPlan, commands: Commands, snapshots: Snapsh
       keep(`a process is executing run ${runId}`);
       continue;
     }
-    // The log is the one source of when a run last did anything (ADR-0002): a run with no event gives gc nothing to wait on, so it stays.
+    // The log is the one source of when a run last did anything (ADR-0008): a run with no event gives gc nothing to wait on, so it stays.
     const events = runEvents(cwd, runId);
     const lastEvent = Date.parse(events.at(-1)?.ts ?? "");
     if (!Number.isFinite(lastEvent)) {
@@ -336,12 +338,13 @@ async function planSnapshots(plan: GcPlan, commands: Commands, snapshots: Snapsh
       continue;
     }
     // A step cut off with its agent running is resumed by reattaching to the agent, and a step that writes has its work on this branch.
+    // (Not when the agent's newest run was cancelled: the resume then starts a new agent. The log does not say so, and gc asks no cloud.)
     // The run is given up on like gc gives up on a failed one; a cancelled run is never given up on: gc keeps it because it can be resumed.
     const cutOff = [...interruptedCloudSteps(events).values()].find((step) => step.snapshot?.branch === branch);
     const cancelled = lastEnd(events)?.how === "cancelled";
     if (cutOff && (cancelled || idle <= plan.failedAfterDays * DAY_MS)) {
       const wait = cancelled ? "it was cancelled, and a cancelled run can be resumed" : `gc waits for more than ${plural(plan.failedAfterDays, "day")} (gcFailedAfterDays) before it gives up on the run`;
-      keep(`run ${runId} was ${cancelled ? "cancelled" : "cut off"} in the middle of the cloud step this branch belongs to (agent ${cutOff.agentId}): a resume reattaches to the agent and takes its work from the branch, and ${wait}`);
+      keep(`run ${runId} was ${cancelled ? "cancelled" : "cut off"} in the middle of the cloud step this branch belongs to (agent ${cutOff.agentId}): a resume reattaches to the agent if it is still running and takes its work from the branch, and ${wait}`);
       continue;
     }
     plan.remove.push({ runId, reason: "snapshot", actions: [{ kind: "remote-branch", target: branch, head, remote }], notes: [] });

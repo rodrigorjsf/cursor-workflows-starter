@@ -103,7 +103,7 @@ function markdownFiles(dir: string): string[] {
   );
 }
 
-/** Prose only: fenced blocks and inline code spans are quoted code, identifiers or runtime messages (Portuguese today). */
+/** Prose only: fenced blocks and inline code spans are quoted code, identifiers or runtime messages. */
 const prose = (md: string) => md.replace(/```[\s\S]*?```/g, "").replace(/`[^`]*`/g, "");
 
 test("the distributed skills are written in English", () => {
@@ -154,6 +154,26 @@ test("the setup skill covers init, doctor, upgrade, validate and config, and eac
   // The two long procedures live in references, linked from the section that needs them.
   assert.match(skill, /\]\(references\/validate\.md\)/);
   assert.match(skill, /\]\(references\/config\.md\)/);
+});
+
+test("the setup skill's config reference names every key the config schema accepts, and points at the schema the kit ships", () => {
+  const reference = read("skills", "cursor-workflows-setup", "references", "config.md");
+  const schema = JSON.parse(read("packages", "runtime", "schema", "config.schema.json"));
+  const keys = (properties: Record<string, unknown>) => Object.keys(properties).filter((key) => !key.startsWith("$"));
+  const groups: Record<string, string[]> = { "top level": keys(schema.properties) };
+  for (const [name, definition] of Object.entries<{ properties?: Record<string, unknown> }>(schema.definitions)) {
+    if (definition.properties) groups[name] = keys(definition.properties);
+  }
+  // A key counts as named only inside a code span, never in the prose between two spans.
+  const spans = [...reference.matchAll(/`([^`]+)`/g)].map((m) => m[1]!);
+  for (const [group, names] of Object.entries(groups)) {
+    for (const key of names) assert.ok(spans.some((span) => new RegExp(`\\b${key}\\b`).test(span)), `config.md never names ${group} key \`${key}\``);
+  }
+  const shipped = reference.match(/~\/\.cursor-workflows\/kit\/(packages\/runtime\/schema\/config\.schema\.json)/);
+  assert.ok(shipped && existsSync(join(ROOT, shipped[1]!)), "config.md must point at the config schema in the installed kit");
+  // The schema's descriptions are pt-BR (they feed the generated docs/reference/config.md): the English skill gives each
+  // key's meaning itself, and never sends an agent to read them.
+  assert.doesNotMatch(reference, /\bdescriptions?\b/, "config.md must not send the agent to the schema's (pt-BR) descriptions");
 });
 
 test("the validate reference names what the kit ships: its scripts exist, the cheap workflow exists, and scenario 4 asks for the PR", () => {

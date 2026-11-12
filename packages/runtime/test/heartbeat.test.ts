@@ -30,14 +30,16 @@ after(() => rmSync(cwd, { recursive: true, force: true }));
 const heartbeatOnDisk = (jobId: string) => (JSON.parse(readFileSync(join(jobsDir(cwd), `${jobId}.json`), "utf8")) as { heartbeat: string }).heartbeat;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-test("a job whose process is alive but whose heartbeat is stale is reported as failed, with its run id for resume", () => {
-  const record = createJob(cwd, "w", { runId: "run-stale", jobId: "job-stale" }); // pid: this process, which is alive
+test("a job whose pid is alive but whose heartbeat is stale is reported as failed, with its run id for resume", () => {
+  // pid: this process, which is alive but is not the job's process and holds no run: the job ended. A frozen job (its own
+  // process, holding the run) says `no heartbeat` instead: detached.process.test.ts and cloud.lifecycle.test.ts cover it.
+  const record = createJob(cwd, "w", { runId: "run-stale", jobId: "job-stale" });
   writeJob(cwd, { ...record, heartbeat: new Date(Date.now() - 5 * 60_000).toISOString() });
   const state = readJob(cwd, "job-stale")!;
   assert.equal(state.status, "failed");
   assert.equal(state.runId, "run-stale");
   assert.match(state.error!, /resumeRunId="run-stale"/);
-  assert.match(state.error!, /no heartbeat/);
+  assert.match(state.error!, /ended without finishing the job/);
 });
 
 test("a job with a fresh heartbeat and a live process is running", () => {

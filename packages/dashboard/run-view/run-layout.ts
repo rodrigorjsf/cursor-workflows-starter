@@ -34,8 +34,20 @@ export const NODE_SIZE: Record<NodeKind, { width: number; height: number }> = {
   join: { width: 30, height: 30 },
 };
 
+/** The text sizes of a step or command node, in pixels at zoom 1: its label, and the line under it (the model or the command). The components set them. */
+export const NODE_TEXT_PX = { label: 14, sub: 12 } as const;
+
 /** Space around the nodes of the first and last lane, inside the band. */
 const LANE_PADDING = 24;
+
+/** Where a lane's title sits inside its band: `LaneNode` places the title with these, and the title is cut to the box. */
+export const LANE_TITLE = { top: 10, left: 12, height: 18 } as const;
+
+/** The strip at the top of every band that holds its title: no node is placed in it, so no node covers a title. */
+const LANE_HEADER = LANE_TITLE.top + LANE_TITLE.height + 12;
+
+/** The box a lane's title takes, in the coordinates of the layout. */
+export const laneTitleBox = (lane: LaneBand): Box => ({ x: lane.x + LANE_TITLE.left, y: LANE_TITLE.top, width: Math.max(0, lane.width - 2 * LANE_TITLE.left), height: LANE_TITLE.height });
 
 const elk = new ELK();
 
@@ -58,7 +70,9 @@ export async function layoutRunGraph(graph: RunGraph): Promise<RunLayout> {
   });
 
   const nodes: Record<string, Box> = {};
-  for (const child of laid.children ?? []) nodes[child.id] = { x: child.x ?? 0, y: child.y ?? 0, width: child.width ?? 0, height: child.height ?? 0 };
+  const top = Math.min(...(laid.children ?? []).map((child) => child.y ?? 0));
+  // Every node moves down below the title strip: the topmost lands just under it.
+  for (const child of laid.children ?? []) nodes[child.id] = { x: child.x ?? 0, y: (child.y ?? 0) - top + LANE_HEADER, width: child.width ?? 0, height: child.height ?? 0 };
   const right = Math.max(...Object.values(nodes).map((b) => b.x + b.width));
   const bottom = Math.max(...Object.values(nodes).map((b) => b.y + b.height));
   const left = Math.min(...Object.values(nodes).map((b) => b.x));

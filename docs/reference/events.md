@@ -221,7 +221,7 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 | --- | --- | --- | --- |
 | `attemptId` | `string` | sim | A tentativa a que o agente pertence (o `attemptId` do `step-start`). |
 | `agentId` | `string` | sim | O id do agente no Cursor (`bc-…`). |
-| `reattached` | `true` | não | true = a tentativa reanexou a um agente que uma execução anterior, interrompida, deixou rodando: ele não foi criado agora. |
+| `reattached` | `true` | não | true = a tentativa reanexou a um agente que uma execução anterior, interrompida, deixou para trás (rodando ou já terminado sem ninguém olhando): ele não foi criado agora. |
 | `snapshot` | `{ remote: string; branch: string; commit?: string }` | não | A branch de snapshot de que o agente parte, o remote para onde foi empurrada e o commit dela (o ponto de partida do agente: uma etapa que escreve só traz o trabalho de volta para um worktree que ainda é esse commit). Quem reanexa a apaga quando a etapa termina. Ausente quando a tentativa reanexou a um agente cuja branch o log não conhece. |
 
 ### `exec-start`

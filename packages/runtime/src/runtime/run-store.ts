@@ -141,11 +141,16 @@ function acquireLock(dir: string, runId: string): () => void {
   );
 }
 
-/** Is a live process executing run `runId` of the repo `cwd`? Only reads: it neither creates the run's directory nor takes its lock. */
-export function isRunExecuting(cwd: string, runId: string): boolean {
+/** The pid of the live process executing run `runId` of the repo `cwd`, or undefined when none holds its lock. Only reads: it neither creates the run's directory nor takes its lock. */
+export function runLockHolder(cwd: string, runId: string): number | undefined {
   const file = join(runDirIn(cwd, runId), LOCK_FILE);
   const holder = readLock(file);
-  return holder !== undefined && isHeld(holder, file);
+  return holder !== undefined && isHeld(holder, file) ? holder.pid : undefined;
+}
+
+/** Is a live process executing run `runId` of the repo `cwd`? Only reads: it neither creates the run's directory nor takes its lock. */
+export function isRunExecuting(cwd: string, runId: string): boolean {
+  return runLockHolder(cwd, runId) !== undefined;
 }
 
 /**
@@ -242,7 +247,8 @@ export class RunStore {
   readonly ledger: Ledger;
   /**
    * The cloud steps an earlier execution left without an end, by `stepId`, replayed from the event log when the store was
-   * opened. A resume reattaches to their agents instead of creating new ones.
+   * opened. A resume reattaches to their agents instead of creating new ones, unless an agent's newest run was cancelled
+   * (a cancel of the run, whatever state its job was in): then it starts a new agent.
    */
   readonly interruptedCloud: ReadonlyMap<string, InterruptedCloudStep>;
   /** Which files ended in a torn line (a crash mid-append) when the run was opened. */
@@ -286,6 +292,11 @@ export class RunStore {
    */
   redact<E extends WorkflowEvent>(event: E): E {
     return this.redactor.value(event);
+  }
+
+  /** Redacts, from now on, the values of the secret-named variables of `env` too: the environment a command is about to run with. */
+  learnSecrets(env: Record<string, string | undefined>): void {
+    this.redactor.learn(env);
   }
 
   appendEvent(event: WorkflowEvent): void {

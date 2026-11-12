@@ -13,7 +13,8 @@
 //   get_workflow_status {jobId}                     → state, without waiting
 //   cancel_workflow {jobId}                         → cancel the job and return its state (the run stays resumable)
 //
-// The state is a projection of the run's event log (jobs.ts): the job record holds identity only.
+// The state is a projection of the run's event log (job-state.ts): the job record holds the job's identity and only the
+// facts its process cannot put in the log (ADR-0008).
 //
 // Each job runs in a detached process (`spawnJob`): this server only starts it, reads its state and asks it to cancel.
 // Restarting the server (or Cursor) does not affect a run in progress; the new server finds it through the job's files.
@@ -96,8 +97,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           name: "cancel_workflow",
           description:
             "Cancels a running job: stops the active agents, reverts the step that was writing and marks the job cancelled. " +
-            "A stuck process (a failed job with no heartbeat) is killed. " +
-            "The run can be resumed later with start_workflow {resumeRunId}. Call it only when the user asks to stop.",
+            "A stuck process (a failed job with no heartbeat) is killed (SIGKILL) without reverting its step. " +
+            "For that killed process, and for a job whose process already ended (a crash), it cancels the cloud agents the run left running, the returned note names them, and the job stays failed. " +
+            "The run can be resumed later with start_workflow {resumeRunId}; a resume after a cancel that named cloud agents starts new ones in their place, at new cost. Call it only when the user asks to stop.",
           inputSchema: { type: "object", required: ["jobId"], properties: { jobId: { type: "string" } } },
         },
       ],

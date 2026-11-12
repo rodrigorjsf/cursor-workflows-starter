@@ -2,7 +2,7 @@
 import { Handle, type Node, type NodeProps, Position } from "@xyflow/react";
 import { NodeRows } from "./NodeRows.js";
 import { describeNode, runsInCloud } from "./node-details.js";
-import { NODE_SIZE } from "./run-layout.js";
+import { LANE_TITLE, NODE_SIZE, NODE_TEXT_PX } from "./run-layout.js";
 import type { GraphNode, NodeState } from "./run-graph.js";
 
 export interface WorkNodeData extends Record<string, unknown> {
@@ -11,12 +11,14 @@ export interface WorkNodeData extends Record<string, unknown> {
   now: number;
   /** Opens the node's log. Called for a key press on the node; a click is React Flow's `onNodeClick`. */
   onOpen?: () => void;
+  /** Brings the node into view on the canvas. Called when the node takes the keyboard focus (Tab), not a click's. */
+  onFocus?: () => void;
 }
 export interface LaneNodeData extends Record<string, unknown> {
   title: string;
 }
 
-const GLYPH: Record<NodeState, string> = { running: "●", ok: "✓", failed: "✗", cancelled: "⊘", cached: "↺", interrupted: "⏸" };
+const GLYPH: Record<NodeState, string> = { running: "●", ok: "✓", failed: "✗", cancelled: "⊘", cached: "↺", interrupted: "‖" };
 
 /** The state as a word a screen reader says; the glyph alone is decoration. */
 function Glyph({ state }: { state: NodeState }) {
@@ -36,20 +38,23 @@ function Handles() {
   );
 }
 
-/** A step or a command: its label, what it runs, a badge when it ran in the cloud, and a tooltip with the details that appears on hover or focus. Clicking it (or Enter on it) opens its log. */
+/** A step or a command: its label, what it runs, a badge when it ran in the cloud, and a tooltip with the details that appears on hover or focus. Clicking it (or Enter on it) opens its log; tabbing to it brings it into view. */
 export function WorkNode({ data, selected }: NodeProps<Node<WorkNodeData, "work">>) {
-  const { node, now, onOpen } = data;
+  const { node, now, onOpen, onFocus } = data;
   const rows = describeNode(node, now);
   const what = node.kind === "command" ? node.detail.command : node.detail.model;
   const cloud = runsInCloud(node);
   return (
     <div
       className={`work ${node.kind} state-${node.state}${selected ? " selected" : ""}`}
-      style={NODE_SIZE[node.kind]}
+      style={{ ...NODE_SIZE[node.kind], fontSize: NODE_TEXT_PX.label }}
       tabIndex={0}
       role="button"
       aria-pressed={selected}
       aria-label={`${node.label}: ${node.state}${cloud ? ", cloud agent" : ""}. Open its log`}
+      onFocus={(event) => {
+        if (event.currentTarget.matches(":focus-visible")) onFocus?.(); // a click lands on a node already in view
+      }}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
@@ -67,7 +72,11 @@ export function WorkNode({ data, selected }: NodeProps<Node<WorkNodeData, "work"
           </span>
         )}
       </div>
-      {what !== undefined && <div className="sub">{what}</div>}
+      {what !== undefined && (
+        <div className="sub" style={{ fontSize: NODE_TEXT_PX.sub }}>
+          {what}
+        </div>
+      )}
       <NodeRows rows={rows} className="tip" role="tooltip" tabbable={false} />
     </div>
   );
@@ -95,5 +104,14 @@ export function StartNode({ data }: NodeProps<Node<WorkNodeData, "start">>) {
 
 /** A phase: a band behind the nodes with its title on top. */
 export function LaneNode({ data }: NodeProps<Node<LaneNodeData, "lane">>) {
-  return <div className="lane">{data.title !== "" && <span className="lane-title">{data.title}</span>}</div>;
+  const { top, left, height } = LANE_TITLE;
+  return (
+    <div className="lane">
+      {data.title !== "" && (
+        <span className="lane-title" style={{ top, left, right: left, height, lineHeight: `${height}px` }}>
+          {data.title}
+        </span>
+      )}
+    </div>
+  );
 }

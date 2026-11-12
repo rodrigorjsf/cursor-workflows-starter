@@ -209,9 +209,9 @@ async function start(port: number, entry: string, startTimeoutMs: number): Promi
   try {
     const out = openSync(logFile, "a");
     try {
-      // The Cursor API key is not the dashboard's business: it never reads it, and it outlives the caller.
-      const { CURSOR_API_KEY: _key, ...env } = process.env;
-      const child = spawn(process.execPath, [...process.execArgv, entry], { detached: true, stdio: ["ignore", out, out], env });
+      // The whole environment, CURSOR_API_KEY included: cancelling a dead run's cloud agents from the dashboard reaches the
+      // Cursor API through the SDK, which finds the key there before the saved `wf login` one.
+      const child = spawn(process.execPath, [...process.execArgv, entry], { detached: true, stdio: ["ignore", out, out] });
       child.once("exit", () => (exited = true));
       child.once("error", (err) => (spawnError = err.message));
       child.unref();

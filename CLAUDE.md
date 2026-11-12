@@ -2,7 +2,7 @@
 
 Canonical guide for agents and humans working on this repo. `AGENTS.md` is a symlink to this file, so Cursor, Codex
 and Claude Code read the same text. Line budget: 100 lines. It is loaded into every agent's context, so keep it short.
-Detail lives in the contributor section of the docs book (`CONTRIBUTING.md` until the book lands).
+Detail lives in the contributor section of the docs book (`docs/contributing/`).
 
 ## What this repo is
 
@@ -25,7 +25,7 @@ A runtime for **deterministic workflows** on the Cursor SDK (`@cursor/sdk`), as 
 
 The runtime resolves its own assets relative to its install location, never the repo root. The only repo it runs in
 is the target repo (the cwd). Keep it that way. One exception, for tools beside it: the `observe` entry point finds
-runs of every repo through the global runs index (ADR-0002), reads their logs, and cancels their jobs.
+runs of every repo through the global runs index (ADR-0008), reads their logs, and cancels their jobs.
 
 Workflows live in `packages/runtime/workflows/*.ts` (built in) and `.agents/workflows/*.ts` (per repo). The MCP server
 `workflows` or the CLI (`npm run wf -- ...`) runs them. Step agents read this file too (`settingSources: ["project"]`).
@@ -58,7 +58,7 @@ Workflows live in `packages/runtime/workflows/*.ts` (built in) and `.agents/work
 - Commit, push and PR are done by the workflow code, not by you.
 - Tests against the real API: prefer the models included in the plan (`composer-2.5`, Grok, `default`). Models that
   use paid quota are allowed when the test needs them. Always pass `--max-tokens` and `--max-cents`. Full policy in
-  `CONTRIBUTING.md`.
+  chapter 9.1 (`docs/contributing/01-contribuindo.md`).
 - Metrics live in `~/.cursor-workflows/metrics.db` (`npm run stats`, `npm run dash`). Never send the database, or an
   export made with `--no-anonymize`, off the user's machine.
 
@@ -83,3 +83,6 @@ When something fails repeatedly, when User has to re-explain, or when a workarou
 - Windows Chrome → WSL dashboard: use `127.0.0.1:4317`; `localhost` is refused.
 - Browser checks: use `chrome-devtools` MCP; `/chrome` fails over Remote Control.
 - `tsx -e` rejects top-level await: write a `.mts` file and run it.
+- Fresh worktree has no node_modules: `mise exec node@22.23.4 -- npm ci --prefer-offline`.
+- Piped `gh issue view --comments` prints only comments: use `--json body,comments`.
+- Test repos: set `core.autocrlf=false`; global git here converts line endings.

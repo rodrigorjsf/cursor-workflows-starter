@@ -1,6 +1,6 @@
 # 7.2 · ADR-0002: The event log is the source of truth
 
-**Status:** accepted · decided in [spec #2](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/2)
+**Status:** superseded by ADR-0008 ([7.8](0008-job-record-keeps-what-the-log-cannot.md)) · decided in [spec #2](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/2)
 
 ## Context
 
