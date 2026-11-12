@@ -54,7 +54,7 @@ test("without config files the run starts with the code defaults, recorded in ru
   const start = runStartOf(logOf(r.runId));
   assert.equal(start.config.workflow, "cfg");
   assert.deepEqual(start.config.limits, { maxTokens: 3_000_000, maxTokensPerStep: null, maxCents: null, concurrency: 4 });
-  assert.deepEqual(start.config.roles.classify, { model: { id: "composer-2.5" }, timeoutMs: 1_800_000, retries: 1, schemaRetries: 2 });
+  assert.deepEqual(start.config.roles.classify, { location: "local", model: { id: "composer-2.5" }, timeoutMs: 1_800_000, retries: 1, schemaRetries: 2 });
   assert.deepEqual(start.provenance["/limits/maxTokens"], { layer: "default" });
   assert.deepEqual(start.provenance["/roles/classify/model/id"], { layer: "default" });
   assert.deepEqual(start.violations, []);
@@ -93,6 +93,7 @@ test("role settings layer field by field; a model's id and params inherit separa
   writeRepoConfig(cwd, { workflows: { cfg: { roles: { review: { retries: 0, model: { id: "grok-5" } } } } } });
   const start = await startOf();
   assert.deepEqual(start.config.roles.review, {
+    location: "local",
     model: { id: "grok-5", params: [{ id: "reasoning_effort", value: "medium" }] },
     timeoutMs: 600_000,
     retries: 0,
@@ -239,7 +240,7 @@ test("the global caps clamp the result: numbers take the minimum, and a repo pre
     maxCents: 100,
     allowedModels: null,
     allowedSettingSources: null,
-    allowedLocations: null,
+    allowedLocations: ["local"],
     maxConcurrency: null,
     requireSandbox: null,
   });
@@ -375,6 +376,104 @@ test("allowedModels: a model the config asks for outside the list is a violation
   assert.equal(refused.status, "failed");
   assert.match(refused.error!, /step "r": model grok-4\.7 is not in the global allowedModels cap \(composer-\*\)/);
   assert.equal(calls.length, 1, "the step with the allowed model ran, the other never created an agent");
+});
+
+test("a role's location is local unless a config layer sends it to the cloud, and the global allowedLocations cap must allow the cloud", async () => {
+  const startWith = async (global: unknown, repo?: unknown) => {
+    clearConfig(cwd);
+    if (global !== undefined) writeGlobalConfig(global);
+    if (repo) writeRepoConfig(cwd, repo);
+    return startOf();
+  };
+  const cloudReview = { workflows: { cfg: { roles: { review: { location: "cloud" } } } } };
+
+  const local = await startWith({});
+  assert.equal(local.config.roles.review!.location, "local", "the default");
+  assert.deepEqual(local.provenance["/roles/review/location"], { layer: "default" });
+
+  const allowed = await startWith({ caps: { allowedLocations: ["local", "cloud"] }, ...cloudReview });
+  assert.deepEqual([allowed.config.roles.review!.location, allowed.config.roles.classify!.location], ["cloud", "local"]);
+  assert.deepEqual(allowed.provenance["/roles/review/location"], { layer: "global", ref: globalConfigPath() });
+  assert.deepEqual(allowed.violations, []);
+
+  const unlimited = await startWith({ caps: { allowedLocations: null }, ...cloudReview });
+  assert.equal(unlimited.config.roles.review!.location, "cloud", "null lifts the cap: every location is allowed");
+
+  const repoLayer = await startWith({ caps: { allowedLocations: ["local", "cloud"] } }, cloudReview);
+  assert.deepEqual(repoLayer.provenance["/roles/review/location"], { layer: "repo", ref: repoConfigPath(cwd) }, "the repo file can ask for the cloud when the machine owner allows it");
+
+  // Denied: the role stays local and the request is recorded as a violation, like any other request above a cap.
+  const asked = { layer: "repo", ref: repoConfigPath(cwd), path: "/workflows/cfg/roles/review/location", requested: "cloud", applied: "local" };
+  const capped = await startWith({ caps: { allowedLocations: ["local"] } }, cloudReview);
+  assert.equal(capped.config.roles.review!.location, "local");
+  assert.deepEqual(capped.provenance["/roles/review/location"], { layer: "cap", ref: globalConfigPath() });
+  assert.deepEqual(capped.violations.map(({ message, ...rest }) => rest), [asked]);
+
+  const noGlobal = await startWith(undefined, cloudReview);
+  assert.equal(noGlobal.config.roles.review!.location, "local", "with no global file the cap defaults to local only");
+  assert.deepEqual(noGlobal.config.caps.allowedLocations, ["local"]);
+  assert.deepEqual(noGlobal.violations.map(({ message, ...rest }) => rest), [asked]);
+});
+
+test("a config that sends a role declared `cloud: never` to the cloud is refused before any step, whatever the caps say", async () => {
+  const toCloud = { workflows: { cfg: { roles: { "implement.low": { location: "cloud" } } } } };
+  for (const global of [{ caps: { allowedLocations: ["local", "cloud"] } }, {}]) {
+    clearConfig(cwd);
+    writeGlobalConfig(global);
+    writeRepoConfig(cwd, toCloud);
+    const r = await runWorkflow(configWorkflow(), {}, { cwd });
+    assert.equal(r.status, "failed");
+    assert.equal(r.refused, true, "nothing was written: the run never started");
+    assert.ok(r.error!.includes(repoConfigPath(cwd)), r.error);
+    assert.match(r.error!, /\/workflows\/cfg\/roles\/implement\.low\/location: role "implement\.low" is declared cloud: never by workflow cfg/);
+    assert.equal(calls.length, 0, "no agent was created");
+  }
+
+  // What counts is where the role ends up: a layer above can bring it back to local.
+  clearConfig(cwd);
+  writeGlobalConfig({ caps: { allowedLocations: ["local", "cloud"] }, workflows: { cfg: { roles: { "implement.low": { location: "cloud" } } } } });
+  writeRepoConfig(cwd, { workflows: { cfg: { roles: { "implement.low": { location: "local" } } } } });
+  const back = await startOf();
+  assert.equal(back.config.roles["implement.low"]!.location, "local");
+});
+
+test("a label cannot be sent to the cloud: only roles declare a cloud capability", async () => {
+  writeGlobalConfig({ caps: { allowedLocations: ["local", "cloud"] }, workflows: { cfg: { labels: { "desenhar:*": { location: "cloud" } } } } });
+  const r = await runWorkflow(configWorkflow(), {}, { cwd });
+  assert.equal(r.status, "failed");
+  assert.match(r.error!, /\/workflows\/cfg\/labels\/desenhar:\*\/location: location is set per role/);
+  assert.equal(calls.length, 0);
+});
+
+test("a role's resultVia is absent from the effective config until a layer sets it, then comes with its provenance; only the two strategies are valid", async () => {
+  const startWith = async (global: unknown, repo?: unknown) => {
+    clearConfig(cwd);
+    writeGlobalConfig(global);
+    if (repo) writeRepoConfig(cwd, repo);
+    return startOf();
+  };
+  const unset = await startWith({});
+  assert.equal("resultVia" in unset.config.roles.classify!, false, "no default cell: the effective config of a run that never asks is what it was");
+
+  const set = await startWith({ workflows: { cfg: { roles: { classify: { resultVia: "artifact" } } } } }, { workflows: { cfg: { roles: { review: { resultVia: "json-block" } } } } });
+  assert.deepEqual([set.config.roles.classify!.resultVia, set.config.roles.review!.resultVia], ["artifact", "json-block"]);
+  assert.deepEqual(set.provenance["/roles/classify/resultVia"], { layer: "global", ref: globalConfigPath() });
+  assert.deepEqual(set.provenance["/roles/review/resultVia"], { layer: "repo", ref: repoConfigPath(cwd) });
+
+  clearConfig(cwd);
+  writeGlobalConfig({ workflows: { cfg: { roles: { classify: { resultVia: "yaml" } } } } });
+  const bad = await runWorkflow(configWorkflow(), {}, { cwd });
+  assert.equal(bad.status, "failed");
+  assert.match(bad.error!, /\/workflows\/cfg\/roles\/classify\/resultVia/);
+  assert.equal(calls.length, 0);
+});
+
+test("a label cannot choose how a cloud step delivers its result either: its steps never run in the cloud", async () => {
+  writeGlobalConfig({ workflows: { cfg: { labels: { "desenhar:*": { resultVia: "artifact" } } } } });
+  const r = await runWorkflow(configWorkflow(), {}, { cwd });
+  assert.equal(r.status, "failed");
+  assert.match(r.error!, /\/workflows\/cfg\/labels\/desenhar:\*\/resultVia: resultVia is set per role/);
+  assert.equal(calls.length, 0);
 });
 
 test("allowedLocations without 'local' keeps every step from running", async () => {

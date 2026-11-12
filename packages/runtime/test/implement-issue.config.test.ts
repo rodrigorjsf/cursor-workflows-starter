@@ -72,7 +72,7 @@ const settings = (value: Record<string, unknown>) => writeRepoConfig(fx.repo, { 
 const slice = (n: number) => ({ behavior: `comportamento ${n}`, seam: "math.subtract", testIdea: `ideia ${n}` });
 const WRONG_CODE = SUB_CODE.replace("a - b", "a + b");
 
-test("implement-issue declares its ten settings with the code defaults; each is in the config schema, and the defaults pass it", () => {
+test("implement-issue declares its eleven settings with the code defaults; each is in the config schema, and the defaults pass it", () => {
   assert.deepEqual(implementIssue.meta.settings, {
     sliceCaps: { LOW: 1, MED: 3, HIGH: 5 },
     extraSlices: 2,
@@ -82,6 +82,7 @@ test("implement-issue declares its ten settings with the code defaults; each is 
     labelTiers: { "complexity:low": "LOW", "good first issue": "LOW", "complexity:medium": "MED", "complexity:high": "HIGH", security: "HIGH" },
     maxStepCrashes: 2,
     gcFailedAfterDays: 14,
+    gcSnapshotGraceHours: 24,
     testTimeoutSec: 600,
     networkTimeoutSec: 120,
   });
@@ -112,6 +113,7 @@ test("a setting that is out of range, misspelled or of the wrong shape fails the
   };
   await fails({ fixRounds: -1 }, /\/workflows\/implement-issue\/settings\/fixRounds/);
   await fails({ redGreenAttempts: 0 }, /\/workflows\/implement-issue\/settings\/redGreenAttempts/);
+  await fails({ gcSnapshotGraceHours: -1 }, /\/workflows\/implement-issue\/settings\/gcSnapshotGraceHours/);
   await fails({ sliceCaps: { LOW: 1, MED: 2 } }, /\/workflows\/implement-issue\/settings\/sliceCaps/);
   await fails({ labelTiers: { urgent: "EXTREME" } }, /\/workflows\/implement-issue\/settings\/labelTiers\/urgent/);
   await fails({ fixRound: 1 }, /\/workflows\/implement-issue\/settings\/fixRound: unknown setting \(workflow implement-issue declares: sliceCaps, extraSlices, fixRounds/);

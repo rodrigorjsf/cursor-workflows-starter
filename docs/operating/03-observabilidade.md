@@ -251,7 +251,7 @@ o encerra.
 | `/runs/<runId>` | a página do run: o grafo ao vivo, veja [Ver um run como grafo](#ver-um-run-como-grafo) (HTML, com o script e o estilo em `/assets/…`) |
 | `/api/runs/<runId>/steps/<stepId>/content` | o conteúdo de uma etapa: prompt, mensagens do agente, chamadas de tool e saída de comandos |
 | `/api/csrf` | `{csrfToken}`: o token que o `POST` de cancelar exige |
-| `POST /api/runs/<runId>/cancel` | cancela o job que executa o run (cabeçalho `X-CSRF-Token`): veja [Cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume) |
+| `POST /api/runs/<runId>/cancel` | cancela o job que executa o run (cabeçalho `X-CSRF-Token`); num run que não está executando, cancela pela API da Cursor os cloud agents que o processo morto deixou rodando e responde `200` com um `note`, ou `409` se não havia nada a cancelar: veja [Cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume) |
 | `/api/summary?days=` | o resumo de métricas dos painéis abaixo |
 | `/api/health` | `{app, pid}`: como quem chama sabe que é o dashboard que responde na porta |
 
@@ -309,10 +309,17 @@ para um run em andamento e para um que já terminou):
 - **Estado.** Um nó em andamento pisca e a aresta que chega a ele se move; depois vira verde (ok), vermelho (falhou), âmbar
   (cancelado) ou cinza (servido do journal ou do memo, num resume). Se o run termina, ou o processo cai, com um nó ainda em
   andamento, o nó vira "interrompido" (tracejado) em vez de piscar para sempre.
-- **Passar o mouse** sobre um nó mostra o modelo (ou o programa, num comando), onde rodou (`local`; os eventos de etapas na
-  nuvem trarão `cloud`), as tentativas, os tokens, o custo, a duração e o tipo do erro (`timeout`, `rate-limit`…; num
-  comando, `exit 2`, `timeout`…). Os números somam todas as tentativas e todas as execuções do run; o custo é o que o teto
-  de custo conta (o maior entre o bruto e o cobrado).
+- **Passar o mouse** sobre um nó mostra o modelo (ou o programa, num comando), onde rodou (`local` ou `cloud`), as
+  tentativas, os tokens, o custo, a duração e o tipo do erro (`timeout`, `rate-limit`…; num comando, `exit 2`,
+  `timeout`…). Os números somam todas as tentativas e todas as execuções do run; o custo é o que o teto de custo conta (o
+  maior entre o bruto e o cobrado), com "(not final)" enquanto a Cursor não fechou o custo de uma tentativa.
+- **Etapas na nuvem.** Uma etapa que rodou como cloud agent da Cursor (`location: "cloud"` no `step-start`) ganha o selo
+  **☁ cloud** no nó, e os detalhes ganham a linha **Cloud agent** com o id (`bc-…`) como link para o agente na Cursor
+  (`https://cursor.com/agents/<id>`, numa nova aba). O id vem do evento `cloud-agent`, que o motor grava assim que o agente
+  existe: o link aparece enquanto a etapa ainda roda. Numa etapa que trocou de agente (o antigo sumiu da nuvem), vale o
+  último. O link só é feito para um id no formato `bc-…`; qualquer outro valor aparece como texto. O tooltip de uma etapa
+  na nuvem aceita o ponteiro, para o link poder ser clicado; para chegar ao link pelo teclado, abra o log da etapa (Enter no
+  nó), que repete a localização, o agente e o custo.
 - **Clicar** num nó (ou Enter nele) abre o [log da etapa](#o-log-de-uma-etapa) ao lado do grafo.
 - **Replay.** Num run que não está em andamento, **Replay** reconstrói o grafo evento a evento, na ordem do log, com
   velocidade de 1× a 20×, pausa e uma barra para ir a qualquer ponto. O grafo de qualquer trecho do log é o mesmo que o
@@ -334,7 +341,9 @@ Clicar num nó abre, ao lado do grafo, o log da etapa, montado só a partir dos 
 
 - **Etapa de agente:** por tentativa, o prompt (um re-prompt aparece como outro bloco), o que o agente disse (escrito
   quando um turno termina), cada chamada de tool com os argumentos e, logo abaixo, a saída dela. Uma tool de MCP tem o título
-  `mcp: <nome da tool>`.
+  `mcp: <nome da tool>`. Numa etapa na nuvem, os dados acima do log trazem também a localização, o link do agente e o custo,
+  e as mensagens do cloud agent aparecem como as de um agente local. Uma etapa que um resume reanexou a um agente que
+  continuou rodando mostra só a resposta final dele (o run reanexado não tem stream).
 - **Comando de `ctx.exec`:** a linha de comando (`$ git commit -m …`), o diretório e a saída, com `stdout` e `stderr`
   separados e na ordem em que chegaram.
 - **Ao vivo.** Enquanto a etapa roda, o painel lê o conteúdo que já existe (`/api/runs/<runId>/steps/<stepId>/content`) e
@@ -448,7 +457,9 @@ aberta, 1 hora depois de mesclada ou fechada, e 5 minutos quando o `gh` não con
 - abre o banco em modo leitura;
 - não carrega nada de fora: os apps web são empacotados localmente, sem CDN, sem fontes nem imagens remotas. A página
   inicial vai com a política `default-src 'self'; script-src 'self'; style-src 'self'`, sem código inline, e a página do
-  run com `default-src 'none'` (scripts e conexões só da própria origem): funciona offline e em rede corporativa restrita.
+  run com `default-src 'none'` (scripts e conexões só da própria origem): funciona offline e em rede corporativa restrita;
+- só escreve um endereço de fora: o link do agente de uma etapa na nuvem (`https://cursor.com/agents/<id>`). Ele só abre
+  quando você clica, numa nova aba e sem `Referer`; o dashboard não faz nenhum pedido a ele.
 
 Verificado em 2026-11-11 no WSL2: escuta só em `127.0.0.1`, responde 403 a um `Host` estranho, não envia
 cabeçalhos CORS e não é alcançável pelo IP do WSL.

@@ -218,6 +218,36 @@ test("a token cap crossed while the backend is still creating the agent is held 
   assert.deepEqual([ends.b!.ok, ends.b!.errorKind, ends.b!.agentId, ends.b!.usage?.totalTokens], [false, "budget", "agent-b", 0], "b's agent existed, so its usage was read and charged");
 });
 
+test("a backend's warning goes to the run's log and does not stand for the agent: a token cap crossed before the agent exists still waits for it", async () => {
+  const bWarned = Promise.withResolvers<void>();
+  const capCrossed = Promise.withResolvers<void>();
+  const seenB: { before?: boolean; after?: boolean } = {};
+  const { backend } = stubBackend(async (h) => {
+    if (h.prompt === "b") {
+      h.onEvent({ type: "warning", message: "cloud agents ignore setting sources" }); // b is still pushing its snapshot: no agent yet
+      bWarned.resolve();
+      await capCrossed.promise;
+      seenB.before = h.signal.aborted;
+      h.onEvent({ type: "agent", agentId: "agent-b" });
+      seenB.after = h.signal.aborted;
+      return { outcome: { kind: "aborted", reason: h.signal.reason }, agentId: "agent-b", usage: usedTokens(0) };
+    }
+    await bWarned.promise;
+    await nextMacrotask();
+    h.onEvent(turn(100));
+    h.onEvent(turn(100)); // 200 > 150
+    capCrossed.resolve();
+    return { outcome: { kind: "aborted", reason: h.signal.reason }, agentId: "agent-a", usage: usedTokens(200) };
+  });
+  const wf = configWorkflow((ctx) => ctx.parallel([() => ctx.agent("a", { role: "classify", label: "a", retries: 0 }), () => ctx.agent("b", { role: "classify", label: "b", retries: 0 })]));
+  const r = await runWorkflow(wf, {}, { cwd, backend, maxTokens: 150 });
+
+  assert.equal(r.status, "failed");
+  assert.deepEqual(seenB, { before: false, after: true }, "the warning did not make the cap apply early");
+  const warnings = logOf(r.runId).filter((e) => e.type === "warning").map((e) => (e as { message: string }).message);
+  assert.ok(warnings.includes('step "b": cloud agents ignore setting sources'), `the warning is in the log, with its step: ${warnings}`);
+});
+
 test("cancelling the run aborts the attempt's signal with the cancellation as its reason, and the run stays resumable", async () => {
   const controller = new AbortController();
   const seen: { reason?: unknown } = {};

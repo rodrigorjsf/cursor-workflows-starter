@@ -1,6 +1,6 @@
 # 7.5 · ADR-0005: The cloud backend and the location cap
 
-**Status:** accepted · decided in [spec #2](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/2); built by [spec #5](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/5)
+**Status:** superseded by ADR-0006 ([7.6](0006-cloud-steps-as-built.md)) · decided in [spec #2](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/2); built by [spec #5](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/5)
 
 ## Context
 
@@ -63,4 +63,4 @@ enforced before any cloud code exists.
 
 ---
 
-[← Anterior: 7.4 · ADR-0004: npm workspaces and a canonical CLAUDE.md](0004-workspaces-and-claude-md-symlink.md) · [Índice](../README.md) · [Próximo: 8.1 · Cursor SDK como motor de workflows determinísticos: relatório de pesquisa →](../research/relatorio-pesquisa.md)
+[← Anterior: 7.4 · ADR-0004: npm workspaces and a canonical CLAUDE.md](0004-workspaces-and-claude-md-symlink.md) · [Índice](../README.md) · [Próximo: 7.6 · ADR-0006: Cloud steps as built →](0006-cloud-steps-as-built.md)

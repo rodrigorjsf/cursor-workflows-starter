@@ -72,8 +72,9 @@ _Evite_: log (sozinho), progresso.
 **Location**:
 Onde uma etapa roda: `local` (o loop do agente roda na máquina do usuário, o padrão) ou `cloud` (numa VM da Cursor). Em
 ambos a inferência é hospedada pela Cursor; a location só define onde o loop roda e onde o código fica. A configuração
-escolhe a location por role, o teto global `allowedLocations` a permite ou não, e o workflow declara a capacidade de
-cada role. Hoje só `local` existe; `cloud` é a decisão do [ADR-0005](../adr/0005-cloud-backend-and-location-cap.md).
+escolhe a location por role, o teto global `allowedLocations` a permite ou não (sem ele, só `local`), e o workflow declara
+a capacidade de cada role. Uma etapa pode rodar em `cloud` contra um snapshot do worktree: a de leitura devolve só o resultado, e a que
+escreve commita na branch de snapshot e o motor avança o worktree até o trabalho dela (um fast-forward, ou a etapa falha). A decisão é o [ADR-0006](../adr/0006-cloud-steps-as-built.md).
 _Evite_: ambiente, runtime.
 
 ## Onde cada coisa mora no disco

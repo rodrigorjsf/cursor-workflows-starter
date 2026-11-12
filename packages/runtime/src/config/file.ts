@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import { Ajv, type ValidateFunction } from "ajv";
+import type { ResultVia, StepLocation } from "../runtime/backend.js";
 import { userDir } from "../runtime/state.js";
 
 /** Pointer into a JSON document (RFC 6901): `/workflows/implement-issue/roles/review`. */
@@ -19,12 +20,16 @@ export interface ConfigCaps {
   maxCents?: number | null;
   allowedModels?: string[] | null;
   allowedSettingSources?: SettingSource[] | null;
-  allowedLocations?: Array<"local" | "cloud"> | null;
+  allowedLocations?: StepLocation[] | null;
   maxConcurrency?: number | null;
   requireSandbox?: boolean | null;
 }
 
 export interface RolePrefs {
+  /** Where the role's steps run. Absent: `local`. Only roles have one (a label has no declared cloud capability). */
+  location?: StepLocation;
+  /** How a cloud step of the role delivers a structured result. Absent: `json-block`. Only roles have one, like `location`. */
+  resultVia?: ResultVia;
   /** Field by field: what is absent inherits from the layer below. */
   model?: Partial<ModelSelection>;
   timeoutMs?: number;
@@ -51,10 +56,16 @@ export interface DashboardPrefs {
   autoStart?: boolean;
 }
 
+export interface CloudPrefs {
+  /** The git remote that cloud steps' snapshot branches are pushed to. Default: `origin`. */
+  remote?: string;
+}
+
 export interface ConfigFile {
   kit?: string;
   caps?: ConfigCaps;
   dashboard?: DashboardPrefs;
+  cloud?: CloudPrefs;
   workflows?: Record<string, WorkflowPrefs>;
 }
 

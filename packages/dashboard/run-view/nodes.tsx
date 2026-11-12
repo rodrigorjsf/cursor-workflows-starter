@@ -1,6 +1,7 @@
 // The node components of the Run view: a step or command (with its tooltip), the start, a fork or join, and a lane's band.
 import { Handle, type Node, type NodeProps, Position } from "@xyflow/react";
-import { describeNode } from "./node-details.js";
+import { NodeRows } from "./NodeRows.js";
+import { describeNode, runsInCloud } from "./node-details.js";
 import { NODE_SIZE } from "./run-layout.js";
 import type { GraphNode, NodeState } from "./run-graph.js";
 
@@ -35,11 +36,12 @@ function Handles() {
   );
 }
 
-/** A step or a command: its label, what it runs, and a tooltip with the details that appears on hover or focus. Clicking it (or Enter on it) opens its log. */
+/** A step or a command: its label, what it runs, a badge when it ran in the cloud, and a tooltip with the details that appears on hover or focus. Clicking it (or Enter on it) opens its log. */
 export function WorkNode({ data, selected }: NodeProps<Node<WorkNodeData, "work">>) {
   const { node, now, onOpen } = data;
   const rows = describeNode(node, now);
   const what = node.kind === "command" ? node.detail.command : node.detail.model;
+  const cloud = runsInCloud(node);
   return (
     <div
       className={`work ${node.kind} state-${node.state}${selected ? " selected" : ""}`}
@@ -47,7 +49,7 @@ export function WorkNode({ data, selected }: NodeProps<Node<WorkNodeData, "work"
       tabIndex={0}
       role="button"
       aria-pressed={selected}
-      aria-label={`${node.label}: ${node.state}. Open its log`}
+      aria-label={`${node.label}: ${node.state}${cloud ? ", cloud agent" : ""}. Open its log`}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
@@ -59,16 +61,14 @@ export function WorkNode({ data, selected }: NodeProps<Node<WorkNodeData, "work"
       <div className="title">
         <Glyph state={node.state} />
         <span className="label">{node.label}</span>
+        {cloud && (
+          <span className="where" title="Runs as a Cursor cloud agent">
+            <span aria-hidden="true">☁</span> cloud
+          </span>
+        )}
       </div>
       {what !== undefined && <div className="sub">{what}</div>}
-      <dl className="tip" role="tooltip">
-        {rows.map(([name, value]) => (
-          <div key={name}>
-            <dt>{name}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
+      <NodeRows rows={rows} className="tip" role="tooltip" tabbable={false} />
     </div>
   );
 }

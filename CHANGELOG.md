@@ -4,6 +4,67 @@
 
 ### Adicionado
 
+- **`wf gc` varre as branches de snapshot das etapas na nuvem.** Uma etapa na nuvem apaga a sua branch
+  `wf/cloud-snapshot/<run>/<id>` quando termina, mas um crash, um `kill -9` ou um remote que recusou apagar a deixavam
+  para sempre (o gc a mantinha como uma branch de nenhum run, e ainda só olhava o `origin`). Agora `wf gc` lista essas
+  branches no remote do `cloud.remote` e remove a que pertence a um run deste repositório que nenhum processo executa e
+  cujo último evento tem mais de `gcSnapshotGraceHours` horas (ajuste novo do `implement-issue`, padrão 24: o cloud agent
+  que o processo morto iniciou pode ainda estar partindo da branch). Fica, com o motivo no plano, a de um run em execução,
+  de um run que não é deste repositório e de um run dentro da espera, e a de um run cortado no meio da etapa dona dela
+  fica por `gcFailedAfterDays` dias, e a de um run cancelado sem limite, como o próprio run (o resume reanexa ao agente e traz o trabalho dessa branch). Nenhuma delas vai para a
+  busca de PR, e uma recusa do remote entra nos `errors` sem parar o resto da varredura. O plano ganhou a razão
+  `snapshot` e o `remote` de cada ação; `Commands.remoteOwnedHeads` e `deleteOwned` aceitam o remote, e
+  `cloud-snapshot.ts` exporta `snapshotRunSegment` e `snapshotBranchSegment`.
+- **Dashboard: etapas na nuvem.** Na página do run, uma etapa que rodou como cloud agent da Cursor ganha o selo **☁ cloud**
+  no nó, e os detalhes (tooltip e dados acima do log da etapa) ganham a linha **Cloud agent** com o id (`bc-…`) como link
+  para o agente na Cursor (`https://cursor.com/agents/<id>`), além da localização e do custo. O id vem do evento
+  `cloud-agent`, então o link aparece enquanto a etapa ainda roda; só um id no formato `bc-…` vira link. O log da etapa
+  mostra as mensagens do cloud agent como as de um agente local; numa etapa que um resume reanexou a um agente que
+  continuou rodando, o motor agora registra a resposta final dele como uma mensagem do agente (o run reanexado não tem
+  stream). Corrigido junto: um timeout ou cancelamento que chegava com o push do snapshot em andamento matava o push, mas o
+  remote podia aceitar a branch depois, e ela ficava lá sem dono (o teste de limpeza da branch falhava de vez em quando numa
+  máquina carregada); agora o push termina e a limpeza da tentativa apaga a branch (o cancelamento espera o push).
+- **Etapas de leitura em Cursor cloud agents.** Um papel pode rodar na nuvem: `workflows.<nome>.roles.<papel>.location`
+  (`local`, o padrão, ou `cloud`) nos arquivos de configuração. A nuvem só vale se o `caps.allowedLocations` do arquivo
+  global a permitir (sem a chave, só `local`: o pedido de um papel vira uma violação e a etapa roda local) e se o workflow
+  declarar o papel `ok` ou `read-only`; uma configuração que manda um papel `never` para a nuvem é recusada antes do run,
+  e uma etapa `read-only` que pode escrever falha antes de gastar. Antes da etapa o estado do worktree, o não commitado inclusive, é empurrado como uma branch descartável
+  `wf/cloud-snapshot/<run>/<id>` para o remote `cloud.remote` (padrão `origin`; um fork serve para quem tem CI pesada, ou
+  exclua `wf/**` do pipeline) e apagada quando a etapa termina. O backend de nuvem (`backend-cloud.ts`) implementa o
+  `AgentBackend`: não manda custom tools, allowlists nem camadas de configuração (avisa que elas são ignoradas), pede o
+  resultado estruturado como um bloco `json` final, valida com o Ajv e reenvia na mesma conversa dentro dos
+  `schemaRetries`. O memo não vale na nuvem, e os tokens e o custo vêm do uso do cloud agent e entram nos mesmos tetos. O
+  `step-start` e o `step-end` ganham `location`, e a configuração efetiva ganha `cloud.remote` e a `location` de cada
+  papel. O `AgentBackend` ganhou o evento `warning` e o campo `writes`, e `runAttempt` e `converse` guardam o que os dois
+  backends repartem.
+- **Etapas que escrevem em Cursor cloud agents.** Uma etapa que pode escrever roda na nuvem num papel declarado `ok` (a
+  `read-only` continua falhando antes de gastar). O cloud agent trabalha na própria branch de snapshot
+  (`workOnCurrentBranch`, sem PR) e é instruído a commitar nela, mesmo que o prompt do workflow mande não rodar git. Quando o
+  run termina, o motor busca a branch e avança o worktree até ela (fast-forward de arquivos, índice e branch) antes de apagar
+  o snapshot, e os comandos que o workflow roda depois com `ctx.exec` (a suíte do TDD) enxergam o trabalho. É um fast-forward
+  ou nada: a etapa falha, sem nova tentativa e sem mudar o worktree, quando o agente reescreveu o histórico, quando a branch local andou ou quando
+  os arquivos mudaram enquanto o agente trabalhava ou o agente adiciona um arquivo onde o worktree tem um que o git
+  ignora (o `revertOnRetry` e o cancelamento não desfazem uma etapa na nuvem recusada, para não apagar o que a pessoa
+  mudou nesse meio tempo); se o avanço falha depois de mexer no índice e nos arquivos, o motor
+  devolve o worktree ao que era antes da etapa (`AttemptResult.touchedWorktree`). O snapshot de um worktree sem mudanças é o
+  próprio `HEAD` (o histórico ganha só os commits do agente); o de um com mudanças fica no histórico local, e o `cloud-agent`
+  grava o commit dele em `snapshot.commit`, para o resume conferir o worktree. Um papel ganha a preferência `resultVia`
+  (`json-block`, o padrão, ou `artifact`): com `artifact` o agente salva o resultado estruturado em `result.json` nos
+  artefatos dele e o motor o baixa depois do run (`listArtifacts`, `downloadArtifact`), validando com o mesmo Ajv e os
+  mesmos follow-ups. As funções de escrita do `implement-issue` continuam `cloud: never`. `converse` aceita um `check`
+  assíncrono.
+- **Ciclo de vida das etapas na nuvem: reanexar, cancelar e o limite de espera.** O motor grava o id do cloud agent no log
+  (evento novo `cloud-agent`, com a branch de snapshot de que o agente parte) assim que o agente existe. Um resume depois de
+  um crash reanexa ao agente que ainda roda (`Agent.resume`, `Agent.listRuns`) em vez de criar outro: espera o run que ele já
+  tinha, sem reenviar o prompt, fecha no log a tentativa morta, cobra o uso do agente uma só vez e apaga a branch de snapshot
+  que o crash deixou. Um agente que a nuvem não conhece mais é trocado por um novo, com aviso; qualquer outra falha ao
+  alcançá-lo falha só a tentativa e a próxima reanexa de novo. Cancelar um run que executa cancela os runs dele na nuvem, o
+  reanexado inclusive, e um cancelamento no meio da busca do agente cancela o run que ele achar; um run cujo processo já morreu
+  não tem a quem cancelar (retome e cancele). O limite de espera de duas horas do cliente do SDK deixou de falhar a etapa: o backend pergunta à nuvem
+  (`Agent.getRun`) e espera de novo pelo run que continua. Novo workflow de verificação contra a API real,
+  `scripts/verify/verify-cloud.ts` ([8.2 §14](docs/research/verificacoes-locais.md)), e o cenário 8 (opcional) do assistente
+  de validação. O `AgentBackend` ganhou `StepOptions.reattach`, o evento `agent` ganhou `snapshot` e `reattached`, e
+  `runAttempt` aceita a espera do backend.
 - **Dashboard: log da etapa, cancelar um run, comando de resume e o cenário 7 da validação.** Clicar num nó do grafo (ou
   Enter nele) abre ao lado dele o log da etapa, ao vivo: por tentativa, o prompt, o que o agente disse, as chamadas de tool
   com a saída de cada uma, ou, num comando de `ctx.exec`, a linha de comando e a saída com `stdout` e `stderr` apartados; a

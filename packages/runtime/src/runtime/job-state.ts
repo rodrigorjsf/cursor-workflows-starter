@@ -11,6 +11,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { LimitOverrides } from "../config/index.js";
+import { cancelLeftCloudAgents, leftAgentsNote } from "./cloud-cancel.js";
 import type { RunStatus } from "./events.js";
 import { type ExecutionState, type Ledger, projectExecution, replayLedger, resumeHint, withRatio } from "./projection.js";
 import { commandLineHas, isAlive } from "./pid.js";
@@ -227,7 +228,11 @@ export async function cancelJob(cwd: string, jobId: string, timeoutMs: number): 
   const record = readJobRecord(cwd, jobId);
   if (!record) return undefined;
   const { state: before, liveness } = inspect(cwd, record);
-  if (liveness === undefined || liveness === "gone") return { ...before, note: `the job already ended (${before.status}); nothing to cancel` };
+  // A process that is gone cannot cancel the cloud agents its run left running: they are reached through the Cursor API.
+  if (liveness === undefined || liveness === "gone") {
+    const left = leftAgentsNote(await cancelLeftCloudAgents(cwd, record.runId));
+    return { ...before, note: `the job already ended (${before.status})${left || "; nothing to cancel"}` };
+  }
   if (!isJobProcess(record)) return { ...before, note: `process ${record.pid} is not the job's process (was the pid reused?); no signal sent` };
   const signal = liveness === "silent" ? "SIGKILL" : "SIGTERM";
   try {
@@ -243,7 +248,8 @@ export async function cancelJob(cwd: string, jobId: string, timeoutMs: number): 
     state = readJob(cwd, jobId) ?? state;
   }
   if (signal === "SIGKILL") {
-    return { ...state, note: `process ${record.pid} had no heartbeat and was killed (SIGKILL) without undoing the step in progress; the run stays resumable` };
+    const left = stopping(state) ? "" : leftAgentsNote(await cancelLeftCloudAgents(cwd, record.runId));
+    return { ...state, note: `process ${record.pid} had no heartbeat and was killed (SIGKILL) without undoing the step in progress; the run stays resumable${left}` };
   }
   return { ...state, note: state.status === "running" ? `SIGTERM sent to process ${record.pid}, which is still stopping; check with wait_workflow` : `SIGTERM sent to process ${record.pid}` };
 }

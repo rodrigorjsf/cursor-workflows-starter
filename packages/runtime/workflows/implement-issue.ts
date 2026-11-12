@@ -91,7 +91,7 @@ import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import { NamedLockedError, acquireNamedLock } from "../src/runtime/run-store.js";
 import { defineWorkflow, type AgentCallOptions, type WorkflowCard } from "../src/runtime/workflow.js";
 import { buildPrBody, type PrText } from "./implement-issue/pr-body.js";
-import { CommandError, Commands, NETWORK_TIMEOUT_SEC, WORKFLOW_BRANCH_PREFIX, worktreeOf } from "./implement-issue/commands.js";
+import { CommandError, Commands, NETWORK_TIMEOUT_SEC, SNAPSHOT_GRACE_HOURS, WORKFLOW_BRANCH_PREFIX, worktreeOf } from "./implement-issue/commands.js";
 import * as P from "./implement-issue/prompts.js";
 import { AXES, AXIS_SCHEMAS, blockingAxes, blockingOf, type Axis, type ReviewReports } from "./implement-issue/review.js";
 import {
@@ -146,6 +146,8 @@ type Settings = {
   maxStepCrashes: number;
   /** `wf gc`: o run que falhou há mais dias que isto perde o worktree e as branches. Quem o lê é o `wf gc`, não o run. */
   gcFailedAfterDays: number;
+  /** `wf gc`: a branch de snapshot de uma etapa na nuvem só é varrida quando o run dela não teve evento nenhum há mais horas que isto (o agente na nuvem pode ainda estar partindo dela). Quem o lê é o `wf gc`, não o run. */
+  gcSnapshotGraceHours: number;
   /** Teto de tempo de cada rodada de testes (e do `setupCommand`), em segundos. */
   testTimeoutSec: number;
   /** Teto de tempo de cada comando de rede (`git push` e `gh`), em segundos: uma credencial pedida ou uma conexão parada falha a etapa. */
@@ -166,6 +168,7 @@ const SETTINGS: Settings = {
   },
   maxStepCrashes: 2,
   gcFailedAfterDays: 14,
+  gcSnapshotGraceHours: SNAPSHOT_GRACE_HOURS,
   testTimeoutSec: 600,
   networkTimeoutSec: NETWORK_TIMEOUT_SEC,
 };
@@ -440,8 +443,9 @@ export default defineWorkflow<Args>({
     phases: [{ title: "Triage" }, { title: "Plan" }, { title: "Implementation" }, { title: "Review" }, { title: "Delivery" }],
     // Roles: the keys of `workflows.implement-issue.roles` in the config. Each role's model is a code default that the
     // config and WF_MODEL_<ROLE> replace. `fix` and `design` declare no model: it depends on the tier or on the step.
-    // `cloud`: steps that write to the local worktree never go to a cloud agent; read-only ones may, once the cloud
-    // spec lands (they read the run's worktree, hence `read-only`).
+    // `cloud`: the engine can run a write step in the cloud (its commits come back into the worktree: ADR-0006), but the roles
+    // that write stay `never` here: their prompts forbid git commands, which a cloud agent needs to deliver its work, and no
+    // TDD loop has run on a cloud agent yet (see #45). The read-only ones may go (they read the run's worktree, hence `read-only`).
     roles: [
       { name: "classify", description: "Classifies the complexity when the issue has no label.", cloud: "ok", defaults: { model: COMPOSER, settingSources: NO_SETTING_SOURCES } },
       { name: "implement.low", description: "Writes test and code in the LOW tier (and the refactor).", cloud: "never", envAliases: ["LOW"], defaults: { model: COMPOSER } },

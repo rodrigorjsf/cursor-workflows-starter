@@ -125,6 +125,36 @@ if (!tests.ok) { /* tests.exitCode, tests.timedOut, tests.tail: the last 32768 c
   does not override them.
 - `budget`: `{ maxTokens?, maxCents? }`, the cap when nothing in the config sets one; an explicit `null` turns a cap off.
 
+## Locations: where a role's steps run
+
+- A step runs `local` (the default) or `cloud`. The user chooses per role in the config (`workflows.<name>.roles.<role>.location`),
+  never in workflow code, and only if the global `caps.allowedLocations` lists `cloud` (the default is local only: sending code to a
+  cloud VM is the machine owner's decision). A role the caps do not let into the cloud runs locally and the request is a violation.
+- You declare what each role can do there with `cloud` in `meta.roles`: `ok` (as it is), `read-only` (only when the step cannot
+  write: give it read-only `tools`) or `never` (it needs the local worktree). A config that sends a `never` role to the cloud is
+  rejected before the run starts; a `read-only` role whose step can write fails before it spends anything.
+- A cloud step is a strict subset of a local one. The engine pushes a throwaway snapshot of the step's worktree (uncommitted
+  changes included) to the `cloud.remote` remote (default `origin`) and deletes it when the step ends. The cloud agent gets no custom
+  tools, no `tools` allowlist (the prompt tells it the step is read-only) and no setting sources (it warns), and the memo cache is
+  skipped. `schema` still works: the agent ends its answer with a fenced `json` block, validated like a `submit_result` call and
+  corrected by the same `schemaRetries`; a role whose config sets `resultVia: "artifact"` has it save a `result.json` artifact
+  instead, which the engine downloads after the run. Design roles for both places: self-contained prompts, a `schema` the model
+  can fill from the repository alone.
+- A step that can write runs in the cloud too, on a role declared `ok`. The cloud agent commits on the snapshot branch (it is told
+  to, even if your prompt says not to run git commands), and when it finishes the engine fetches the branch and fast-forwards the
+  worktree to it, so commands you run afterwards with `ctx.exec` (the tests) see its work. It is a fast-forward or nothing: if the
+  agent rewrote the history, the local branch moved, or the working files changed while it ran, the step fails (without a retry, which
+  would pay for a new agent) and the worktree is left as it was. An agent that commits nothing changes nothing. Uncommitted changes the worktree had are committed in a snapshot
+  commit that stays in the local history.
+- Tokens and cost come from the cloud usage API and count against the same caps as a local step's.
+- A cloud step outlives the process. The engine writes the cloud agent's id to the event log (`cloud-agent`) the moment the agent
+  exists; if the process dies and the run is resumed, the step reattaches to that agent and takes the answer of the run it already
+  has instead of paying for another (code that changes the step's prompt or options starts a new step, and the old agent finishes
+  unwatched unless the run is cancelled). Cancelling a running run cancels its cloud runs. Cancelling a run whose process already
+  died (`wf cancel`, `cancel_workflow`, the dashboard's cancel route) cancels, through the Cursor API, the cloud runs of the agents
+  its log shows without an end. The client stops waiting for a cloud run after two hours: the engine asks
+  the cloud, and a run still going is waited for again, so only the step's `timeoutMs` bounds a long step.
+
 ## Caps
 
 - The run's limits are layered: code defaults (`budget`, `defaults`, role defaults) < the global file

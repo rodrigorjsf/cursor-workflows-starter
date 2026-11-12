@@ -158,7 +158,7 @@ export interface EffectiveCaps {
   allowedModels: string[] | null;
   /** Camadas de configuração que uma etapa pode carregar; `null` libera todas. */
   allowedSettingSources: SettingSource[] | null;
-  /** Onde uma etapa pode rodar; `null` libera todos. */
+  /** Onde uma etapa pode rodar; `null` libera todos. Sem a chave no arquivo global, só `local`: a nuvem é decisão do dono da máquina. */
   allowedLocations: Array<"local" | "cloud"> | null;
   /** Agentes simultâneos; `null` = sem teto. */
   maxConcurrency: number | null;
@@ -168,6 +168,10 @@ export interface EffectiveCaps {
 
 /** As configurações de uma etapa por papel (ou por glob de label). Só aparece o que alguma camada definiu. */
 export interface EffectiveRole {
+  /** Onde as etapas do papel rodam: `local` (o padrão) ou `cloud`. Um `cloud` que o teto `allowedLocations` não permite vira `local`, com uma violação. Só papéis têm location; um glob de label não. */
+  location?: "local" | "cloud";
+  /** Como uma etapa do papel na nuvem entrega o resultado estruturado: `json-block` (o padrão: o último bloco de código `json` da resposta final) ou `artifact` (o arquivo `result.json` que o agente salva nos artefatos dele, baixado depois do run). Só aparece quando uma camada o definiu; só papéis têm um. */
+  resultVia?: "json-block" | "artifact";
   /** Modelo: o ID, os parâmetros e o max mode, cada um com a sua origem em `provenance`. Um glob de label pode trazer só parte deles. */
   model?: Partial<ModelSelection>;
   /** Tempo máximo da etapa, em milissegundos. */
@@ -180,6 +184,12 @@ export interface EffectiveRole {
   maxTokensPerStep?: number | null;
   /** Camadas de configuração que a etapa carrega, já reduzidas pelo teto `allowedSettingSources`. */
   settingSources?: SettingSource[];
+}
+
+/** As preferências das etapas na nuvem, depois das camadas. */
+export interface EffectiveCloud {
+  /** O remote do git para onde vão as branches de snapshot das etapas na nuvem. Padrão: `origin`. */
+  remote: string;
 }
 
 /** A configuração efetiva de um run: o que as camadas e os tetos globais decidiram para este workflow. */
@@ -196,6 +206,8 @@ export interface EffectiveConfig {
   labels: Record<string, EffectiveRole>;
   /** Tempo máximo, em milissegundos, de um comando de `ctx.exec` que não passa o próprio `timeoutMs`. */
   execTimeoutMs: number;
+  /** Preferências das etapas na nuvem (`cloud` dos arquivos de configuração). */
+  cloud: EffectiveCloud;
   /** Os ajustes que o workflow declara (`meta.settings`), cada um com o padrão do código ou o valor que um arquivo de configuração trocou. A origem de cada um está em `provenance` (`/settings/<nome>`). Vazio quando o workflow não declara nenhum. */
   settings: Record<string, unknown>;
 }
@@ -281,6 +293,8 @@ export interface StepStartEvent extends EventBase, StepRef {
   cached: false | "journal" | "memo";
   /** O papel da etapa (`role` da chamada), quando ela declara um. */
   role?: string;
+  /** Onde a tentativa roda: `local` ou `cloud` (um cloud agent da Cursor). Ausente em etapa servida do journal ou do memo, que não rodou. */
+  location?: "local" | "cloud";
   /** O ID do modelo pedido. */
   model?: string;
   /** Modelo + parâmetros ordenados, como `composer-2[reasoning_effort=low]`: esforço e contexto contam como modelos distintos. */
@@ -329,6 +343,8 @@ export interface StepEndEvent extends EventBase, StepRef {
   ok: boolean;
   /** De onde veio o resultado sem chamar a API: journal do run (resume) ou memo entre runs. */
   cached: false | "journal" | "memo";
+  /** Onde a tentativa rodou, como no `step-start`. */
+  location?: "local" | "cloud";
   /** O que o Cursor cobrou pela tentativa (0 para uso incluído no plano). */
   chargedCents: number;
   /** O custo bruto reportado. O teto de custo usa o maior entre o bruto e o cobrado. */
@@ -367,6 +383,19 @@ export interface StepEndEvent extends EventBase, StepRef {
   usageRuns?: RunUsage[];
   /** Duração da tentativa em milissegundos. */
   durationMs?: number;
+}
+
+/** Um agente na nuvem existe para a tentativa. O motor grava o id assim que o backend o tem, antes de a etapa terminar, para que um resume reencontre o agente que ainda roda em vez de criar outro. Só etapas na nuvem emitem este evento; o `step-end` repete o `agentId`, mas só quando a tentativa termina. */
+export interface CloudAgentEvent extends EventBase, StepRef {
+  type: "cloud-agent";
+  /** A tentativa a que o agente pertence (o `attemptId` do `step-start`). */
+  attemptId: string;
+  /** O id do agente no Cursor (`bc-…`). */
+  agentId: string;
+  /** true = a tentativa reanexou a um agente que uma execução anterior, interrompida, deixou rodando: ele não foi criado agora. */
+  reattached?: true;
+  /** A branch de snapshot de que o agente parte, o remote para onde foi empurrada e o commit dela (o ponto de partida do agente: uma etapa que escreve só traz o trabalho de volta para um worktree que ainda é esse commit). Quem reanexa a apaga quando a etapa termina. Ausente quando a tentativa reanexou a um agente cuja branch o log não conhece. */
+  snapshot?: { remote: string; branch: string; commit?: string };
 }
 
 /** Uma chamada de `ctx.exec` começou. É um nó do run, como uma etapa de agente: o comando fecha com um `exec-end` e a saída dele vai em eventos `content`. */
@@ -477,6 +506,7 @@ export type WorkflowEvent =
   | TurnEvent
   | ContentEvent
   | StepEndEvent
+  | CloudAgentEvent
   | ExecStartEvent
   | ExecEndEvent
   | MetricEvent

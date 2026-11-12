@@ -4,11 +4,13 @@
 // SDKCustomTool.outputSchema é "puramente descritivo". O contorno é uma custom tool local
 // `submit_result` cujo inputSchema é o schema pedido. O execute() valida com Ajv no nosso processo:
 // inválido → devolve isError para o modelo corrigir; válido → captura o objeto.
-// Custom tools são apenas locais (não funcionam em cloud agents) e não pedem aprovação.
+// Custom tools são apenas locais (não funcionam em cloud agents) e não pedem aprovação. Um cloud agent entrega o resultado
+// de outro jeito: o último bloco de código JSON da resposta final, validado aqui com o mesmo Ajv (`resultFromJsonBlock`).
 
 import { Ajv } from "ajv";
 import type { SDKCustomTool, SDKJsonValue } from "@cursor/sdk";
 import type { JsonSchema } from "./workflow.js";
+import { errorText } from "./error-text.js";
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 
@@ -53,4 +55,87 @@ export function repromptMessage(capture: Capture): string {
   return capture.lastError
     ? `The last ${SUBMIT_TOOL} call was rejected: ${capture.lastError}. Call ${SUBMIT_TOOL} again with a valid object.`
     : `You did not call ${SUBMIT_TOOL}. Call it now with this step's result.`;
+}
+
+/** The prompt's request for a cloud step: a cloud agent has no custom tool, so the result comes as a fenced JSON block at the end of its answer. */
+export function jsonBlockInstruction(schema: JsonSchema): string {
+  return (
+    `\n\n---\nWhen you finish, end your final message with exactly one fenced code block labelled \`json\` that holds ` +
+    `the structured result: a JSON object that satisfies this JSON Schema. Nothing may follow the block.\n\nJSON Schema:\n${JSON.stringify(schema, null, 2)}`
+  );
+}
+
+/** The follow-up that asks a cloud agent to deliver the result again, with the reason the last answer was refused. */
+export function jsonBlockReprompt(error: string): string {
+  return `Your last message did not end with a valid result: ${error}. Reply again; end with exactly one fenced \`json\` code block that holds the result object, and nothing after it.`;
+}
+
+/** The body of the last complete fenced code block of `text` that is labelled `json` or not labelled at all. */
+function lastJsonBlock(text: string): string | undefined {
+  let last: string | undefined;
+  let open: { ticks: number; json: boolean; body: string[] } | undefined;
+  for (const line of text.split(/\r?\n/)) {
+    if (!open) {
+      const opener = /^ {0,3}(`{3,})\s*([\w-]*)\s*$/.exec(line);
+      if (opener) open = { ticks: opener[1]!.length, json: opener[2]!.toLowerCase() === "json" || opener[2] === "", body: [] };
+      continue;
+    }
+    const closer = /^ {0,3}(`{3,})\s*$/.exec(line);
+    if (closer && closer[1]!.length >= open.ticks) {
+      if (open.json) last = open.body.join("\n");
+      open = undefined;
+    } else {
+      open.body.push(line);
+    }
+  }
+  return last;
+}
+
+/** A structured result that passed its schema: the success arm of every result a step reads. */
+export type Validated = { ok: true; value: unknown };
+
+/** A structured result read from an answer: the validated value, or why there is none. */
+export type Parsed = Validated | { ok: false; error: string };
+
+/** What `text` holds as a result for `schema`: the object, or why it is not one. `what` names where the text came from. */
+function resultFromJson(text: string, schema: JsonSchema, what: string): Parsed {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch (err) {
+    return { ok: false, error: `${what} does not parse (${errorText(err)})` };
+  }
+  const validate = ajv.compile(schema);
+  if (!validate(value)) return { ok: false, error: ajv.errorsText(validate.errors) };
+  return { ok: true, value };
+}
+
+/** What a cloud agent's final message holds: the result object the schema accepts, or why it holds none. */
+export function resultFromJsonBlock(text: string, schema: JsonSchema): Parsed {
+  const block = lastJsonBlock(text);
+  if (block === undefined) return { ok: false, error: "there is no fenced json code block" };
+  return resultFromJson(block, schema, "the json code block");
+}
+
+/** The name of the file a cloud agent saves its result in when the role's `resultVia` is `artifact`. */
+export const RESULT_ARTIFACT = "result.json";
+
+/** The prompt's request for a cloud step whose role delivers the result as a file: the agent saves it in its artifacts directory, and the engine downloads it after the run. */
+export function artifactInstruction(schema: JsonSchema): string {
+  return (
+    `\n\n---\nWhen you finish, save the structured result as the file \`${RESULT_ARTIFACT}\` in your artifacts directory ` +
+    `(\`/opt/cursor/artifacts/${RESULT_ARTIFACT}\`): a JSON object that satisfies this JSON Schema, and nothing else in the file. ` +
+    `Only that file counts: do not answer with the result as text.\n\nJSON Schema:\n${JSON.stringify(schema, null, 2)}`
+  );
+}
+
+/** The follow-up that asks a cloud agent to save the result file again, with the reason the last one was refused. */
+export function artifactReprompt(error: string): string {
+  return `The artifact ${RESULT_ARTIFACT} did not hold a valid result: ${error}. Save it again in your artifacts directory: a JSON object that satisfies the schema, and nothing else in the file.`;
+}
+
+/** What a result artifact holds: the object the schema accepts, or why it holds none. Undefined `text` is an agent that saved no such file. */
+export function resultFromArtifact(text: string | undefined, schema: JsonSchema): Parsed {
+  if (text === undefined) return { ok: false, error: `there is no ${RESULT_ARTIFACT} in the agent's artifacts` };
+  return resultFromJson(text, schema, `the artifact ${RESULT_ARTIFACT}`);
 }

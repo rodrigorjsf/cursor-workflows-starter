@@ -7,6 +7,7 @@
 // which is also how the provenance is keyed.
 
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
+import type { ResultVia, StepLocation } from "../runtime/backend.js";
 import type { ConfigSource, ConfigViolation, EffectiveCaps, EffectiveConfig, EffectiveLimits, EffectiveRole } from "../runtime/events.js";
 import type { WorkflowDefinition, WorkflowRole } from "../runtime/workflow.js";
 import { globMatches, literalLength } from "./glob.js";
@@ -36,6 +37,10 @@ export interface ResolveInput {
 
 /** What the config layers change for one step. A field the layers left alone is absent: the call's own options stand. */
 export interface StepOverrides {
+  /** Where the step runs: its role's location, once the global `allowedLocations` cap has been applied. Always `local` for a step without a role. */
+  location: StepLocation;
+  /** How a cloud step delivers a structured result: its role's `resultVia`. Absent: the code default (`json-block`). */
+  resultVia?: ResultVia;
   model?: Partial<ModelSelection>;
   timeoutMs?: number;
   retries?: number;
@@ -74,6 +79,8 @@ interface Cell {
 }
 
 const DEFAULT_CONCURRENCY = 4;
+/** The git remote that cloud snapshots go to when the config names none. */
+const DEFAULT_CLOUD_REMOTE = "origin";
 /** How long a `ctx.exec` command may run when neither the call nor the config says: a long test run is of this order. */
 const DEFAULT_EXEC_TIMEOUT_MS = 10 * 60_000;
 type WorkflowBudget = WorkflowDefinition["budget"];
@@ -110,7 +117,7 @@ export function limitOverridesSchema(): Record<string, unknown> {
 const MODEL_FIELDS = ["id", "params", "maxMode"] as const;
 /** The step settings the config layers override on top of a call's own options. */
 export const STEP_OVERRIDE_FIELDS = ["timeoutMs", "retries", "schemaRetries", "settingSources"] as const;
-const ROLE_FIELDS = [...STEP_OVERRIDE_FIELDS, "maxTokensPerStep"] as const;
+const ROLE_FIELDS = [...STEP_OVERRIDE_FIELDS, "maxTokensPerStep", "location", "resultVia"] as const;
 const lastSegment = (pointer: Pointer): string => pointer.slice(pointer.lastIndexOf("/") + 1);
 
 /** Why a value is not a valid limit, or undefined when it is. `null` means no limit, which concurrency cannot have. */
@@ -203,10 +210,12 @@ function roleEntries(section: "roles" | "labels", name: string, prefs: RolePrefs
 }
 
 function fileEntries(file: LoadedConfig, layer: "global" | "repo", workflow: string): Entry[] {
-  const prefs: WorkflowPrefs | undefined = file.data.workflows?.[workflow];
-  if (!prefs) return [];
-  const base = pointerOf("workflows", workflow);
   const entries: Entry[] = [];
+  const remote = file.data.cloud?.remote;
+  if (remote !== undefined) entries.push({ layer, ref: file.path, path: pointerOf("cloud", "remote"), at: pointerOf("cloud", "remote"), value: remote });
+  const prefs: WorkflowPrefs | undefined = file.data.workflows?.[workflow];
+  if (!prefs) return entries;
+  const base = pointerOf("workflows", workflow);
   for (const field of LIMIT_FIELDS) {
     if (prefs[field] !== undefined) entries.push({ layer, ref: file.path, path: `${base}/${field}`, at: pointerOf("limits", field), value: prefs[field] });
   }
@@ -254,12 +263,42 @@ function checkDeclaredNames(input: ResolveInput, section: "roles" | "settings", 
   }
 }
 
+/**
+ * Where a config file may send a step. A label has no cloud capability, so only roles have a location; and a role the
+ * workflow declares `cloud: never` cannot end up in the cloud: the last file that sets its location decides where it goes.
+ * (The `read-only` capability depends on what a step does, which only the engine sees: it is checked there.)
+ */
+function checkLocations(input: ResolveInput, roles: WorkflowRole[], issues: ConfigIssue[]): void {
+  const name = input.workflow.meta.name;
+  const files = [input.global, input.repo].filter((f): f is LoadedConfig => f !== undefined);
+  const prefsOf = (file: LoadedConfig) => file.data.workflows?.[name];
+  for (const file of files) {
+    for (const [glob, prefs] of Object.entries(prefsOf(file)?.labels ?? {})) {
+      for (const field of ["location", "resultVia"] as const) {
+        if (prefs[field] === undefined) continue;
+        issues.push({ ref: file.path, path: pointerOf("workflows", name, "labels", glob, field), message: `${field} is set per role: a label has no cloud capability declared by the workflow, so its steps never run in the cloud` });
+      }
+    }
+  }
+  for (const role of roles.filter((r) => r.cloud === "never")) {
+    const deciding = files.filter((f) => prefsOf(f)?.roles?.[role.name]?.location !== undefined).at(-1);
+    if (deciding && prefsOf(deciding)?.roles?.[role.name]?.location === "cloud") {
+      issues.push({
+        ref: deciding.path,
+        path: pointerOf("workflows", name, "roles", role.name, "location"),
+        message: `role "${role.name}" is declared cloud: never by workflow ${name} (its steps need the local worktree): it cannot run in the cloud`,
+      });
+    }
+  }
+}
+
 export function resolveConfig(input: ResolveInput): ResolvedConfig {
   const { meta, defaults, budget } = input.workflow;
   const roles = meta.roles ?? [];
   const issues: ConfigIssue[] = [];
   checkDeclaredNames(input, "roles", "role", roles.map((r) => r.name), issues);
   checkDeclaredNames(input, "settings", "setting", Object.keys(meta.settings ?? {}), issues);
+  checkLocations(input, roles, issues);
   const entries = [
     ...(input.global ? fileEntries(input.global, "global", meta.name) : []),
     ...(input.repo ? fileEntries(input.repo, "repo", meta.name) : []),
@@ -276,13 +315,15 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
     maxCents: rawCaps.maxCents ?? null,
     allowedModels: rawCaps.allowedModels ?? null,
     allowedSettingSources: rawCaps.allowedSettingSources ?? null,
-    allowedLocations: rawCaps.allowedLocations ?? null,
+    // Sending code to a cloud VM is the machine owner's decision: without the key, only local. An explicit `null` allows every location.
+    allowedLocations: rawCaps.allowedLocations === undefined ? ["local"] : rawCaps.allowedLocations,
     maxConcurrency: rawCaps.maxConcurrency ?? null,
     requireSandbox: rawCaps.requireSandbox ?? null,
   };
   /** The numeric cap of each limit field; `settingSources` and model ids have their own checks. */
   const capOf = new Map<string, number | null>(LIMIT_FIELDS.map((f) => [f, caps[LIMITS[f].cap]]));
   const capRef = input.global?.path;
+  const cloudAllowed = caps.allowedLocations === null || caps.allowedLocations.includes("cloud");
 
   const violations: ConfigViolation[] = [];
   const cells = new Map<Pointer, Cell>();
@@ -292,6 +333,7 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
   const fromCode: ConfigSource = { layer: "default" };
   for (const field of LIMIT_FIELDS) set(pointerOf("limits", field), LIMITS[field].codeDefault(budget), fromCode);
   set(pointerOf("execTimeoutMs"), DEFAULT_EXEC_TIMEOUT_MS, fromCode);
+  set(pointerOf("cloud", "remote"), DEFAULT_CLOUD_REMOTE, fromCode);
   for (const role of roles) {
     const code = { ...defaults, ...role.defaults };
     for (const field of MODEL_FIELDS) {
@@ -300,6 +342,7 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
     for (const field of ["timeoutMs", "retries", "schemaRetries"] as const) {
       if (code[field] !== undefined) set(pointerOf("roles", role.name, field), code[field], fromCode);
     }
+    set(pointerOf("roles", role.name, "location"), "local", fromCode);
     if (role.defaults?.settingSources) set(pointerOf("roles", role.name, "settingSources"), role.defaults.settingSources, fromCode);
   }
 
@@ -349,6 +392,9 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
       const refused = (entry.value as SettingSource[]).filter((s) => !caps.allowedSettingSources!.includes(s));
       if (refused.length) violate(allowedSources(caps.allowedSettingSources, entry.value as SettingSource[]), `settingSources ${refused.join(", ")} outside the allowedSettingSources cap: removed`);
     }
+    if (field === "location" && entry.value === "cloud" && !cloudAllowed) {
+      violate("local", `location cloud is outside the allowedLocations cap (${caps.allowedLocations?.join(", ") || "empty"}): the step runs locally`);
+    }
     if (entry.at.endsWith("/model/id") && !isModelAllowed(caps.allowedModels, entry.value as string)) {
       violate(undefined, `model ${entry.value} is not in allowedModels: the requested model has no effect`);
       dropped.add(group!);
@@ -396,6 +442,8 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
     } else if (field === "settingSources" && caps.allowedSettingSources) {
       const kept = allowedSources(caps.allowedSettingSources, cell.value as SettingSource[]);
       if (kept.length !== (cell.value as SettingSource[]).length) set(at, kept, { layer: "cap", ref: capRef });
+    } else if (field === "location" && cell.value === "cloud" && !cloudAllowed) {
+      set(at, "local", { layer: "cap", ref: capRef });
     }
   }
 
@@ -438,6 +486,7 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
     roles: Object.fromEntries(roles.map((r) => [r.name, settingsOf(pointerOf("roles", r.name))])),
     labels: Object.fromEntries([...labels].map((glob) => [glob, settingsOf(pointerOf("labels", glob))])),
     execTimeoutMs: cells.get(pointerOf("execTimeoutMs"))!.value as number,
+    cloud: { remote: cells.get(pointerOf("cloud", "remote"))!.value as string },
     settings: Object.fromEntries([...settings].map(([key, cell]) => [key, cell.value])),
   };
 
@@ -448,9 +497,10 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
     stepOverrides(role, label) {
       const best = role === undefined ? [...labels].filter((g) => globMatches(g, label)).sort((a, b) => literalLength(b) - literalLength(a))[0] : undefined;
       const base = role !== undefined ? pointerOf("roles", role) : best !== undefined ? pointerOf("labels", best) : undefined;
-      if (base === undefined) return { maxTokensPerStep: config.limits.maxTokensPerStep };
+      if (base === undefined) return { location: "local", maxTokensPerStep: config.limits.maxTokensPerStep };
       const { maxTokensPerStep, ...layered } = settingsOf(base, (cell) => cell.source.layer !== "default");
-      return { ...layered, maxTokensPerStep: maxTokensPerStep === undefined ? config.limits.maxTokensPerStep : maxTokensPerStep };
+      const location = role === undefined ? "local" : ((cells.get(`${base}/location`)?.value as StepLocation | undefined) ?? "local");
+      return { ...layered, location, maxTokensPerStep: maxTokensPerStep === undefined ? config.limits.maxTokensPerStep : maxTokensPerStep };
     },
   };
 }

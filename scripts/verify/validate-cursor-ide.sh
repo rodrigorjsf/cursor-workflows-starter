@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# WHAT: Walks a person through the seven Cursor IDE validation scenarios: it creates a throwaway GitHub repo (with
-#   setup-sandbox-repo.sh) and sets it up with `wf init`, runs `wf doctor` on it, says exactly what to type in the Cursor
-#   chat for each scenario, records what the person saw, writes validation-report.json and offers to file it as an issue.
+# WHAT: Walks a person through the seven Cursor IDE validation scenarios, and an optional eighth: it creates a throwaway
+#   GitHub repo (with setup-sandbox-repo.sh) and sets it up with `wf init`, runs `wf doctor` on it, says exactly what to type
+#   in the Cursor chat for each scenario, records what the person saw, writes validation-report.json and offers to file it
+#   as an issue.
 # WHY: "Works in the Cursor IDE" is the release criterion of the foundation spec, and seven scenarios that passed, recorded
-#   the same way every time, are its evidence. The IDE's behaviour cannot be tested offline: a person has to look.
+#   the same way every time, are its evidence. The IDE's behaviour cannot be tested offline: a person has to look. The
+#   eighth, a read-only step on a Cursor cloud agent, is reported but not part of the criterion: it needs a plan with Cloud
+#   Agents, and sends the sandbox repo's code to a VM.
 # WHEN: Before a release, on a new machine or account, and after a new Cursor version. Run it in Cursor's own terminal
 #   (Terminal panel): scenario 1 counts only there, because the IDE picks its own Node and PATH.
 # HOW: `scripts/verify/validate-cursor-ide.sh [report-dir]`, or `~/.cursor-workflows/kit/scripts/verify/validate-cursor-ide.sh`
@@ -11,7 +14,8 @@
 #   `<report-dir>/progress.env` (default `~/.cursor-workflows/validation`), so Ctrl-C, or quitting Cursor in scenario 5,
 #   loses nothing: run it again. `WF_KIT_REPO=owner/repo` files the issue somewhere other than the kit's origin;
 #   `GH_VISIBILITY=--public` reaches the sandbox script. Scenarios 3 to 7 run workflows: 3 to 6 measured about 800k
-#   tokens, on models the plans include; scenario 7's `smoke` run was not part of that measurement.
+#   tokens, on models the plans include; scenario 7's `smoke` run was not part of that measurement, and neither was scenario
+#   8's (the same `smoke`, in the cloud).
 #
 # The library below, down to the STAGES marker, is the /wizard skill's template.sh, unedited. The wizard's own helpers
 # and stages follow the marker. Wizard text is English, like the library's; the report is English too.
@@ -190,7 +194,8 @@ finish() {
 }
 
 # ──────────────────────────────────────────────────────────────────────────
-# STAGES: a sandbox repo, the seven scenarios (six of the foundation spec, the dashboard's of the live dashboard spec), and the report.
+# STAGES: a sandbox repo, the seven scenarios (six of the foundation spec, the dashboard's of the live dashboard spec), the optional
+# eighth (the cloud's, of the cloud spec), and the report.
 # ──────────────────────────────────────────────────────────────────────────
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -198,7 +203,7 @@ KIT="$(cd "$HERE/../.." && pwd -P)"
 SELF="$HERE/$(basename "${BASH_SOURCE[0]}")"
 REPORT_DIR="${1:-${WF_HOME:-$HOME/.cursor-workflows}/validation}"
 ENV_FILE="$REPORT_DIR/progress.env" # the library's value store: it keeps the answers across runs
-TOTAL_STAGES=10
+TOTAL_STAGES=11
 
 # ── Helpers of this wizard ────────────────────────────────────────────────
 
@@ -457,7 +462,34 @@ if ! keep_recorded 7; then
   ask_note 7
 fi
 
-# ── Stage 10 · report ─────────────────────────────────────────────────────
+# ── Stage 10 · scenario 8 (optional) ──────────────────────────────────────
+stage "Scenario 8 (optional) · a read-only step runs on a cloud agent"
+if ! keep_recorded 8; then
+  say "This one sends the sandbox repo's code to a Cursor cloud agent. It needs a Cursor plan with Cloud Agents, and the sandbox repo on a GitHub account that Cursor is connected to."
+  note "It is not part of the release criterion: the report lists it as optional."
+  ask_choice S8_RUN "Run scenario 8? (yes/no):" yes no
+  if [[ "$S8_RUN" == yes ]]; then
+    record S8_TITLE "a read-only step runs on a cloud agent and leaves no snapshot branch on the remote"
+    step "Allow the cloud for the smoke workflow. Merge these keys into ~/.cursor-workflows/config.json (create the file if it is not there):"
+    say '    { "caps": { "allowedLocations": ["local", "cloud"] },'
+    say '      "workflows": { "smoke": { "roles": { "ping": { "location": "cloud" } } } } }'
+    note "Only this file can allow the cloud: sending code to a VM is the machine owner's decision. Take the keys out when you are done."
+    pause "Press Enter when the file is saved."
+    step "In a chat of the sandbox window, type:"
+    say "    /run-workflow smoke"
+    note "Pass: the chat reports the job finished, with the answer pong, and the run's log has a cloud-agent event with a bc- agent id."
+    note "Also worth a look, not part of the pass: in the dashboard's page of that run the ping step has a cloud badge, and hovering it shows a link to the agent in Cursor and its cost."
+    pause "Press Enter when the chat has answered."
+    say "The cloud agents the sandbox's runs logged (the newest last):"
+    grep -h '"type":"cloud-agent"' "$SANDBOX_DIR"/.workflows/runs/*/events.jsonl 2>/dev/null | tail -n 3 || true
+    say "Snapshot branches left on the sandbox's remote (none is expected):"
+    git -C "$SANDBOX_DIR" ls-remote --heads origin 'wf/cloud-snapshot/*' 2>&1 || true
+    ask_choice S8_RESULT "Result: pass, fail or skip?" pass fail skip
+    ask_note 8
+  fi
+fi
+
+# ── Stage 11 · report ─────────────────────────────────────────────────────
 stage "Report"
 doctor_args=()
 [[ -s "$REPORT_DIR/doctor.json" ]] && doctor_args=(--doctor "$REPORT_DIR/doctor.json")

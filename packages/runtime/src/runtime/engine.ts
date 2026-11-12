@@ -18,12 +18,14 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ModelSelection, RunUsage, SettingSource } from "@cursor/sdk";
 import { Ajv } from "ajv";
-import { type AgentBackend, type AttemptEvent, type AttemptResult, type StepOptions, type UsageReading, localBackend } from "./backend.js";
+import { errorText } from "./error-text.js";
+import { type AgentBackend, type AttemptEvent, type AttemptResult, type ResultVia, type StepLocation, type StepOptions, type UsageReading, localBackend } from "./backend.js";
+import { createCloudBackend } from "./backend-cloud.js";
 import { type CommandOutcome, EXEC_FLUSH_MS, EXEC_LOG_MAX_CHARS, outputLog, runCommand, toExecResult } from "./command-runner.js";
 import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedConfig, type StepOverrides, allowedSources, isModelAllowed, loadEffectiveConfig } from "../config/index.js";
 import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type OutputStream, type NewEvent, type RunStatus, type StepRef, type TurnUsage, type WorkflowEvent } from "./events.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
-import { addUsage, emptyUsage, resumeHint, withRatio } from "./projection.js";
+import { type InterruptedCloudStep, addUsage, emptyUsage, resumeHint, subtractUsage, turnTokens, withRatio } from "./projection.js";
 import { CONTENT_MAX_CHARS, RunLockedError, RunStore } from "./run-store.js";
 import type { RetentionPolicy } from "./retention.js";
 import { registerRun } from "./runs-index.js";
@@ -159,8 +161,9 @@ export interface RunOptions {
   signal?: AbortSignal;
   onEvent?: (e: WorkflowEvent) => void;
   /**
-   * Where the steps' agents run: every attempt of every step goes through this backend (see `AgentBackend` in
-   * `backend.ts` for the contract). Default: the local backend, the SDK's local agents.
+   * Where the steps' agents run: every attempt of a step goes through a backend (see `AgentBackend` in `backend.ts` for the
+   * contract). This one serves the steps of its own `location`; the steps of the other location use the default backend of
+   * theirs: the local one is the SDK's local agents, the cloud one the SDK's cloud agents on a snapshot of the worktree.
    */
   backend?: AgentBackend;
   /**
@@ -383,13 +386,22 @@ interface AttemptCounters {
 
 /**
  * The `onEvent` of one attempt: counts turns, steps, summaries, re-prompts and tool calls, writes the attempt's content,
- * and hands each ended turn's usage to `onTurn` (which emits the turn event and enforces the live caps).
+ * hands each ended turn's usage to `on.turn` (which emits the turn event and enforces the live caps), each warning to
+ * `on.warning` and the agent, once it exists, to `on.agent`.
  */
-function attemptEvents(c: AttemptCounters, content: AttemptContent, onTurn: (usage: TurnUsage) => void): (event: AttemptEvent) => void {
+function attemptEvents(
+  c: AttemptCounters,
+  content: AttemptContent,
+  on: { turn: (usage: TurnUsage) => void; warning: (message: string) => void; agent: (event: Extract<AttemptEvent, { type: "agent" }>) => void },
+): (event: AttemptEvent) => void {
   return (event) => {
     switch (event.type) {
       case "agent":
-        break; // the engine learns the id from the result
+        on.agent(event);
+        break;
+      case "warning":
+        on.warning(event.message);
+        break;
       case "step":
         c.steps++;
         c.stepsInTurn++;
@@ -413,7 +425,7 @@ function attemptEvents(c: AttemptCounters, content: AttemptContent, onTurn: (usa
         break;
       case "turn":
         content.flush();
-        if (event.usage) onTurn(event.usage);
+        if (event.usage) on.turn(event.usage);
         c.turns++;
         c.stepsInTurn = 0;
         break;
@@ -578,6 +590,14 @@ async function executeRun<A, R>(
   const sem = new Semaphore(limits.concurrency);
   const settingSources = opts.settingSources ?? ["project", "team", "mdm"];
   const roles = new Map((def.meta.roles ?? []).map((r) => [r.name, r]));
+  // The backend of each location. A backend handed in through the options serves its own location; the cloud one is made on
+  // first use, so a run that never goes to the cloud never touches it.
+  let cloudBackend: AgentBackend | undefined;
+  const backendFor = (location: StepLocation): AgentBackend => {
+    if (opts.backend?.location === location) return opts.backend;
+    if (location === "local") return localBackend;
+    return (cloudBackend ??= createCloudBackend({ remote: resolved.config.cloud.remote, runId }));
+  };
   let currentPhase: string | undefined;
   const flows = new AsyncLocalStorage<Flow>();
   const rootFlow: Flow = { groupId: null, last: null, groups: 0, prefix: "" };
@@ -725,6 +745,10 @@ async function executeRun<A, R>(
     label: string;
     phase: string | undefined;
     sources: SettingSource[];
+    /** Where the step runs: its role's location in the config, once the global `allowedLocations` cap has applied. */
+    location: StepLocation;
+    /** How a cloud step delivers a structured result: its role's `resultVia` in the config. */
+    resultVia: ResultVia | undefined;
     mKey: string | undefined;
     fingerprint: Record<string, unknown>;
     /** Journal key. */
@@ -765,7 +789,7 @@ async function executeRun<A, R>(
     // Chave calculada de forma síncrona, antes de qualquer await.
     const key = journal.keyFor(prompt, fingerprint);
     const ref: StepRef = { stepId: stepIdOf(key), parentId: flow.last, groupId: flow.groupId };
-    const step: StepContext = { o, role, promptHash, label, phase, sources, mKey, fingerprint, key, ref, started: false, tokenCap: overrides.maxTokensPerStep, tokens: 0 };
+    const step: StepContext = { o, role, promptHash, label, phase, sources, location: overrides.location, resultVia: overrides.resultVia, mKey, fingerprint, key, ref, started: false, tokenCap: overrides.maxTokensPerStep, tokens: 0 };
     return inNode(runStep<T>(prompt, step), flow, ref, () => step.started);
   }
 
@@ -788,7 +812,7 @@ async function executeRun<A, R>(
   }
 
   async function runStep<T>(prompt: string, step: StepContext): Promise<T> {
-    const { o, role, promptHash, label, phase, sources, mKey, fingerprint, key, ref } = step;
+    const { o, role, promptHash, label, phase, sources, location, mKey, fingerprint, key, ref } = step;
     const emitStart = (attemptId: string, attempt: number, cachedFrom: false | "journal" | "memo") => {
       step.started = true;
       emit({
@@ -800,6 +824,7 @@ async function executeRun<A, R>(
         phase,
         cached: cachedFrom,
         role,
+        location: cachedFrom ? undefined : location,
         model: o.model?.id,
         modelKey: mKey,
         modelParams: o.model?.params,
@@ -827,27 +852,38 @@ async function executeRun<A, R>(
       if (!isReadOnly(o.tools)) {
         throw new StepFailedError(`step "${label}": memo requires \`tools\` with read-only tools only (read, grep, glob, ls, semSearch...)`);
       }
-      const state = await repoState(stepCwd);
-      if (state) {
-        memoKey = memo.key({ prompt, ...fingerprint, cwd: undefined }, state);
-        const hit = memo.get(memoKey);
-        if (hit !== undefined) {
-          journal.record({ key, label, model: o.model?.id, result: hit, chargedCents: 0, totalTokens: 0 });
-          servedFrom("memo");
-          return hit as T;
-        }
+      if (location === "cloud") {
+        // A cloud agent's answer depends on its VM and on the snapshot, not only on the repository state the memo key holds.
+        emit({ type: "warning", message: `step "${label}": memo skipped (cloud steps are not memoized)` });
       } else {
-        emit({ type: "warning", message: `step "${label}": memo skipped (cwd is not a git repository with a commit, or git did not answer in time)` });
+        const state = await repoState(stepCwd);
+        if (state) {
+          memoKey = memo.key({ prompt, ...fingerprint, cwd: undefined }, state);
+          const hit = memo.get(memoKey);
+          if (hit !== undefined) {
+            journal.record({ key, label, model: o.model?.id, result: hit, chargedCents: 0, totalTokens: 0 });
+            servedFrom("memo");
+            return hit as T;
+          }
+        } else {
+          emit({ type: "warning", message: `step "${label}": memo skipped (cwd is not a git repository with a commit, or git did not answer in time)` });
+        }
       }
     }
     if (!o.model) throw new StepFailedError(`step "${label}" has no model: set opts.model or defaults.model`);
     if (!isModelAllowed(caps.allowedModels, o.model.id)) {
       throw new StepFailedError(`step "${label}": model ${o.model.id} is not in the global allowedModels cap (${caps.allowedModels!.join(", ")})`);
     }
-    // Every step runs on one backend for now; the cloud spec picks the backend per role (ADR-0005).
-    const backend: AgentBackend = opts.backend ?? localBackend;
+    // A step runs on the backend of its location: the role's `location` in the config, which the global cap already limited.
+    const backend = backendFor(location);
     if (caps.allowedLocations && !caps.allowedLocations.includes(backend.location)) {
-      throw new StepFailedError(`step "${label}": the global allowedLocations cap (${caps.allowedLocations.join(", ") || "empty"}) does not allow ${backend.location === "local" ? "local" : "cloud"} steps`);
+      throw new StepFailedError(`step "${label}": the global allowedLocations cap (${caps.allowedLocations.join(", ") || "empty"}) does not allow ${backend.location} steps`);
+    }
+    // A cloud step is rejected before it spends anything. The workflow's declaration (`read-only`) is checked against what the step
+    // does, which only a step knows. A step that writes works on the snapshot branch, and its commits are brought back into the worktree.
+    const writes = !isReadOnly(o.tools);
+    if (location === "cloud" && writes && roles.get(role!)?.cloud === "read-only") {
+      throw new StepFailedError(`step "${label}": role "${role}" is declared cloud: read-only by workflow ${def.meta.name}, but this step can write (its tools are not read-only), so it cannot run in the cloud`);
     }
     if (o.schema && o.schema.type !== "object") {
       throw new StepFailedError(`step "${label}": schema must have type "object" at the root (it becomes a tool's inputSchema)`);
@@ -862,24 +898,68 @@ async function executeRun<A, R>(
       disallowedTools: o.disallowedTools,
       agents: o.agents,
       // O guarda vem antes: um mcpServers da etapa com o mesmo nome continua podendo substituí-lo de propósito.
-      mcpServers: withGuard(nestedGuard(sources), o.mcpServers),
+      // In the cloud there is no guard: it is a command of this machine, which a VM cannot run, and the VM could not reach
+      // this machine's `workflows` server either.
+      mcpServers: location === "cloud" ? o.mcpServers : withGuard(nestedGuard(sources), o.mcpServers),
       cwd: stepCwd,
       settingSources: sources,
       // The global cap wins over the workflow code: a pull request that edits a workflow cannot turn sandboxing off.
       sandbox: caps.requireSandbox === true || Boolean(o.sandbox),
+      writes,
       schema: o.schema,
       schemaRetries: o.schemaRetries ?? 2,
+      resultVia: step.resultVia,
+    };
+
+    /**
+     * An attempt of a cloud step that an earlier execution left running has an agent now: the log closes the dead attempt, so the
+     * next resume meets the new one instead. When the attempt took the same agent over, it pays for the agent's whole usage, so
+     * the dead attempt closes uncharged and the budget stops counting the turns it had reported. When the cloud had lost the agent
+     * and a new one started, those turns were real spend that nothing else will count: the dead attempt closes with them.
+     */
+    const closeInterrupted = (interrupted: InterruptedCloudStep, attempt: number, sameAgent: boolean): void => {
+      const counted = interrupted.countedTokens;
+      emit({
+        type: "step-end",
+        ...ref,
+        attemptId: interrupted.attemptId,
+        stepKey: key,
+        label,
+        phase,
+        ok: false,
+        cached: false,
+        location,
+        chargedCents: 0,
+        // Taken over, the agent's whole cost is the new attempt's: a reconcile must not charge it here again. Replaced, the
+        // dead agent's cost is still owed to this attempt, and a reconcile fills it in.
+        costFinal: sameAgent,
+        model: o.model?.id,
+        modelKey: mKey,
+        usage: sameAgent || counted.totalTokens === 0 ? undefined : counted,
+        errorKind: "exception",
+        error: `the process that was executing this attempt ended before it did; attempt ${attempt} ${sameAgent ? "reattached to" : "replaced"} its cloud agent ${interrupted.agentId}`,
+        agentId: interrupted.agentId,
+      });
+      if (!sameAgent) return;
+      spentTokens -= counted.totalTokens;
+      subtractUsage(totals, counted);
+      emit({
+        type: "warning",
+        message: `step "${label}": reattached to cloud agent ${interrupted.agentId}, which an earlier execution of this run left running; what the agent did while no process was watching is not in the event log (only its final answer is, as one message), and the live token caps act only when its run ends`,
+      });
     };
 
     await sem.acquire();
     try {
       // A step that can write is reverted if the run is cancelled in the middle of it, so a resume meets no half-made edits,
       // and, when the call asks (`revertOnRetry`), before each retry, so a retry meets none of the failed attempt's.
-      const writes = !isReadOnly(o.tools);
       const snapshot = writes && !signal?.aborted ? await takeSnapshot(stepCwd) : undefined;
       const reverter = reverts.forStep({ writes, snapshot, stepCwd, label, warn: (message) => emit({ type: "warning", message }) });
       const attempts = 1 + (o.retries ?? 1);
       let lastError = "";
+      // A cloud step an earlier execution left running: the first attempt takes its agent over instead of creating another.
+      let reattach = location === "cloud" ? store.interruptedCloud.get(ref.stepId) : undefined;
+      let tookOver = false;
       for (let attempt = 1; attempt <= attempts; attempt++) {
         if (signal?.aborted) {
           // Cancelled while queued or between attempts: this attempt never starts (no step-start). The attempts before it may have left edits.
@@ -909,22 +989,36 @@ async function executeRun<A, R>(
         // step's turn for the run's cap).
         live.add(turnUsage);
         cutters.add(abort);
-        const handle = attemptEvents(c, content, (t) => {
-          emit({ type: "turn", ...ref, attemptId, idx: c.turns, steps: c.stepsInTurn, usage: t });
-          addUsage(turnUsage, { ...t, totalTokens: t.inputTokens + t.outputTokens }); // o cache já está no input
-          if (t.reasoningTokens) turnUsage.reasoningTokens = (turnUsage.reasoningTokens ?? 0) + t.reasoningTokens;
-          // The real SDK may report one turn per send, so this can fire only when a send ends (see #37).
-          const breach = tokenBreach(step, turnUsage.totalTokens);
-          if (breach instanceof BudgetExceededError) for (const active of cutters) active.cut(breach); // the run's cap: every active attempt
-          else if (breach) abort.cut(breach);
+        const handle = attemptEvents(c, content, {
+          turn: (t) => {
+            emit({ type: "turn", ...ref, attemptId, idx: c.turns, steps: c.stepsInTurn, usage: t });
+            addUsage(turnUsage, turnTokens(t));
+            if (t.reasoningTokens) turnUsage.reasoningTokens = (turnUsage.reasoningTokens ?? 0) + t.reasoningTokens;
+            // The real SDK may report one turn per send, so this can fire only when a send ends (see #37).
+            const breach = tokenBreach(step, turnUsage.totalTokens);
+            if (breach instanceof BudgetExceededError) for (const active of cutters) active.cut(breach); // the run's cap: every active attempt
+            else if (breach) abort.cut(breach);
+          },
+          warning: (message) => emit({ type: "warning", message: `step "${label}": ${message}` }),
+          // A cloud agent is written to the log the moment it exists: a crash from here on leaves its id behind for the resume.
+          agent: (agent) => {
+            if (location !== "cloud") return;
+            if (reattach && !tookOver) {
+              tookOver = true; // the dead attempt is closed once, whatever the next attempts do
+              closeInterrupted(reattach, attempt, agent.agentId === reattach.agentId);
+            }
+            emit({ type: "cloud-agent", ...ref, attemptId, agentId: agent.agentId, reattached: agent.reattached, snapshot: agent.snapshot });
+          },
         });
         const onEvent = (event: AttemptEvent) => {
-          abort.agentReady(); // any event means the agent exists: a cap held back while it was being created applies now
+          if (event.type !== "warning") abort.agentReady(); // any other event means the agent exists: a cap held back while it was being created applies now
           handle(event);
         };
         let charge: Charge | undefined;
         let errorKind: ErrorKind | undefined;
         let cancelledBy: RunCancelledError | undefined;
+        let touchedWorktree = false;
+        let final = false;
         let reverted = false;
         let agentId: string | undefined;
         let resolvedModel: string | undefined;
@@ -940,6 +1034,7 @@ async function executeRun<A, R>(
             attempt,
             ok,
             cached: false,
+            location,
             chargedCents: charge?.charged ?? 0,
             rawCents: charge?.raw,
             costFinal: charge?.costFinal ?? false,
@@ -964,10 +1059,10 @@ async function executeRun<A, R>(
         try {
           let result: AttemptResult;
           try {
-            result = await backend.run(prompt, stepOptions, abort.signal, onEvent);
+            result = await backend.run(prompt, reattach ? { ...stepOptions, reattach: { agentId: reattach.agentId, snapshot: reattach.snapshot } } : stepOptions, abort.signal, onEvent);
           } catch (err) {
             // A backend reports its failures in the result; one that throws has a bug. The attempt fails, uncharged.
-            result = { outcome: { kind: "error", reason: "other", message: err instanceof Error ? err.message : String(err) } };
+            result = { outcome: { kind: "error", reason: "other", message: errorText(err) } };
           } finally {
             clearTimeout(timer);
             signal?.removeEventListener("abort", onRunAbort);
@@ -975,9 +1070,13 @@ async function executeRun<A, R>(
           }
           agentId = result.agentId;
           resolvedModel = result.model;
+          touchedWorktree = result.touchedWorktree === true;
+          final = result.final === true;
           // Timeout/error also cost. No reading and no turns: no agent existed, so nothing was used.
           if (result.usage || turnUsage.totalTokens > 0) charge = chargeUsage(result.usage ?? { failed: "the backend reported no usage" }, turnUsage);
           const { outcome } = result;
+          // An attempt that could not reach the interrupted agent leaves it to the next attempt; any other ending is done with it.
+          if (!result.reattachFailed) reattach = undefined;
           switch (outcome.kind) {
             case "finished":
               journal.record({ key, label, model: model.id, result: outcome.value, chargedCents: charge?.charged ?? 0, totalTokens: charge?.usage.totalTokens ?? 0 });
@@ -1034,10 +1133,17 @@ async function executeRun<A, R>(
           live.delete(turnUsage); // idempotent: an attempt that never got to be charged must not keep counting
           step.tokens += turnUsage.totalTokens;
         }
-        if (cancelledBy) reverted = await reverter.onCancel();
-        else if (o.revertOnRetry && attempt < attempts) reverted = await reverter.beforeRetry();
+        // A cloud step changes the directory only when its work is brought back, and says so when that fails half way
+        // (`touchedWorktree`). Otherwise there is nothing of the step to put back, and putting the directory back as it was before
+        // the step would undo what the person changed meanwhile. A step that did touch it has it put back whatever the call asks:
+        // a worktree half moved to the agent's result is no one's.
+        const putsBack = location === "local" || touchedWorktree;
+        if (cancelledBy) reverted = putsBack && (await reverter.onCancel());
+        else if (touchedWorktree || (putsBack && o.revertOnRetry && attempt < attempts && !final)) reverted = await reverter.beforeRetry();
         endEvent(false);
         if (cancelledBy) throw cancelledBy;
+        // The backend says another attempt could not do better (a cloud step's work that could not be brought back): the step fails now.
+        if (final) throw new StepFailedError(`step "${label}" failed after ${attempt} attempt(s): ${lastError}`);
       }
       throw new StepFailedError(`step "${label}" failed after ${attempts} attempt(s): ${lastError}`);
     } finally {

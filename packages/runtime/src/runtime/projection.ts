@@ -4,7 +4,7 @@
 // Nothing here reads a file or the clock: both take the events. Neither ever carries step content: the projection looks
 // at metadata fields only, and `content` events are not read at all.
 
-import type { ExecEndEvent, RunStatus, WorkflowEvent } from "./events.js";
+import type { CloudAgentEvent, ExecEndEvent, RunStatus, TurnUsage, WorkflowEvent } from "./events.js";
 import { type OutcomeClass, outcomeClass } from "./outcome.js";
 import type { UsageTotals } from "./workflow.js";
 
@@ -21,6 +21,14 @@ export function addUsage(acc: UsageTotals, u: Partial<UsageTotals> | undefined):
   acc.cacheWriteTokens += u.cacheWriteTokens ?? 0;
   acc.totalTokens += u.totalTokens ?? 0;
 }
+
+/** Takes `u` away from `acc`: the undo of an `addUsage` of the same tokens. */
+export function subtractUsage(acc: UsageTotals, u: UsageTotals): void {
+  addUsage(acc, { inputTokens: -u.inputTokens, outputTokens: -u.outputTokens, cacheReadTokens: -u.cacheReadTokens, cacheWriteTokens: -u.cacheWriteTokens, totalTokens: -u.totalTokens });
+}
+
+/** A turn's tokens as totals. The cache is already in the input (measured), so the total is input + output. */
+export const turnTokens = (u: TurnUsage): UsageTotals => ({ ...u, totalTokens: u.inputTokens + u.outputTokens });
 
 export function withRatio(u: UsageTotals): UsageTotals & { cacheHitRatio: number | null } {
   // Measured on the API: inputTokens already includes cache reads and writes, and totalTokens = input + output.
@@ -53,7 +61,7 @@ export function replayLedger(events: Iterable<WorkflowEvent>): Ledger {
   for (const e of events) {
     if (e.type === "turn") {
       const tokens = unfinished.get(e.attemptId) ?? emptyUsage();
-      addUsage(tokens, { ...e.usage, totalTokens: e.usage.inputTokens + e.usage.outputTokens }); // the cache is already in the input
+      addUsage(tokens, turnTokens(e.usage));
       unfinished.set(e.attemptId, tokens);
     } else if (e.type === "step-end" && !e.cached) {
       unfinished.delete(e.attemptId);
@@ -68,6 +76,45 @@ export function replayLedger(events: Iterable<WorkflowEvent>): Ledger {
     addUsage(ledger.usage, tokens);
   }
   return ledger;
+}
+
+/** A cloud step an earlier execution left without an end: its agent may still be running in the cloud. */
+export interface InterruptedCloudStep {
+  /** The step's stable id: what a resume matches the step to. */
+  stepId: string;
+  /** The attempt that has an agent and no end. */
+  attemptId: string;
+  agentId: string;
+  /** Where that agent started from, when the log says. */
+  snapshot?: CloudAgentEvent["snapshot"];
+  /** The tokens the attempt's turns reported before the process died: the ledger counts them as spent. */
+  countedTokens: UsageTotals;
+}
+
+/**
+ * The cloud steps a run's log shows as interrupted, by `stepId`: the latest attempt of each whose agent was recorded
+ * (`cloud-agent`) and that never ended (no `step-end`). That is a crash, or a process killed in the middle of the step; the
+ * agent it started keeps working in the cloud, and a resume reattaches to it. (A step that delivered is in the journal, which
+ * a resume reads first; an execution that reattaches closes the attempt it takes over, so there is one at a time.)
+ */
+export function interruptedCloudSteps(events: Iterable<WorkflowEvent>): Map<string, InterruptedCloudStep> {
+  const open = new Map<string, CloudAgentEvent>(); // by attemptId, in the order the agents appeared
+  const turns = new Map<string, UsageTotals>(); // what each attempt's turns reported, by attemptId
+  for (const e of events) {
+    if (e.type === "cloud-agent") open.set(e.attemptId, e);
+    else if (e.type === "turn") {
+      const tokens = turns.get(e.attemptId) ?? emptyUsage();
+      addUsage(tokens, turnTokens(e.usage));
+      turns.set(e.attemptId, tokens);
+    } else if (e.type === "step-end" && !e.cached) {
+      open.delete(e.attemptId);
+    }
+  }
+  const steps = new Map<string, InterruptedCloudStep>();
+  for (const agent of open.values()) {
+    steps.set(agent.stepId, { stepId: agent.stepId, attemptId: agent.attemptId, agentId: agent.agentId, snapshot: agent.snapshot, countedTokens: turns.get(agent.attemptId) ?? emptyUsage() });
+  }
+  return steps;
 }
 
 /** How many progress lines `recent` keeps. */
@@ -120,6 +167,7 @@ function recentLine(e: WorkflowEvent): string | undefined {
     case "group-start":
     case "group-end":
     case "turn":
+    case "cloud-agent": // the step-start already shows the step; the agent's id is for the log
     case "content":
       return undefined;
   }

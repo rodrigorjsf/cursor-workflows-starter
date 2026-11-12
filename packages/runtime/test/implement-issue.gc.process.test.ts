@@ -3,11 +3,12 @@
 // so the worktrees, the branches, the pushes and the run state are what the workflow leaves behind. What happened on GitHub
 // (a PR merged or closed) is set in the fake gh; what happened to a run in the past (a failure N days ago) is set in its event log.
 // Two tests step beside the CLI: one drives gc's plan and apply apart (a run that starts between them), one asks `Commands`
-// for the guard that keeps the origin from deleting a branch outside `wf/`. The last two run implement-issue itself, to show
-// what a resume finds after gc.
+// for the guard that keeps the origin from deleting a branch outside `wf/`. Two run implement-issue itself, to show what a resume
+// finds after gc. The cloud snapshot branches are pushed by hand to the temporary remotes, as a cloud step leaves them behind
+// (cloud.lifecycle.test.ts has the ones a real crashed cloud step leaves).
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { writeRepoConfig } from "./config-fixtures.js";
@@ -17,6 +18,7 @@ import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import implementIssue from "../workflows/implement-issue.js";
 import { type GcPlan, applyGc, directCommands, planGc } from "../workflows/implement-issue/gc.js";
 import { branchOf, failGh, fx, gh, git, issue, originBranches, run, setPrState, setup, teardown, worktreeOf } from "./implement-issue.fixture.js";
+import { ageRunLog } from "./run-fixtures.js";
 
 beforeEach(() => {
   setup();
@@ -56,17 +58,7 @@ async function failedRun() {
 }
 
 /** Moves everything the run did `days` days into the past, as if it had happened then. */
-function age(runId: string, days: number) {
-  const file = join(fx.repo, ".workflows", "runs", runId, "events.jsonl");
-  const lines = readFileSync(file, "utf8")
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => {
-      const event = JSON.parse(line) as { ts: string };
-      return JSON.stringify({ ...event, ts: new Date(Date.parse(event.ts) - days * 86_400_000).toISOString() });
-    });
-  writeFileSync(file, lines.join("\n") + "\n");
-}
+const age = (runId: string, days: number) => ageRunLog(fx.repo, runId, days);
 
 const stillThere = (r: { branch: string; worktree: string }) => ({
   worktree: existsSync(r.worktree),
@@ -177,7 +169,7 @@ test("a run that starts executing between the plan and the removal is skipped, n
   const d = await delivered();
   setPrState(d.branch, "MERGED");
   const commands = directCommands();
-  const plan = await planGc({ cwd: fx.repo, commands, failedAfterDays: 14 });
+  const plan = await planGc({ cwd: fx.repo, commands, failedAfterDays: 14, snapshots: { remote: "origin", graceHours: 24 } });
   assert.equal(plan.remove.length, 1, "the plan has the run");
 
   const executing = tryAcquireRunLock(fx.repo, d.runId); // what a resume of the run holds while it executes
@@ -439,6 +431,216 @@ test("a run that failed before its first slice can be resumed after gc: there wa
   assert.equal((resumed.result as { status: string }).status, "done", JSON.stringify(resumed.result ?? resumed.error));
   assert.ok(existsSync(failed.worktree));
 });
+
+/** The cloud snapshot branches of the bare repository at `bare` (the origin by default): what a cloud step's push leaves when nothing deletes it. */
+const snapshotsOn = (bare = join(fx.root, "origin.git")) =>
+  git(bare, "for-each-ref", "--format=%(refname:short)", "refs/heads/wf/cloud-snapshot/")
+    .split("\n")
+    .filter(Boolean)
+    .sort();
+
+/** Pushes `HEAD` as the snapshot branch of `runId` to the remote `remote`, the way a cloud step does, and returns the branch. */
+function leaveSnapshot(runId: string, { remote = "origin", id = "00000000" } = {}): string {
+  const branch = `wf/cloud-snapshot/${runId}/${id}`;
+  git(fx.repo, "push", "-q", remote, `HEAD:refs/heads/${branch}`);
+  return branch;
+}
+
+test("a cloud snapshot branch that a run of this repo left on the remote is removed once no process executes the run and its last event is past the grace period; --dry-run only lists it", async () => {
+  const d = await delivered(); // a run of this repo whose PR is open: the sweep has nothing else to do with it
+  age(d.runId, 2);
+  const branch = leaveSnapshot(d.runId);
+  assert.deepEqual(snapshotsOn(), [branch]);
+
+  const dry = gc("--dry-run");
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.deepEqual(snapshotsOn(), [branch], "a dry run deletes nothing");
+  assert.deepEqual(
+    dry.out.remove.map((x) => [x.runId, x.reason, x.actions.map((a) => [a.kind, a.target, a.result])]),
+    [[d.runId, "snapshot", [["remote-branch", branch, undefined]]]],
+  );
+  assert.ok(dry.stderr.includes(branch), "the plan on stderr names the branch");
+  assert.deepEqual(stillThere(d), { worktree: true, localBranch: true, originBranch: true }, "the run itself is not gc's to clean: its PR is open");
+
+  const real = gc();
+  assert.equal(real.status, 0, real.stderr);
+  assert.deepEqual(snapshotsOn(), [], "the branch is gone from the remote");
+  assert.deepEqual(real.out.remove[0]!.actions.map((a) => [a.target, a.result]), [[branch, "removed"]]);
+  assert.deepEqual(stillThere(d), { worktree: true, localBranch: true, originBranch: true });
+  assert.deepEqual(gc().out.remove, [], "a second gc finds nothing left");
+});
+
+/** What the plan keeps of the cloud snapshot branches: each branch once, with why. */
+const keptSnapshots = (out: GcOutput) => out.kept.filter((k) => k.branch?.startsWith("wf/cloud-snapshot/")).map((k) => [k.branch, k.why]);
+/** Every `gh` call that names a cloud snapshot branch: a snapshot has no PR, so there must be none. */
+const prLookupsForSnapshots = () => gh().calls.filter((c) => c.some((arg) => arg.includes("cloud-snapshot")));
+
+test("a snapshot branch of a run still inside the grace period, of a run id this repo does not have, or with a name no cloud step builds, stays; the plan says why, lists each once, and no PR is looked up for any", async () => {
+  const fresh = await delivered(); // its last event is from this minute: a cloud agent may still be starting from its snapshot
+  const mine = leaveSnapshot(fresh.runId);
+  const foreign = leaveSnapshot("implement-issue-made-in-another-clone");
+  git(fx.repo, "push", "-q", "origin", "HEAD:refs/heads/wf/cloud-snapshot/hand-made");
+  const before = snapshotsOn();
+  assert.equal(before.length, 3);
+
+  const r = gc();
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(snapshotsOn(), before, "nothing was deleted");
+  assert.deepEqual(r.out.remove, []);
+  assert.deepEqual(
+    keptSnapshots(r.out).map(([branch]) => branch),
+    [mine, "wf/cloud-snapshot/hand-made", foreign].sort(),
+    "each is kept once: not also as a branch of no run",
+  );
+  const why = (branch: string) => r.out.kept.find((k) => k.branch === branch)?.why ?? "";
+  assert.match(why(mine), new RegExp(`run ${fresh.runId} was last active less than an hour ago, and gc waits for more than 24 hours`));
+  assert.match(why(foreign), /no run of this repo made it .*another clone/);
+  assert.match(why("wf/cloud-snapshot/hand-made"), /not a name a cloud step gives/);
+  for (const branch of [mine, foreign, "wf/cloud-snapshot/hand-made"]) assert.ok(r.stderr.includes(branch), `the plan on stderr names ${branch}`);
+  assert.deepEqual(prLookupsForSnapshots(), [], "no PR lookup was made for a snapshot branch");
+});
+
+test("a snapshot branch of a run a process is executing stays, whatever the age of its last event; it goes once the process ends", async () => {
+  const d = await delivered();
+  age(d.runId, 30);
+  const branch = leaveSnapshot(d.runId);
+  // The resume redelivers; its final suite holds it until the gate file exists, so the run is executing while gc looks.
+  const started = join(fx.root, "started");
+  const gate = join(fx.root, "gate");
+  const resuming = run({ openPr: true, testCommand: `touch ${started}; while [ ! -f ${gate} ]; do sleep 0.05; done` }, d.runId);
+  try {
+    for (let i = 0; i < 400 && !existsSync(started); i++) await new Promise((r) => setTimeout(r, 25));
+    assert.ok(existsSync(started), "the resumed run reached its final suite");
+
+    const during = gc();
+    assert.equal(during.status, 0, during.stderr);
+    assert.deepEqual(snapshotsOn(), [branch]);
+    assert.deepEqual(during.out.remove, []);
+    assert.match(during.out.kept.find((k) => k.branch === branch)?.why ?? "", new RegExp(`a process is executing run ${d.runId}`));
+  } finally {
+    writeFileSync(gate, "");
+    await resuming;
+  }
+  age(d.runId, 2); // what the run did while it executed is not past the grace period yet
+
+  const after = gc();
+  assert.equal(after.status, 0, after.stderr);
+  assert.deepEqual(snapshotsOn(), []);
+});
+
+test("a snapshot branch of a run whose directory has no event log stays: the log is the only record of when a run was last active", async () => {
+  mkdirSync(join(fx.repo, ".workflows", "runs", "implement-issue-no-log"), { recursive: true });
+  const branch = leaveSnapshot("implement-issue-no-log");
+
+  const r = gc();
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(snapshotsOn(), [branch]);
+  assert.deepEqual(r.out.remove, []);
+  assert.match(r.out.kept.find((k) => k.branch === branch)?.why ?? "", /run implement-issue-no-log has no event log/);
+});
+
+test("a snapshot branch of a run that starts executing between the plan and the removal is skipped, not removed", async () => {
+  const d = await delivered();
+  age(d.runId, 2);
+  const branch = leaveSnapshot(d.runId);
+  const commands = directCommands();
+  const plan = await planGc({ cwd: fx.repo, commands, failedAfterDays: 14, snapshots: { remote: "origin", graceHours: 24 } });
+  assert.deepEqual(plan.remove.map((x) => x.actions.map((a) => a.target)), [[branch]], "the plan has the branch");
+
+  const executing = tryAcquireRunLock(fx.repo, d.runId)!; // what a resume of the run holds while it executes
+  try {
+    await applyGc(plan, commands);
+  } finally {
+    executing();
+  }
+  assert.deepEqual(snapshotsOn(), [branch]);
+  assert.deepEqual(plan.remove[0]!.actions.map((a) => a.result), ["skipped"]);
+  assert.deepEqual(plan.errors, [], "a run that started again is not a failure of gc");
+});
+
+/** A second bare repository, added to the temp repo as the remote `name`: a fork that cloud steps can push their snapshots to. */
+function addRemote(name: string): string {
+  const bare = join(fx.root, `${name}.git`);
+  git(fx.root, "init", "-q", "--bare", bare);
+  git(fx.repo, "remote", "add", name, bare);
+  return bare;
+}
+
+test("when cloud.remote names a remote other than the origin, the sweep lists and deletes the snapshot branches there, and the origin's are not touched", async () => {
+  const fork = addRemote("fork");
+  writeRepoConfig(fx.repo, { cloud: { remote: "fork" } });
+  const d = await delivered();
+  age(d.runId, 2);
+  const onFork = leaveSnapshot(d.runId, { remote: "fork" });
+  const onOrigin = leaveSnapshot(d.runId, { id: "0000000f" });
+
+  const dry = gc("--dry-run");
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.deepEqual(dry.out.remove.map((x) => x.actions.map((a) => [a.kind, a.target, a.remote])), [[["remote-branch", onFork, "fork"]]]);
+  assert.match(dry.stderr, new RegExp(`fork branch\\s+${onFork}`), "the plan says which remote");
+  assert.deepEqual([snapshotsOn(fork), snapshotsOn()], [[onFork], [onOrigin]], "a dry run deletes nothing");
+
+  const real = gc();
+  assert.equal(real.status, 0, real.stderr);
+  assert.deepEqual([snapshotsOn(fork), snapshotsOn()], [[], [onOrigin]], "the fork's branch is gone, the origin's is where it was");
+  assert.deepEqual(real.out.remove[0]!.actions.map((a) => a.result), ["removed"]);
+  assert.match(real.out.kept.find((k) => k.branch === onOrigin)?.why ?? "", /cloud steps push to fork/);
+  assert.deepEqual(prLookupsForSnapshots(), [], "no PR lookup for the origin's snapshot either");
+});
+
+test("a cloud.remote that is not a remote of the repo has no snapshot branch to sweep, and is not an error", async () => {
+  writeRepoConfig(fx.repo, { cloud: { remote: "nowhere" } });
+  const r = gc();
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.out.errors, []);
+});
+
+test("a remote that refuses to delete one snapshot branch is a failure in the plan's errors, and the rest of the sweep goes on", async () => {
+  const d = await delivered();
+  age(d.runId, 2);
+  const refused = leaveSnapshot(d.runId, { id: "00000000" });
+  const accepted = leaveSnapshot(d.runId, { id: "deadbeef" });
+  // A branch of another clone whose PR was merged: it comes after the snapshots in the plan, and goes although a deletion before it failed.
+  git(fx.repo, "push", "-q", "origin", "HEAD:refs/heads/wf/issue-9-merged-elsewhere");
+  addPr("wf/issue-9-merged-elsewhere", "MERGED");
+  const hook = join(fx.root, "origin.git", "hooks", "pre-receive");
+  writeFileSync(hook, '#!/bin/sh\nwhile read old new ref; do\n  case "$ref" in */00000000) [ "$new" = "0000000000000000000000000000000000000000" ] && { echo "deletion refused by the remote" >&2; exit 1; } ;; esac\ndone\n');
+  chmodSync(hook, 0o755);
+
+  const r = gc();
+  assert.equal(r.status, 1, "a failed deletion fails gc");
+  assert.deepEqual(snapshotsOn(), [refused], "the branch the remote refused is still there; the other went");
+  assert.ok(!originBranches().includes("wf/issue-9-merged-elsewhere"), "the sweep went on past the failure");
+  assert.equal(r.out.errors.length, 1);
+  assert.match(r.out.errors[0]!, new RegExp(`${d.runId}.*${refused}.*deletion refused by the remote`));
+  assert.deepEqual(
+    r.out.remove.flatMap((x) => x.actions.map((a) => [a.target, a.result])).sort(),
+    [[refused, "failed"], [accepted, "removed"], ["wf/issue-9-merged-elsewhere", "removed"]].sort(),
+  );
+});
+
+test("the grace period is the setting gcSnapshotGraceHours: a longer one keeps a snapshot that the default would remove, and 0 removes one the default would keep", async () => {
+  const d = await delivered();
+  age(d.runId, 2);
+  const branch = leaveSnapshot(d.runId);
+
+  settingsOfImplementIssue({ gcSnapshotGraceHours: 72 });
+  const longer = gc();
+  assert.equal(longer.status, 0, longer.stderr);
+  assert.deepEqual(snapshotsOn(), [branch]);
+  assert.match(longer.out.kept.find((k) => k.branch === branch)?.why ?? "", /last active 2 days ago, and gc waits for more than 72 hours/);
+
+  settingsOfImplementIssue({ gcSnapshotGraceHours: 0 });
+  const none = await delivered(); // finished a moment ago
+  const fresh = leaveSnapshot(none.runId);
+  const shorter = gc();
+  assert.equal(shorter.status, 0, shorter.stderr);
+  assert.deepEqual(snapshotsOn(), [], "with no grace the snapshot of a run that just stopped goes, as does the older one");
+  assert.deepEqual(shorter.out.remove.map((x) => x.actions.map((a) => a.target)).flat().sort(), [branch, fresh].sort());
+});
+
+/** Sets `implement-issue`'s settings in the repo config. */
+const settingsOfImplementIssue = (settings: Record<string, unknown>) => writeRepoConfig(fx.repo, { workflows: { "implement-issue": { settings } } });
 
 /** A PR on GitHub for a branch this repo has no run for (the run was made in another clone): the fake gh gets it as if `pr create` had made it. */
 function addPr(head: string, state: "OPEN" | "MERGED" | "CLOSED") {

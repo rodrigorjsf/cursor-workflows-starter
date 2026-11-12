@@ -2,7 +2,8 @@
 // output. It follows the step while it runs (the view sticks to the bottom until the reader scrolls up) and shows the log as it
 // stood at a replay's position when the run is being replayed. Everything is drawn as text: a log holds what an agent wrote.
 import { type ReactNode, useEffect, useMemo, useRef } from "react";
-import { describeNode } from "./node-details.js";
+import { NodeRows } from "./NodeRows.js";
+import { describeFacts } from "./node-details.js";
 import type { GraphNode } from "./run-graph.js";
 import { type Body, type LogEntry, type OutputBlock, buildStepLog } from "./step-log.js";
 import { useStepLog } from "./use-step-log.js";
@@ -105,7 +106,7 @@ export function StepLogPanel({ runId, node, now, live, upTo, onClose }: StepLogP
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const rows = describeNode(node, now).filter(([name]) => ["State", "Model", "Command", "Attempts", "Duration"].includes(name));
+  const rows = describeFacts(node, now);
   let body: ReactNode;
   if (feed.status === "loading") body = <p className="notice">Reading the step…</p>;
   else if (feed.status === "error") {
@@ -136,14 +137,7 @@ export function StepLogPanel({ runId, node, now, live, upTo, onClose }: StepLogP
           ×
         </button>
       </header>
-      <dl className="facts">
-        {rows.map(([name, value]) => (
-          <div key={name}>
-            <dt>{name}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
+      <NodeRows rows={rows} className="facts" />
       <div
         className="log"
         ref={scroller}

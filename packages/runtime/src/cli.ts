@@ -15,7 +15,7 @@
 //   wf wait <jobId> [--timeout 240]       # espera até o timeout e imprime o estado
 //   wf cancel <jobId> [--timeout 30]      # cancel the job (SIGTERM to its process) and wait for it to stop; the run stays resumable
 //   wf jobs
-//   wf gc [--dry-run]                     # removes the worktrees, local branches and origin branches of implement-issue runs whose PR was merged or closed, or that failed long ago; --dry-run only prints the plan
+//   wf gc [--dry-run]                     # removes the worktrees, local branches and origin branches of implement-issue runs whose PR was merged or closed, or that failed long ago, and the cloud snapshot branches their steps left on the cloud.remote remote; --dry-run only prints the plan
 //   wf stats [--days 30]                  # resumo de custo/eficiência (banco ~/.cursor-workflows/metrics.db)
 //   wf metrics export [--days 30] [--format csv|json] [--out dir] [--no-anonymize]
 //   wf metrics reconcile                  # completa custos que o Cursor ainda não tinha reportado
@@ -216,11 +216,13 @@ async function main(): Promise<number> {
     case "gc": {
       const def = (await loadWorkflows(cwd)).get("implement-issue");
       if (!def) throw new Error("unknown workflow: implement-issue. Use `wf list`.");
-      const { gcFailedAfterDays: failedAfterDays, networkTimeoutSec } = loadEffectiveConfig(def, { cwd }).config.settings;
+      const { config } = loadEffectiveConfig(def, { cwd });
+      const { gcFailedAfterDays: failedAfterDays, gcSnapshotGraceHours: graceHours, networkTimeoutSec } = config.settings;
       if (typeof failedAfterDays !== "number") throw new Error("workflows.implement-issue.settings.gcFailedAfterDays must be a number of days");
+      if (typeof graceHours !== "number") throw new Error("workflows.implement-issue.settings.gcSnapshotGraceHours must be a number of hours");
       if (typeof networkTimeoutSec !== "number") throw new Error("workflows.implement-issue.settings.networkTimeoutSec must be a number of seconds");
       const commands = directCommands(networkTimeoutSec);
-      const plan = await planGc({ cwd, commands, failedAfterDays });
+      const plan = await planGc({ cwd, commands, failedAfterDays, snapshots: { remote: config.cloud.remote, graceHours } });
       process.stderr.write(formatPlan(plan)); // the plan first, then the removal
       if (values["dry-run"]) process.stderr.write("wf gc: dry run, nothing was changed.\n");
       else await applyGc(plan, commands);

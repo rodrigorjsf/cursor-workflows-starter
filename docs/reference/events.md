@@ -135,6 +135,7 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 | `phase` | `string` | não | A fase em que a etapa começou (`phase` da chamada ou o último `ctx.phase`). |
 | `cached` | `false \| "journal" \| "memo"` | sim | De onde vem o resultado sem chamar a API: journal do run (resume) ou memo entre runs. `false` = tentativa real. |
 | `role` | `string` | não | O papel da etapa (`role` da chamada), quando ela declara um. |
+| `location` | `"local" \| "cloud"` | não | Onde a tentativa roda: `local` ou `cloud` (um cloud agent da Cursor). Ausente em etapa servida do journal ou do memo, que não rodou. |
 | `model` | `string` | não | O ID do modelo pedido. |
 | `modelKey` | `string` | não | Modelo + parâmetros ordenados, como `composer-2[reasoning_effort=low]`: esforço e contexto contam como modelos distintos. |
 | `modelParams` | `ModelSelection["params"]` | não | Os parâmetros do modelo pedidos (esforço de raciocínio, contexto…). |
@@ -189,6 +190,7 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 | `attempt` | `number` | não | Número da tentativa; ausente quando a etapa foi servida do journal ou do memo. |
 | `ok` | `boolean` | sim | A tentativa entregou um resultado válido. |
 | `cached` | `false \| "journal" \| "memo"` | sim | De onde veio o resultado sem chamar a API: journal do run (resume) ou memo entre runs. |
+| `location` | `"local" \| "cloud"` | não | Onde a tentativa rodou, como no `step-start`. |
 | `chargedCents` | `number` | sim | O que o Cursor cobrou pela tentativa (0 para uso incluído no plano). |
 | `rawCents` | `number` | não | O custo bruto reportado. O teto de custo usa o maior entre o bruto e o cobrado. |
 | `costFinal` | `boolean` | não | false = o Cursor ainda não tinha reportado custo; `wf metrics reconcile` completa depois. |
@@ -208,6 +210,19 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 | `agentId` | `string` | não | O id do agente no Cursor. |
 | `usageRuns` | `RunUsage[]` | não | O uso por run do agente, como o Cursor o reporta. |
 | `durationMs` | `number` | não | Duração da tentativa em milissegundos. |
+
+### `cloud-agent`
+
+Um agente na nuvem existe para a tentativa. O motor grava o id assim que o backend o tem, antes de a etapa terminar, para que um resume reencontre o agente que ainda roda em vez de criar outro. Só etapas na nuvem emitem este evento; o `step-end` repete o `agentId`, mas só quando a tentativa termina.
+
+Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
+
+| Campo | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `attemptId` | `string` | sim | A tentativa a que o agente pertence (o `attemptId` do `step-start`). |
+| `agentId` | `string` | sim | O id do agente no Cursor (`bc-…`). |
+| `reattached` | `true` | não | true = a tentativa reanexou a um agente que uma execução anterior, interrompida, deixou rodando: ele não foi criado agora. |
+| `snapshot` | `{ remote: string; branch: string; commit?: string }` | não | A branch de snapshot de que o agente parte, o remote para onde foi empurrada e o commit dela (o ponto de partida do agente: uma etapa que escreve só traz o trabalho de volta para um worktree que ainda é esse commit). Quem reanexa a apaga quando a etapa termina. Ausente quando a tentativa reanexou a um agente cuja branch o log não conhece. |
 
 ### `exec-start`
 
@@ -288,6 +303,7 @@ A configuração efetiva de um run: o que as camadas e os tetos globais decidira
 | `roles` | `Record<string, EffectiveRole>` | sim | Um item por papel que o workflow declara (`meta.roles`). |
 | `labels` | `Record<string, EffectiveRole>` | sim | Preferências por glob de label, para etapas sem papel. |
 | `execTimeoutMs` | `number` | sim | Tempo máximo, em milissegundos, de um comando de `ctx.exec` que não passa o próprio `timeoutMs`. |
+| `cloud` | `EffectiveCloud` | sim | Preferências das etapas na nuvem (`cloud` dos arquivos de configuração). |
 | `settings` | `Record<string, unknown>` | sim | Os ajustes que o workflow declara (`meta.settings`), cada um com o padrão do código ou o valor que um arquivo de configuração trocou. A origem de cada um está em `provenance` (`/settings/<nome>`). Vazio quando o workflow não declara nenhum. |
 
 ### EffectiveLimits
@@ -312,7 +328,7 @@ Os tetos globais em vigor (o `caps` do arquivo global). `null` = sem teto.
 | `maxCents` | `number \| null` | sim | Teto de custo por run, em centavos. |
 | `allowedModels` | `string[] \| null` | sim | Modelos permitidos (IDs ou globs com `*`); `null` libera todos. |
 | `allowedSettingSources` | `SettingSource[] \| null` | sim | Camadas de configuração que uma etapa pode carregar; `null` libera todas. |
-| `allowedLocations` | `Array<"local" \| "cloud"> \| null` | sim | Onde uma etapa pode rodar; `null` libera todos. |
+| `allowedLocations` | `Array<"local" \| "cloud"> \| null` | sim | Onde uma etapa pode rodar; `null` libera todos. Sem a chave no arquivo global, só `local`: a nuvem é decisão do dono da máquina. |
 | `maxConcurrency` | `number \| null` | sim | Agentes simultâneos; `null` = sem teto. |
 | `requireSandbox` | `boolean \| null` | sim | `true` liga o sandbox do SDK em toda etapa, mesmo que o código do workflow o desligue; `null` deixa o código decidir. |
 
@@ -322,12 +338,22 @@ As configurações de uma etapa por papel (ou por glob de label). Só aparece o 
 
 | Campo | Tipo | Obrigatório | Descrição |
 | --- | --- | --- | --- |
+| `location` | `"local" \| "cloud"` | não | Onde as etapas do papel rodam: `local` (o padrão) ou `cloud`. Um `cloud` que o teto `allowedLocations` não permite vira `local`, com uma violação. Só papéis têm location; um glob de label não. |
+| `resultVia` | `"json-block" \| "artifact"` | não | Como uma etapa do papel na nuvem entrega o resultado estruturado: `json-block` (o padrão: o último bloco de código `json` da resposta final) ou `artifact` (o arquivo `result.json` que o agente salva nos artefatos dele, baixado depois do run). Só aparece quando uma camada o definiu; só papéis têm um. |
 | `model` | `Partial<ModelSelection>` | não | Modelo: o ID, os parâmetros e o max mode, cada um com a sua origem em `provenance`. Um glob de label pode trazer só parte deles. |
 | `timeoutMs` | `number` | não | Tempo máximo da etapa, em milissegundos. |
 | `retries` | `number` | não | Tentativas extras quando a etapa termina em erro. |
 | `schemaRetries` | `number` | não | Re-prompts quando o agente não entrega o JSON do schema. |
 | `maxTokensPerStep` | `number \| null` | não | Teto de tokens da etapa. Ausente: vale o do workflow (`limits`). |
 | `settingSources` | `SettingSource[]` | não | Camadas de configuração que a etapa carrega, já reduzidas pelo teto `allowedSettingSources`. |
+
+### EffectiveCloud
+
+As preferências das etapas na nuvem, depois das camadas.
+
+| Campo | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `remote` | `string` | sim | O remote do git para onde vão as branches de snapshot das etapas na nuvem. Padrão: `origin`. |
 
 ### ConfigSource
 

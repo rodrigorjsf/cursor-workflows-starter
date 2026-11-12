@@ -7,7 +7,8 @@
 //   from a saved progress file.
 // HOW: `tsx scripts/verify/validation-report.ts --progress <progress.env> --out-dir <dir> [--doctor <doctor.json>]
 //   [--kit <kit dir>]`. The progress file is `KEY=value` lines: CURSOR_VERSION, IDE_TERMINAL (yes|no), SANDBOX_REPO,
-//   SANDBOX_DIR, and S<n>_TITLE, S<n>_RESULT (pass|fail|skip), S<n>_NOTE per scenario. Exit 2 on a missing argument.
+//   SANDBOX_DIR, and S<n>_TITLE, S<n>_RESULT (pass|fail|skip), S<n>_NOTE per scenario (the eighth is optional: reported, not
+//   part of the release criterion). Exit 2 on a missing argument.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, hostname, release, userInfo } from "node:os";
 import { join, resolve } from "node:path";
@@ -22,6 +23,8 @@ interface Scenario {
   title: string;
   result: Result;
   note: string;
+  /** True for a scenario past the release criterion's seven: reported, never counted in the summary or the title. */
+  optional?: true;
 }
 
 interface DoctorCheck {
@@ -116,7 +119,10 @@ function anonymizeFreeText(report: Report, fn: (text: string) => string): Report
   };
 }
 
-/** The release criterion: "works in the Cursor IDE" means these many scenarios pass (the six of the foundation spec and the live dashboard's). */
+/**
+ * The release criterion: "works in the Cursor IDE" means these many scenarios pass (the six of the foundation spec and the
+ * live dashboard's). A scenario numbered past them is optional (the eighth, a step in the cloud, needs a plan with Cloud Agents).
+ */
 const SCENARIO_COUNT = 7;
 
 const RESULTS: Record<string, Result> = { pass: "pass", fail: "fail" };
@@ -132,6 +138,7 @@ function scenariosOf(progress: Record<string, string>): Scenario[] {
     title: progress[`S${id}_TITLE`]!,
     result: RESULTS[progress[`S${id}_RESULT`] ?? ""] ?? "skipped", // no answer is not a pass
     note: progress[`S${id}_NOTE`] ?? "",
+    ...(id > SCENARIO_COUNT ? { optional: true as const } : {}),
   }));
 }
 
@@ -158,7 +165,8 @@ function kitVersion(kitDir: string | undefined): string | null {
 
 function buildReport(progress: Record<string, string>, doctorText: string | undefined, kitDir: string | undefined, now = new Date()): Report {
   const scenarios = scenariosOf(progress);
-  const count = (result: Result) => scenarios.filter((s) => s.result === result).length;
+  const required = scenarios.filter((s) => !s.optional);
+  const count = (result: Result) => required.filter((s) => s.result === result).length;
   const pass = count("pass");
   return {
     schemaVersion: 1,
@@ -174,7 +182,7 @@ function buildReport(progress: Record<string, string>, doctorText: string | unde
     },
     doctor: doctorOf(doctorText),
     scenarios,
-    summary: { pass, fail: count("fail"), skipped: count("skipped"), releaseCriterionMet: scenarios.length === SCENARIO_COUNT && pass === SCENARIO_COUNT },
+    summary: { pass, fail: count("fail"), skipped: count("skipped"), releaseCriterionMet: required.length === SCENARIO_COUNT && pass === SCENARIO_COUNT },
   };
 }
 
@@ -191,11 +199,11 @@ function issueBody(report: Report): string {
   const lines = [
     "## Cursor IDE validation",
     "",
-    `${issueTitle(report)}. The release criterion (all scenarios pass) is ${summary.releaseCriterionMet ? "met" : "not met"}.`,
+    `${issueTitle(report)}. The release criterion (scenarios 1 to ${SCENARIO_COUNT} pass) is ${summary.releaseCriterionMet ? "met" : "not met"}.`,
     "",
     "| # | Scenario | Result | Note |",
     "|---|---|---|---|",
-    ...scenarios.map((s) => `| ${s.id} | ${cell(s.title)} | ${s.result} | ${cell(s.note)} |`),
+    ...scenarios.map((s) => `| ${s.id} | ${cell(s.title)}${s.optional ? " (optional)" : ""} | ${s.result} | ${cell(s.note)} |`),
     "",
     "### Environment",
     "",

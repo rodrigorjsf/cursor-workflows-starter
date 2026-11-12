@@ -23,6 +23,13 @@ export interface CommandTimeouts {
 export const LOCAL_GIT_TIMEOUT_MS = 5 * 60_000;
 /** The default for how long `git push`, `git ls-remote` and every `gh` call may run, in seconds. */
 export const NETWORK_TIMEOUT_SEC = 120;
+/**
+ * The default for how long `wf gc` leaves a cloud snapshot branch alone after the last event of its run, in hours. A step that
+ * ends deletes its snapshot; one that is still there belongs to a run that died, and a cloud agent that the dead process started
+ * may only now be reading the ref it starts from. How late it reads is not known (nothing has measured it against the real API),
+ * so the wait is long: a day costs nothing, a throwaway ref on the remote is all that waits.
+ */
+export const SNAPSHOT_GRACE_HOURS = 24;
 
 /** What a command that had to succeed did instead. `result` is what `ctx.exec` handed back. */
 export class CommandError extends Error {
@@ -46,6 +53,9 @@ function failureMessage(line: string, r: ExecResult, timeoutMs: number | undefin
   const output = r.tail.trim().slice(-1000);
   return `${line} ${r.exitCode === null ? "was killed" : `exited with code ${r.exitCode}`}${output ? `: ${output}` : ""}`;
 }
+
+/** The remote the workflow pushes its branches to, and the default of the others its commands take. */
+export const ORIGIN = "origin";
 
 /** Every branch the workflow creates starts with this, and it force-pushes no other (`Commands.pushOwned`). */
 export const WORKFLOW_BRANCH_PREFIX = "wf/";
@@ -116,12 +126,12 @@ export class Commands {
   }
 
   /**
-   * Every branch the origin has under the workflow's prefix, by name, with the commit each points at. A network command.
-   * Empty when the repository has no `origin`: there is no remote branch to find.
+   * Every branch `remote` (the origin by default) has under `prefix` (the workflow's own by default), by name, with the commit each
+   * points at. A network command. Empty when the repository has no such remote: there is no remote branch to find.
    */
-  async remoteOwnedHeads(cwd: string): Promise<Map<string, string>> {
-    if (!(await this.gitIs(cwd, "config", "--get", "remote.origin.url"))) return new Map();
-    const out = await this.succeedRead("git", ["ls-remote", "--heads", "origin", `refs/heads/${WORKFLOW_BRANCH_PREFIX}*`], cwd, this.timeouts.networkMs);
+  async remoteOwnedHeads(cwd: string, remote = ORIGIN, prefix = WORKFLOW_BRANCH_PREFIX): Promise<Map<string, string>> {
+    if (!(await this.gitIs(cwd, "config", "--get", `remote.${remote}.url`))) return new Map();
+    const out = await this.succeedRead("git", ["ls-remote", "--heads", remote, `refs/heads/${prefix}*`], cwd, this.timeouts.networkMs);
     const heads = new Map<string, string>();
     for (const line of out.split("\n")) {
       const [sha, ref] = line.trim().split(/\s+/);
@@ -131,12 +141,12 @@ export class Commands {
   }
 
   /**
-   * Deletes `branch` from the origin, but only if it still points at `expected` (a lease, like `pushOwned`): a commit pushed
-   * since is not deleted. Like the push, it is restricted to the branches the workflow owns.
+   * Deletes `branch` from `remote` (the origin by default), but only if it still points at `expected` (a lease, like `pushOwned`):
+   * a commit pushed since is not deleted. Like the push, it is restricted to the branches the workflow owns.
    */
-  async deleteOwned(cwd: string, branch: string, expected: string): Promise<void> {
-    assertOwned(branch, `delete ${branch} from the origin`, "deletes");
-    await this.push(cwd, `--force-with-lease=${branch}:${expected}`, "origin", `:refs/heads/${branch}`);
+  async deleteOwned(cwd: string, branch: string, expected: string, remote = ORIGIN): Promise<void> {
+    assertOwned(branch, `delete ${branch} from ${remote}`, "deletes");
+    await this.push(cwd, `--force-with-lease=${branch}:${expected}`, remote, `:refs/heads/${branch}`);
   }
 
   /** `gh` in `cwd`, which has to succeed; returns all of its stdout. */
