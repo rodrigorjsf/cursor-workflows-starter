@@ -320,14 +320,16 @@ para um run em andamento e para um que já terminou):
   último. O link só é feito para um id no formato `bc-…`; qualquer outro valor aparece como texto. O tooltip de uma etapa
   na nuvem aceita o ponteiro, para o link poder ser clicado; para chegar ao link pelo teclado, abra o log da etapa (Enter no
   nó), que repete a localização, o agente e o custo.
-- **Clicar** num nó (ou Enter nele) abre o [log da etapa](#o-log-de-uma-etapa) ao lado do grafo.
+- **Clicar** num nó (ou Enter nele) abre o [log da etapa](#o-log-de-uma-etapa) ao lado do grafo (abaixo de 800 px de
+  largura, por cima dele).
 - **Replay.** Num run que não está em andamento, **Replay** reconstrói o grafo evento a evento, na ordem do log, com
   velocidade de 1× a 20×, pausa e uma barra para ir a qualquer ponto. O grafo de qualquer trecho do log é o mesmo que o
   run teria naquele instante, e o painel de log aberto mostra o log da etapa como ele estava naquele ponto (o replay anda
   pelos eventos que mudam o desenho: o log de uma etapa aparece inteiro quando ela termina; a barra deixa parar em
   qualquer evento).
-- Um run grande (o `implement-issue` passa de 50 comandos) não cabe na tela em tamanho legível: a tela enquadra os últimos
-  nós de um run em andamento, ou os primeiros de um que terminou, e **Fit View** mostra tudo.
+- Um run grande (o `implement-issue` passa de 50 comandos) não cabe na tela em tamanho legível: a tela enquadra só os nós
+  que cabem com o texto legível, em volta de um foco (o nó com o log aberto; num run que terminou, o primeiro nó que falhou
+  ou parou, ou senão a primeira etapa; num run em andamento, o nó mais recente), e **Fit View** mostra tudo.
 
 A página lê a API: o stream `?content=false` do run (o conteúdo das etapas vem só do painel de log, que pede o de uma etapa
 por vez), `GET /api/runs/<runId>` para o status e o repositório, que ela consulta a cada poucos segundos, e só age para
@@ -337,7 +339,7 @@ põe de volta em andamento. Eventos de outra versão do esquema ou de tipo desco
 
 ### O log de uma etapa
 
-Clicar num nó abre, ao lado do grafo, o log da etapa, montado só a partir dos eventos `content` dela:
+Clicar num nó abre o log da etapa ao lado do grafo (abaixo de 800 px de largura, por cima dele), montado só a partir dos eventos `content` dela:
 
 - **Etapa de agente:** por tentativa, o prompt (um re-prompt aparece como outro bloco), o que o agente disse (escrito
   quando um turno termina), cada chamada de tool com os argumentos e, logo abaixo, a saída dela. Uma tool de MCP tem o título
@@ -364,6 +366,10 @@ No cabeçalho da página do run:
   escreve o fim do run como `cancelled`). O cartão vai para a coluna Cancelled quando o log o registra. Se o job demora mais
   do que a espera (20 s) para parar, a resposta diz que ele ainda está parando. Um run que não foi iniciado como job (`wf run`
   num terminal) não tem processo registrado para sinalizar: o dashboard responde `409` e diz para dar Ctrl-C naquele terminal.
+- **Cancel cloud agent** (num run `failed` cujo processo morreu com uma etapa na nuvem interrompida e o agente registrado
+  no log) chama a mesma rota: ela cancela, pela API da Cursor, os cloud agents que o run deixou rodando e a página mostra a
+  nota da resposta (`200`), que os nomeia. Quando não há mais nada a cancelar (por exemplo, num segundo clique, já que o
+  cancelamento anterior não fica registrado), a rota responde `409` e a página mostra a mensagem.
 - **Copy resume command** (num run `failed` ou `cancelled`) copia
   `wf start <workflow> --args '<args>' --resume <runId> --cwd <repositório>`, com os mesmos `--max-cents`, `--max-tokens` e
   `--overrides` do start. O registro do job da última execução (`.workflows/jobs/<jobId>.json`, campo `start`) guarda os
@@ -387,7 +393,8 @@ A página inicial (`/`) é um só app, em React, com três menus (o menu é o `#
 
 - **Runs:** os runs de todos os repositórios, do mais novo ao mais antigo, com status, fase, duração e custo;
 - **Board:** o quadro, descrito abaixo;
-- **Metrics:** o painel de custo e eficiência, o mesmo de antes (a tela abaixo).
+- **Metrics:** o painel de custo e eficiência (a tela abaixo), em inglês como o resto do app e com os números no mesmo
+  formato das outras telas.
 
 As duas páginas (o app e a página do run) são empacotadas com o esbuild **quando o dashboard sobe** (nenhum passo de
 build para quem usa o kit), e o resultado fica guardado por hash do conteúdo em `~/.cursor-workflows/dashboard-cache/<hash>/`:
