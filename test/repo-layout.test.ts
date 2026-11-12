@@ -195,7 +195,12 @@ test("the dashboard is its own workspace package: its dependencies never enter t
   const dashboard = manifest("packages", "dashboard");
   assert.equal(dashboard.name, "@cursor-workflows/dashboard");
   assert.ok(manifest().workspaces.includes("packages/*"));
-  assert.deepEqual(Object.keys(dashboard.dependencies), ["@cursor-workflows/runtime"], "the dashboard needs nothing the runtime does not already ship");
+  assert.deepEqual(
+    Object.keys(dashboard.dependencies).sort(),
+    ["@cursor-workflows/runtime", "esbuild", "react", "react-dom"],
+    "the dashboard's own dependencies are the web app's (React, and esbuild to bundle it at start); everything else comes through the runtime",
+  );
+  for (const name of ["esbuild", "react", "react-dom"]) assert.equal(name in runtime.dependencies, false, `${name} is the dashboard's: the runtime does not carry it`);
   assert.equal(Object.keys(runtime.dependencies).some((name) => name.startsWith("@cursor-workflows/")), false, "the runtime depends on no workspace package");
   assert.deepEqual(Object.keys(runtime.exports).sort(), ["./observe", "./package.json"], "the runtime's only public entry points");
 

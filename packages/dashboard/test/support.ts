@@ -1,9 +1,9 @@
 // Shared by the dashboard's tests: a throwaway per-user home, throwaway repos with run directories written the way the
 // runtime writes them, and an HTTP client that can send any Host header.
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 export interface Sandbox {
   /** `WF_HOME`: where the global runs index and the metrics database live. */
@@ -41,6 +41,8 @@ export interface FixtureRun {
   runId: string;
   workflow: string;
   startedAt: string;
+  /** The `phases` the run-start declares (what `meta.phases` lists); left out when not given, as an older kit's log has it. */
+  phases?: string[];
   /** Events after the `run-start` (which the helper writes): each is `{type, ...fields}`; `ts`, `runId` and `v` are filled in. */
   events?: Array<{ type: string } & Record<string, unknown>>;
   /** Write the run's lock as held by this pid: a process is executing the run. */
@@ -72,7 +74,7 @@ export function writeRun(home: string, repo: string, run: FixtureRun): void {
   const file = logPath(repo, run.runId);
   const dir = join(file, "..");
   mkdirSync(dir, { recursive: true });
-  const events = [{ type: "run-start", workflow: run.workflow }, ...(run.events ?? [])];
+  const events = [{ type: "run-start", workflow: run.workflow, ...(run.phases ? { phases: run.phases } : {}) }, ...(run.events ?? [])];
   writeFileSync(file, events.map((e, i) => eventLine(run.runId, at(i), e)).join("\n") + "\n");
   if (run.lockedBy !== undefined) writeFileSync(join(dir, "run.lock"), JSON.stringify({ pid: run.lockedBy, token: "fixture", startedAt: run.startedAt, runId: run.runId }));
 }
@@ -203,4 +205,46 @@ export function openStream(url: string, path: string, opts: { host?: string; hea
     req.once("error", reject);
     req.end();
   });
+}
+
+export interface FakeGh {
+  /** Pull requests the fake knows: `gh pr view <url>` answers with the state. A url not set answers "no pull requests found" and exits 1. */
+  set(url: string, state: "OPEN" | "MERGED" | "CLOSED"): void;
+  /** Every argument list `gh` was started with, in order. */
+  calls(): string[][];
+  /** Puts PATH back and removes the fake. */
+  restore(): void;
+}
+
+/** A `gh` first on PATH for the length of the test, answering `gh pr view <url> --json state --jq .state` from the states set, and logging each start. */
+export function fakeGh(box: Sandbox): FakeGh {
+  const dir = box.repo("fake-gh-bin");
+  const states = join(dir, "states.txt");
+  const log = join(dir, "calls.jsonl");
+  writeFileSync(states, "");
+  writeFileSync(log, "");
+  writeFileSync(
+    join(dir, "gh"),
+    `#!/usr/bin/env node
+const fs = require("fs");
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + "\\n");
+const line = fs.readFileSync(${JSON.stringify(states)}, "utf8").split("\\n").find((l) => l.startsWith(args[2] + " "));
+if (!line) { process.stderr.write("no pull requests found for " + args[2]); process.exit(1); }
+process.stdout.write(line.split(" ")[1] + "\\n");
+`,
+  );
+  chmodSync(join(dir, "gh"), 0o755);
+  const previous = process.env.PATH;
+  process.env.PATH = `${dir}${delimiter}${previous ?? ""}`;
+  return {
+    set(url, state) {
+      const kept = readFileSync(states, "utf8").split("\n").filter((l) => l && !l.startsWith(`${url} `));
+      writeFileSync(states, [...kept, `${url} ${state}`].join("\n") + "\n");
+    },
+    calls: () => readFileSync(log, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as string[]),
+    restore() {
+      process.env.PATH = previous;
+    },
+  };
 }

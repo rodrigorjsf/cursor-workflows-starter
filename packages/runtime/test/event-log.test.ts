@@ -66,6 +66,53 @@ const startOf = (events: WorkflowEvent[], label: string) => {
   return found[0]!;
 };
 
+test("ctx.card puts the workflow's card in the log, with the fields the workflow gave and none it did not, and the run-start lists the declared phases", async () => {
+  const wf = defineWorkflow({
+    meta: { name: "carded", description: "carded", phases: [{ title: "Triage" }, { title: "Delivery", detail: "ignored by the log" }] },
+    async run(ctx) {
+      ctx.card({ title: "#7 Add subtract", badges: ["LOW"] });
+      ctx.card({ title: "#7 Add subtract", subtitle: "wf/issue-7", links: [{ label: "PR #9", url: "https://github.com/o/r/pull/9" }], badges: ["LOW", "2 slices"] });
+      return "ok";
+    },
+  });
+  const r = await runWorkflow(wf, {}, { cwd });
+  assert.equal(r.status, "finished", r.error);
+  const { events } = logOf(r.runId);
+
+  const cards = ofType(events, "card");
+  assert.equal(cards.length, 2, "every call is an event: the board keeps the latest");
+  const { v: _v, ts: _ts, runId: _runId, ...first } = roundTrip(cards[0]!);
+  assert.deepEqual(first, { type: "card", title: "#7 Add subtract", badges: ["LOW"] });
+  const { v: _v2, ts: _ts2, runId: _runId2, ...second } = roundTrip(cards[1]!);
+  assert.deepEqual(second, {
+    type: "card",
+    title: "#7 Add subtract",
+    subtitle: "wf/issue-7",
+    links: [{ label: "PR #9", url: "https://github.com/o/r/pull/9" }],
+    badges: ["LOW", "2 slices"],
+  });
+  assert.deepEqual(ofType(events, "run-start")[0]!.phases, ["Triage", "Delivery"], "the board's columns come from the workflow's declared phases");
+});
+
+test("ctx.card copies the fields it knows: an object with more than that never puts the rest in the log, and a workflow that edits its card afterwards changes nothing", async () => {
+  const wf = defineWorkflow({
+    meta: { name: "carded-copy", description: "carded-copy" },
+    async run(ctx) {
+      const badges = ["a"];
+      const links = [{ label: "x", url: "https://example.com/x" }];
+      ctx.card({ title: "t", badges, links, extra: "no" } as never);
+      badges.push("late");
+      links[0]!.label = "late";
+      return "ok";
+    },
+  });
+  const r = await runWorkflow(wf, {}, { cwd });
+  const card = ofType(logOf(r.runId).events, "card")[0]!;
+  assert.deepEqual(Object.keys(card).filter((k) => !["v", "ts", "runId", "type"].includes(k)).sort(), ["badges", "links", "title"]);
+  assert.deepEqual(card.badges, ["a"]);
+  assert.deepEqual(card.links, [{ label: "x", url: "https://example.com/x" }]);
+});
+
 test("step events carry step, parent and group ids; parallel and pipeline groups are identifiable from the log alone", async () => {
   const wf = defineWorkflow({
     meta: { name: "structure", description: "structure" },

@@ -1,4 +1,5 @@
-// The dashboard's HTTP server: a read-only JSON API over the runs of every repo and the metrics database, plus the page.
+// The dashboard's HTTP server: a read-only JSON API over the runs of every repo and the metrics database, plus the web app
+// that draws them (built at start, see app-bundle.ts).
 //
 // - It listens on 127.0.0.1 only and refuses any `Host` that is not a loopback name (DNS rebinding protection). It sends
 //   no CORS headers, so another site's script cannot read it.
@@ -6,10 +7,13 @@
 //   database, opened read-only the first time it exists. A machine with no history gets empty states, not an error.
 // - A run's event log is also served live: `/api/runs/<runId>/events` is a Server-Sent Events stream that replays the log and
 //   then follows it as the run appends, and `/api/runs/<runId>/steps/<stepId>/content` is one step's content.
+// - The Board is `/api/board`: the runs placed in the columns of their workflow, with the state of the pull requests their cards link to.
 import { existsSync } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
 import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, type RunTail, defaultDbPath, listRuns, openDb, readRun, readStepContent, summary, tailRun } from "@cursor-workflows/runtime/observe";
-import { METRICS_PAGE } from "./metrics-page.js";
+import { type AppBundle, buildApp } from "./app-bundle.js";
+import { buildBoards } from "./board.js";
+import { PrStates } from "./pr-state.js";
 
 /** Host names a request may carry: the loopback names. Anything else is a page of another site asking the browser to talk to us. */
 const ALLOWED_HOSTS = new Set(["127.0.0.1", "localhost"]);
@@ -27,7 +31,29 @@ export interface DashboardServer {
 export interface DashboardOptions {
   /** The port to listen on; 0 picks a free one (tests). */
   port: number;
+  /** How long the state of an open pull request is kept before `gh` is asked again, in milliseconds (a merged or closed one is kept 120 times as long). Default 30 seconds. */
+  prStateCacheMs?: number;
 }
+
+const DEFAULT_PR_STATE_CACHE_MS = 30_000;
+
+/** The page the app runs in. Everything it loads is on this server, so the policy allows only this origin and no inline code. */
+const PAGE_POLICY = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
+/** The app's page: an empty root, the script and the stylesheet. */
+const appPage = (app: AppBundle): string =>
+  `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cursor Workflows</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/assets/app.${app.hash}.css">
+</head><body><div id="root"></div>
+<script type="module" src="/assets/app.${app.hash}.js"></script>
+</body></html>
+`;
+
+/** The assets are named after their content: they never change under their name, so a browser may keep them for good. */
+const ASSET_HEADERS = { "cache-control": "public, max-age=31536000, immutable", "x-content-type-options": "nosniff" };
 
 function hostAllowed(header: string | undefined): boolean {
   if (!header) return false;
@@ -121,7 +147,14 @@ function stream(req: IncomingMessage, res: ServerResponse, tail: RunTail): void 
 }
 
 export async function startDashboard(options: DashboardOptions): Promise<DashboardServer> {
+  const app = await buildApp();
+  const page = appPage(app);
+  const assets = new Map([
+    [`/assets/app.${app.hash}.js`, { type: "text/javascript; charset=utf-8", body: app.js }],
+    [`/assets/app.${app.hash}.css`, { type: "text/css; charset=utf-8", body: app.css }],
+  ]);
   const metrics = new MetricsSource();
+  const prStates = new PrStates(options.prStateCacheMs ?? DEFAULT_PR_STATE_CACHE_MS);
 
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!hostAllowed(req.headers.host)) {
@@ -136,11 +169,8 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
     const url = new URL(req.url ?? "/", `http://${DASHBOARD_HOST}`);
     switch (url.pathname) {
       case "/":
-        res.writeHead(200, {
-          "content-type": "text/html; charset=utf-8",
-          "content-security-policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'",
-        });
-        res.end(METRICS_PAGE);
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-security-policy": PAGE_POLICY, "cache-control": "no-cache" });
+        res.end(page);
         return;
       case HEALTH_PATH:
         send(res, 200, { app: DASHBOARD_APP, pid: process.pid });
@@ -148,12 +178,24 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
       case "/api/runs":
         send(res, 200, { runs: listRuns(clamped(url.searchParams.get("limit"), 200, 1, 1000)) });
         return;
+      case "/api/board": {
+        const runs = listRuns(clamped(url.searchParams.get("limit"), 200, 1, 1000));
+        const states = prStates.states(runs.flatMap((run) => run.card?.links.map((link) => link.url) ?? []));
+        send(res, 200, { boards: buildBoards(runs, states) });
+        return;
+      }
       case "/api/summary": {
         const db = await metrics.get();
         send(res, 200, db ? summary(db, clamped(url.searchParams.get("days"), 30, 1, 3650)) : EMPTY_SUMMARY);
         return;
       }
       default: {
+        const asset = assets.get(url.pathname);
+        if (asset) {
+          res.writeHead(200, { "content-type": asset.type, ...ASSET_HEADERS });
+          res.end(asset.body);
+          return;
+        }
         const match = /^\/api\/runs\/([^/]+)(?:\/(.*))?$/.exec(url.pathname);
         if (!match) return send(res, 404, { error: "not found" });
         const runId = decodeSegment(match[1]!);
@@ -199,6 +241,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
       new Promise<void>((resolve) => {
         server.close(() => {
           metrics.close();
+          prStates.close();
           resolve();
         });
         server.closeAllConnections();

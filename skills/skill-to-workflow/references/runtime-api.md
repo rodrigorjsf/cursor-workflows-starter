@@ -54,6 +54,7 @@ export default defineWorkflow<{ target: string }>({
 | `ctx.exec(command, args, opts)` | Runs a command (tests, `git`, `gh`) and returns `{ ok, exitCode, timedOut, tail, error? }`. Asynchronous, killed at its timeout, logged. See "`exec()` options" below. |
 | `ctx.phase(title)` / `ctx.log(message)` | Progress, shown by `wait_workflow` and on the CLI. |
 | `ctx.metric(name, value)` | An outcome or difficulty signal of the run, written to the `metrics` table (observability.md). |
+| `ctx.card({ title, subtitle?, links?, badges? })` | What the run's card shows on the dashboard's Board. `links` is `[{ label, url }]` and `badges` is a list of short strings. Call it again to update the card: the Board shows the latest one. A link to a GitHub pull request also shows whether the pull request is open, merged or closed. A run that never calls it still has a card, titled with the run id. |
 | `ctx.args`, `ctx.cwd`, `ctx.runId` | Input, repository and run id (the same on resume). |
 | `ctx.settings` | The workflow's own tunable settings (`meta.settings`) as the config resolved them for this run: the code default, or what the global or repo file set under `workflows.<name>.settings`. A copy; read fresh at every run start. |
 | `ctx.budget` | `remainingCents()` (`Infinity` without a cents cap), `spentCents()`, `chargedCents()`, `spentTokens()`, `usage()` (tokens by type), `maxCents`, `maxTokens`. Spend is the run's total: a resume starts from what earlier executions spent, failed attempts included. |

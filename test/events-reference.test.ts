@@ -16,7 +16,7 @@ test("the committed events reference page matches the event type", () => {
 
 test("the page documents every event type, its fields and their comments", () => {
   const page = generateEventsReference(source);
-  for (const type of ["log", "phase", "run-start", "run-end", "group-start", "group-end", "step-start", "turn", "content", "step-end", "metric", "warning"]) {
+  for (const type of ["log", "phase", "card", "run-start", "run-end", "group-start", "group-end", "step-start", "turn", "content", "step-end", "metric", "warning"]) {
     assert.match(page, new RegExp(`^### \`${type}\``, "m"), `section of ${type}`);
   }
   assert.match(page, /\| `stepId` \| `string` \| sim \|/, "a required field of the step position");

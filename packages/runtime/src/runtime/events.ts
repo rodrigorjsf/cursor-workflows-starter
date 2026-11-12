@@ -85,6 +85,27 @@ export interface PhaseEvent extends EventBase {
   title: string;
 }
 
+/** Um link do cartão de um run. */
+export interface CardLink {
+  /** O texto do link. */
+  label: string;
+  /** O endereço. Só `http:` e `https:` aparecem no dashboard; um link de pull request do GitHub mostra também o estado dele (aberto, mesclado ou fechado). */
+  url: string;
+}
+
+/** O cartão do run no quadro do dashboard (`ctx.card`). O quadro mostra o último cartão de cada run: chamar `ctx.card` de novo atualiza o cartão. */
+export interface CardEvent extends EventBase {
+  type: "card";
+  /** O título do cartão. */
+  title: string;
+  /** Uma linha abaixo do título. */
+  subtitle?: string;
+  /** Links do cartão, como o da pull request. */
+  links?: CardLink[];
+  /** Rótulos curtos do cartão, como o tier. */
+  badges?: string[];
+}
+
 /** De onde veio um valor da configuração efetiva. */
 export interface ConfigSource {
   /**
@@ -190,6 +211,8 @@ export interface RunStartEvent extends EventBase {
   argsHash: string;
   /** O repositório do run: nome da pasta raiz do git e um hash curto do remote `origin` (ou do caminho). */
   repo: { name: string; hash: string };
+  /** As fases que o workflow declara em `meta.phases`, na ordem: os títulos que `ctx.phase` usa. O dashboard monta as colunas do quadro com elas. Ausente em logs de versões antigas e em workflow que não declara fases. */
+  phases?: string[];
   /** O job (`wf start`, `start_workflow`) que iniciou esta execução. Ausente em `wf run`. O estado de um job é a projeção das execuções que levam o id dele. */
   jobId?: string;
   /** A configuração efetiva desta execução, lida dos arquivos e do ambiente no início. Um resume lê de novo. */
@@ -445,6 +468,7 @@ export interface WarningEvent extends EventBase {
 export type WorkflowEvent =
   | LogEvent
   | PhaseEvent
+  | CardEvent
   | RunStartEvent
   | RunEndEvent
   | GroupStartEvent

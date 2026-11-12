@@ -89,7 +89,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import { NamedLockedError, acquireNamedLock } from "../src/runtime/run-store.js";
-import { defineWorkflow, type AgentCallOptions } from "../src/runtime/workflow.js";
+import { defineWorkflow, type AgentCallOptions, type WorkflowCard } from "../src/runtime/workflow.js";
 import { buildPrBody, type PrText } from "./implement-issue/pr-body.js";
 import { CommandError, Commands, NETWORK_TIMEOUT_SEC, WORKFLOW_BRANCH_PREFIX, worktreeOf } from "./implement-issue/commands.js";
 import * as P from "./implement-issue/prompts.js";
@@ -252,6 +252,18 @@ const listBlock = (title: string, items: string[]) => (items.length ? `## ${titl
 const tail = (s: string | undefined, n = 3000) => (s ?? "").slice(-n);
 /** Aspas simples para shell: o comando de relançamento postado na issue não quebra com `'` nos args. */
 const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/** The issue's card on the dashboard's Board: its number and title, and its tier. `extra` adds what a later point of the run knows. */
+const issueCard = (issue: { number: number; title: string }, tier: Tier, extra: Partial<WorkflowCard> = {}): WorkflowCard => ({
+  title: `#${issue.number} ${issue.title}`,
+  badges: [tier],
+  ...extra,
+});
+/** The link text of a pull request: `PR #9` for `https://github.com/o/r/pull/9`. */
+const prLabel = (url: string) => {
+  const number = /\/pull\/(\d+)/.exec(url)?.[1];
+  return number ? `PR #${number}` : "Pull request";
+};
 
 /** The URL of the branch's PR, or undefined when it has none. Any other `gh` failure (auth, network) is an error, never "no PR". */
 async function existingPr(cmd: Commands, branch: string, repoFlag: string[], cwd: string): Promise<string | undefined> {
@@ -516,6 +528,7 @@ export default defineWorkflow<Args>({
       ctx.log(`Issue #${issue.number} → tier ${tier} (role ${implementRole(tier)})`);
       ctx.metric("tier", tier); // covariável de dificuldade: compare modelos dentro do mesmo tier
       ctx.metric("tier_source", labelTier ? "label" : "classifier");
+      ctx.card(issueCard(issue, tier)); // on the Board from here on; delivery updates it
       const ctxFiles = CONTEXT_FILES.filter((f) => existsSync(join(ctx.cwd, f)));
       const contextBlock = listBlock("Repository context files (read the ones that matter)", ctxFiles);
 
@@ -1034,6 +1047,7 @@ export default defineWorkflow<Args>({
           prUrl = (await withBodyFile(body, (f) => cmd.gh(worktree, "pr", "create", "--head", branch, "--title", `${issue.title} (#${issue.number})`, "--body-file", f, ...repoFlag))).trim();
         }
       }
+      ctx.card(issueCard(issue, tier, { subtitle: branch, links: prUrl ? [{ label: prLabel(prUrl), url: prUrl }] : undefined }));
       return {
         ...base,
         status: "done",

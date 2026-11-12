@@ -1,0 +1,56 @@
+// The Runs menu: every run of every repo, newest first.
+import type { RunSummary } from "@cursor-workflows/runtime/observe";
+import { money, repoName, runDuration, startedLabel } from "./format.js";
+import { usePoll } from "./usePoll.js";
+
+const POLL_MS = 3000;
+
+export function RunsView() {
+  const { data, error } = usePoll<{ runs: RunSummary[] }>("/api/runs", POLL_MS);
+  if (!data) return <p className={error ? "note error" : "note"}>{error ?? "Loading the runs…"}</p>;
+  return (
+    <>
+      {error && <p className="note error">Could not refresh: {error}</p>}
+      {data.runs.length === 0 ? (
+        <p className="note">No runs yet.</p>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Status</th>
+                <th scope="col">Workflow</th>
+                <th scope="col">Run</th>
+                <th scope="col">Phase</th>
+                <th scope="col">Started</th>
+                <th scope="col">Duration</th>
+                <th scope="col">Cost</th>
+                <th scope="col">Repo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.runs.map((run) => (
+                <tr key={run.runId}>
+                  <td>
+                    <span className={`pill status-${run.status}`} title={run.error}>
+                      {run.status}
+                    </span>
+                  </td>
+                  <td>{run.workflow}</td>
+                  <td>
+                    <code>{run.runId}</code>
+                  </td>
+                  <td>{run.phase ?? ""}</td>
+                  <td>{startedLabel(run.startedAt)}</td>
+                  <td>{run.status === "missing" ? "" : runDuration(run.startedAt, run.finishedAt)}</td>
+                  <td className="n">{money(run.spentCents)}</td>
+                  <td title={run.repo}>{repoName(run.repo)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
