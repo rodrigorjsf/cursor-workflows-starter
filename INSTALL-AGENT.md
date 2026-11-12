@@ -37,12 +37,16 @@ The installer:
 - writes `~/.cursor-workflows/config.json` with the default hard caps (3,000,000 tokens and 500 cents per run, 600,000
   tokens per step, concurrency 4, local steps only) when the file does not exist yet.
 
-Running it again is safe. Done when it exits 0 and `wf list` prints a JSON list that includes `implement-issue`.
+Running it again is safe. Done when it exits 0 after printing `kit ready at <kit>`, and `wf list` prints a JSON list
+that includes `implement-issue`.
 
-- A line starting `aviso:` is a warning, not a failure. Relay it. One of them says `~/.local/bin` is not on the PATH:
+- A line starting `warning:` is a warning, not a failure. Relay it. One of them says `~/.local/bin` is not on the PATH
+  (`... is not on the PATH, so the wf command will not be found.`):
   for this session run `export PATH="$HOME/.local/bin:$PATH"`, and tell the user to add that folder to their shell's
   profile (bash or zsh: `~/.profile`; fish: `fish_add_path ~/.local/bin`) and to restart the IDE afterwards.
-- A line starting `erro:` is a failure: fix what it names and run the installer again.
+- A line starting `error:` is a failure: fix what it names and run the installer again. For example,
+  `<tool> is not on the PATH; install it and run again` or `Node <have> (<path>) is too old: the kit needs <need> or
+  newer.`
 
 ## 3. Log in to the Cursor SDK
 
