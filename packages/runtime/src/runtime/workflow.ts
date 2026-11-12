@@ -131,8 +131,8 @@ export interface ExecOptions {
   timeoutMs?: number;
   /** Working directory. Default: the run's cwd. */
   cwd?: string;
-  /** Environment variables added to this process's own. */
-  env?: Record<string, string>;
+  /** Environment variables added to this process's own. A variable set to `undefined` is removed from the command's environment. */
+  env?: Record<string, string | undefined>;
 }
 
 /** What a `ctx.exec` call hands back. A command that fails, times out or cannot start is a result: the workflow decides what it means. */

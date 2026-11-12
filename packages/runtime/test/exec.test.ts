@@ -43,6 +43,21 @@ test("ctx.exec returns the exit code and the output of a command that succeeds",
   assert.deepEqual(r.result, { ok: true, exitCode: 0, timedOut: false, tail: "hello\n" });
 });
 
+test("env adds variables to the process's own, and undefined removes one (a nested `node --test` must not see NODE_TEST_CONTEXT)", async () => {
+  process.env.EXEC_TEST_INHERITED = "inherited";
+  try {
+    const code = "process.stdout.write(JSON.stringify([process.env.EXEC_TEST_INHERITED, process.env.EXEC_TEST_ADDED ?? null]))";
+    const wf = workflow(async (ctx) => [
+      (await ctx.exec(...node(code), { env: { EXEC_TEST_ADDED: "added" } })).tail,
+      (await ctx.exec(...node(code), { env: { EXEC_TEST_INHERITED: undefined } })).tail,
+    ]);
+    const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });
+    assert.deepEqual(r.result, ['["inherited","added"]', "[null,null]"]);
+  } finally {
+    delete process.env.EXEC_TEST_INHERITED;
+  }
+});
+
 test("a command that exits non-zero is a result, not an error: the workflow decides what it means", async () => {
   const wf = workflow(async (ctx) => ctx.exec(...node("process.stdout.write('out\\n'); process.stderr.write('boom\\n'); process.exit(3)")));
   const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });

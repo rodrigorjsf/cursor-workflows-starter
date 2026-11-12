@@ -16,8 +16,8 @@ export interface CommandSpec {
   command: string;
   args: string[];
   cwd: string;
-  /** Added to this process's own environment. */
-  env?: Record<string, string>;
+  /** Added to this process's own environment; a variable set to `undefined` is left out. */
+  env?: Record<string, string | undefined>;
   /** The command is killed this long after it started. */
   timeoutMs: number;
   /** Aborting it kills the command. */
