@@ -7,10 +7,11 @@
 //   - o estado do repositório: HEAD + hash das mudanças locais (staged, unstaged e arquivos novos).
 // Mudou um arquivo, mudou a chave. Por isso só vale para etapas de leitura.
 
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import type { ToolName } from "@cursor/sdk";
 import { stateDir } from "./state.js";
 import { writeFileAtomic } from "./state-files.js";
@@ -22,16 +23,24 @@ export function isReadOnly(tools: readonly ToolName[] | undefined): boolean {
   return tools !== undefined && tools.every((t) => READ_ONLY_TOOLS.includes(t));
 }
 
-/** Estado do repositório em `cwd`, ou undefined se não for um repositório git. */
-export function repoState(cwd: string): string | undefined {
+const execFileAsync = promisify(execFile);
+
+/** How long each `git` that reads the repository state may take. Past it the memo is skipped for the step, not the run. */
+export const REPO_STATE_TIMEOUT_MS = 60_000;
+
+/**
+ * Estado do repositório em `cwd`, ou undefined se não for um repositório git (ou se o git não responder a tempo). O git roda
+ * assíncrono: um repositório grande ou um disco lento não congela o processo (status e cancelamento seguem respondendo).
+ */
+export async function repoState(cwd: string): Promise<string | undefined> {
   try {
     // Node's default 1 MiB buffer would turn a large local diff into "not a git repo" and silently disable the memo.
-    const git = (...args: string[]) =>
-      execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 * 1024 * 1024 });
-    const head = git("rev-parse", "HEAD").trim();
-    const hash = createHash("sha256").update(git("diff", "HEAD", "--binary"));
+    const git = async (...args: string[]) =>
+      (await execFileAsync("git", args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: REPO_STATE_TIMEOUT_MS })).stdout;
+    const head = (await git("rev-parse", "HEAD")).trim();
+    const hash = createHash("sha256").update(await git("diff", "HEAD", "--binary"));
     // Arquivos novos (não rastreados) entram pelo conteúdo. `.workflows/` fica fora via .git/info/exclude.
-    for (const file of git("ls-files", "--others", "--exclude-standard", "-z").split("\0").filter(Boolean).sort()) {
+    for (const file of (await git("ls-files", "--others", "--exclude-standard", "-z")).split("\0").filter(Boolean).sort()) {
       hash.update(file).update("\0").update(readFileSync(join(cwd, file)));
     }
     const dirty = hash.digest("hex");

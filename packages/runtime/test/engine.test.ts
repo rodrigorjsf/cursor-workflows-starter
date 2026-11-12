@@ -175,6 +175,37 @@ test("memo still serves a step when the local changes diff past 1 MiB", async ()
   assert.equal(calls.length, 1, "the second run should come from the memo");
 });
 
+test("the git the engine runs itself (the memo's repo state, the run's repo identity) never blocks the process", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { chmodSync, mkdirSync, writeFileSync } = await import("node:fs");
+  mkdirSync(cwd, { recursive: true });
+  const git = (...a: string[]) => execFileSync("git", a, { cwd, stdio: "ignore" });
+  git("init", "-q");
+  writeFileSync(join(cwd, "a.txt"), "1");
+  git("add", ".");
+  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init");
+  // A slow git (a large repo, a slow disk): `diff` and `remote` take a second each.
+  const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  const bin = join(cwd, "..", `slow-git-${process.pid}`);
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, "git"), `#!/bin/sh\ncase "$1" in diff|remote) sleep 1;; esac\nexec ${JSON.stringify(realGit)} "$@"\n`);
+  chmodSync(join(bin, "git"), 0o755);
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  let ticks = 0;
+  const timer = setInterval(() => ticks++, 50);
+  try {
+    const wf = defineWorkflow({ meta: { name: "ms", description: "ms" }, defaults: { model: { id: "m" } }, run: (ctx) => ctx.agent("plan", { tools: ["read"], memo: true }) });
+    const r = await runWorkflow(wf, {}, { cwd });
+    assert.equal(r.status, "finished", r.error);
+  } finally {
+    clearInterval(timer);
+    process.env.PATH = path;
+    rmSync(bin, { recursive: true, force: true });
+  }
+  assert.ok(ticks >= 20, `the event loop ran ${ticks} times in about two seconds of git: a synchronous git held it`);
+});
+
 test("memo é recusado em etapa que pode escrever", async () => {
   const wf = defineWorkflow({ meta: { name: "mw", description: "mw" }, defaults: { model: { id: "m" } }, run: (ctx) => ctx.agent("x", { tools: ["read", "edit"], memo: true }) });
   const r = await runWorkflow(wf, {}, { cwd });

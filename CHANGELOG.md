@@ -38,7 +38,9 @@
   `content` `command-output`, com `stream`), com a redação e a retenção do conteúdo de um agente, e cada chamada é um nó
   do run (`exec-start`/`exec-end`, com `stepId`, `parentId` e `groupId`). O cancelamento mata o comando e o que ele
   iniciou. A skill de autoria documenta o `ctx.exec`, e um teste do repositório reprova chamadas síncronas
-  (`execFileSync`, `execSync`, `spawnSync`) em arquivos de workflow.
+  (`execFileSync`, `execSync`, `spawnSync`) em arquivos de workflow. O próprio motor também deixa de rodar `git`
+  síncrono: o estado do repositório que o memo lê a cada etapa e a identidade do repositório no `run-start` vêm de um
+  `git` assíncrono, com teto de tempo (um git que não responde a tempo desliga o memo da etapa, não trava o processo).
 - **Workflow `smoke` e o assistente de validação no Cursor IDE.** O `smoke` é uma etapa estruturada no `composer-2.5`,
   sem tools e sem contexto do projeto, com teto de 50 mil tokens (medido: 21.628): prova chat → MCP → SDK → resultado
   estruturado sem pagar um `implement-issue`. O `scripts/verify/validate-cursor-ide.sh` conduz os seis cenários de

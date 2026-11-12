@@ -21,7 +21,7 @@ export function ensureIgnored(cwd: string): void {
   let exclude = excludeFiles.get(cwd);
   if (!exclude) {
     try {
-      exclude = resolve(cwd, execFileSync("git", ["rev-parse", "--git-path", "info/exclude"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim());
+      exclude = resolve(cwd, execFileSync("git", ["rev-parse", "--git-path", "info/exclude"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }).trim()); // once per repo, and bounded
     } catch {
       return; // sem git instalado ou .git inválido: nada a proteger
     }

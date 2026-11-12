@@ -12,7 +12,7 @@
 // STATUS: verificado contra a API real num plano Premium em 2026-11-11 (docs/research/verificacoes-locais.md).
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -215,6 +215,8 @@ function announceRun<A>(o: {
   resolved: ResolvedConfig;
   emit: (e: NewEvent) => void;
   recorderWarning: string | undefined;
+  /** The repository the run is in (`repoIdentity`). */
+  repo: { name: string; hash: string };
 }): void {
   const { def, args, opts, runId, store, resolved, emit, recorderWarning } = o;
   // The source fingerprint covers the modules the workflow imports (prompts, helpers); `run.toString()` alone does not.
@@ -226,7 +228,7 @@ function announceRun<A>(o: {
     workflow: def.meta.name,
     workflowHash,
     argsHash: sha(JSON.stringify(args ?? null)).slice(0, 16),
-    repo: repoIdentity(opts.cwd),
+    repo: o.repo,
     jobId: opts.jobId,
     config: resolved.config,
     provenance: resolved.provenance,
@@ -425,13 +427,20 @@ export function modelKey(m: ModelSelection | undefined): string | undefined {
   return params.length || m.maxMode ? `${m.id}[${[...params, ...(m.maxMode ? ["max"] : [])].join(",")}]` : m.id;
 }
 
-function repoIdentity(cwd: string): { name: string; hash: string } {
-  const git = (...a: string[]) => execFileSync("git", a, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+/** How long each `git` that names the run's repository may take; past it the run is named after its cwd. */
+const REPO_IDENTITY_TIMEOUT_MS = 10_000;
+
+/** The repository a run is in, for its run-start event. The git runs asynchronously: a slow one never freezes the process. */
+async function repoIdentity(cwd: string): Promise<{ name: string; hash: string }> {
+  const git = (...a: string[]) =>
+    new Promise<string>((resolve, reject) =>
+      execFile("git", a, { cwd, encoding: "utf8", timeout: REPO_IDENTITY_TIMEOUT_MS }, (err, stdout) => (err ? reject(err) : resolve(stdout.trim()))),
+    );
   let top = cwd;
   let origin = "";
   try {
-    top = git("rev-parse", "--show-toplevel");
-    origin = git("remote", "get-url", "origin");
+    top = await git("rev-parse", "--show-toplevel");
+    origin = await git("remote", "get-url", "origin");
   } catch {
     /* sem git ou sem remote */
   }
@@ -560,7 +569,7 @@ async function executeRun<A, R>(
   });
 
   const { emit, attemptContent, recorderWarning, close: closeEvents } = await openEventChannel(store, runId, opts);
-  announceRun({ def, args, opts, runId, store, resolved, emit, recorderWarning });
+  announceRun({ def, args, opts, runId, store, resolved, emit, recorderWarning, repo: await repoIdentity(opts.cwd) });
 
   process.env[INSIDE_WORKFLOW_ENV] = "1";
   const journal = store.journal;
@@ -817,7 +826,7 @@ async function executeRun<A, R>(
       if (!isReadOnly(o.tools)) {
         throw new StepFailedError(`step "${label}": memo requires \`tools\` with read-only tools only (read, grep, glob, ls, semSearch...)`);
       }
-      const state = repoState(stepCwd);
+      const state = await repoState(stepCwd);
       if (state) {
         memoKey = memo.key({ prompt, ...fingerprint, cwd: undefined }, state);
         const hit = memo.get(memoKey);
@@ -827,7 +836,7 @@ async function executeRun<A, R>(
           return hit as T;
         }
       } else {
-        emit({ type: "warning", message: `step "${label}": memo skipped (cwd is not a git repository with a commit)` });
+        emit({ type: "warning", message: `step "${label}": memo skipped (cwd is not a git repository with a commit, or git did not answer in time)` });
       }
     }
     if (!o.model) throw new StepFailedError(`step "${label}" has no model: set opts.model or defaults.model`);
