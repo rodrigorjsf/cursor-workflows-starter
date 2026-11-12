@@ -18,8 +18,8 @@ const cwd = join(import.meta.dirname, ".tmp", `live-caps-${process.pid}`);
 const reset = () => {
   script.length = 0;
   calls.length = 0;
-  Object.assign(stats, { active: 0, maxActive: 0, disposed: 0, usageReads: 0, cancels: 0, turnsDelivered: 0 });
-  Object.assign(costConfig, { raw: 9, charged: 7, getUsageError: undefined, createErrorCode: undefined });
+  Object.assign(stats, { active: 0, maxActive: 0, disposed: 0, usageReads: 0, cancels: 0, turnsDelivered: 0, sends: 0 });
+  Object.assign(costConfig, { raw: 9, charged: 7, getUsageError: undefined, createErrorCode: undefined, createGate: undefined });
 };
 afterEach(() => {
   clearConfig(cwd);
@@ -56,8 +56,31 @@ test("a step that crosses its per-step cap during a turn is cancelled on the spo
   assert.equal(r.spentTokens, 300);
 });
 
+/** A promise and the function that settles it, for a test that decides when something may go on. */
+const deferred = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => (resolve = done));
+  return { promise, resolve };
+};
+
 /** A send() chosen by the step's prompt, so parallel steps need no send order. */
 const byPrompt = (plan: Record<string, ReturnType<typeof live>>) => (o: any, msg: string, n: number) => plan[msg]!(o, msg, n);
+
+/**
+ * Like `byPrompt`, for live runs that must all exist before any of them streams: the first turn of every run is held until
+ * every step of the plan has called send(). The runs are then handed back (and known to the engine) before a turn can cross
+ * a cap, however late a step's agent was created, so a test can count on every active step having a run to cancel.
+ * Push the result once per step of the plan.
+ */
+const holdUntilAllSent = (plan: Record<string, ReturnType<typeof live>>) => {
+  let sent = 0;
+  const allSent = deferred();
+  return (o: any, msg: string, n: number) => {
+    const behaviour = plan[msg]!(o, msg, n);
+    if (++sent === Object.keys(plan).length) allSent.resolve();
+    return { ...behaviour, gate: allSent.promise };
+  };
+};
 
 test("a step cut by its own cap fails alone: the run goes on, as it does for any failed step", async () => {
   writeRepoConfig(cwd, { workflows: { cfg: { roles: { classify: { maxTokensPerStep: 250 } } } } });
@@ -146,12 +169,26 @@ test("a global per-step cap is enforced even when the repo asks for none", async
   assert.match(r.error!, /Teto de tokens da etapa "c" atingido: 200 de 150/);
 });
 
-test("the run's cap cancels every active step at once and the run ends with a budget error", async () => {
-  for (let i = 0; i < 2; i++) script.push(byPrompt({ a: live(10, 100), b: live(10, 100) }));
-  const events: WorkflowEvent[] = [];
+/**
+ * The run's cap crossed by the fifth turn of two parallel live steps (100 tokens each, cap 450). `delayBCreationMs` creates b's
+ * agent that much later than a's. The turns still wait for both runs (`holdUntilAllSent`), so this is about every active step
+ * having a run to cancel; a step cut before it has a run is the next test.
+ */
+async function runCapCrossedByTwoSteps({ delayBCreationMs }: { delayBCreationMs: number }) {
+  let bDelayed = false;
+  if (delayBCreationMs) {
+    costConfig.createGate = (o) => {
+      if (!String(o.name).endsWith(":b")) return undefined;
+      bDelayed = true;
+      return new Promise((resolve) => setTimeout(resolve, delayBCreationMs));
+    };
+  }
+  const plan = holdUntilAllSent({ a: live(10, 100), b: live(10, 100) });
+  script.push(plan, plan);
   const wf = configWorkflow((ctx) => ctx.parallel([() => ctx.agent("a", { role: "classify", label: "a", retries: 0 }), () => ctx.agent("b", { role: "review", label: "b", retries: 0 })]));
-  const r = await runWorkflow(wf, {}, { cwd, maxTokens: 450, onEvent: (e) => events.push(e) });
+  const r = await runWorkflow(wf, {}, { cwd, maxTokens: 450 });
 
+  assert.equal(bDelayed, delayBCreationMs > 0, "b's agent was held back exactly when the test asked for it");
   assert.equal(r.status, "failed");
   assert.match(r.error!, /^Teto de tokens atingido: 500 de 450\.$/, "the sum of both steps' turns, live");
   assert.equal(stats.cancels, 2, "both active steps were cancelled, not only the one whose turn crossed");
@@ -165,6 +202,44 @@ test("the run's cap cancels every active step at once and the run ends with a bu
   const runEnd = log.at(-1) as Extract<WorkflowEvent, { type: "run-end" }>;
   assert.equal(runEnd.status, "failed");
   assert.match(runEnd.error!, /Teto de tokens atingido/);
+}
+
+test("the run's cap cancels every active step at once and the run ends with a budget error", () => runCapCrossedByTwoSteps({ delayBCreationMs: 0 }));
+
+test("the run's cap cancels every active step at once even when the second step's agent is created late", () => runCapCrossedByTwoSteps({ delayBCreationMs: 30 }));
+
+test("a step the run's cap cuts while its agent is still being created never sends: it ends as 'budget', with no turn and nothing to cancel", async () => {
+  const bCreating = deferred();
+  const releaseB = deferred();
+  costConfig.createGate = (o) => {
+    if (!String(o.name).endsWith(":b")) return undefined;
+    bCreating.resolve();
+    return releaseB.promise; // b's agent is not created until the test says so
+  };
+  // One send only (a step that sent would find the script empty and run as a plain, finished step). Its first turn waits until
+  // b is inside Agent.create, so the cap cannot be crossed before b has started: that would be another path (a step refused at its start).
+  script.push(() => ({ ...live(10, 100)(), gate: bCreating.promise }));
+  let turns = 0;
+  const wf = configWorkflow((ctx) => ctx.parallel([() => ctx.agent("a", { role: "classify", label: "a", retries: 0 }), () => ctx.agent("b", { role: "review", label: "b", retries: 0 })]));
+  // The second turn of a takes the run over its cap (200 > 150) while b is still waiting for its agent; b's creation completes right after.
+  const r = await runWorkflow(wf, {}, { cwd, maxTokens: 150, onEvent: (e) => e.type === "turn" && ++turns === 2 && releaseB.resolve() });
+
+  assert.equal(r.status, "failed");
+  assert.match(r.error!, /^Teto de tokens atingido: 200 de 150\.$/);
+  assert.equal(calls.length, 2, "b's agent was created, late");
+  assert.equal(stats.sends, 1, "but b never sent");
+  assert.equal(stats.turnsDelivered, 2, "no turn reached b");
+  assert.equal(stats.cancels, 1, "only a had an SDK run: nothing to cancel for b");
+  assert.equal(stats.disposed, 2, "the agent b got late is disposed");
+  assert.equal(r.spentTokens, 200, "b used nothing");
+
+  const log = logOf(r.runId);
+  const byLabel = Object.fromEntries(stepEnds(log).map((e) => [e.label, e]));
+  assert.deepEqual([byLabel.a!.ok, byLabel.a!.errorKind], [false, "budget"]);
+  assert.deepEqual([byLabel.b!.ok, byLabel.b!.errorKind], [false, "budget"]);
+  assert.equal(byLabel.b!.turns, 0);
+  assert.equal(byLabel.b!.usage?.totalTokens, 0);
+  assert.equal(log.at(-1)!.type, "run-end", "the run waited for b to stop");
 });
 
 test("steps queued behind the concurrency limit do not start once the run's cap is crossed", async () => {

@@ -5,9 +5,9 @@ export const calls: any[] = [];
 export const script: Array<(o: any, msg: string, n: number) => any> = [];
 /**
  * `cancels`: Run.cancel() calls (not on `hang` runs). `cancelled`: `hang` runs ended by cancel(). `turnsDelivered`:
- * turn-ended deltas that reached onDelta on live runs.
+ * turn-ended deltas that reached onDelta on live runs. `sends`: Agent.send() calls.
  */
-export const stats = { active: 0, maxActive: 0, disposed: 0, usageReads: 0, cancels: 0, cancelled: 0, turnsDelivered: 0 };
+export const stats = { active: 0, maxActive: 0, disposed: 0, usageReads: 0, cancels: 0, cancelled: 0, turnsDelivered: 0, sends: 0 };
 export class CursorAgentError extends Error {
   isRetryable = false;
 }
@@ -23,7 +23,17 @@ const DEFAULT_DELTAS = [
   { type: "turn-ended", usage: TURN_USAGE },
 ];
 /** Custo devolvido por getUsage() (mude nos testes). */
-export const costConfig: { raw: number | undefined; charged: number; modelId?: string; getUsageError?: string; createErrorCode?: string; createHang?: boolean; createDelayMs?: number } = { raw: 9, charged: 7 };
+export const costConfig: {
+  raw: number | undefined;
+  charged: number;
+  modelId?: string;
+  getUsageError?: string;
+  createErrorCode?: string;
+  createHang?: boolean;
+  createDelayMs?: number;
+  /** Holds the creation of the agents it answers for (it gets the create options) until the promise settles; `undefined` = not held. */
+  createGate?: (options: any) => Promise<unknown> | undefined;
+} = { raw: 9, charged: 7 };
 export const Agent = {
   async getUsage(_agentId: string) {
     return { usage: { ...TURN_USAGE, totalTokens: 110 }, cost: { chargedCents: 7, rawCostCents: 9 }, runs: [] };
@@ -32,6 +42,7 @@ export const Agent = {
     calls.push(o);
     if (costConfig.createHang) return new Promise(() => {}); // a creation that never answers
     if (costConfig.createDelayMs) await new Promise((r) => setTimeout(r, costConfig.createDelayMs)); // a slow one
+    await costConfig.createGate?.(o); // a slow one, chosen by agent
     if (costConfig.createErrorCode) {
       // Como o SDK no plano Free: a validação local do modelo chama GET /v1/models e recebe 403.
       throw Object.assign(new CursorAgentError(`[${costConfig.createErrorCode}] Cloud Agent is not available for free users. Please upgrade to Pro.`), { code: costConfig.createErrorCode, status: 403 });
@@ -43,6 +54,7 @@ export const Agent = {
     return {
       agentId: `agent-${calls.length}`,
       async send(msg: string, options?: any) {
+        stats.sends++;
         // `script` is process-local; a test that spawns a CLI or an MCP server steers the fake through the prompt instead.
         const behave =
           script.shift() ??
@@ -59,8 +71,10 @@ export const Agent = {
         if (r?.live) {
           // Opt-in, like the real SDK: send() hands back the run first and the deltas stream after it, one per macrotask,
           // until the run is cancelled (nothing is delivered after cancel()). The result is "cancelled" in that case.
+          // `gate` (a promise) holds the first delta until it settles: a test uses it to let parallel steps all have a run before any turn lands.
           let cancelled = false;
           const streamed = (async () => {
+            await r.gate;
             for (const update of r.deltas ?? DEFAULT_DELTAS) {
               await new Promise((resolve) => setImmediate(resolve));
               if (cancelled) return;
@@ -105,7 +119,8 @@ export const Agent = {
         }
         const cost = costConfig.raw === undefined ? undefined : { chargedCents: costConfig.charged, rawCostCents: costConfig.raw };
         // Como no SDK: o total do agente é a soma dos turnos que ele emitiu (ou o uso padrão, se nenhum).
-        const sum = (turnUsages.length ? turnUsages : [TURN_USAGE]).reduce(
+        // An agent that never called send() used nothing.
+        const sum = (turnUsages.length || n === 0 ? turnUsages : [TURN_USAGE]).reduce(
           (a, u) => ({
             inputTokens: a.inputTokens + u.inputTokens,
             outputTokens: a.outputTokens + u.outputTokens,
