@@ -15,7 +15,7 @@ import { cancelLeftCloudAgents, leftAgentsNote } from "./cloud-cancel.js";
 import type { RunStatus } from "./events.js";
 import { type ExecutionState, type Ledger, projectExecution, replayLedger, resumeHint, withRatio } from "./projection.js";
 import { commandLineHas, isAlive } from "./pid.js";
-import { eventLogPath, readEventLog } from "./run-store.js";
+import { eventLogPath, readEventLog, runLockHolder } from "./run-store.js";
 import { stateDir } from "./state.js";
 import { writeFileAtomic } from "./state-files.js";
 
@@ -159,18 +159,21 @@ function inspect(cwd: string, record: JobRecord): { state: JobState; liveness?: 
     return { state, liveness: "gone" };
   }
   const silent = silenceOf(record);
-  if (silent !== undefined) {
-    state.status = "failed";
+  if (silent === undefined) return { state, liveness: "alive" };
+  state.status = "failed";
+  if (isFrozen(cwd, record)) {
     state.error = silent;
     return { state, liveness: "silent" };
   }
-  return { state, liveness: "alive" };
+  // The pid is there but does not execute the job: the job's process ended, and another process got the number (or the run).
+  state.error = `${silent.slice(0, silent.indexOf(";"))}, and process ${record.pid} no longer executes the job: it ended without finishing it; ${resumeHint(record.runId)}`;
+  return { state, liveness: "gone" };
 }
 
 /**
- * Why a job whose process is there counts as failed: its heartbeat is older than `WF_HEARTBEAT_STALE_MS` (30 s). The pid is
- * alive, or recycled, but has not said so for too long: frozen, stopped, or not the job's process any more. Undefined while
- * the heartbeat is fresh.
+ * How long the job's process has not said it is alive, when that is longer than `WF_HEARTBEAT_STALE_MS` (30 s): the error a
+ * frozen job (`isFrozen`) is `failed` with. Undefined while the heartbeat is fresh. Says nothing of whether the pid is still
+ * the job's process.
  */
 function silenceOf(record: JobRecord): string | undefined {
   const silentMs = Date.now() - Date.parse(record.heartbeat);
@@ -179,14 +182,26 @@ function silenceOf(record: JobRecord): string | undefined {
 }
 
 /**
- * What `wf status` says of job `jobId` of `repo` when its process stopped beating (`silenceOf`), for the run view: a run whose
- * lock a frozen process still holds is `failed` there with this error, the status `wf status` gives its job. Undefined while
- * the heartbeat is fresh, and when the id is not a plain name or the record is not there or is another run's. Only reads.
+ * Is the job frozen: its process is there, is the job's (`isJobProcess`), still holds the run's lock, and has stopped beating
+ * (`silenceOf`)? A frozen job shows as `failed`, yet it still executes its run: a cancel kills it. Nothing else with a stale
+ * heartbeat is frozen: a dead pid is a job that ended (a crash), and a live pid that is not the job's process, or not the
+ * one that holds the run, is another process (one that got the pid, or a new execution of the run that took its lock).
+ */
+function isFrozen(cwd: string, record: JobRecord): boolean {
+  return isAlive(record.pid) && silenceOf(record) !== undefined && isJobProcess(record) && runLockHolder(cwd, record.runId) === record.pid;
+}
+
+/**
+ * What `wf status` says of job `jobId` of `repo` when it is frozen (`isFrozen`), for the run view: a run whose lock a frozen
+ * job still holds is `failed` there with this error, the status `wf status` gives its job. Undefined when the job is not
+ * frozen (its heartbeat is fresh, its process is gone, or the pid or the run's lock is another process's), and when the id
+ * is not a plain name or the record is not there or is another run's. Only reads.
  */
 export function silentJobError(repo: string, jobId: string, runId: string): string | undefined {
   if (!/^[A-Za-z0-9_-]+$/.test(jobId)) return undefined;
   const record = parseJobRecord(join(jobsDirIn(repo), `${jobId}.json`));
-  return record?.runId === runId && typeof record.heartbeat === "string" ? silenceOf(record) : undefined;
+  if (record?.runId !== runId || typeof record.heartbeat !== "string" || typeof record.pid !== "number") return undefined;
+  return isFrozen(repo, record) ? silenceOf(record) : undefined;
 }
 
 const jobStateOf = (cwd: string, record: JobRecord): JobState => inspect(cwd, record).state;
@@ -204,11 +219,12 @@ export function listJobs(cwd: string): JobState[] {
 }
 
 /**
- * The job that is executing run `runId` of the repo `cwd`: the one of its jobs whose process is still there, beating or not. A
- * run has one job per execution (a resume is a new job over the same run) and the earlier ones have ended. A job whose process
- * stopped beating is reported `failed` by `readJob`, yet it still executes the run (it holds its lock): it is this function's
- * answer too, and `cancelJob` kills it. Undefined when no job's process is there, which is also the case of a run that a
- * terminal executes (`wf run`: no job). Reads the job records without creating the jobs folder.
+ * The job that is executing run `runId` of the repo `cwd`: the one of its jobs whose process is still there and beating, or
+ * frozen (`isFrozen`). A run has one job per execution (a resume is a new job over the same run) and the earlier ones have
+ * ended. A frozen job is reported `failed` by `readJob`, yet it still executes the run (it holds its lock): it is this
+ * function's answer too, and `cancelJob` kills it. A stale job whose pid another process got is not: it ended. Undefined when
+ * no job executes the run, which is also the case of a run that a terminal executes (`wf run`: no job). Reads the job records
+ * without creating the jobs folder.
  */
 export function runningJobOf(cwd: string, runId: string): JobState | undefined {
   const dir = jobsDirIn(cwd);
@@ -244,8 +260,9 @@ export interface CancelResult extends JobState {
  * answering (its heartbeat is stale, so the job already shows as failed) cannot handle a signal: it is killed, which frees
  * the run for a resume but cannot revert the step; once it is gone, the cloud agents its run left running are cancelled
  * through the Cursor API, and a resume afterwards starts a new agent in place of each, at new cost. A job whose process
- * already ended gets no signal: those agents are cancelled the same way. Either way the job stays `failed`, its run's end
- * never written. A process that is not the job's is left alone. Undefined when there is no such job.
+ * already ended gets no signal: those agents are cancelled the same way. So does a job whose pid another process got: the
+ * job's process ended, and the other process is left alone. Either way the job stays `failed`, its run's end never written.
+ * Undefined when there is no such job.
  */
 export async function cancelJob(cwd: string, jobId: string, timeoutMs: number): Promise<CancelResult | undefined> {
   const record = readJobRecord(cwd, jobId);
@@ -256,7 +273,12 @@ export async function cancelJob(cwd: string, jobId: string, timeoutMs: number): 
     const left = leftAgentsNote(await cancelLeftCloudAgents(cwd, record.runId));
     return { ...before, note: `the job already ended (${before.status})${left || "; nothing to cancel"}` };
   }
-  if (!isJobProcess(record)) return { ...before, note: `process ${record.pid} is not the job's process (was the pid reused?); no signal sent` };
+  // A fresh heartbeat on a pid that is another process's (`inspect` checks the process only once the heartbeat is stale): the
+  // job's process ended, as above. Its run's lock tells `cancelLeftCloudAgents` whether some process still executes the run.
+  if (!isJobProcess(record)) {
+    const left = leftAgentsNote(await cancelLeftCloudAgents(cwd, record.runId));
+    return { ...before, note: `process ${record.pid} is not the job's process (was the pid reused?): the job ended, no signal sent${left || "; nothing to cancel"}` };
+  }
   const signal = liveness === "silent" ? "SIGKILL" : "SIGTERM";
   try {
     process.kill(record.pid, signal);
