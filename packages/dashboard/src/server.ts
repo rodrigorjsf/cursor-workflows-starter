@@ -1,5 +1,5 @@
 // The dashboard's HTTP server: a JSON API over the runs of every repo and the metrics database, plus the web app that draws
-// them (built at start, see app-bundle.ts). It reads, with one action: cancelling a run.
+// them (its two pages, built at start, see web-bundle.ts). It reads, with one action: cancelling a run.
 //
 // - It listens on 127.0.0.1 only and refuses any `Host` that is not a loopback name (DNS rebinding protection). It sends
 //   no CORS headers, so another site's script cannot read it.
@@ -15,11 +15,10 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
 import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, type RunTail, cancelRun, defaultDbPath, listRuns, openDb, readRun, readStepContent, summary, tailRun } from "@cursor-workflows/runtime/observe";
-import { type AppBundle, buildApp } from "./app-bundle.js";
 import { buildBoards } from "./board.js";
+import { PAGE_POLICY, assetPath, pageHtml } from "./pages.js";
 import { PrStates } from "./pr-state.js";
-import { RUN_PAGE_POLICY, runPage } from "./run-page.js";
-import { uiBundle } from "./ui-bundle.js";
+import { type PageName, buildWeb } from "./web-bundle.js";
 
 /** Host names a request may carry: the loopback names. Anything else is a page of another site asking the browser to talk to us. */
 const ALLOWED_HOSTS = new Set(["127.0.0.1", "localhost"]);
@@ -46,23 +45,14 @@ export interface DashboardOptions {
 const DEFAULT_PR_STATE_CACHE_MS = 30_000;
 const DEFAULT_CANCEL_TIMEOUT_MS = 20_000;
 
-/** The page the app runs in. Everything it loads is on this server, so the policy allows only this origin and no inline code. */
-const PAGE_POLICY = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
-
-/** The app's page: an empty root, the script and the stylesheet. */
-const appPage = (app: AppBundle): string =>
-  `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Cursor Workflows</title>
-<link rel="icon" href="data:,">
-<link rel="stylesheet" href="/assets/app.${app.hash}.css">
-</head><body><div id="root"></div>
-<script type="module" src="/assets/app.${app.hash}.js"></script>
-</body></html>
-`;
-
 /** The assets are named after their content: they never change under their name, so a browser may keep them for good. */
 const ASSET_HEADERS = { "cache-control": "public, max-age=31536000, immutable", "x-content-type-options": "nosniff" };
+
+/** A page: its HTML names the build's assets, so it is fetched again every time to see a new build. */
+function sendPage(req: IncomingMessage, res: ServerResponse, page: PageName, html: string): void {
+  res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-security-policy": PAGE_POLICY[page], "cache-control": "no-store", "x-content-type-options": "nosniff" });
+  res.end(req.method === "HEAD" ? undefined : html);
+}
 
 function hostAllowed(header: string | undefined): boolean {
   if (!header) return false;
@@ -178,12 +168,11 @@ function sameOrigin(req: IncomingMessage): boolean {
 }
 
 export async function startDashboard(options: DashboardOptions): Promise<DashboardServer> {
-  const app = await buildApp();
-  const page = appPage(app);
-  const assets = new Map([
-    [`/assets/app.${app.hash}.js`, { type: "text/javascript; charset=utf-8", body: app.js }],
-    [`/assets/app.${app.hash}.css`, { type: "text/css; charset=utf-8", body: app.css }],
-  ]);
+  const web = await buildWeb();
+  const appPage = pageHtml("app", web.hash, "Cursor Workflows");
+  const assets = new Map(
+    Object.entries(web.files).map(([file, body]) => [assetPath(file, web.hash), { type: file.endsWith(".js") ? "text/javascript; charset=utf-8" : "text/css; charset=utf-8", body }]),
+  );
   const metrics = new MetricsSource();
   const prStates = new PrStates(options.prStateCacheMs ?? DEFAULT_PR_STATE_CACHE_MS);
   const csrfToken = randomBytes(32).toString("hex");
@@ -226,9 +215,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
     }
     switch (url.pathname) {
       case "/":
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-security-policy": PAGE_POLICY, "cache-control": "no-cache" });
-        res.end(page);
-        return;
+        return sendPage(req, res, "app", appPage);
       case HEALTH_PATH:
         send(res, 200, { app: DASHBOARD_APP, pid: process.pid });
         return;
@@ -250,27 +237,14 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
         return;
       }
       default: {
-        const appAsset = assets.get(url.pathname);
-        if (appAsset) {
-          res.writeHead(200, { "content-type": appAsset.type, ...ASSET_HEADERS });
-          res.end(appAsset.body);
+        const asset = assets.get(url.pathname);
+        if (asset) {
+          res.writeHead(200, { "content-type": asset.type, ...ASSET_HEADERS });
+          res.end(req.method === "HEAD" ? undefined : asset.body);
           return;
         }
         const page = /^\/runs\/([^/]+)$/.exec(url.pathname);
-        if (page) {
-          const html = runPage(decodeSegment(page[1]!), await uiBundle());
-          res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-security-policy": RUN_PAGE_POLICY, "cache-control": "no-store", "x-content-type-options": "nosniff" });
-          res.end(req.method === "HEAD" ? undefined : html);
-          return;
-        }
-        const asset = /^\/assets\/(run-[0-9a-f]{12}\.(?:js|css))$/.exec(url.pathname); // only a name the build can have made starts a build
-        if (asset) {
-          const file = (await uiBundle()).assets.get(asset[1]!);
-          if (!file) return send(res, 404, { error: "not found" });
-          res.writeHead(200, { "content-type": file.type, "cache-control": "public, max-age=31536000, immutable", "x-content-type-options": "nosniff" });
-          res.end(req.method === "HEAD" ? undefined : file.body);
-          return;
-        }
+        if (page) return sendPage(req, res, "run", pageHtml("run", web.hash, `Run ${decodeSegment(page[1]!)} · cursor-workflows`));
         const match = /^\/api\/runs\/([^/]+)(?:\/(.*))?$/.exec(url.pathname);
         if (!match) return send(res, 404, { error: "not found" });
         const runId = decodeSegment(match[1]!);

@@ -2,15 +2,21 @@
 // content hash and served from the dashboard itself: nothing is fetched from another origin. The UI's behaviour is checked in
 // a real browser (see the ticket's validation notes); these tests cover what is served and how it is cached.
 import assert from "node:assert/strict";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, test } from "node:test";
-import { buildApp } from "../src/app-bundle.js";
+import { FILES, buildWeb } from "../src/web-bundle.js";
 import { type DashboardServer, startDashboard } from "../src/server.js";
 import { type Sandbox, http, sandbox } from "./support.js";
 
-const UI = join(dirname(fileURLToPath(import.meta.url)), "..", "app");
+const PACKAGE = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+/** A copy of the dashboard's page sources (`app/` and `run-view/`) under `dir`. */
+function copySources(dir: string): string {
+  for (const tree of ["app", "run-view"]) cpSync(join(PACKAGE, tree), join(dir, tree), { recursive: true });
+  return dir;
+}
 
 let box: Sandbox;
 let dash: DashboardServer | undefined;
@@ -42,7 +48,7 @@ test("the home page is the app shell: one script and one stylesheet, both served
   assert.doesNotMatch(page.text, /https?:\/\//, "no address on another origin");
 
   const csp = String(page.headers["content-security-policy"]);
-  assert.match(csp, /default-src 'self'/);
+  assert.match(csp, /default-src 'none'/);
   assert.match(csp, /script-src 'self'(;|$)/);
   assert.doesNotMatch(csp, /unsafe-inline|unsafe-eval|https?:|\*/, "strict: nothing inline, nothing remote");
 });
@@ -92,46 +98,62 @@ test("the build is cached by content hash: a second start with the same sources 
   assert.equal(statSync(built).mtimeMs, before, "not written again");
 });
 
+test("the Run view page is built with the app when the dashboard starts, and cached on disk under the same hash", async () => {
+  dash = await startDashboard({ port: 0 });
+  const hash = /app\.([0-9a-f]{16})\.js/.exec((await http(dash.url, "/")).text)![1]!;
+  for (const file of ["app.js", "app.css", "run.js", "run.css"]) assert.ok(existsSync(join(cacheDir(), hash, file)), `${file} is built before any page asks for it`);
+  const page = (await http(dash.url, "/runs/smoke-1")).text;
+  assert.match(page, new RegExp(`src="/assets/run\\.${hash}\\.js"`));
+  assert.match(page, new RegExp(`href="/assets/run\\.${hash}\\.css"`));
+  const built = statSync(join(cacheDir(), hash, "run.js")).mtimeMs;
+  await dash.close();
+
+  await new Promise((r) => setTimeout(r, 30)); // a rebuild would show in the modification time
+  dash = await startDashboard({ port: 0 });
+  assert.equal((await http(dash.url, "/runs/smoke-1")).text, page);
+  assert.equal(statSync(join(cacheDir(), hash, "run.js")).mtimeMs, built, "a restart reads the Run view from the cache");
+});
+
 test("a change to the sources makes a new hash, builds it, and drops the old build", async () => {
-  const src = join(box.repo("ui-copy"), "ui");
-  cpSync(UI, src, { recursive: true });
+  const root = copySources(box.repo("ui-copy"));
   const cache = cacheDir();
 
-  const first = await buildApp({ srcDir: src, cacheDir: cache });
+  const first = await buildWeb({ root, cacheDir: cache });
   assert.match(first.hash, /^[0-9a-f]{16}$/);
   assert.deepEqual(readdirSync(cache), [first.hash]);
 
-  writeFileSync(join(src, "styles.css"), `${readFileSync(join(src, "styles.css"), "utf8")}\n/* changed */\n`);
-  const second = await buildApp({ srcDir: src, cacheDir: cache });
-  assert.notEqual(second.hash, first.hash);
-  assert.deepEqual(readdirSync(cache), [second.hash], "only the current build is kept");
-
-  const again = await buildApp({ srcDir: src, cacheDir: cache });
+  for (const changed of [join(root, "app", "styles.css"), join(root, "run-view", "run-view.css")]) {
+    const before = (await buildWeb({ root, cacheDir: cache })).hash;
+    writeFileSync(changed, `${readFileSync(changed, "utf8")}\n/* changed */\n`);
+    const after = await buildWeb({ root, cacheDir: cache });
+    assert.notEqual(after.hash, before, `a change to ${changed} is a new build`);
+    assert.deepEqual(readdirSync(cache), [after.hash], "only the current build is kept");
+  }
+  const second = await buildWeb({ root, cacheDir: cache });
+  const again = await buildWeb({ root, cacheDir: cache });
   assert.equal(again.hash, second.hash, "the same sources give the same hash");
   assert.deepEqual(again, second);
 });
 
 test("a cache entry that is incomplete is built again, not served", async () => {
   const cache = cacheDir();
-  const good = await buildApp({ cacheDir: cache });
-  rmSync(join(cache, good.hash, "app.css"));
-  const rebuilt = await buildApp({ cacheDir: cache });
+  const good = await buildWeb({ cacheDir: cache });
+  rmSync(join(cache, good.hash, "run.css"));
+  const rebuilt = await buildWeb({ cacheDir: cache });
   assert.deepEqual(rebuilt, good);
-  assert.ok(existsSync(join(cache, good.hash, "app.css")));
+  for (const file of FILES) assert.ok(existsSync(join(cache, good.hash, file)), file);
 });
 
 test("two dashboards that start together both end with a whole build, and leave no temporary directory behind", async () => {
   const cache = cacheDir();
-  const [a, b] = await Promise.all([buildApp({ cacheDir: cache }), buildApp({ cacheDir: cache })]);
+  const [a, b] = await Promise.all([buildWeb({ cacheDir: cache }), buildWeb({ cacheDir: cache })]);
   assert.deepEqual(a, b);
   assert.deepEqual(readdirSync(cache), [a.hash]);
 });
 
 test("a source that does not build stops the dashboard from starting, with the reason", async () => {
-  const src = join(box.repo("ui-broken"), "ui");
-  mkdirSync(src, { recursive: true });
-  cpSync(UI, src, { recursive: true });
-  writeFileSync(join(src, "main.tsx"), "import './nowhere';\nconst = ;\n");
-  await assert.rejects(buildApp({ srcDir: src, cacheDir: cacheDir() }), /main\.tsx/);
+  const root = copySources(box.repo("ui-broken"));
+  writeFileSync(join(root, "app", "main.tsx"), "import './nowhere';\nconst = ;\n");
+  await assert.rejects(buildWeb({ root, cacheDir: cacheDir() }), /main\.tsx/);
   assert.equal(existsSync(cacheDir()) ? readdirSync(cacheDir()).length : 0, 0, "nothing half-built is left");
 });

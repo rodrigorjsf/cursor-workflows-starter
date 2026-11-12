@@ -368,11 +368,8 @@ No cabeçalho da página do run:
 O cancelamento exige o token CSRF (veja [Segurança](#segurança-do-dashboard)): a página lê o token em `/api/csrf` a cada
 cancelamento e o manda em `X-CSRF-Token`.
 
-A página do run tem um app à parte, também empacotado pelo próprio dashboard: o `esbuild` junta React, React Flow e
-elkjs quando o dashboard sobe (cerca de meio segundo; uma página pedida antes disso espera o mesmo build), e os arquivos
-saem da memória com o hash do conteúdo no nome (`/assets/run-<hash>.js`), com cache de um ano. Não há passo de build para o usuário. Se o build falha (por exemplo,
-numa instalação sem as dependências do app), o dashboard registra o motivo em `dashboard.log` e as páginas do run
-respondem `500` com ele; a API e as métricas continuam funcionando.
+A página do run tem um app à parte (React, React Flow e elkjs), empacotado junto com o app principal quando o dashboard
+sobe e guardado no mesmo cache por hash (veja [O app](#o-app)): `/assets/run.<hash>.js` e `.css`, com cache de um ano.
 
 ### O app
 
@@ -383,11 +380,12 @@ A página inicial (`/`) é um só app, em React, com três menus (o menu é o `#
 - **Board:** o quadro, descrito abaixo;
 - **Metrics:** o painel de custo e eficiência, o mesmo de antes (a tela abaixo).
 
-O app é empacotado com o esbuild **quando o dashboard sobe** (nenhum passo de build para quem usa o kit), e o resultado
-fica guardado por hash do conteúdo em `~/.cursor-workflows/dashboard-cache/<hash>/`: o hash cobre os arquivos de
-`packages/dashboard/app/` e as versões do React e do esbuild, então uma subida com os mesmos fontes só lê dois arquivos, e
-qualquer mudança gera um build novo (só o atual é mantido). O dashboard serve o script e a folha de estilo ele mesmo
-(`/assets/app.<hash>.js` e `.css`, com cache de um ano, porque o nome muda com o conteúdo). Se os fontes não compilam, o
+As duas páginas (o app e a página do run) são empacotadas com o esbuild **quando o dashboard sobe** (nenhum passo de
+build para quem usa o kit), e o resultado fica guardado por hash do conteúdo em `~/.cursor-workflows/dashboard-cache/<hash>/`:
+o hash cobre os arquivos de `packages/dashboard/app/` e `packages/dashboard/run-view/` e as versões do React, do React
+Flow, do elkjs e do esbuild, então uma subida com os mesmos fontes só lê quatro arquivos, e qualquer mudança gera um build
+novo (só o atual é mantido). O dashboard serve os scripts e as folhas de estilo ele mesmo (`/assets/app.<hash>.js`,
+`/assets/run.<hash>.js` e os `.css`, com cache de um ano, porque o nome muda com o conteúdo). Se os fontes não compilam, o
 dashboard não sobe e diz o motivo.
 
 ![Dashboard com dados sintéticos gerados pelos testes](../img/dashboard.png)

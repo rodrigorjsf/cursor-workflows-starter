@@ -1,8 +1,7 @@
-// Seam: HTTP. The Run view is a page the dashboard serves, with a script and a style it builds itself when asked: the tests
+// Seam: HTTP. The Run view is a page the dashboard serves, with a script and a style it builds itself when it starts: the tests
 // ask the server for them the way a browser does and look at what comes back. Nothing here runs the page: that is the
 // browser validation (the `chrome-devtools` MCP), because this repo has no DOM to run it in.
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -54,7 +53,7 @@ test("the page is sent with a content security policy that allows only this orig
   assert.doesNotMatch(policy, /unsafe-eval|https?:|\*/);
 });
 
-test("the script and the style are built once, named by the hash of their content, served for a year and never revalidated", async () => {
+test("the script and the style are built once, named by the build's content hash, served for a year and never revalidated", async () => {
   const first = assetsOf((await http(dash.url, "/runs/a")).text);
   const second = assetsOf((await http(dash.url, "/runs/b")).text);
   assert.deepEqual(second, first, "one build serves every run");
@@ -65,8 +64,7 @@ test("the script and the style are built once, named by the hash of their conten
     assert.match(String(asset.headers["content-type"]), type);
     assert.equal(asset.headers["cache-control"], "public, max-age=31536000, immutable");
     assert.equal(asset.headers["x-content-type-options"], "nosniff");
-    const hash = createHash("sha256").update(asset.text).digest("hex").slice(0, 12);
-    assert.ok(path.includes(hash), `${path} is named by the hash of its content (${hash})`);
+    assert.match(path, /^\/assets\/run\.[0-9a-f]{16}\.(js|css)$/, "named after the build's content hash");
   }
 });
 
