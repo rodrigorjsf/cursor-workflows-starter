@@ -24,14 +24,14 @@ export function submitResultTool(schema: JsonSchema, capture: Capture): SDKCusto
   const validate = ajv.compile(schema);
   return {
     description:
-      "Entrega o resultado final desta etapa. Chame exatamente uma vez, no fim, com um objeto que satisfaça o inputSchema.",
+      "Delivers this step's final result. Call it exactly once, at the end, with an object that satisfies the inputSchema.",
     inputSchema: schema as Record<string, SDKJsonValue>,
     annotations: { readOnlyHint: true, idempotentHint: true },
     execute: (args) => {
       if (!validate(args)) {
         capture.lastError = ajv.errorsText(validate.errors);
         return {
-          content: [{ type: "text", text: `Resultado inválido: ${capture.lastError}. Corrija e chame ${SUBMIT_TOOL} de novo.` }],
+          content: [{ type: "text", text: `Invalid result: ${capture.lastError}. Fix it and call ${SUBMIT_TOOL} again.` }],
           isError: true,
         };
       }
@@ -44,13 +44,13 @@ export function submitResultTool(schema: JsonSchema, capture: Capture): SDKCusto
 
 export function schemaInstruction(): string {
   return (
-    `\n\n---\nAo terminar, chame a tool \`${SUBMIT_TOOL}\` com o resultado estruturado. ` +
-    `Não responda o resultado em texto: só a chamada da tool conta.`
+    `\n\n---\nWhen you finish, call the \`${SUBMIT_TOOL}\` tool with the structured result. ` +
+    `Do not answer the result as text: only the tool call counts.`
   );
 }
 
 export function repromptMessage(capture: Capture): string {
   return capture.lastError
-    ? `A última chamada de ${SUBMIT_TOOL} foi rejeitada: ${capture.lastError}. Chame ${SUBMIT_TOOL} novamente com um objeto válido.`
-    : `Você não chamou ${SUBMIT_TOOL}. Chame agora com o resultado desta etapa.`;
+    ? `The last ${SUBMIT_TOOL} call was rejected: ${capture.lastError}. Call ${SUBMIT_TOOL} again with a valid object.`
+    : `You did not call ${SUBMIT_TOOL}. Call it now with this step's result.`;
 }

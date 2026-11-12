@@ -39,7 +39,7 @@ test("a resume starts from what the run already spent, so the budget never resta
   spentAtStart.length = 0;
   const first = await runWorkflow(three, {}, { cwd, maxCents: 15 });
   assert.equal(first.status, "failed");
-  assert.match(first.error!, /Teto de custo atingido: 18¢ de 15¢/);
+  assert.match(first.error!, /Cost cap reached: 18¢ of 15¢/);
   assert.deepEqual([first.spentCents, first.chargedCents, first.spentTokens], [18, 14, 220]);
 
   const resumed = await runWorkflow(three, {}, { cwd, runId: first.runId });
@@ -69,7 +69,7 @@ test("a resume with a cap sets the new total cap, not an allowance on top of wha
 
   const tight = await runWorkflow(three, {}, { cwd, runId: first.runId, maxCents: 18 });
   assert.equal(tight.status, "failed");
-  assert.match(tight.error!, /Teto de custo atingido: 18¢ de 18¢/, "18 already spent, total cap 18: no step may start");
+  assert.match(tight.error!, /Cost cap reached: 18¢ of 18¢/, "18 already spent, total cap 18: no step may start");
   assert.equal(tight.spentCents, 18);
 
   const wider = await runWorkflow(three, {}, { cwd, runId: first.runId, maxCents: 27 });
@@ -83,11 +83,11 @@ test("the token cap is a total across resumes too", async () => {
   const first = await runWorkflow(three, {}, { cwd, maxTokens: 220 });
   assert.equal(first.status, "failed");
   assert.equal(first.spentTokens, 220);
-  assert.match(first.error!, /Teto de tokens atingido: 220 de 220/);
+  assert.match(first.error!, /Token cap reached: 220 of 220/);
 
   const tight = await runWorkflow(three, {}, { cwd, runId: first.runId, maxTokens: 220 });
   assert.equal(tight.status, "failed");
-  assert.match(tight.error!, /Teto de tokens atingido: 220 de 220/);
+  assert.match(tight.error!, /Token cap reached: 220 of 220/);
 
   const wider = await runWorkflow(three, {}, { cwd, runId: first.runId, maxTokens: 400 });
   assert.equal(wider.status, "finished", wider.error);

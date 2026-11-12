@@ -173,7 +173,7 @@ test("start_workflow refuses an unusable config up front, with the file and the 
   await withServer(async (client) => {
     const r = await call(client, "start_workflow", { name: "cfgwf" });
     assert.equal(r.isError, true);
-    assert.match(r.body.error, /\/workflows\/cfgwf\/roles\/clasify: papel desconhecido/);
+    assert.match(r.body.error, /\/workflows\/cfgwf\/roles\/clasify: unknown role/);
     assert.ok(String(r.body.error).includes(repoConfig()));
     assert.equal(r.body.jobId, undefined);
   });

@@ -134,7 +134,7 @@ test("retries, schema retries and timeout per role change how the step runs", { 
   script.push(() => ({ hang: true }), () => ({ hang: true }), () => ({ hang: true }));
   const r = await runWorkflow(configWorkflow(), {}, { cwd });
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /falhou após 3 tentativa\(s\): timeout após 40 ms/);
+  assert.match(r.error!, /failed after 3 attempt\(s\): timeout after 40 ms/);
   assert.equal(calls.length, 3);
 
   calls.length = 0;
@@ -143,7 +143,7 @@ test("retries, schema retries and timeout per role change how the step runs", { 
   const wf = configWorkflow((ctx) => ctx.agent("p", { role: "classify", label: "c", schema }));
   const bad = await runWorkflow(wf, {}, { cwd });
   assert.equal(bad.status, "failed");
-  assert.match(bad.error!, /falhou após 1 tentativa/);
+  assert.match(bad.error!, /failed after 1 attempt/);
   assert.equal(stats.disposed, 4, "no schema re-prompt and no second attempt");
 });
 
@@ -185,14 +185,14 @@ test("an unknown role in a config file is an error naming the path; so is an unk
   const r = await runWorkflow(configWorkflow(), {}, { cwd });
   assert.equal(r.status, "failed");
   assert.ok(r.error!.includes(repoConfigPath(cwd)));
-  assert.match(r.error!, /\/workflows\/cfg\/roles\/clasify: papel desconhecido \(o workflow cfg declara: classify, review, implement\.low\)/);
+  assert.match(r.error!, /\/workflows\/cfg\/roles\/clasify: unknown role \(workflow cfg declares: classify, review, implement\.low\)/);
   assert.equal(calls.length, 0);
 
   clearConfig(cwd);
   const wf = configWorkflow((ctx) => ctx.agent("p", { role: "nope", label: "n" }));
   const step = await runWorkflow(wf, {}, { cwd });
   assert.equal(step.status, "failed");
-  assert.match(step.error!, /papel desconhecido "nope"/);
+  assert.match(step.error!, /unknown role "nope"/);
   assert.equal(calls.length, 0, "the step fails before an agent exists, and is not retried");
 });
 
@@ -265,7 +265,7 @@ test("a cap enforces on a run: the budget that stops the run is the clamped one"
   });
   const r = await runWorkflow(wf, {}, { cwd });
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /Teto de tokens atingido: 220 de 200/);
+  assert.match(r.error!, /Token cap reached: 220 of 200/);
   assert.equal(calls.length, 2);
 });
 
@@ -355,7 +355,7 @@ test("allowedModels: a model the config asks for outside the list is a violation
   clearRepo();
   const refused = await runWorkflow(wf, {}, { cwd });
   assert.equal(refused.status, "failed");
-  assert.match(refused.error!, /etapa "r": o modelo grok-4\.7 não está no teto global allowedModels \(composer-\*\)/);
+  assert.match(refused.error!, /step "r": model grok-4\.7 is not in the global allowedModels cap \(composer-\*\)/);
   assert.equal(calls.length, 1, "the step with the allowed model ran, the other never created an agent");
 });
 
@@ -470,9 +470,9 @@ test("a limit that is not a valid number is an error naming where it came from: 
     assert.equal(r.status, "failed");
     return r.error!;
   };
-  assert.match(await refused({ maxTokens: 1.5 }), /--max-tokens.*inteiro/);
+  assert.match(await refused({ maxTokens: 1.5 }), /--max-tokens.*integer/);
   assert.match(await refused({ maxCents: -1 }), /--max-cents/);
-  assert.match(await refused({ concurrency: 0 }), /RunOptions\.concurrency.*maior ou igual a 1/);
+  assert.match(await refused({ concurrency: 0 }), /RunOptions\.concurrency.*greater than or equal to 1/);
   assert.match(await refused({ mcpOverrides: { concurrency: 0 } }), /start_workflow\.overrides.*concurrency/);
   assert.match(await refused({ mcpOverrides: { maxTokens: 2.5 } }), /start_workflow\.overrides.*maxTokens/);
   assert.match(await refused({}, { WF_MAX_TOKENS: "1.5" }), /WF_MAX_TOKENS/);

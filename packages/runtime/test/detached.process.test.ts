@@ -157,7 +157,7 @@ test("cancelling a job that already ended changes nothing and says so; an unknow
   assert.equal(done.status, "finished");
   const again = wf("cancel", started.jobId);
   assert.equal(again.status, "finished");
-  assert.match(again.note, /já terminou/);
+  assert.match(again.note, /already ended/);
   assert.deepEqual(wf("cancel", "nope"), { error: "job não encontrado" });
 });
 
@@ -169,7 +169,7 @@ test("cancel does not signal a process that is not the job's (a recycled pid)", 
 
   const result = wf("cancel", "recycled");
   assert.equal(result.status, "running");
-  assert.match(result.note, /não é o processo do job/);
+  assert.match(result.note, /is not the job's process/);
   assert.ok(alive(bystander.pid!), "the bystander was left alone");
 });
 
@@ -238,12 +238,12 @@ test("a frozen job (alive, heartbeat stale) shows as failed with its run id; can
     return state.status === "failed" ? state : undefined;
   });
   assert.equal(frozen.runId, started.runId);
-  assert.match(frozen.error, /sem sinal de vida/);
+  assert.match(frozen.error, /no heartbeat/);
   assert.match(frozen.error, new RegExp(`resumeRunId="${started.runId}"`));
   assert.ok(alive(pid), "the process is still there, holding the run");
 
   const cancelled = read("cancel", started.jobId);
-  assert.match(cancelled.note, /encerrado à força/);
+  assert.match(cancelled.note, /killed \(SIGKILL\)/);
   assert.ok(!alive(pid));
   const resumed = wf("start", "twostep", "--args", "{}", "--resume", started.runId);
   const done = wf("wait", resumed.jobId, "--timeout", "60");

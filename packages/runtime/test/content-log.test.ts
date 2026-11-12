@@ -95,7 +95,7 @@ test("a re-prompt is content too", async () => {
   const prompts = contentOf(readEventLog(eventLogPath(cwd, r.runId)).events).filter((c) => c.kind === "prompt");
   assert.equal(prompts.length, 2);
   assert.equal(prompts[0]!.text, "give me json");
-  assert.match(prompts[1]!.text!, /Você não chamou submit_result/);
+  assert.match(prompts[1]!.text!, /You did not call submit_result/);
 });
 
 test("step content never reaches the metrics database, its exports, or the listeners of the run", async () => {

@@ -243,7 +243,7 @@ export interface StepStartEvent extends EventBase, StepRef {
   attemptId: string;
   /** Chave do journal: hash do prompt e das opções + nº da ocorrência. `stepId` é a forma curta dela. */
   stepKey: string;
-  /** O `label` da etapa; sem ele, `etapa-` e um hash do prompt (nunca o começo do prompt). */
+  /** O `label` da etapa; sem ele, `step-` e um hash do prompt (nunca o começo do prompt). */
   label: string;
   /** A fase em que a etapa começou (`phase` da chamada ou o último `ctx.phase`). */
   phase?: string;

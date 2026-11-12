@@ -137,7 +137,7 @@ test("a job the runtime refuses before the run starts projects as failed, with t
   const invalid = startJob(wf, {}, { cwd });
   const state = await invalid.done;
   assert.equal(state.status, "failed");
-  assert.match(state.error!, /args inválidos/);
+  assert.match(state.error!, /invalid args/);
 
   let release!: () => void;
   script.push(() => new Promise((resolve) => (release = () => resolve({ status: "finished", result: "ok" }))));
@@ -147,7 +147,7 @@ test("a job the runtime refuses before the run starts projects as failed, with t
     await until(() => readJob(cwd, first.job.jobId)!.recent.includes("▶ hold [m]"));
     const second = await startJob(slow, {}, { cwd, runId: first.job.runId }).done;
     assert.equal(second.status, "failed");
-    assert.match(second.error!, /já está em execução/);
+    assert.match(second.error!, /already running/);
     assert.equal(readJob(cwd, first.job.jobId)!.status, "running", "the job that holds the run is unaffected");
   } finally {
     release();
@@ -168,7 +168,7 @@ test("a process that crashes ends its run in the log: the job projects as failed
   await crashAJob("crashed", "run-crashed");
   const view = readJob(cwd, "crashed")!;
   assert.equal(view.status, "failed");
-  assert.equal(view.error, 'crash: boom; relance com resumeRunId="run-crashed"');
+  assert.equal(view.error, 'crash: boom; relaunch with resumeRunId="run-crashed"');
   assert.ok(view.finishedAt, "the run is closed in the log");
 });
 

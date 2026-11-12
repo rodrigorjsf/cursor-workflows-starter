@@ -109,10 +109,10 @@ const lastSegment = (pointer: Pointer): string => pointer.slice(pointer.lastInde
 /** Why a value is not a valid limit, or undefined when it is. `null` means no limit, which concurrency cannot have. */
 function limitProblem(field: LimitField, value: unknown): string | undefined {
   const { min, integer, nullable } = LIMITS[field];
-  if (value === null) return nullable ? undefined : `${field} não pode ser null`;
-  if (typeof value !== "number" || !Number.isFinite(value)) return "esperava um número";
-  if (value < min) return `esperava um número maior ou igual a ${min}`;
-  if (integer && !Number.isInteger(value)) return "esperava um número inteiro";
+  if (value === null) return nullable ? undefined : `${field} cannot be null`;
+  if (typeof value !== "number" || !Number.isFinite(value)) return "expected a number";
+  if (value < min) return `expected a number greater than or equal to ${min}`;
+  if (integer && !Number.isInteger(value)) return "expected an integer";
   return undefined;
 }
 
@@ -157,7 +157,7 @@ function envEntries(input: ResolveInput, roles: WorkflowRole[], issues: ConfigIs
     const value = Number(raw);
     const problem = limitProblem(field, value);
     if (problem) {
-      issues.push({ ref: name, path: "", message: `${problem}, recebeu "${raw}"` });
+      issues.push({ ref: name, path: "", message: `${problem}, got "${raw}"` });
       continue;
     }
     entries.push({ layer: "env", ref: name, path: name, at: pointerOf("limits", field), value });
@@ -167,7 +167,7 @@ function envEntries(input: ResolveInput, roles: WorkflowRole[], issues: ConfigIs
     if (!name) continue;
     const model = parseModelSpec(input.env[name]!);
     if (!model) {
-      issues.push({ ref: name, path: "", message: `modelo inválido "${input.env[name]}": use <id> ou <id>[param=valor,...]` });
+      issues.push({ ref: name, path: "", message: `invalid model "${input.env[name]}": use <id> or <id>[param=value,...]` });
       continue;
     }
     for (const field of MODEL_FIELDS) {
@@ -218,7 +218,7 @@ function flagEntries(flags: FlagLimits | undefined, issues: ConfigIssue[]): Entr
     if (value === undefined) continue;
     const ref = FLAG_REF[field] ?? `RunOptions.${field}`;
     const problem = limitProblem(field, value);
-    if (problem) issues.push({ ref, path: "", message: `${problem}, recebeu ${JSON.stringify(value)}` });
+    if (problem) issues.push({ ref, path: "", message: `${problem}, got ${JSON.stringify(value)}` });
     else entries.push({ layer: "flag", ref, path: ref, at: pointerOf("limits", field), value });
   }
   return entries;
@@ -230,7 +230,7 @@ function checkMcpOverrides(overrides: LimitOverrides | undefined, issues: Config
   for (const field of LIMIT_FIELDS) {
     const value = overrides?.[field];
     const problem = value === undefined ? undefined : limitProblem(field, value);
-    if (problem) issues.push({ ref: MCP_OVERRIDES_REF, path: field, message: `${problem}, recebeu ${JSON.stringify(value)}` });
+    if (problem) issues.push({ ref: MCP_OVERRIDES_REF, path: field, message: `${problem}, got ${JSON.stringify(value)}` });
   }
 }
 
@@ -239,8 +239,8 @@ function checkRoleNames(input: ResolveInput, declared: string[], issues: ConfigI
   for (const file of [input.global, input.repo]) {
     for (const role of Object.keys(file?.data.workflows?.[name]?.roles ?? {})) {
       if (declared.includes(role)) continue;
-      const known = declared.length ? `o workflow ${name} declara: ${declared.join(", ")}` : `o workflow ${name} não declara papéis`;
-      issues.push({ ref: file!.path, path: pointerOf("workflows", name, "roles", role), message: `papel desconhecido (${known})` });
+      const known = declared.length ? `workflow ${name} declares: ${declared.join(", ")}` : `workflow ${name} declares no roles`;
+      issues.push({ ref: file!.path, path: pointerOf("workflows", name, "roles", role), message: `unknown role (${known})` });
     }
   }
 }
@@ -305,7 +305,7 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
       path: "/caps",
       requested: input.repo.data.caps,
       applied: caps,
-      message: "os tetos (caps) só valem no arquivo global: o do repositório pode apertar tetos pelas preferências, nunca afrouxar; ignorado",
+      message: "caps apply only in the global file: the repo file can tighten caps through its preferences, never loosen them; ignored",
     });
   }
 
@@ -320,14 +320,14 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
       violations.push({ layer: entry.layer, ref: entry.ref, path: entry.path, requested: entry.value, applied, message });
     const cap = capOf.get(field);
     if (cap != null && (entry.value === null || (entry.value as number) > cap)) {
-      violate(cap, `${field} ${entry.value === null ? "null (sem limite)" : entry.value} passa do teto global ${cap}: vale o teto`);
+      violate(cap, `${field} ${entry.value === null ? "null (no limit)" : entry.value} exceeds the global cap ${cap}: the cap applies`);
     }
     if (field === "settingSources" && caps.allowedSettingSources) {
       const refused = (entry.value as SettingSource[]).filter((s) => !caps.allowedSettingSources!.includes(s));
-      if (refused.length) violate(allowedSources(caps.allowedSettingSources, entry.value as SettingSource[]), `settingSources ${refused.join(", ")} fora do teto allowedSettingSources: removido(s)`);
+      if (refused.length) violate(allowedSources(caps.allowedSettingSources, entry.value as SettingSource[]), `settingSources ${refused.join(", ")} outside the allowedSettingSources cap: removed`);
     }
     if (entry.at.endsWith("/model/id") && !isModelAllowed(caps.allowedModels, entry.value as string)) {
-      violate(undefined, `o modelo ${entry.value} não está em allowedModels: o modelo pedido não tem efeito`);
+      violate(undefined, `model ${entry.value} is not in allowedModels: the requested model has no effect`);
       dropped.add(group!);
       continue;
     }
@@ -351,7 +351,7 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
         path: field,
         requested: value,
         applied: current,
-        message: `${field} ${value === null ? "null (sem limite)" : value} afrouxaria o valor em vigor (${current}): o override do chat só pode apertar; ignorado`,
+        message: `${field} ${value === null ? "null (no limit)" : value} would loosen the value in force (${current}): a chat override can only tighten; ignored`,
       });
       continue;
     }
@@ -402,7 +402,7 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
         path: at,
         requested: id,
         applied: null,
-        message: `o modelo ${id}, padrão do código do papel ${role.name}, não está em allowedModels: as etapas desse papel falham até a config ou WF_MODEL_${role.name.toUpperCase().replace(/[.-]/g, "_")} trocar o modelo`,
+        message: `model ${id}, the code default of role ${role.name}, is not in allowedModels: the steps of that role fail until the config or WF_MODEL_${role.name.toUpperCase().replace(/[.-]/g, "_")} changes the model`,
       });
     }
   }

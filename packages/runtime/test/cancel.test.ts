@@ -54,7 +54,7 @@ test("aborting the signal cancels the active agent run, ends the run as cancelle
   const outcome = await runWorkflow(oneStep, {}, { cwd, runId: "r1", signal: controller.signal, onEvent: abortOnFirstStep(controller) });
 
   assert.equal(outcome.status, "cancelled");
-  assert.match(outcome.error!, /cancelado/);
+  assert.match(outcome.error!, /cancelled/);
   assert.match(outcome.error!, /resumeRunId="r1"/, "the outcome tells how to resume");
   assert.equal(stats.cancelled, 1, "the agent run was cancelled");
   assert.equal(stats.disposed, 1, "the agent was disposed");
@@ -102,7 +102,7 @@ test("a creation that never answers fails the step on its timeout instead of han
   });
   const outcome = await runWorkflow(wf, {}, { cwd, runId: "r-create-timeout" });
   assert.equal(outcome.status, "failed");
-  assert.match(outcome.error!, /timeout após 100 ms/);
+  assert.match(outcome.error!, /timeout after 100 ms/);
   const stepEnd = eventsOf("r-create-timeout").find((e) => e.type === "step-end");
   assert.ok(stepEnd && stepEnd.type === "step-end" && stepEnd.errorKind === "timeout");
 });
@@ -306,7 +306,7 @@ test("cancelling a write step in a directory that is not a git repository says n
   assert.equal(outcome.status, "cancelled");
   assert.equal(read(dir, "f.txt"), "after\n", "nothing could be reverted");
   const log = eventsOf("r-plain");
-  assert.ok(log.some((e) => e.type === "warning" && /não é um repositório git/.test(e.message) && e.message.includes(dir)));
+  assert.ok(log.some((e) => e.type === "warning" && /is not a git repository/.test(e.message) && e.message.includes(dir)));
   const stepEnd = log.find((e) => e.type === "step-end");
   assert.ok(stepEnd && stepEnd.type === "step-end" && stepEnd.reverted === undefined);
 });

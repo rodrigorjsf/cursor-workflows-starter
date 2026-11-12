@@ -66,7 +66,7 @@ export interface ConfigIssue {
 /** Thrown when a config layer cannot be used. `message` lists every issue, each with its file and field path. */
 export class ConfigError extends Error {
   constructor(readonly issues: ConfigIssue[]) {
-    super(`configuração inválida:\n${issues.map((i) => `  ${i.ref}${i.path ? ` ${i.path}` : ""}: ${i.message}`).join("\n")}`);
+    super(`invalid configuration:\n${issues.map((i) => `  ${i.ref}${i.path ? ` ${i.path}` : ""}: ${i.message}`).join("\n")}`);
   }
 }
 
@@ -90,7 +90,7 @@ export function validateConfigData(data: unknown): Array<{ path: Pointer; messag
         return { path: `${e.instancePath}/${escapePointer(String((e.params as { additionalProperty: string }).additionalProperty))}`, message: "chave desconhecida" };
       }
       const name = e.propertyName === undefined ? "" : `/${escapePointer(e.propertyName)}`;
-      return { path: `${e.instancePath}${name}`, message: e.message ?? "inválido" };
+      return { path: `${e.instancePath}${name}`, message: e.message ?? "invalid" };
     });
 }
 
@@ -101,7 +101,7 @@ export function loadConfigFile(path: string): LoadedConfig | undefined {
   try {
     data = JSON.parse(readFileSync(path, "utf8"));
   } catch (err) {
-    throw new ConfigError([{ ref: path, path: "", message: `JSON inválido: ${err instanceof Error ? err.message : String(err)}` }]);
+    throw new ConfigError([{ ref: path, path: "", message: `invalid JSON: ${err instanceof Error ? err.message : String(err)}` }]);
   }
   const errors = validateConfigData(data);
   if (errors.length) throw new ConfigError(errors.map((e) => ({ ref: path, ...e })));

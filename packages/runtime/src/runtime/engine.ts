@@ -256,7 +256,7 @@ function announceRun<A>(o: {
   if (store.previousStart && store.previousStart.workflowHash !== workflowHash) {
     emit({
       type: "warning",
-      message: `o código do workflow mudou desde a execução anterior deste run (${store.previousStart.workflowHash} → ${workflowHash}): o run retomado mistura versões`,
+      message: `the workflow code changed since this run's previous execution (${store.previousStart.workflowHash} → ${workflowHash}): the resumed run mixes versions`,
     });
   }
   if (!store.previousStart) {
@@ -264,14 +264,14 @@ function announceRun<A>(o: {
     try {
       registerRun({ runId, repo: resolve(opts.cwd), workflow: def.meta.name, startedAt });
     } catch (err) {
-      emit({ type: "warning", message: `não foi possível registrar o run no índice global: ${err instanceof Error ? err.message : String(err)}` });
+      emit({ type: "warning", message: `could not register the run in the global runs index: ${err instanceof Error ? err.message : String(err)}` });
     }
   }
   for (const { runId: prunedRun, error } of pruned.failed) {
-    emit({ type: "warning", message: `não foi possível apagar o conteúdo antigo do run ${prunedRun}: ${error}` });
+    emit({ type: "warning", message: `could not delete the old content of run ${prunedRun}: ${error}` });
   }
-  if (store.tornTail.events) emit({ type: "warning", message: "a última linha do log de eventos estava incompleta (queda no meio de uma gravação): ignorada" });
-  if (store.tornTail.journal) emit({ type: "warning", message: "a última linha do journal estava incompleta (queda no meio de uma gravação): a etapa dela roda de novo" });
+  if (store.tornTail.events) emit({ type: "warning", message: "the last line of the event log was incomplete (a crash in the middle of a write): ignored" });
+  if (store.tornTail.journal) emit({ type: "warning", message: "the last line of the journal was incomplete (a crash in the middle of a write): its step runs again" });
 }
 
 /** Reverts run one at a time: two steps writing in the same directory must not restore it at once. */
@@ -286,14 +286,14 @@ class RevertQueue {
       if (reverting) return reverting;
       const run = this.tail.then(async () => {
         if (!o.snapshot) {
-          o.warn(`etapa "${o.label}" cancelada: ${o.stepCwd} não é um repositório git (ou o git falhou), então as alterações da etapa não foram desfeitas`);
+          o.warn(`step "${o.label}" cancelled: ${o.stepCwd} is not a git repository (or git failed), so the step's changes were not undone`);
           return false;
         }
         try {
           await revertToSnapshot(o.snapshot);
           return true;
         } catch (err) {
-          o.warn(`etapa "${o.label}" cancelada: não foi possível desfazer as alterações em ${o.stepCwd}: ${err instanceof Error ? err.message : String(err)}`);
+          o.warn(`step "${o.label}" cancelled: could not undo the changes in ${o.stepCwd}: ${err instanceof Error ? err.message : String(err)}`);
           return false;
         }
       });
@@ -330,7 +330,7 @@ async function openEventChannel(store: RunStore, runId: string, opts: RunOptions
       const { createRecorder } = await import("../observability/recorder.js");
       recorder = await createRecorder(opts.metricsDb || undefined);
     } catch (err) {
-      recorderWarning = `métricas desligadas: ${err instanceof Error ? err.message : String(err)}`;
+      recorderWarning = `metrics off: ${err instanceof Error ? err.message : String(err)}`;
     }
   }
   // Every event is stamped and redacted here, once: the log, the recorder and the listeners all get the same redacted event.
@@ -342,7 +342,7 @@ async function openEventChannel(store: RunStore, runId: string, opts: RunOptions
     } catch (err) {
       if (logFailed) return;
       logFailed = true; // one warning only: the log is the source of truth, but a full disk must not take the run down
-      opts.onEvent?.(stamp({ type: "warning", message: `falha ao gravar o log de eventos: ${err instanceof Error ? err.message : String(err)}` }));
+      opts.onEvent?.(stamp({ type: "warning", message: `could not write the event log: ${err instanceof Error ? err.message : String(err)}` }));
     }
   };
   const emit = (e: NewEvent) => {
@@ -351,7 +351,7 @@ async function openEventChannel(store: RunStore, runId: string, opts: RunOptions
     try {
       recorder?.record(event);
     } catch (err) {
-      const warning = stamp({ type: "warning", message: `falha ao gravar métrica: ${err instanceof Error ? err.message : String(err)}` });
+      const warning = stamp({ type: "warning", message: `could not write a metric: ${err instanceof Error ? err.message : String(err)}` });
       append(warning);
       opts.onEvent?.(warning);
     }
@@ -542,7 +542,7 @@ export async function runWorkflow<A, R>(
 
   if (def.meta.argsSchema) {
     const validate = ajv.compile(def.meta.argsSchema);
-    if (!validate(args)) return refused(`args inválidos: ${ajv.errorsText(validate.errors)}`);
+    if (!validate(args)) return refused(`invalid args: ${ajv.errorsText(validate.errors)}`);
   }
 
   // The config is read afresh at the start of every execution (also a resume): an edit takes effect on the next run.
@@ -650,7 +650,7 @@ async function executeRun<A, R>(
   const cutters = new Set<AttemptCut>();
   let runBreach: BudgetExceededError | undefined;
 
-  const stepCapError = (step: StepContext, tokens: number) => new StepBudgetError(`Teto de tokens da etapa "${step.label}" atingido: ${tokens} de ${step.tokenCap}.`);
+  const stepCapError = (step: StepContext, tokens: number) => new StepBudgetError(`Step token cap reached for step "${step.label}": ${tokens} of ${step.tokenCap}.`);
 
   /** Has the turn that just ended taken the run or the step over a token cap? The run's cap wins: it ends the run. */
   function tokenBreach(step: StepContext, attemptTokens: number): Error | undefined {
@@ -658,7 +658,7 @@ async function executeRun<A, R>(
     if (budget.maxTokens != null) {
       let total = spentTokens;
       for (const usage of live) total += usage.totalTokens;
-      if (total > budget.maxTokens) return (runBreach = new BudgetExceededError(`Teto de tokens atingido: ${total} de ${budget.maxTokens}.`));
+      if (total > budget.maxTokens) return (runBreach = new BudgetExceededError(`Token cap reached: ${total} of ${budget.maxTokens}.`));
     }
     const stepTokens = step.tokens + attemptTokens;
     return step.tokenCap != null && stepTokens > step.tokenCap ? stepCapError(step, stepTokens) : undefined;
@@ -666,7 +666,7 @@ async function executeRun<A, R>(
 
   // Cancellation. `cancelled` rejects when the signal aborts; it is only ever raced against something, never awaited alone.
   const signal = opts.signal;
-  const cancelMessage = `run cancelado; ${resumeHint(runId)}`;
+  const cancelMessage = `run cancelled; ${resumeHint(runId)}`;
   const cancelled = signal
     ? new Promise<never>((_, reject) => {
         const fire = () => reject(new RunCancelledError(cancelMessage));
@@ -696,10 +696,10 @@ async function executeRun<A, R>(
     if (accountError) throw accountError;
     if (runBreach) throw runBreach;
     if (budget.maxCents != null && spentCents >= budget.maxCents) {
-      throw new BudgetExceededError(`Teto de custo atingido: ${spentCents}¢ de ${budget.maxCents}¢.`);
+      throw new BudgetExceededError(`Cost cap reached: ${spentCents}¢ of ${budget.maxCents}¢.`);
     }
     if (budget.maxTokens != null && spentTokens >= budget.maxTokens) {
-      throw new BudgetExceededError(`Teto de tokens atingido: ${spentTokens} de ${budget.maxTokens}.`);
+      throw new BudgetExceededError(`Token cap reached: ${spentTokens} of ${budget.maxTokens}.`);
     }
   }
 
@@ -738,12 +738,12 @@ async function executeRun<A, R>(
           const why = lastErr instanceof Error ? lastErr.message : String(lastErr);
           emit({
             type: "warning",
-            message: `getUsage() falhou (${why.slice(0, 160)}): tokens contados pelos eventos turn-ended; custo desconhecido, o teto em centavos não contou esta tentativa. Use --max-tokens.`,
+            message: `getUsage() failed (${why.slice(0, 160)}): tokens counted from the turn-ended events; cost unknown, so the cents cap did not count this attempt. Use --max-tokens.`,
           });
         } else if (!u.cost) {
           emit({
             type: "warning",
-            message: "custo da tentativa ainda não reportado pelo Cursor: o teto em centavos não a contou (o de tokens, sim). Use --max-tokens e rode `wf metrics reconcile` depois.",
+            message: "Cursor has not reported the attempt's cost yet: the cents cap did not count it (the token cap did). Use --max-tokens and run `wf metrics reconcile` later.",
           });
         }
         addUsage(totals, usage);
@@ -769,7 +769,7 @@ async function executeRun<A, R>(
   async function within<T>(attempt: Deadline, promise: Promise<T>, late?: (value: T) => void, abort?: Promise<never>): Promise<T> {
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new StepTimeoutError(`timeout após ${attempt.ms} ms`)), Math.max(0, attempt.at - Date.now()));
+      timer = setTimeout(() => reject(new StepTimeoutError(`timeout after ${attempt.ms} ms`)), Math.max(0, attempt.at - Date.now()));
     });
     try {
       return await Promise.race([...(abort ? [abort] : []), promise, timeout, ...(cancelled ? [cancelled] : [])]);
@@ -816,10 +816,10 @@ async function executeRun<A, R>(
     const flow = currentFlow();
     const promptHash = sha(prompt).slice(0, 16);
     // Label padrão é um hash, não o começo do prompt: nada de conteúdo de issue/código nas métricas e logs.
-    const label = callOpts.label ?? `etapa-${promptHash.slice(0, 8)}`;
+    const label = callOpts.label ?? `step-${promptHash.slice(0, 8)}`;
     const role = callOpts.role;
     if (role !== undefined && !roles.has(role)) {
-      throw new StepFailedError(`etapa "${label}": papel desconhecido "${role}" (o workflow declara: ${[...roles.keys()].join(", ") || "nenhum"})`);
+      throw new StepFailedError(`step "${label}": unknown role "${role}" (the workflow declares: ${[...roles.keys()].join(", ") || "none"})`);
     }
     // Workflow defaults < the role's defaults < this call < the config layers: what the user configured wins over the code.
     const overrides = resolved.stepOverrides(role, label);
@@ -890,7 +890,7 @@ async function executeRun<A, R>(
     let memoKey: string | undefined;
     if (o.memo) {
       if (!isReadOnly(o.tools)) {
-        throw new StepFailedError(`etapa "${label}": memo exige \`tools\` só com tools de leitura (read, grep, glob, ls, semSearch...)`);
+        throw new StepFailedError(`step "${label}": memo requires \`tools\` with read-only tools only (read, grep, glob, ls, semSearch...)`);
       }
       const state = repoState(o.cwd ?? opts.cwd);
       if (state) {
@@ -902,20 +902,20 @@ async function executeRun<A, R>(
           return hit as T;
         }
       } else {
-        emit({ type: "warning", message: `etapa "${label}": memo ignorado (cwd não é um repositório git com commit)` });
+        emit({ type: "warning", message: `step "${label}": memo skipped (cwd is not a git repository with a commit)` });
       }
     }
-    if (!o.model) throw new StepFailedError(`etapa "${label}" sem modelo: defina opts.model ou defaults.model`);
+    if (!o.model) throw new StepFailedError(`step "${label}" has no model: set opts.model or defaults.model`);
     if (!isModelAllowed(caps.allowedModels, o.model.id)) {
-      throw new StepFailedError(`etapa "${label}": o modelo ${o.model.id} não está no teto global allowedModels (${caps.allowedModels!.join(", ")})`);
+      throw new StepFailedError(`step "${label}": model ${o.model.id} is not in the global allowedModels cap (${caps.allowedModels!.join(", ")})`);
     }
     // Every step runs on the local backend today; the cloud spec picks the backend per role (ADR-0005).
     const backend: AgentBackend = localBackend;
     if (caps.allowedLocations && !caps.allowedLocations.includes(backend.location)) {
-      throw new StepFailedError(`etapa "${label}": o teto global allowedLocations (${caps.allowedLocations.join(", ") || "vazio"}) não permite etapas ${backend.location === "local" ? "locais" : "na nuvem"}`);
+      throw new StepFailedError(`step "${label}": the global allowedLocations cap (${caps.allowedLocations.join(", ") || "empty"}) does not allow ${backend.location === "local" ? "local" : "cloud"} steps`);
     }
     if (o.schema && o.schema.type !== "object") {
-      throw new StepFailedError(`etapa "${label}": schema precisa ter type "object" na raiz (vira o inputSchema de uma tool)`);
+      throw new StepFailedError(`step "${label}": schema must have type "object" at the root (it becomes a tool's inputSchema)`);
     }
     const model = o.model;
 
@@ -1051,10 +1051,10 @@ async function executeRun<A, R>(
 
           if (result.status !== "finished") {
             errorKind = "run-error";
-            lastError = `run ${result.status}: ${result.error?.message ?? "sem detalhe"}`;
+            lastError = `run ${result.status}: ${result.error?.message ?? "no detail"}`;
           } else if (o.schema && !capture.submitted) {
             errorKind = "schema";
-            lastError = `agente não entregou ${SUBMIT_TOOL} válido (${capture.lastError ?? "nenhuma chamada"})`;
+            lastError = `the agent did not deliver a valid ${SUBMIT_TOOL} (${capture.lastError ?? "no call"})`;
           } else {
             const value = o.schema ? capture.value : (result.result ?? "");
             journal.record({ key, label, model: model.id, result: value, chargedCents: charge.charged, totalTokens: charge.usage.totalTokens });
@@ -1080,14 +1080,14 @@ async function executeRun<A, R>(
           } else if (typeof code === "string" && ACCOUNT_ERROR_CODES.has(code)) {
             errorKind = "exception";
             endEvent(false);
-            accountError ??= new AccountAccessError(`O plano da conta não dá acesso ao Cursor SDK (${code}): ${lastError}`);
+            accountError ??= new AccountAccessError(`The account's plan does not give access to the Cursor SDK (${code}): ${lastError}`);
             throw accountError;
           } else if (err instanceof RateLimitError) {
             errorKind = "rate-limit";
             // Não retentável = teto de uso do plano ("Usage limit exceeded" na doc do SDK): não adianta tentar de novo.
             if (!err.isRetryable) {
               endEvent(false);
-              throw new BudgetExceededError(`Limite de uso do Cursor atingido: ${err.message}`);
+              throw new BudgetExceededError(`Cursor usage limit reached: ${err.message}`);
             }
             await sleep(2000 * 2 ** (attempt - 1));
           } else {
@@ -1103,7 +1103,7 @@ async function executeRun<A, R>(
         endEvent(false);
         if (cancelledBy) throw cancelledBy;
       }
-      throw new StepFailedError(`etapa "${label}" falhou após ${attempts} tentativa(s): ${lastError}`);
+      throw new StepFailedError(`step "${label}" failed after ${attempts} attempt(s): ${lastError}`);
     } finally {
       sem.release();
     }

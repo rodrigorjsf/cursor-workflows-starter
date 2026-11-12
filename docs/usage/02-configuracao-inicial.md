@@ -103,10 +103,10 @@ Como funciona:
   de label, do workflow ou do arquivo global; conta todas as tentativas da etapa) e o do run (o gasto que o log já
   registra, resumes inclusive, mais os turnos em andamento de todas as etapas). Passou de um deles (estritamente
   acima), o run do agente é cancelado na hora e a tentativa falha com `errorKind: "budget"`, sem nova tentativa.
-  - O teto da **etapa** só derruba a etapa: ela lança `Teto de tokens da etapa "x" atingido: 300 de 250.`, e o
+  - O teto da **etapa** só derruba a etapa: ela lança `Step token cap reached for step "x": 300 of 250.`, e o
     workflow decide (em `parallel` vira `null`, com um `warning`).
   - O teto do **run** cancela todas as etapas ativas, nenhuma etapa nova começa, e o run termina com
-    `Teto de tokens atingido: 500 de 450.` Isso vale mesmo que o código do workflow capture o erro da etapa e siga
+    `Token cap reached: 500 of 450.` Isso vale mesmo que o código do workflow capture o erro da etapa e siga
     adiante: o run termina `failed`. O run espera as etapas canceladas fecharem a conta (até 30 s), então o
     `run-end` é o último evento do log e os tokens delas entram no total.
   - Uma etapa que já gastou todo o seu teto numa tentativa que falhou (`>=`, como no teto do run) não ganha nova
@@ -131,7 +131,7 @@ Como funciona:
 - Enquanto o uso de agentes locais não estiver liberado na conta, `getUsage()` devolve `403 feature_unavailable`
   ([DOC](https://cursor.com/docs/sdk/typescript#agentgetusage)). Nesse caso, e em qualquer falha do `getUsage()`,
   o engine conta os tokens da tentativa pela soma dos eventos `turn-ended`, e o teto de tokens continua valendo. O
-  custo fica desconhecido, e o teto em centavos não conta a tentativa. O `warning` começa com "getUsage() falhou".
+  custo fica desconhecido, e o teto em centavos não conta a tentativa. O `warning` começa com "getUsage() failed".
   Com `feature_unavailable`, o engine não tenta ler de novo. Turno sem uso reportado, como o de uma run cancelada
   antes de fechar o turno, fica fora da soma ([DOC](https://cursor.com/docs/sdk/typescript#token-usage)).
 - Isso acontece em plano pago. Num Premium, em 2026-11-11, toda chamada ao `getUsage()` de agente local deu
@@ -158,7 +158,7 @@ Como funciona:
   ("Usage limit exceeded", causa "monthly usage cap"; na doc Python, "usage limits exceeded")
   ([DOC](https://cursor.com/docs/sdk/typescript#errors)). A mesma classe cobre o limite de rajada ("Rate limit
   exceeded"), e o SDK marca os casos transitórios com `isRetryable: true`. O engine espera e tenta de novo nesses
-  casos, e converte o não retentável em falha "Limite de uso do Cursor atingido". Medido em 2026-11-11: a falta de
+  casos, e converte o não retentável em falha "Cursor usage limit reached". Medido em 2026-11-11: a falta de
   franquia para um modelo (`gpt-5.3-codex` num Premium sem crédito pré-pago) veio como run com `status: "error"` e
   mensagem, não como `RateLimitError`. O engine trata isso como falha de run: tenta de novo (`retries`, default 1) e
   depois falha a etapa com a mensagem do SDK. O teto mensal do plano não foi atingido, então o caminho dele segue sem teste

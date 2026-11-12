@@ -93,7 +93,7 @@ flowchart TB
      reportado ...").
    - Se o `getUsage()` falha, os tokens vêm da soma dos eventos `turn-ended` da tentativa, e o teto de tokens
      continua valendo. O custo fica desconhecido: o teto em centavos não conta a tentativa, e o engine emite
-     `warning` ("getUsage() falhou (...)"). Isso acontece, por exemplo, com `403 feature_unavailable`
+     `warning` ("getUsage() failed (...)"). Isso acontece, por exemplo, com `403 feature_unavailable`
      (`UnknownAgentError` com `code === "feature_unavailable"`): o uso de agentes locais é liberado por conta
      [DOC](https://cursor.com/docs/sdk/typescript#agentgetusage). Nesse caso o engine não tenta de novo. Turno sem
      uso reportado, como o de uma run cancelada antes de fechar o turno, fica fora da soma
@@ -144,7 +144,7 @@ flowchart TB
 | O conteúdo das etapas fica só no log local, sem segredos, por tempo limitado | Eventos `content` + redação antes da gravação + retenção ao iniciar o run (ver passo 12). O banco de métricas e os exports dele nunca recebem conteúdo |
 | Todo evento do run fica registrado, e a estrutura do run dá para refazer só com o log | Log de eventos por run (`events.jsonl`): `v`, `ts` e `runId` em todo evento; `stepId`, `parentId` e `groupId` nas etapas; `group-start`/`group-end` em `parallel` e `pipeline`. Campos em [6.1 · Referência de eventos](../reference/events.md), gerada do tipo |
 | Uma queda no meio de uma gravação não impede o resume | Log e journal em JSON Lines: a última linha incompleta é ignorada, e a seguinte começa em linha nova. Os demais arquivos de estado (job, memo, progresso do workflow) são trocados por inteiro (arquivo temporário + `rename`) |
-| Um run não roda duas vezes ao mesmo tempo | `run.lock` no diretório do run: o segundo processo é recusado com `já está em execução`; o lock de um processo que morreu é retomado |
+| Um run não roda duas vezes ao mesmo tempo | `run.lock` no diretório do run: o segundo processo é recusado com `already running`; o lock de um processo que morreu é retomado |
 | Retomar um run com o workflow alterado não passa em silêncio | O `workflowHash` do `run-start` é comparado ao da execução anterior; mudou, o log recebe um `warning` |
 | Os runs de todos os repositórios são encontráveis | Cada run novo acrescenta uma linha (id, repositório, workflow, início) a `~/.cursor-workflows/runs.jsonl` (`WF_HOME` muda o diretório) |
 | Workflow não dispara workflow por acidente | MCP inline `workflows` sem tools nas etapas, que encobre o do `.cursor/mcp.json` (passo 4), + `WF_INSIDE_WORKFLOW` herdado pelo shell, com recusa no CLI. Medido em 2026-11-11: sem o inline, a etapa via `start_workflow`; com ele, só `FetchMcpResource` e `submit_result`. Não é fronteira de segurança (ver abaixo) |
@@ -174,7 +174,7 @@ flowchart TB
   próxima consulta, e o que parou de dar sinal de vida (processo travado, parado, ou um pid reaproveitado), depois de
   30 s sem heartbeat. Relance com `start_workflow {resumeRunId}` ou `wf start --resume <runId>`; o journal evita
   refazer o que já terminou. O log do processo fica em `.workflows/jobs/<jobId>.log`. Um processo travado que ainda
-  existe segura o lock do run: a retomada é recusada (`já está em execução`) até ele ser encerrado.
+  existe segura o lock do run: a retomada é recusada (`already running`) até ele ser encerrado.
 - **Imunidade a promises rejeitadas do SDK.** O cookbook avisa que o SDK dispara promises não aguardadas na
   inicialização. O kit instala `unhandledRejection` (registra e segue) e `uncaughtException` (grava um `run-end`
   `failed` com o motivo no log de cada run em execução, o que faz os jobs aparecerem como `failed`, e sai).

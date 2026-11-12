@@ -146,7 +146,7 @@ O que conferir:
    crédito pré-pago. Foi o caso de `gpt-5.3-codex` num Premium em 2026-11-11. Troque por um modelo do Cursor.
 3. A saída final tem `status: "finished"`, `spentCents` (o custo que o teto conta) e `chargedCents` (só o cobrado,
    que pode ser 0). Se `spentCents` vier 0, o teto em centavos não protege a sua conta. Se o stderr também trouxer
-   o aviso `getUsage() falhou (...)` (provavelmente `403 feature_unavailable`), o custo ficou desconhecido e só o
+   o aviso `getUsage() failed (...)` (provavelmente `403 feature_unavailable`), o custo ficou desconhecido e só o
    teto de tokens protege. Ele conta pelos eventos `turn-ended`: confira que `spentTokens` saiu maior que 0.
    Isso não é hipótese: num Premium, em 2026-11-11, toda chamada ao `getUsage()` deu `feature_unavailable`
    ([8.2 §5](../research/verificacoes-locais.md)). Com isso, `spentCents` fica em 0 e o

@@ -53,9 +53,10 @@ global index `~/.cursor-workflows/runs.jsonl` (run id, repo path, workflow, star
   deleted; the events around it stay.
 - `wait_workflow` and `wf status` are projections of the log: `recent` holds at most 20 one-line summaries, never prompt or
   output text. `result` is whatever the workflow returned, so return structured facts, not raw agent text.
-- Warnings to relay on a resume: `o código do workflow mudou` (the resumed run mixes two versions of the workflow) and
-  `linha incompleta` (a crash tore the last line of the log or the journal; the affected step runs again).
-- One process executes a run id at a time: starting it again while it runs fails with `já está em execução`.
+- Warnings to relay on a resume: `the workflow code changed` (the resumed run mixes two versions of the workflow) and
+  `the last line of the event log was incomplete` or `the last line of the journal was incomplete` (a crash
+  tore that line; the affected step runs again).
+- One process executes a run id at a time: starting it again while it runs fails with `already running`.
 
 ## Reading the numbers
 

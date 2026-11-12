@@ -241,7 +241,7 @@ test("an event log that ends in a partial line resumes: later events are appende
   assert.equal(skipped, 1, "the torn line is skipped, nothing else");
   assert.equal(events.at(-1)!.type, "run-end", "the resumed execution's events are all readable");
   assert.equal(ofType(events, "run-start").length, 2);
-  const tornWarnings = () => ofType(readEventLog(file).events, "warning").filter((w) => /linha.*log/i.test(w.message)).length;
+  const tornWarnings = () => ofType(readEventLog(file).events, "warning").filter((w) => /line of the event log/i.test(w.message)).length;
   assert.equal(tornWarnings(), 1, "the resume says that it found a torn line");
 
   await runWorkflow(twoSteps, {}, { cwd, runId: first.runId });
@@ -280,7 +280,7 @@ test("a global runs index that cannot be written warns but never fails the run",
     const events: WorkflowEvent[] = [];
     const r = await runWorkflow(oneStep, {}, { cwd, onEvent: (e) => events.push(e) });
     assert.equal(r.status, "finished", r.error);
-    assert.ok(ofType(events, "warning").some((w) => /índice global/.test(w.message)));
+    assert.ok(ofType(events, "warning").some((w) => /global runs index/.test(w.message)));
   } finally {
     process.env.WF_HOME = previous;
   }
@@ -308,7 +308,7 @@ test("resuming a run whose workflow changed records a warning event; resuming it
   const failed = await runWorkflow(v1, {}, { cwd });
   assert.equal(failed.status, "failed");
 
-  const changeWarnings = (events: WorkflowEvent[]) => ofType(events, "warning").filter((w) => /workflow mudou/.test(w.message));
+  const changeWarnings = (events: WorkflowEvent[]) => ofType(events, "warning").filter((w) => /workflow code changed/.test(w.message));
 
   const seen: WorkflowEvent[] = [];
   const resumed = await runWorkflow(v2, {}, { cwd, runId: failed.runId, onEvent: (e) => seen.push(e) });
@@ -340,7 +340,7 @@ test("resuming a run whose workflow's imported module changed records the code-c
 
     writeFileSync(join(dir, "helper.ts"), `export const answer = () => "v2";\n`); // only the imported module changes
     await runWorkflow(await load(), {}, { cwd, runId: first.runId });
-    const changeWarnings = ofType(logOf(first.runId).events, "warning").filter((w) => /workflow mudou/.test(w.message));
+    const changeWarnings = ofType(logOf(first.runId).events, "warning").filter((w) => /workflow code changed/.test(w.message));
     assert.equal(changeWarnings.length, 1);
   } finally {
     if (previousDir === undefined) delete process.env.WORKFLOWS_DIR;
@@ -356,7 +356,7 @@ test("a group that a fatal error aborts is closed with ok=false, and the run fai
   });
   const r = await runWorkflow(wf, {}, { cwd, concurrency: 1, maxCents: 5 }); // the fake charges 9¢ per step: the second step hits the cap
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /Teto de custo/);
+  assert.match(r.error!, /Cost cap reached/);
   const { events } = logOf(r.runId);
   const [group] = ofType(events, "group-start");
   const closing = ofType(events, "group-end").filter((e) => e.groupId === group!.groupId);
@@ -374,7 +374,7 @@ test("a metrics recorder that cannot start is reported after the run-start, not 
     assert.equal(r.status, "finished", r.error);
     const { events } = logOf(r.runId);
     assert.equal(events[0]!.type, "run-start", "every execution of the log opens with its run-start");
-    assert.ok(ofType(events, "warning").some((w) => /métricas desligadas/.test(w.message)));
+    assert.ok(ofType(events, "warning").some((w) => /metrics off/.test(w.message)));
   } finally {
     process.env.WF_METRICS = previous;
   }

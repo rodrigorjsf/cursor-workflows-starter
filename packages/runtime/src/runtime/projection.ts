@@ -8,7 +8,7 @@ import type { RunStatus, WorkflowEvent } from "./events.js";
 import type { UsageTotals } from "./workflow.js";
 
 /** How a message tells the reader to continue a run that stopped without finishing. The `run-workflow` skill matches the `resumeRunId="..."` part. */
-export const resumeHint = (runId: string): string => `relance com resumeRunId="${runId}"`;
+export const resumeHint = (runId: string): string => `relaunch with resumeRunId="${runId}"`;
 
 export const emptyUsage = (): UsageTotals => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0 });
 
@@ -93,7 +93,7 @@ function recentLine(e: WorkflowEvent): string | undefined {
       return oneLine(`== ${e.title}`);
     case "step-start":
       if (e.cached) return undefined; // served from the journal/memo: the step-end that follows already shows it
-      return oneLine(`▶ ${e.label} [${e.model ?? "?"}]${e.attempt > 1 ? ` tentativa ${e.attempt}` : ""}`);
+      return oneLine(`▶ ${e.label} [${e.model ?? "?"}]${e.attempt > 1 ? ` attempt ${e.attempt}` : ""}`);
     case "step-end": {
       const cache = e.usage && e.usage.cacheReadTokens > 0 ? ` cache-read ${e.usage.cacheReadTokens}` : "";
       const cents = attemptCents(e);

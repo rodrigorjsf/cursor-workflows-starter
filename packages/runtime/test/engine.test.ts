@@ -53,7 +53,7 @@ test("argsSchema é validado antes de rodar", async () => {
   });
   const r = await runWorkflow(wf, { issue: "abc" }, { cwd });
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /args inválidos/);
+  assert.match(r.error!, /invalid args/);
   assert.equal(calls.length, 0);
 });
 
@@ -62,7 +62,7 @@ test("etapa que falha em todas as tentativas derruba o workflow (não é pulada)
   const wf = defineWorkflow({ meta: { name: "e", description: "e" }, defaults: { model: { id: "m" } }, run: (ctx) => ctx.agent("x") });
   const r = await runWorkflow(wf, {}, { cwd });
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /falhou após 2 tentativa/);
+  assert.match(r.error!, /failed after 2 attempt/);
   assert.equal(stats.disposed, 2);
 });
 
@@ -117,7 +117,7 @@ test("teto de custo aborta, inclusive dentro de parallel", async () => {
   });
   const r = await runWorkflow(wf, {}, { cwd, maxCents: 10 }); // o fake cobra 7¢ por etapa
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /Teto de custo/);
+  assert.match(r.error!, /Cost cap reached/);
 });
 
 test("uso por tipo de token é somado e a taxa de cache calculada", async () => {
@@ -179,7 +179,7 @@ test("memo é recusado em etapa que pode escrever", async () => {
   const wf = defineWorkflow({ meta: { name: "mw", description: "mw" }, defaults: { model: { id: "m" } }, run: (ctx) => ctx.agent("x", { tools: ["read", "edit"], memo: true }) });
   const r = await runWorkflow(wf, {}, { cwd });
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /memo exige/);
+  assert.match(r.error!, /memo requires/);
   assert.equal(calls.length, 0);
 });
 
@@ -197,7 +197,7 @@ test("teto em centavos conta o custo bruto quando o cobrado é 0 (uso incluído 
   Object.assign(costConfig, { raw: 9, charged: 0 });
   const r = await runWorkflow(threeSteps, {}, { cwd, maxCents: 10 });
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /Teto de custo/);
+  assert.match(r.error!, /Cost cap reached/);
   assert.equal(calls.length, 2, "a terceira etapa não pode começar: 18¢ brutos já passaram do teto");
   assert.equal(r.spentCents, 18);
   assert.equal(r.chargedCents, 0);
@@ -216,9 +216,9 @@ test("custo não reportado gera aviso, e o teto de tokens continua protegendo", 
   const events: any[] = [];
   const r = await runWorkflow(threeSteps, {}, { cwd, maxCents: 1, maxTokens: 150, onEvent: (e) => events.push(e) });
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /Teto de tokens/);
+  assert.match(r.error!, /Token cap reached/);
   assert.equal(r.spentCents, 0);
-  assert.ok(events.some((e) => e.type === "warning" && /custo .*não reportado/.test(e.message)), "deveria avisar que o teto em centavos não contou a etapa");
+  assert.ok(events.some((e) => e.type === "warning" && /not reported the attempt.s cost/.test(e.message)), "deveria avisar que o teto em centavos não contou a etapa");
 });
 
 test("getUsage() indisponível (403 feature_unavailable): tokens vêm dos eventos turn-ended e o teto de tokens dispara", async () => {
@@ -226,11 +226,11 @@ test("getUsage() indisponível (403 feature_unavailable): tokens vêm dos evento
   const events: any[] = [];
   const r = await runWorkflow(threeSteps, {}, { cwd, maxTokens: 150, onEvent: (e) => events.push(e) });
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /Teto de tokens/);
+  assert.match(r.error!, /Token cap reached/);
   assert.equal(calls.length, 2, "a terceira etapa não pode começar: 220 tokens dos turnos já passaram do teto");
   assert.equal(r.spentTokens, 220); // 20 + 10 + 60 + 20 por etapa, somados dos turn-ended
   assert.equal(r.spentCents, 0);
-  assert.ok(events.some((e) => e.type === "warning" && /getUsage\(\) falhou/.test(e.message)), "deveria avisar que o custo é desconhecido");
+  assert.ok(events.some((e) => e.type === "warning" && /getUsage\(\) failed/.test(e.message)), "deveria avisar que o custo é desconhecido");
   assert.ok(!events.some((e) => e.type === "warning" && /o de tokens, sim/.test(e.message)), "não pode dizer que o teto de tokens contou pelo getUsage");
 });
 
@@ -244,7 +244,7 @@ test("plano sem acesso ao SDK (plan_required) encerra o run na primeira tentativ
   const r = await runWorkflow(wf, {}, { cwd, concurrency: 1 });
   assert.equal(r.status, "failed");
   assert.match(r.error!, /plan_required/);
-  assert.match(r.error!, /plano/);
+  assert.match(r.error!, /account's plan/);
   assert.equal(calls.length, 1, "sem nova tentativa nem a segunda etapa do parallel");
 });
 
@@ -293,7 +293,7 @@ test("teto padrão declarado pelo workflow vale sem --max-tokens; null explícit
   const capped = { ...threeSteps, budget: { maxTokens: 150 } };
   const r = await runWorkflow(capped, {}, { cwd });
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /Teto de tokens/);
+  assert.match(r.error!, /Token cap reached/);
   calls.length = 0;
   const free = await runWorkflow(capped, {}, { cwd, maxTokens: null });
   assert.equal(free.status, "finished", free.error);

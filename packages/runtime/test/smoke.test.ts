@@ -83,7 +83,7 @@ test("the token cap of a smoke run is low, and a step that crosses it is cut at 
   const cap = runStartOf(logOf(r.runId)).config.limits.maxTokens;
   assert.ok(cap !== null && cap <= 50_000, `a smoke run must be cheap, cap is ${cap}`);
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /Teto de tokens/);
+  assert.match(r.error!, /Token cap reached/);
 });
 
 test("the model is the role's: the repo config swaps it (an account where composer-2.5 is not included)", async () => {

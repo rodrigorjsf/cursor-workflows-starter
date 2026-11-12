@@ -117,7 +117,7 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 | --- | --- | --- | --- |
 | `attemptId` | `string` | sim | Identifica a tentativa: liga o `step-start`, os `turn` e o `step-end` dela. Uma etapa tem uma tentativa por retry. |
 | `stepKey` | `string` | sim | Chave do journal: hash do prompt e das opções + nº da ocorrência. `stepId` é a forma curta dela. |
-| `label` | `string` | sim | O `label` da etapa; sem ele, `etapa-` e um hash do prompt (nunca o começo do prompt). |
+| `label` | `string` | sim | O `label` da etapa; sem ele, `step-` e um hash do prompt (nunca o começo do prompt). |
 | `phase` | `string` | não | A fase em que a etapa começou (`phase` da chamada ou o último `ctx.phase`). |
 | `cached` | `false \| "journal" \| "memo"` | sim | De onde vem o resultado sem chamar a API: journal do run (resume) ou memo entre runs. `false` = tentativa real. |
 | `role` | `string` | não | O papel da etapa (`role` da chamada), quando ela declara um. |

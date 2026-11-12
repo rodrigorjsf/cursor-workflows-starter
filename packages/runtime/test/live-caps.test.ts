@@ -43,7 +43,7 @@ test("a step that crosses its per-step cap during a turn is cancelled on the spo
   const r = await runWorkflow(wf, {}, { cwd });
 
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /Teto de tokens da etapa "c" atingido: 300 de 250/);
+  assert.match(r.error!, /Step token cap reached for step "c": 300 of 250/);
   assert.equal(calls.length, 1, "retries is 3, but a budget failure is not retried: one agent only");
   assert.equal(stats.cancels, 1, "the agent run was cancelled");
   assert.equal(stats.disposed, 1);
@@ -91,7 +91,7 @@ test("a step cut by its own cap fails alone: the run goes on, as it does for any
 
   assert.equal(r.status, "finished", r.error);
   assert.deepEqual(r.result, [null, "ok"], "the runaway step came back as the null of a failed parallel branch");
-  assert.ok(events.some((e) => e.type === "warning" && /Teto de tokens da etapa "runaway" atingido/.test(e.message)));
+  assert.ok(events.some((e) => e.type === "warning" && /Step token cap reached for step "runaway"/.test(e.message)));
   const ends = Object.fromEntries(stepEnds(logOf(r.runId)).map((e) => [e.label, e]));
   assert.equal(ends.runaway!.errorKind, "budget");
   assert.equal(ends.fine!.ok, true, "the other step was not touched");
@@ -135,7 +135,7 @@ test("the step's cap covers all its attempts: a retry does not get a fresh allow
   const r = await runWorkflow(configWorkflow((ctx) => ctx.agent("p", { role: "classify", label: "c" })), {}, { cwd });
 
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /Teto de tokens da etapa "c" atingido: 300 de 250/, "200 from the failed attempt + the first turn of the retry");
+  assert.match(r.error!, /Step token cap reached for step "c": 300 of 250/, "200 from the failed attempt + the first turn of the retry");
   assert.deepEqual(stepEnds(logOf(r.runId)).map((e) => [e.attempt, e.errorKind]), [[1, "run-error"], [2, "budget"]]);
   assert.equal(stats.turnsDelivered, 3);
 });
@@ -146,7 +146,7 @@ test("a turn that arrives before send() has handed back the run still cuts the s
   const r = await runWorkflow(configWorkflow((ctx) => ctx.agent("p", { role: "classify", label: "c" })), {}, { cwd });
 
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /Teto de tokens da etapa "c" atingido: 200 de 150/, "cut at the second turn, the one that crossed");
+  assert.match(r.error!, /Step token cap reached for step "c": 200 of 150/, "cut at the second turn, the one that crossed");
   assert.equal(calls.length, 1, "no retry");
   assert.equal(stats.cancels, 1, "the run was cancelled as soon as send() returned it");
   assert.equal(stepEnds(logOf(r.runId))[0]!.errorKind, "budget");
@@ -156,7 +156,7 @@ test("a chat override of the per-step cap is enforced live too", async () => {
   script.push(live(10, 100));
   const r = await runWorkflow(configWorkflow((ctx) => ctx.agent("p", { role: "review", label: "r", retries: 0 })), {}, { cwd, mcpOverrides: { maxTokensPerStep: 120 } });
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /Teto de tokens da etapa "r" atingido: 200 de 120/);
+  assert.match(r.error!, /Step token cap reached for step "r": 200 of 120/);
   assert.equal(stats.turnsDelivered, 2);
 });
 
@@ -166,7 +166,7 @@ test("a global per-step cap is enforced even when the repo asks for none", async
   script.push(live(10, 100));
   const r = await runWorkflow(configWorkflow((ctx) => ctx.agent("p", { role: "classify", label: "c" })), {}, { cwd });
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /Teto de tokens da etapa "c" atingido: 200 de 150/);
+  assert.match(r.error!, /Step token cap reached for step "c": 200 of 150/);
 });
 
 /**
@@ -190,7 +190,7 @@ async function runCapCrossedByTwoSteps({ delayBCreationMs }: { delayBCreationMs:
 
   assert.equal(bDelayed, delayBCreationMs > 0, "b's agent was held back exactly when the test asked for it");
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /^Teto de tokens atingido: 500 de 450\.$/, "the sum of both steps' turns, live");
+  assert.match(r.error!, /^Token cap reached: 500 of 450\.$/, "the sum of both steps' turns, live");
   assert.equal(stats.cancels, 2, "both active steps were cancelled, not only the one whose turn crossed");
   assert.equal(stats.turnsDelivered, 5, "no further turn was delivered to either step");
   assert.equal(r.spentTokens, 500, "what the cancelled steps used is in the run's total");
@@ -201,7 +201,7 @@ async function runCapCrossedByTwoSteps({ delayBCreationMs }: { delayBCreationMs:
   assert.equal(log.at(-1)!.type, "run-end", "the run waited for the cancelled steps: no step event after the run-end");
   const runEnd = log.at(-1) as Extract<WorkflowEvent, { type: "run-end" }>;
   assert.equal(runEnd.status, "failed");
-  assert.match(runEnd.error!, /Teto de tokens atingido/);
+  assert.match(runEnd.error!, /Token cap reached/);
 }
 
 test("the run's cap cancels every active step at once and the run ends with a budget error", () => runCapCrossedByTwoSteps({ delayBCreationMs: 0 }));
@@ -225,7 +225,7 @@ test("a step the run's cap cuts while its agent is still being created never sen
   const r = await runWorkflow(wf, {}, { cwd, maxTokens: 150, onEvent: (e) => e.type === "turn" && ++turns === 2 && releaseB.resolve() });
 
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /^Teto de tokens atingido: 200 de 150\.$/);
+  assert.match(r.error!, /^Token cap reached: 200 of 150\.$/);
   assert.equal(calls.length, 2, "b's agent was created, late");
   assert.equal(stats.sends, 1, "but b never sent");
   assert.equal(stats.turnsDelivered, 2, "no turn reached b");
@@ -248,7 +248,7 @@ test("steps queued behind the concurrency limit do not start once the run's cap 
   const r = await runWorkflow(wf, {}, { cwd, maxTokens: 150, concurrency: 1 });
 
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /Teto de tokens atingido: 200 de 150/);
+  assert.match(r.error!, /Token cap reached: 200 of 150/);
   assert.equal(calls.length, 1, "the two queued steps never created an agent");
   assert.equal(stats.turnsDelivered, 2);
 });
@@ -265,7 +265,7 @@ test("the run's cap counts what earlier executions spent: a resume cuts a step t
   script.push(live(5, 110));
   const resumed = await runWorkflow(three, {}, { cwd, runId: first.runId, maxTokens: 300 });
   assert.equal(resumed.status, "failed");
-  assert.match(resumed.error!, /Teto de tokens atingido: 330 de 300/, "220 replayed from the log + the first turn of c");
+  assert.match(resumed.error!, /Token cap reached: 330 of 300/, "220 replayed from the log + the first turn of c");
   assert.equal(stats.turnsDelivered, 1);
   assert.equal(resumed.spentTokens, 330);
 });
@@ -287,7 +287,7 @@ test("a step the workflow starts after the run's cap was crossed, while the canc
   const r = await runWorkflow(wf, {}, { cwd, maxTokens: 150, onEvent: (e) => e.type === "turn" && ++turns === 2 && crossed() });
 
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /Teto de tokens atingido: 200 de 150/);
+  assert.match(r.error!, /Token cap reached: 200 of 150/);
   assert.equal(calls.length, 1, "only the first step ever had an agent");
   assert.equal(stats.turnsDelivered, 2);
 });
@@ -297,7 +297,7 @@ test("a cut does not wait for the SDK: a run whose wait() never settles after ca
   script.push(() => ({ live: true, stuckAfterCancel: true, deltas: Array.from({ length: 10 }, () => turn(100)) }));
   const r = await runWorkflow(configWorkflow((ctx) => ctx.agent("p", { role: "classify", label: "c" })), {}, { cwd });
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /Teto de tokens da etapa "c" atingido: 200 de 150/);
+  assert.match(r.error!, /Step token cap reached for step "c": 200 of 150/);
   assert.equal(stats.cancels, 1);
 });
 
@@ -314,7 +314,7 @@ test("a workflow that swallows the step's budget error does not turn a crossed r
   const r = await runWorkflow(wf, {}, { cwd, maxTokens: 150 });
 
   assert.equal(r.status, "failed", "the run's cap was crossed: the run ends with the budget error whatever the workflow does with it");
-  assert.match(r.error!, /^Teto de tokens atingido: 200 de 150\.$/);
+  assert.match(r.error!, /^Token cap reached: 200 of 150\.$/);
   assert.equal(r.result, undefined);
   const runEnd = logOf(r.runId).at(-1) as Extract<WorkflowEvent, { type: "run-end" }>;
   assert.deepEqual([runEnd.type, runEnd.status], ["run-end", "failed"]);
@@ -326,7 +326,7 @@ test("a step that already used its whole cap in a failed attempt is not retried:
   const r = await runWorkflow(configWorkflow((ctx) => ctx.agent("p", { role: "classify", label: "c" })), {}, { cwd });
 
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /Teto de tokens da etapa "c" atingido: 200 de 200/, "exactly the cap is not over it, but nothing is left for another attempt");
+  assert.match(r.error!, /Step token cap reached for step "c": 200 of 200/, "exactly the cap is not over it, but nothing is left for another attempt");
   assert.equal(calls.length, 1);
   assert.deepEqual(stepEnds(logOf(r.runId)).map((e) => [e.attempt, e.errorKind]), [[1, "run-error"]]);
 });
@@ -338,7 +338,7 @@ test("a cap crossed while the agent answers a schema re-prompt cuts the step too
   const r = await runWorkflow(configWorkflow((ctx) => ctx.agent("p", { role: "classify", label: "c", schema })), {}, { cwd });
 
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /Teto de tokens da etapa "c" atingido: 200 de 150/);
+  assert.match(r.error!, /Step token cap reached for step "c": 200 of 150/);
   assert.equal(calls.length, 1, "one agent: the re-prompt went to the same conversation, and a budget failure is not retried");
   assert.equal(stats.turnsDelivered, 2, "the one turn of the first answer and the first turn of the re-prompt");
   assert.equal(stats.cancels, 1);

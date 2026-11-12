@@ -36,7 +36,7 @@ test("a job whose process is alive but whose heartbeat is stale is reported as f
   assert.equal(state.status, "failed");
   assert.equal(state.runId, "run-stale");
   assert.match(state.error!, /resumeRunId="run-stale"/);
-  assert.match(state.error!, /sem sinal de vida/);
+  assert.match(state.error!, /no heartbeat/);
 });
 
 test("a job with a fresh heartbeat and a live process is running", () => {

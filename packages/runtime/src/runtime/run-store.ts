@@ -108,12 +108,12 @@ function acquireLock(dir: string, runId: string): () => void {
       const holder = readLock(file);
       if (holder && isHeld(holder, file)) {
         throw new RunLockedError(
-          `já está em execução: o run ${runId} pertence ao processo ${holder.pid} (desde ${holder.startedAt}); espere terminar, ou apague ${file} se esse processo não existe mais`,
+          `already running: run ${runId} belongs to process ${holder.pid} (since ${holder.startedAt}); wait for it to end, or delete ${file} if that process no longer exists`,
         );
       }
       rmSync(file, { force: true }); // stale (dead holder) or unreadable: take it over
     }
-    throw new RunLockedError(`já está em execução: o run ${runId} foi disputado por outro processo ao mesmo tempo`);
+    throw new RunLockedError(`already running: another process claimed run ${runId} at the same time`);
   } finally {
     rmSync(aside, { force: true });
   }

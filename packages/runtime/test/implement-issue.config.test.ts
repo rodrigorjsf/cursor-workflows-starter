@@ -57,6 +57,6 @@ test("a misspelled role in the repo config is an error before any step; the decl
   writeFileSync(join(fx.repo, ".agents", "workflows", "config.json"), JSON.stringify({ workflows: { "implement-issue": { roles: { "implement.lo": { retries: 0 } } } } }));
   const r = await run({});
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /\/workflows\/implement-issue\/roles\/implement\.lo: papel desconhecido \(o workflow implement-issue declara: classify, implement\.low, implement\.med, implement\.high, review, fix, design, pr-text\)/);
+  assert.match(r.error!, /\/workflows\/implement-issue\/roles\/implement\.lo: unknown role \(workflow implement-issue declares: classify, implement\.low, implement\.med, implement\.high, review, fix, design, pr-text\)/);
   assert.equal(calls.length, 0);
 });

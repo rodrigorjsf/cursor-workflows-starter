@@ -58,7 +58,7 @@ Em agentes locais, o `getUsage()` ainda está sendo liberado aos poucos, por con
 soma os tokens dos eventos `turn-ended` da tentativa (deram os mesmos números de `RunResult.usage`
 [TESTE](../research/verificacoes-locais.md)) e os conta no teto de tokens. O custo fica desconhecido: `raw_cents`
 vazio, e o teto em centavos não conta a tentativa. Com `feature_unavailable`, o engine não tenta de novo e emite
-um `warning` que começa com "getUsage() falhou".
+um `warning` que começa com "getUsage() failed".
 
 Isso acontece em plano pago: num Premium da The X Subscription, toda chamada ao `getUsage()` de agente local
 deu `UnknownAgentError [feature_unavailable] This feature is not available for your account`, inclusive o
@@ -270,7 +270,7 @@ Para validar a entrega depois, por exemplo quando o PR é aceito ou recusado, us
 `wf metrics mark <runId> accepted|rejected`.
 
 **Labels:** dê `label` explícito às etapas (`"planejar"`, `"implementar"`). Sem label, o runtime usa
-`etapa-<hash>`, para não vazar conteúdo do prompt. Mas aí as análises por etapa ficam ilegíveis.
+`step-<hash>`, para não vazar conteúdo do prompt. Mas aí as análises por etapa ficam ilegíveis.
 
 ## 7. Privacidade e uso no time
 

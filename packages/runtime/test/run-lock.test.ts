@@ -49,7 +49,7 @@ test("a second process executing the same run id is refused with a clear message
   const proc = await holdRun("shared-run");
   const refused = await runWorkflow(quick, {}, { cwd, runId: "shared-run" });
   assert.equal(refused.status, "failed");
-  assert.match(refused.error!, new RegExp(`^já está em execução: o run shared-run pertence ao processo ${proc.pid} `));
+  assert.match(refused.error!, new RegExp(`^already running: run shared-run belongs to process ${proc.pid} `));
   assert.equal(calls.length, 0, "the refused process starts no agent");
 
   const { events } = readEventLog(eventLogPath(cwd, "shared-run"));
@@ -70,7 +70,7 @@ test("two executions of the same run id in one process cannot overlap either, an
   const slow = runWorkflow(quick, {}, { cwd, runId: "same-process" });
   const overlapping = await runWorkflow(quick, {}, { cwd, runId: "same-process" });
   assert.equal(overlapping.status, "failed");
-  assert.match(overlapping.error!, /^já está em execução: o run same-process /);
+  assert.match(overlapping.error!, /^already running: run same-process /);
   assert.equal((await slow).status, "finished");
 
   const after = await runWorkflow(quick, {}, { cwd, runId: "same-process" });
@@ -96,6 +96,6 @@ test("a lock held by a live process with the same identity is respected, and the
   leftoverLock("alive-holder", { identity: processIdentity(process.ppid) });
   const r = await runWorkflow(quick, {}, { cwd, runId: "alive-holder" });
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /^já está em execução: o run alive-holder pertence ao processo \d+ /);
+  assert.match(r.error!, /^already running: run alive-holder belongs to process \d+ /);
   assert.match(r.error!, /run\.lock/, "names the file to delete when the process is gone");
 });

@@ -136,13 +136,13 @@ function inspect(cwd: string, record: JobRecord): { state: JobState; liveness?: 
   if (!isAlive(record.pid)) {
     // The process died without ending the run (crash, machine shut down).
     state.status = "failed";
-    state.error = `processo ${record.pid} terminou sem concluir o job; ${resumeHint(record.runId)}`;
+    state.error = `process ${record.pid} ended without finishing the job; ${resumeHint(record.runId)}`;
     return { state, liveness: "gone" };
   }
   if (silentMs > fromEnv("WF_HEARTBEAT_STALE_MS", HEARTBEAT_STALE_MS)) {
     // Alive, or a recycled pid, but it has not said so for too long: frozen, stopped, or not the job's process any more.
     state.status = "failed";
-    state.error = `sem sinal de vida há ${Math.round(silentMs / 1000)}s (processo ${record.pid}); ${resumeHint(record.runId)}`;
+    state.error = `no heartbeat for ${Math.round(silentMs / 1000)}s (process ${record.pid}); ${resumeHint(record.runId)}`;
     return { state, liveness: "silent" };
   }
   return { state, liveness: "alive" };
@@ -183,7 +183,7 @@ export function createJob(cwd: string, workflow: string, runId?: string, jobId: 
  */
 export function installCrashHandlers(): void {
   process.on("unhandledRejection", (reason) => {
-    process.stderr.write(`[wf] unhandledRejection ignorada: ${reason instanceof Error ? reason.message : String(reason)}\n`);
+    process.stderr.write(`[wf] unhandledRejection ignored: ${reason instanceof Error ? reason.message : String(reason)}\n`);
   });
   process.on("uncaughtException", (err) => {
     // A job's state comes from the run's log: end this process's runs in it, with the reason and how to resume.
@@ -292,7 +292,7 @@ export function spawnJob(o: SpawnJobOptions): { job: JobRecord; log: string } {
       cwd: o.cwd,
       env: process.env,
     });
-    child.once("error", (err) => writeJob(o.cwd, { ...job, refused: `não foi possível iniciar o processo do job: ${err.message}` }));
+    child.once("error", (err) => writeJob(o.cwd, { ...job, refused: `could not start the job's process: ${err.message}` }));
     child.unref();
     // The record was born with this process's pid; the child's replaces it (the child also writes its own when it starts).
     if (child.pid) writeJob(o.cwd, Object.assign(job, { pid: child.pid }));
@@ -328,13 +328,13 @@ export async function cancelJob(cwd: string, jobId: string, timeoutMs: number): 
   const record = readJobRecord(cwd, jobId);
   if (!record) return undefined;
   const { state: before, liveness } = inspect(cwd, record);
-  if (liveness === undefined || liveness === "gone") return { ...before, note: `o job já terminou (${before.status}); nada a cancelar` };
-  if (!isJobProcess(record)) return { ...before, note: `o processo ${record.pid} não é o processo do job (o pid foi reaproveitado?); nenhum sinal enviado` };
+  if (liveness === undefined || liveness === "gone") return { ...before, note: `the job already ended (${before.status}); nothing to cancel` };
+  if (!isJobProcess(record)) return { ...before, note: `process ${record.pid} is not the job's process (was the pid reused?); no signal sent` };
   const signal = liveness === "silent" ? "SIGKILL" : "SIGTERM";
   try {
     process.kill(record.pid, signal);
   } catch (err) {
-    return { ...before, note: `não foi possível sinalizar o processo ${record.pid}: ${err instanceof Error ? err.message : String(err)}` };
+    return { ...before, note: `could not signal process ${record.pid}: ${err instanceof Error ? err.message : String(err)}` };
   }
   // A killed process never writes the run's end: the wait is for it to be gone. A cancelled one: for the job to leave `running`.
   const stopping = (state: JobState) => (signal === "SIGKILL" ? isAlive(record.pid) : state.status === "running");
@@ -344,9 +344,9 @@ export async function cancelJob(cwd: string, jobId: string, timeoutMs: number): 
     state = readJob(cwd, jobId) ?? state;
   }
   if (signal === "SIGKILL") {
-    return { ...state, note: `o processo ${record.pid} estava sem sinal de vida e foi encerrado à força (SIGKILL), sem desfazer a etapa em andamento; o run continua retomável` };
+    return { ...state, note: `process ${record.pid} had no heartbeat and was killed (SIGKILL) without undoing the step in progress; the run stays resumable` };
   }
-  return { ...state, note: state.status === "running" ? `SIGTERM enviado ao processo ${record.pid}, que ainda está encerrando; confira com wait_workflow` : `SIGTERM enviado ao processo ${record.pid}` };
+  return { ...state, note: state.status === "running" ? `SIGTERM sent to process ${record.pid}, which is still stopping; check with wait_workflow` : `SIGTERM sent to process ${record.pid}` };
 }
 
 /**
@@ -358,11 +358,11 @@ export function cancelOnSignals(): AbortSignal {
   const controller = new AbortController();
   const handle = (name: NodeJS.Signals, exitCode: number) => () => {
     if (!controller.signal.aborted) {
-      process.stderr.write(`[wf] ${name}: cancelando o run; envie o sinal de novo para sair já\n`);
+      process.stderr.write(`[wf] ${name}: cancelling the run; send the signal again to exit now\n`);
       controller.abort();
       return;
     }
-    abortOpenRuns((runId) => `run cancelado à força por um segundo ${name}; ${resumeHint(runId)}`, "cancelled");
+    abortOpenRuns((runId) => `run cancelled by force by a second ${name}; ${resumeHint(runId)}`, "cancelled");
     process.exit(exitCode);
   };
   process.on("SIGINT", handle("SIGINT", 130));

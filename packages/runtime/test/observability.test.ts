@@ -69,7 +69,7 @@ test("label padrão é hash (sem conteúdo do prompt) e banco é 0600", async ()
   await runWorkflow(anon, {}, { cwd, metricsDb: dbPath });
   const db = await openDb(dbPath);
   const label = (db.prepare("SELECT label FROM attempts").get() as { label: string }).label;
-  assert.match(label, /^etapa-[0-9a-f]{8}$/);
+  assert.match(label, /^step-[0-9a-f]{8}$/);
   if (process.platform !== "win32") assert.equal(statSync(dbPath).mode & 0o777, 0o600);
   db.close();
 });
@@ -149,7 +149,7 @@ test("falha do banco de métricas não derruba o workflow", async () => {
     onEvent: (e) => e.type === "warning" && warnings.push(e.message),
   });
   assert.equal(r.status, "finished");
-  assert.ok(warnings.some((w) => /métricas desligadas/.test(w)));
+  assert.ok(warnings.some((w) => /metrics off/.test(w)));
 });
 
 test("classe do resultado", () => {

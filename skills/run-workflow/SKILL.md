@@ -19,7 +19,7 @@ The runtime's messages are in Portuguese. This skill quotes the ones it matches,
    - If the exact name or the args format is unclear, call `list_workflows` (MCP server `workflows`) and follow the
      returned `argsSchema`. If a `required` arg is missing, ask the user.
    - A `resumeRunId` in the request is a parameter of `start_workflow`, next to `args`. Inside `args` it does not
-     resume: `implement-issue` (`additionalProperties: false`) fails with `args inválidos`, and a workflow without
+     resume: `implement-issue` (`additionalProperties: false`) fails with `invalid args`, and a workflow without
      that guard starts from scratch, without the journal.
 2. Call `start_workflow` with `{ name, args }` (and `resumeRunId`, if any). The step ends with the `jobId` in hand; a
    return with `error` (`unknown workflow`, an invalid config with its file and field path, or a kit outside the
@@ -32,14 +32,14 @@ The runtime's messages are in Portuguese. This skill quotes the ones it matches,
    longer `running`. A return with `error` and no `status` (`job not found`) also ends the wait: relay the error
    and the `jobId` to the user.
    - On each return, show the user the current `phase` and the new lines of `recent`, in one or two lines.
-   - Note the cost warnings (`getUsage() falhou`, attempt cost not yet reported) for step 4: `recent` keeps only the
+   - Note the cost warnings (`getUsage() failed`, attempt cost not yet reported) for step 4: `recent` keeps only the
      20 most recent events.
    - If the harness asks for approval on every wait, tell the user they can allow `wait_workflow` and
      `get_workflow_status`: in Cursor, in the Run Mode allowlist; in Claude Code, in `permissions.allow`, as
      `mcp__workflows__wait_workflow` and `mcp__workflows__get_workflow_status`.
 4. When `status` is `finished`, present the cost and the `result` according to `result.status`. Cost: `spentCents`
    (what the cents cap counts) and `chargedCents` (only what was charged; 0 for usage included in the plan). With a
-   cost warning noted, `spentCents` did not count every attempt; `spentCents: 0` with `getUsage() falhou` is an
+   cost warning noted, `spentCents` did not count every attempt; `spentCents: 0` with `getUsage() failed` is an
    **unknown** cost, not zero: say so and report `spentTokens` instead.
    - `done`: what was done, what was left out (in `implement-issue`, `deferred`: postponed slices; the PR then only
      references the issue) and the branch or PR.
@@ -55,25 +55,25 @@ The runtime's messages are in Portuguese. This skill quotes the ones it matches,
    - Anything else: the workflow ended **without delivering**. Relay the status and whatever the result brings
      (`output`, `findings`, `worktree`).
 5. When `status` is `failed`, relay the `error` and follow its beginning:
-   - `args inválidos`: fix the args from the `argsSchema` (step 1) and start a new run, without `resumeRunId`.
-   - `O plano da conta não dá acesso` or `Limite de uso do Cursor atingido`: a resume would fail the same way; the
+   - `invalid args`: fix the args from the `argsSchema` (step 1) and start a new run, without `resumeRunId`.
+   - `The account's plan does not give access` or `Cursor usage limit reached`: a resume would fail the same way; the
      step ends with the relay.
-   - `Teto de custo atingido` or `Teto de tokens atingido`: the cap is a total for the run, and a resume starts from
+   - `Cost cap reached` or `Token cap reached`: the cap is a total for the run, and a resume starts from
      what the run already spent. The same cap stops it at the same step. The token cap also cancels the steps that are
      running when it is crossed (their `step-end` carries `errorKind: "budget"`). Tell the user that continuing takes a
      higher total cap: `--resume <runId> --max-cents <new total>` on the CLI, or a higher `WF_MAX_CENTS` /
      `WF_MAX_TOKENS` in the `env` of the `workflows` server in `mcp.json`. The user decides.
-   - `Teto de tokens da etapa`: one step went over its own `maxTokensPerStep` and was cancelled, with no retry. A resume
+   - `Step token cap reached`: one step went over its own `maxTokensPerStep` and was cancelled, with no retry. A resume
      runs it again under the same cap. Tell the user the cap is in the config files (`.agents/workflows/config.json`,
      or the global `~/.cursor-workflows/config.json`); only the user raises it, and a global cap may forbid it.
-   - `já está em execução`: another process is still executing that run, so a second execution is refused. Do not
+   - `already running`: another process is still executing that run, so a second execution is refused. Do not
      resume again; follow the job that is already running (`wait_workflow` or `get_workflow_status` with its
      `jobId`), and tell the user if you do not have it.
-   - Anything else (a step that failed, a process that died or stopped answering: `terminou sem concluir o job`,
-     `sem sinal de vida`): offer to relaunch **resuming**: `start_workflow` with the same `name` and `args` and
+   - Anything else (a step that failed, a process that died or stopped answering: `ended without finishing the job`,
+     `no heartbeat`): offer to relaunch **resuming**: `start_workflow` with the same `name` and `args` and
      `resumeRunId` equal to the job's `runId`. Completed steps are not repeated.
-     With `sem sinal de vida` the process may still be alive and holding the run; if the resume then returns
-     `já está em execução`, ask the user whether to cancel the job (`cancel_workflow` ends a frozen process), then resume.
+     With `no heartbeat` the process may still be alive and holding the run; if the resume then returns
+     `already running`, ask the user whether to cancel the job (`cancel_workflow` ends a frozen process), then resume.
    On a relaunch, go back to step 3 with the new `jobId`.
 6. When `status` is `cancelled`, the run was stopped on purpose. Relay that with the `runId`, and offer to resume it
    as in step 5 if the user wants to continue; the steps it finished are not repeated.
