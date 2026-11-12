@@ -42,15 +42,6 @@ function workflowFiles(): string[] {
   ];
 }
 
-/**
- * Workflow files that still make synchronous process calls, with the ticket that moves them to `ctx.exec`. Not a place to
- * add to: a new workflow uses `ctx.exec`. Delete a file's entry when its ticket lands (this test fails until you do).
- */
-const MIGRATION_PENDING: Record<string, string> = {
-  "packages/runtime/workflows/implement-issue.ts": "#24: implement-issue runs git, gh and tests through ctx.exec",
-  "packages/runtime/workflows/implement-issue/tdd.ts": "#24: implement-issue runs git, gh and tests through ctx.exec",
-};
-
 test("the lint sees a synchronous process call however it is imported, and ignores prose and the asynchronous API", () => {
   const flagged = [
     `import { execFileSync } from "node:child_process";\nexecFileSync("git", ["status"]);`,
@@ -76,12 +67,9 @@ test("workflow files make no synchronous process calls: commands go through ctx.
   const files = workflowFiles();
   assert.ok(files.includes("packages/runtime/workflows/smoke.ts"), `found ${files.join(", ")}`);
   const offending = files.filter((file) => syncProcessCalls(readFileSync(join(ROOT, file), "utf8")).length > 0).sort();
-  const unexpected = offending.filter((file) => !(file in MIGRATION_PENDING));
   assert.deepEqual(
-    unexpected,
+    offending,
     [],
-    `${unexpected.join(", ")} call a synchronous process API (execFileSync, execSync, spawnSync): run the command with ctx.exec instead (skills/cursor-workflow-authoring/references/runtime-api.md)`,
+    `${offending.join(", ")} call a synchronous process API (execFileSync, execSync, spawnSync): run the command with ctx.exec instead (skills/cursor-workflow-authoring/references/runtime-api.md)`,
   );
-  const migrated = Object.keys(MIGRATION_PENDING).filter((file) => !offending.includes(file));
-  assert.deepEqual(migrated, [], `${migrated.join(", ")} no longer make synchronous calls: delete the entry from MIGRATION_PENDING`);
 });

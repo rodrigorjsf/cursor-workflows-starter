@@ -115,12 +115,12 @@ a resposta antiga. Depois da correção, só os eixos que bloquearam são revist
 ### Corrigir até passar (com teto)
 
 ```ts
-let t = runTests(cmd, worktree);
-for (let round = 1; t.kind === "failed" && round <= 2; round++) {   // timeout e overflow não são falha de código
+let t = await runTests(cmd, worktree);
+for (let round = 1; t.kind === "failed" && round <= 2; round++) {   // timeout não é falha de código
   await ctx.agent(`${FIX_INSTRUCTIONS}\n\n## Rodada ${round}\n\n## Saída dos testes\n${t.output}`, {
     label: `corrigir-${round}`, model: MODELS.HIGH, cwd: worktree, schema: IMPL_SCHEMA,
   });
-  t = runTests(cmd, worktree);
+  t = await runTests(cmd, worktree);
 }
 if (!t.ok) return { status: t.kind === "failed" ? "tests-failed" : `tests-${t.kind}`, output: t.output };
 ```
@@ -181,9 +181,9 @@ Uma regra do processo que o modelo policiaria sozinho ("red antes de green", "s�
 - **Quem tocou o quê:** `snapshotTree` (uma árvore git do worktree, que enxerga também `git add`, `stash`,
   `commit` e `skip-worktree` feitos pelo agente) antes e depois da etapa, e `changesBetween`, sem detecção de
   renomeação (um arquivo movido aparece como apagado e criado).
-- **Estado observável:** o código roda o comando e confere o resultado esperado com `runTests`, que tem teto de
-  tempo e devolve `kind` (`passed`, `failed`, `timeout`, `overflow`): só `failed` vale como red. Ele tira
-  `NODE_TEST_CONTEXT`, que faz um `node --test` aninhado sair com 0 mesmo falhando.
+- **Estado observável:** o código roda o comando e confere o resultado esperado com `runTests`, que roda por
+  `ctx.exec` (um nó de comando no log do run), tem teto de tempo e devolve `kind` (`passed`, `failed`, `timeout`): só
+  `failed` vale como red. Ele tira `NODE_TEST_CONTEXT`, que faz um `node --test` aninhado sair com 0 mesmo falhando.
 - **O que fica travado:** nas etapas de código (green, correção, refactor), os arquivos dos globs de teste e a
   configuração do runner (`protectedGlobs`, os scripts do `package.json` e os campos `jest`, `vitest`, `mocha`,
   `ava`, `c8` e `nyc` dele); no green e na correção, também o arquivo do teste da fatia (hash guardado no red). Sem
@@ -196,12 +196,12 @@ Uma regra do processo que o modelo policiaria sozinho ("red antes de green", "s�
 - **Partida:** a invariante vale antes do primeiro item (suíte verde, senão `baseline-red`).
 
 ```ts
-const before = snapshotTree(worktree);
+const before = await snapshotTree(worktree);
 await ctx.agent(`${TEST_INSTRUCTIONS}\n\n${sliceBlock}`, { label: `teste-${n}`, cwd: worktree, schema: TEST_SCHEMA });
-const changed = changesBetween(worktree, before, snapshotTree(worktree));
-if (changed.some((c) => !isTestFile(c.path) || c.status === "D")) { revertTo(worktree, before); /* nova tentativa */ }
-const red = runTests(testCommand, worktree);
-if (red.kind === "timeout" || red.kind === "overflow") { revertTo(worktree, before); /* encerra: tests-timeout ou tests-overflow */ }
+const changed = await changesBetween(worktree, before, await snapshotTree(worktree));
+if (changed.some((c) => !isTestFile(c.path) || c.status === "D")) { await revertTo(worktree, before); /* nova tentativa */ }
+const red = await runTests(testCommand, worktree);
+if (red.kind === "timeout") { await revertTo(worktree, before); /* encerra: tests-timeout */ }
 if (red.kind === "passed") { /* o teste não é red: nova tentativa, ou alreadySatisfied com a evidência */ }
 ```
 

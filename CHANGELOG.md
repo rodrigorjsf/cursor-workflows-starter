@@ -118,6 +118,17 @@
 
 ### Mudado
 
+- **O `implement-issue` roda `git`, `gh` e os testes por `ctx.exec`.** Nenhum comando dele trava mais o processo: o
+  status e o cancelamento respondem durante uma suíte, e cancelar mata o comando na hora. Cada suíte do laço TDD
+  (`suite:baseline`, `suite:red:1`, `suite:green:1`, `suite:final`…) e cada chamada de `git` e `gh` é um nó de comando
+  no log do run, com a saída da suíte ao lado. O `git push` e todo `gh` têm teto de tempo (argumento
+  `networkTimeoutSec`, 120 s): um push que espera credencial, ou uma conexão parada, falha a etapa com
+  `git push … timed out after Ns`, e o resume entrega. O `git` local tem teto de 5 minutos. Um erro do `gh` na busca
+  do PR existente (autenticação, rede) passa a falhar o run com a mensagem dele; antes virava "não há PR" e o
+  workflow tentava criar outro. As respostas do `git` e do `gh` que o workflow lê (diffs, listas de arquivos, a issue
+  e seus comentários) vêm inteiras, não do `tail` de 32768 caracteres do `ctx.exec`: a trava de segredos continua
+  vendo o diff todo. O `runTests` agora é assíncrono e não devolve mais `overflow`, porque a saída não passa por um
+  buffer; o teste que era dessa classe agora termina normalmente.
 - **A execução do agente fica atrás de uma interface, o `AgentBackend`.** O motor deixa de falar com o SDK: cada
   tentativa de uma etapa vai a `AgentBackend.run(prompt, opções resolvidas, sinal de aborto, callback de eventos)`, que
   devolve o resultado da tentativa. A execução local (criar o agente, enviar, esperar, entregar o resultado estruturado,

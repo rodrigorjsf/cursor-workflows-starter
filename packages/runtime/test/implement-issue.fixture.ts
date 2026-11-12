@@ -32,7 +32,16 @@ export const write = (o: any, file: string, content: string) => {
   writeFileSync(p, content);
 };
 export const gh = () =>
-  JSON.parse(readFileSync(fx.ghState, "utf8")) as { comments: string[]; prs: Array<{ url: string; body: string }>; calls: string[][] };
+  JSON.parse(readFileSync(fx.ghState, "utf8")) as { comments: string[]; prs: Array<{ url: string; body: string }>; calls: string[][]; fail?: Record<string, string> };
+/** From now on the fake gh fails `gh <command>` (for example "pr view") with `message` on stderr and exit code 1; `message` undefined restores it. */
+export function failGh(command: string, message: string | undefined) {
+  const state = JSON.parse(readFileSync(fx.ghState, "utf8"));
+  state.fail = { ...state.fail };
+  if (message === undefined) delete state.fail[command];
+  else state.fail[command] = message;
+  writeFileSync(fx.ghState, JSON.stringify(state));
+}
+
 export const worktreeOf = () => join(fx.repo, ".workflows", "worktrees", "wf-issue-7");
 
 const FAKE_GH = `#!/usr/bin/env node
@@ -41,6 +50,8 @@ const f = process.env.FAKE_GH_STATE;
 const st = JSON.parse(fs.readFileSync(f, "utf8"));
 const a = process.argv.slice(2);
 st.calls.push(a);
+const failure = (st.fail || {})[a[0] + " " + a[1]];
+if (failure !== undefined) { fs.writeFileSync(f, JSON.stringify(st)); process.stderr.write(failure); process.exit(1); }
 const flag = (n) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };
 const save = () => fs.writeFileSync(f, JSON.stringify(st));
 const body = () => (flag("--body-file") ? fs.readFileSync(flag("--body-file"), "utf8") : flag("--body"));

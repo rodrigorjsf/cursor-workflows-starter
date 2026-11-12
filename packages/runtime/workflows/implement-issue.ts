@@ -31,7 +31,10 @@
 //     (`reset --soft` para a base, mantendo a árvore); a trava de segredos olha o diff desde a base, o comentário
 //     das seams e o corpo do PR ("secret-blocked");
 //   - o corpo do PR segue o template da skill pr; a Evidence é a saída real red → green de cada fatia, sem caminhos
-//     locais; com fatias adiadas, o PR só referencia a issue (`Refs`) em vez de fechá-la.
+//     locais; com fatias adiadas, o PR só referencia a issue (`Refs`) em vez de fechá-la;
+//   - todo comando (testes, git, gh) roda por `ctx.exec` (implement-issue/commands.ts): assíncrono, com teto de tempo
+//     (testes: `testTimeoutSec`; `git push` e `gh`: `networkTimeoutSec`; git local: 5 min) e como nó de comando no log
+//     do run. Um erro do `gh` ou do `git` falha o run com a mensagem dele; "sem PR" é só a resposta conhecida do `gh`.
 //
 // Custo por etapa (passo 4 da /skill-to-workflow). "[]" = settingSources vazio: sem AGENTS.md, regras, hooks, MCP e
 // sem as skills que o SDK carrega com qualquer outra camada (medido: 58).
@@ -67,13 +70,13 @@
 // STATUS: LOW e MED verificados contra a API real em 2026-11-11 (docs/research/verificacoes-locais.md §13). HIGH, o
 // review que bloqueia e o alreadySatisfied só têm testes offline.
 
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import { defineWorkflow, type AgentCallOptions } from "../src/runtime/workflow.js";
 import { buildPrBody, type PrText } from "./implement-issue/pr-body.js";
+import { Commands } from "./implement-issue/commands.js";
 import * as P from "./implement-issue/prompts.js";
 import { AXES, AXIS_SCHEMAS, blockingAxes, blockingOf, type Axis, type ReviewReports } from "./implement-issue/review.js";
 import {
@@ -94,8 +97,6 @@ import {
   snapshotTree,
   type SliceRecord,
 } from "./implement-issue/tdd.js";
-
-export { runTests } from "./implement-issue/tdd.js";
 
 type Tier = "LOW" | "MED" | "HIGH";
 
@@ -122,6 +123,9 @@ const READ_ONLY = ["read", "grep", "glob", "ls", "semSearch"];
 const REVIEW_TOOLS = ["read", "grep", "glob", "ls"];
 const NO_SETTINGS: SettingSource[] = [];
 const MAX_DIFF_CHARS = 40_000;
+/** Teto de tempo do `git` local (add, diff, commit com hooks…): passado disso há um hook ou um lock parado. */
+const LOCAL_GIT_TIMEOUT_MS = 5 * 60_000;
+const NETWORK_TIMEOUT_SEC = 120;
 const SEAMS_MARKER = "<!-- wf:implement-issue:seams -->";
 /** Arquivos que orientam o desenho e o review, quando existem no repositório. */
 const CONTEXT_FILES = ["GLOSSARY.md", "CONTEXT.md", "AGENTS.md", "CODING_STANDARDS.md", "CONTRIBUTING.md", "docs/adr"];
@@ -135,6 +139,8 @@ interface Args {
   testCommand?: string;
   /** Teto de tempo de cada rodada de testes, em segundos (default 600). */
   testTimeoutSec?: number;
+  /** Teto de tempo de cada comando de rede (`git push` e `gh`), em segundos (default 120): uma credencial pedida ou uma conexão parada falha a etapa. */
+  networkTimeoutSec?: number;
   /** Roda uma vez no worktree novo antes da suíte de base (ex.: `npm ci`). */
   setupCommand?: string;
   openPr?: boolean;
@@ -205,52 +211,32 @@ const tail = (s: string | undefined, n = 3000) => (s ?? "").slice(-n);
 /** Aspas simples para shell: o comando de relançamento postado na issue não quebra com `'` nos args. */
 const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
-const sh = (cmd: string, args: string[], cwd: string) => execFileSync(cmd, args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-
-function hasStagedChanges(cwd: string): boolean {
-  try {
-    execFileSync("git", ["diff", "--cached", "--quiet"], { cwd });
-    return false; // exit 0 = nada staged
-  } catch {
-    return true;
-  }
+/** The URL of the branch's PR, or undefined when it has none. Any other `gh` failure (auth, network) is an error, never "no PR". */
+async function existingPr(cmd: Commands, branch: string, repoFlag: string[], cwd: string): Promise<string | undefined> {
+  const url = await cmd.ghOrNothing(cwd, /no pull requests? found/i, "pr", "view", branch, "--json", "url", "-q", ".url", ...repoFlag);
+  return url?.trim() || undefined;
 }
 
-function existingPr(branch: string, repoFlag: string[], cwd: string): string | undefined {
-  try {
-    return sh("gh", ["pr", "view", branch, "--json", "url", "-q", ".url", ...repoFlag], cwd).trim() || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function branchExists(cwd: string, branch: string): boolean {
-  try {
-    execFileSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { cwd, stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
+const branchExists = (cmd: Commands, cwd: string, branch: string) => cmd.gitIs(cwd, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`);
 
 /** Escreve um corpo longo num arquivo temporário para `--body-file` (sem limite de argumento de linha de comando). */
-function withBodyFile<T>(body: string, fn: (path: string) => T): T {
+async function withBodyFile<T>(body: string, fn: (path: string) => Promise<T>): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), "wf-body-"));
   const path = join(dir, "body.md");
   writeFileSync(path, body);
   try {
-    return fn(path);
+    return await fn(path);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
 /** Diff desde a base do worktree, para o review e o PR. Grande demais: estatística + início, e o agente lê o resto. */
-function diffSinceBase(cwd: string, base: string): string {
-  sh("git", ["add", "-A"], cwd);
-  const diff = sh("git", ["diff", "--cached", "--no-color", base], cwd);
+async function diffSinceBase(cmd: Commands, cwd: string, base: string): Promise<string> {
+  await cmd.git(cwd, "add", "-A");
+  const diff = await cmd.gitRead(cwd, "diff", "--cached", "--no-color", base);
   if (diff.length <= MAX_DIFF_CHARS) return "```diff\n" + diff + "\n```";
-  const stat = sh("git", ["diff", "--cached", "--stat", base], cwd);
+  const stat = await cmd.gitRead(cwd, "diff", "--cached", "--stat", base);
   return `(diff truncated: read the files for the rest)\n\n${stat}\n\n\`\`\`diff\n${diff.slice(0, MAX_DIFF_CHARS)}\n\`\`\``;
 }
 
@@ -267,14 +253,14 @@ export function findSecretInText(text: string, knownSecrets: string[] = savedSec
  * ~/.cursor/sdk/auth.json para o worktree, e o sandbox do SDK não restringe leitura. Olha o diff staged desde `base`
  * (default: HEAD, ou a árvore vazia num repo sem commits), para pegar também o que um agente tenha commitado. Devolve a regra que disparou, nunca o trecho.
  */
-export function findStagedSecret(worktree: string, knownSecrets: string[] = savedSecrets(), base?: string): string | undefined {
-  const git = (...a: string[]) => execFileSync("git", a, { cwd: worktree, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  for (const name of git("diff", "--cached", "--name-only", ...(base ? [base] : [])).split("\n").filter(Boolean)) {
+export async function findStagedSecret(cmd: Commands, worktree: string, knownSecrets: string[] = savedSecrets(), base?: string): Promise<string | undefined> {
+  const git = (...a: string[]) => cmd.gitRead(worktree, ...a);
+  for (const name of (await git("diff", "--cached", "--name-only", ...(base ? [base] : []))).split("\n").filter(Boolean)) {
     const file = basename(name);
     if (file === "auth.json") return "auth.json file in the commit";
     if (file === ".env" || file.startsWith(".env.")) return "a .env file in the commit";
   }
-  const added = git("diff", "--cached", "--no-color", "-U0", ...(base ? [base] : []))
+  const added = (await git("diff", "--cached", "--no-color", "-U0", ...(base ? [base] : [])))
     .split("\n")
     .filter((l) => l.startsWith("+") && !l.startsWith("+++"))
     .join("\n");
@@ -325,6 +311,7 @@ export default defineWorkflow<Args>({
         repo: { type: "string" },
         testCommand: { type: "string" },
         testTimeoutSec: { type: "number" },
+        networkTimeoutSec: { type: "number" },
         setupCommand: { type: "string" },
         openPr: { type: "boolean" },
         approveSeams: { type: "boolean" },
@@ -343,13 +330,18 @@ export default defineWorkflow<Args>({
     const globs = ctx.args.testGlobs?.length ? ctx.args.testGlobs : DEFAULT_TEST_GLOBS;
     const protectedGlobs = ctx.args.protectedGlobs ?? DEFAULT_PROTECTED_GLOBS;
     const testTimeout = (ctx.args.testTimeoutSec ?? 600) * 1000;
+    // Todo comando do workflow (testes, git, gh) passa por ctx.exec: assíncrono, com teto de tempo e visível no log do run.
+    const cmd = new Commands((command, args, opts) => ctx.exec(command, args, opts), {
+      localMs: LOCAL_GIT_TIMEOUT_MS,
+      networkMs: (ctx.args.networkTimeoutSec ?? NETWORK_TIMEOUT_SEC) * 1000,
+    });
     const isTest = (f: string) => isTestFile(f, globs);
     const progress = new ProgressStore(ctx.cwd, ctx.runId);
 
     // ── Triagem: dados da issue via gh (código, sem modelo) ─────────────────────────────
     ctx.phase("Triage");
     const repoFlag = repo ? ["--repo", repo] : [];
-    const issue = JSON.parse(sh("gh", ["issue", "view", String(number), ...repoFlag, "--json", "number,title,body,labels"], ctx.cwd)) as Issue;
+    const issue = JSON.parse(await cmd.gh(ctx.cwd, "issue", "view", String(number), ...repoFlag, "--json", "number,title,body,labels")) as Issue;
     let tier = issue.labels.map((l) => LABEL_TIERS[l.name.toLowerCase()]).find(Boolean);
     if (!tier) {
       const c = await ctx.agent<{ tier: Tier; reason: string }>(`${CLASSIFY_INSTRUCTIONS}\n\n${issueBlock(issue)}`, {
@@ -461,9 +453,9 @@ export default defineWorkflow<Args>({
         ].join("\n");
         const leak = findSecretInText(comment);
         if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the seams comment` };
-        const existing = JSON.parse(sh("gh", ["issue", "view", String(issue.number), ...repoFlag, "--json", "comments"], ctx.cwd)) as { comments: Array<{ body: string }> };
+        const existing = JSON.parse(await cmd.gh(ctx.cwd, "issue", "view", String(issue.number), ...repoFlag, "--json", "comments")) as { comments: Array<{ body: string }> };
         if (!existing.comments.some((c) => c.body.includes(SEAMS_MARKER) && c.body.includes(ctx.runId))) {
-          withBodyFile(comment, (f) => sh("gh", ["issue", "comment", String(issue.number), ...repoFlag, "--body-file", f], ctx.cwd));
+          await withBodyFile(comment, (f) => cmd.gh(ctx.cwd, "issue", "comment", String(issue.number), ...repoFlag, "--body-file", f));
         }
         return { ...base, status: "seams-proposed", runId: ctx.runId, seams: plan.seams, slices: plan.slices, next: relaunch };
       }
@@ -474,31 +466,31 @@ export default defineWorkflow<Args>({
     const branch = `wf/issue-${issue.number}`;
     const worktree = join(ctx.cwd, ".workflows", "worktrees", branch.replace("/", "-"));
     if (existsSync(worktree)) ctx.log(`worktree ${worktree} already exists; reusing it`);
-    else if (progress.data.baseCommit && branchExists(ctx.cwd, branch)) sh("git", ["worktree", "add", worktree, branch], ctx.cwd); // resume: mantém os commits
+    else if (progress.data.baseCommit && (await branchExists(cmd, ctx.cwd, branch))) await cmd.git(ctx.cwd, "worktree", "add", worktree, branch); // resume: mantém os commits
     else {
-      if (branchExists(ctx.cwd, branch)) ctx.log(`branch ${branch} from an earlier run was recreated from HEAD`);
-      sh("git", ["worktree", "add", "-B", branch, worktree], ctx.cwd);
+      if (await branchExists(cmd, ctx.cwd, branch)) ctx.log(`branch ${branch} from an earlier run was recreated from HEAD`);
+      await cmd.git(ctx.cwd, "worktree", "add", "-B", branch, worktree);
     }
     if (!progress.data.baseCommit) {
-      progress.data.baseCommit = sh("git", ["rev-parse", "HEAD"], worktree).trim();
+      progress.data.baseCommit = (await cmd.gitRead(worktree, "rev-parse", "HEAD")).trim();
       progress.save();
     }
     // Uma etapa de escrita interrompida (o processo caiu no meio): volta ao estado de antes dela.
     if (progress.data.inFlight) {
       ctx.log(`undoing the interrupted step ${progress.data.inFlight.id}`);
-      revertTo(worktree, progress.data.inFlight.before);
+      await revertTo(cmd, worktree, progress.data.inFlight.before);
       progress.data.inFlight = undefined;
       progress.save();
     }
     const testCommand = ctx.args.testCommand ?? plan.testCommand ?? "npm test";
-    const suite = () => runTests(testCommand, worktree, testTimeout);
+    const suite = (label: string) => runTests(cmd, testCommand, worktree, { timeoutMs: testTimeout, label: `suite:${label}` });
     if (!progress.data.baselineGreen) {
       if (ctx.args.setupCommand) {
-        const setup = runTests(ctx.args.setupCommand, worktree, testTimeout);
+        const setup = await runTests(cmd, ctx.args.setupCommand, worktree, { timeoutMs: testTimeout, label: "setup" });
         if (!setup.ok) return { ...base, status: "setup-failed", worktree, output: setup.output };
       }
-      const baseline = suite();
-      if (baseline.kind === "timeout" || baseline.kind === "overflow") return { ...base, status: `tests-${baseline.kind}`, worktree, output: baseline.output };
+      const baseline = await suite("baseline");
+      if (baseline.kind === "timeout") return { ...base, status: `tests-${baseline.kind}`, worktree, output: baseline.output };
       if (!baseline.ok && !looksLikeNoTests(baseline.output)) return { ...base, status: "baseline-red", worktree, output: baseline.output };
       if (!baseline.ok) ctx.log("the baseline suite has no tests: counted as green");
       progress.data.baselineGreen = true;
@@ -511,7 +503,7 @@ export default defineWorkflow<Args>({
      * guardada. Se o agente falhar, a etapa é desfeita antes de o erro subir.
      */
     const writeStep = async <T>(id: string, prompt: string, opts: AgentCallOptions): Promise<{ value: T; before: string }> => {
-      const before = snapshotTree(worktree);
+      const before = await snapshotTree(cmd, worktree);
       const seq = (progress.data.writeSeq ?? 0) + 1;
       progress.data.writeSeq = seq;
       progress.data.inFlight = { id, before, resumes: 0 };
@@ -520,8 +512,13 @@ export default defineWorkflow<Args>({
         const value = await ctx.agent<T>(`${prompt}\n\n<!-- write step ${seq} -->`, { ...opts, cwd: worktree });
         return { value, before };
       } catch (err) {
-        revertTo(worktree, before);
-        settle();
+        try {
+          await revertTo(cmd, worktree, before);
+          settle();
+        } catch {
+          // O desfazer falhou (o run foi cancelado, ou o git travou): o erro da etapa é o que sobe, e o registro "em andamento" fica,
+          // para o resume voltar ao snapshot de antes dela.
+        }
         throw err;
       }
     };
@@ -530,14 +527,14 @@ export default defineWorkflow<Args>({
       progress.save();
     };
     /** O que uma etapa de código (green, correção, refactor) não pode mudar. Vazio = nenhuma violação. */
-    const codeViolation = (before: string, after: string, rec?: SliceRecord): string => {
-      const changed = changedBetween(worktree, before, after);
+    const codeViolation = async (before: string, after: string, rec?: SliceRecord): Promise<string> => {
+      const changed = await changedBetween(cmd, worktree, before, after);
       const tests = changed.filter(isTest);
       const guarded = changed.filter((f) => matchesAny(f, protectedGlobs));
       const problems: string[] = [];
       if (tests.length) problems.push(`changed test files (${tests.join(", ")})`);
       if (guarded.length) problems.push(`changed the runner configuration (${guarded.join(", ")})`);
-      if (runnerConfigChanged(worktree, before, after)) problems.push("changed the scripts or the test configuration in package.json");
+      if (await runnerConfigChanged(cmd, worktree, before, after)) problems.push("changed the scripts or the test configuration in package.json");
       if (rec?.testFile && fileHash(worktree, rec.testFile) !== rec.testHash) problems.push(`the slice's test (${rec.testFile}) changed or is gone`);
       return problems.length ? `You ${problems.join("; ")}. The change was undone: the test is the specification, change only the code.` : "";
     };
@@ -564,20 +561,20 @@ export default defineWorkflow<Args>({
             `${P.TEST_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Test command\n\`${testCommand}\`${problem ? `\n\n## Fix\n${problem}` : ""}`,
             { label: attempt === 1 ? `teste-${sfx}` : `teste-${sfx}:${attempt}`, role: implementRole(tier), schema: TEST_SCHEMA },
           );
-          let after = snapshotTree(worktree);
-          const changes = changesBetween(worktree, before, after);
+          let after = await snapshotTree(cmd, worktree);
+          const changes = await changesBetween(cmd, worktree, before, after);
           // O que não é teste (implementação, stub, configuração) é descartado pelo código: o teste fica e tem de
           // falhar sozinho. Medido: o composer-2.5 implementou junto com o teste nas duas tentativas da issue #7.
           const nonTest = changes.filter((c) => !isTest(c.path)).map((c) => c.path);
           if (nonTest.length) {
-            restorePaths(worktree, before, nonTest);
+            await restorePaths(cmd, worktree, before, nonTest);
             redDiscarded += nonTest.length;
             ctx.log(`slice ${sfx}: the red step changed ${nonTest.join(", ")}; those changes were discarded, only the test stays`);
-            after = snapshotTree(worktree);
+            after = await snapshotTree(cmd, worktree);
           }
           const deleted = changes.filter((c) => c.status === "D" && isTest(c.path)).map((c) => c.path);
-          if (deleted.length || runnerConfigChanged(worktree, before, after)) {
-            revertTo(worktree, before);
+          if (deleted.length || await runnerConfigChanged(cmd, worktree, before, after)) {
+            await revertTo(cmd, worktree, before);
             settle();
             problem =
               `The change was undone: ${deleted.length ? `you deleted tests (${deleted.join(", ")})` : "you changed the runner configuration"}. ` +
@@ -586,11 +583,11 @@ export default defineWorkflow<Args>({
             if (attempt === 2) return "tdd-violation";
             continue;
           }
-          const res = suite();
-          if (res.kind === "timeout" || res.kind === "overflow") {
-            revertTo(worktree, before);
+          const res = await suite(`red:${sfx}`);
+          if (res.kind === "timeout") {
+            await revertTo(cmd, worktree, before);
             settle();
-            return `tests-${res.kind}`;
+            return "tests-timeout";
           }
           if (res.ok) {
             if (t.alreadySatisfied) {
@@ -599,7 +596,7 @@ export default defineWorkflow<Args>({
               progress.upsert(rec);
               return undefined;
             }
-            revertTo(worktree, before);
+            await revertTo(cmd, worktree, before);
             settle();
             problem =
               "The test passed without implementation. If the behaviour already exists, answer alreadySatisfied: true with the evidence; " +
@@ -631,10 +628,10 @@ export default defineWorkflow<Args>({
             `${P.CODE_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Failing test\n\`${rec.testName}\` in \`${rec.testFile}\`\n\n## Suite output\n${tail(rec.red)}${problem ? `\n\n## Fix\n${problem}` : ""}`,
             { label: attempt === 1 ? `codigo-${sfx}` : `codigo-${sfx}:${attempt}`, role: implementRole(tier), schema: IMPL_SCHEMA },
           );
-          problem = codeViolation(before, snapshotTree(worktree), rec);
+          problem = await codeViolation(before, await snapshotTree(cmd, worktree), rec);
           if (problem) {
             lastProblem = problem;
-            revertTo(worktree, before);
+            await revertTo(cmd, worktree, before);
             settle();
             if (attempt === 2) return "tdd-violation";
             continue;
@@ -645,7 +642,7 @@ export default defineWorkflow<Args>({
         }
         if (!rec.greenDone) return "tdd-violation";
       }
-      let res = suite();
+      let res = await suite(`green:${sfx}`);
       for (let round = (rec.fixRound ?? 0) + 1; res.kind === "failed" && round <= MAX_FIX_ROUNDS; round++) {
         ctx.log(`slice ${sfx}: tests failed; fix ${round}/${MAX_FIX_ROUNDS}`);
         rec.fixRound = round;
@@ -656,33 +653,33 @@ export default defineWorkflow<Args>({
           model: tier === "LOW" ? GROK : GROK_HIGH, // escala o modelo na correção
           schema: IMPL_SCHEMA,
         });
-        lastProblem = codeViolation(before, snapshotTree(worktree), rec);
+        lastProblem = await codeViolation(before, await snapshotTree(cmd, worktree), rec);
         if (lastProblem) {
-          revertTo(worktree, before);
+          await revertTo(cmd, worktree, before);
           settle();
           return "tdd-violation";
         }
         settle();
-        res = suite();
+        res = await suite(`fix:${sfx}:${round}`);
       }
-      if (res.kind === "timeout" || res.kind === "overflow") return `tests-${res.kind}`;
+      if (res.kind === "timeout") return "tests-timeout";
       if (!res.ok) return "tests-failed";
       Object.assign(rec, { green: res.output, done: true });
       progress.upsert(rec);
       return undefined;
     };
     /** Falha de fatia: o worktree volta ao estado do começo dela (verde), para o resume e para quem inspeciona. */
-    const sliceStart = () => snapshotTree(worktree);
+    const sliceStart = () => snapshotTree(cmd, worktree);
 
     const planned = plan.slices.slice(0, SLICE_CAP[tier]);
     const deferred = plan.slices.slice(SLICE_CAP[tier]).map((s) => `${s.behavior} (seam: ${s.seam})`);
     if (deferred.length) ctx.log(`cap of ${SLICE_CAP[tier]} slices at tier ${tier}: ${deferred.length} deferred`);
     ctx.metric("slices_planned", plan.slices.length);
     for (const [i, sl] of planned.entries()) {
-      const start = sliceStart();
+      const start = await sliceStart();
       const failed = await runSlice(sliceKey("s", sl.behavior, sl.seam), String(i + 1), sl);
       if (failed) {
-        if (failed !== "tdd-violation" && failed !== "test-not-red") revertTo(worktree, start);
+        if (failed !== "tdd-violation" && failed !== "test-not-red") await revertTo(cmd, worktree, start);
         return { ...base, status: failed, slice: i + 1, reason: lastProblem || undefined, worktree };
       }
     }
@@ -698,7 +695,7 @@ export default defineWorkflow<Args>({
         Object.assign(reports, pinned);
         return true;
       }
-      const diff = diffSinceBase(worktree, progress.data.baseCommit!);
+      const diff = await diffSinceBase(cmd, worktree, progress.data.baseCommit!);
       const extra: Record<Axis, string> = {
         standards: listBlock("Repository standards files", standardsFiles) || "## Repository standards files\nNone: use only the smell baseline.",
         spec: listBlock("Slices deferred by the cap (not 'missing')", deferred),
@@ -742,10 +739,10 @@ export default defineWorkflow<Args>({
         const behavior = f.behavior ?? f.note;
         const seam = f.seam ?? "the closest public interface";
         const key = sliceKey("x", behavior, seam);
-        const start = sliceStart();
+        const start = await sliceStart();
         const failed = await runSlice(key, `extra-${i + 1}`, { behavior, seam, testIdea: `issue requirement: "${f.quote}"` });
         if (failed) {
-          if (failed !== "tdd-violation" && failed !== "test-not-red") revertTo(worktree, start);
+          if (failed !== "tdd-violation" && failed !== "test-not-red") await revertTo(cmd, worktree, start);
           return { ...base, status: failed, slice: `extra-${i + 1}`, reason: lastProblem || undefined, worktree };
         }
         const rec = progress.slice(key);
@@ -759,15 +756,15 @@ export default defineWorkflow<Args>({
           `${P.REFACTOR_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n## Findings\n${JSON.stringify(toRefactor, null, 2)}`,
           { label: "refatorar-1", role: implementRole(tier), schema: IMPL_SCHEMA },
         );
-        const refactorProblem = codeViolation(before, snapshotTree(worktree));
+        const refactorProblem = await codeViolation(before, await snapshotTree(cmd, worktree));
         if (refactorProblem) {
-          revertTo(worktree, before);
+          await revertTo(cmd, worktree, before);
           settle();
           return { ...base, status: "tdd-violation", step: "refatorar-1", reason: refactorProblem, worktree };
         }
-        const after = suite();
+        const after = await suite("refactor");
         if (!after.ok) {
-          revertTo(worktree, before); // volta ao último verde
+          await revertTo(cmd, worktree, before); // volta ao último verde
           settle();
           return { ...base, status: "tests-failed-after-review", worktree, output: after.output };
         }
@@ -786,31 +783,31 @@ export default defineWorkflow<Args>({
 
     // ── Entrega (pr): suíte verde, commit e PR feitos pelo código; idempotentes no resume ─
     ctx.phase("Delivery");
-    const final = suite();
+    const final = await suite("final");
     if (!final.ok) return { ...base, status: final.kind === "failed" ? "tests-failed" : `tests-${final.kind}`, worktree, output: final.output };
     const baseCommit = progress.data.baseCommit!;
-    const head = sh("git", ["rev-parse", "HEAD"], worktree).trim();
+    const head = (await cmd.gitRead(worktree, "rev-parse", "HEAD")).trim();
     if (head !== progress.data.deliveredCommit) {
       // Commits feitos por agentes (a instrução pede para não fazer) são desfeitos, mantendo a árvore.
-      if (head !== baseCommit) sh("git", ["reset", "--soft", baseCommit], worktree);
-      sh("git", ["add", "-A"], worktree);
-      const secret = findStagedSecret(worktree, undefined, baseCommit);
+      if (head !== baseCommit) await cmd.git(worktree, "reset", "--soft", baseCommit);
+      await cmd.git(worktree, "add", "-A");
+      const secret = await findStagedSecret(cmd, worktree, undefined, baseCommit);
       if (secret) {
         // Nada de commit, push ou PR. O worktree fica para inspeção; o motivo não repete o segredo.
         ctx.metric("secret_blocked", 1);
         ctx.log(`delivery blocked: ${secret}`);
         return { ...base, status: "secret-blocked", reason: secret, branch, worktree, spentCents: ctx.budget.spentCents() };
       }
-      if (hasStagedChanges(worktree)) sh("git", ["commit", "-m", `feat: ${issue.title} (#${issue.number})`], worktree);
-      progress.data.deliveredCommit = sh("git", ["rev-parse", "HEAD"], worktree).trim();
+      if (!(await cmd.gitIs(worktree, "diff", "--cached", "--quiet"))) await cmd.git(worktree, "commit", "-m", `feat: ${issue.title} (#${issue.number})`);
+      progress.data.deliveredCommit = (await cmd.gitRead(worktree, "rev-parse", "HEAD")).trim();
       progress.save();
     }
     let prUrl: string | undefined;
     if (openPr) {
-      prUrl = existingPr(branch, repoFlag, worktree);
+      prUrl = await existingPr(cmd, branch, repoFlag, worktree);
       if (!prUrl) {
         const text = await ctx.agent<PrText>(
-          `${P.PR_INSTRUCTIONS}\n\n${contextBlock}\n\n${issueBlock(issue)}\n\n## Diff\n${diffSinceBase(worktree, baseCommit)}`,
+          `${P.PR_INSTRUCTIONS}\n\n${contextBlock}\n\n${issueBlock(issue)}\n\n## Diff\n${await diffSinceBase(cmd, worktree, baseCommit)}`,
           { label: "pr-texto", role: "pr-text", cwd: worktree, tools: REVIEW_TOOLS, schema: PR_SCHEMA, memo: true },
         );
         const body = buildPrBody({
@@ -824,12 +821,10 @@ export default defineWorkflow<Args>({
         });
         const leak = findSecretInText(body);
         if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the PR body`, branch, worktree };
-        sh("git", ["push", "-u", "origin", branch], worktree);
-        prUrl = withBodyFile(body, (f) =>
-          sh("gh", ["pr", "create", "--head", branch, "--title", `${issue.title} (#${issue.number})`, "--body-file", f, ...repoFlag], worktree).trim(),
-        );
+        await cmd.push(worktree, "-u", "origin", branch);
+        prUrl = (await withBodyFile(body, (f) => cmd.gh(worktree, "pr", "create", "--head", branch, "--title", `${issue.title} (#${issue.number})`, "--body-file", f, ...repoFlag))).trim();
       } else {
-        sh("git", ["push", "-u", "origin", branch], worktree);
+        await cmd.push(worktree, "-u", "origin", branch);
       }
     }
     return {

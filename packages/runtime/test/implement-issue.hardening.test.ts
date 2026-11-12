@@ -5,7 +5,6 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { runTests } from "../workflows/implement-issue.js";
 import {
   ALL_CODE,
   ALL_TEST,
@@ -121,13 +120,6 @@ test("achado 'missing' de algo que já existe: o teste passa, a etapa confirma e
   assert.equal(res(r).status, "done", JSON.stringify(res(r)));
   assert.ok(!names().includes("codigo-extra-1"));
   assert.match(gh().prs[0]!.body, /refutado por teste/);
-});
-
-test("runTests: teto de tempo vira 'timeout' e saída grande não vira red", () => {
-  const slow = runTests("sleep 5", fx.root, 300) as { ok: boolean; kind?: string };
-  assert.equal(slow.kind, "timeout");
-  const big = runTests("head -c 2000000 /dev/zero | tr '\\0' a; echo", fx.root);
-  assert.equal(big.ok, true);
 });
 
 // ── Resume e idempotência ─────────────────────────────────────────────────────────────
@@ -263,6 +255,39 @@ test("commit feito por agente não escapa da trava de segredos nem chega ao orig
   assert.ok(!onOrigin());
   assert.equal(gh().prs.length, 0);
 });
+
+// A trava olha o diff desde a base: auth.json, .env, as chaves crsr_/sk- e a chave salva (aqui, CURSOR_API_KEY).
+const SAVED_KEY = "segredo-salvo-1234567890";
+const SECRET_CASES: Array<[string, string, RegExp]> = [
+  ["copia/auth.json", '{"apiKey":"x"}', /auth\.json/],
+  [".env.local", "TOKEN=1", /\.env/],
+  ["src/a.js", `const k = "${FAKE_KEY}";\n`, /crsr_/],
+  ["src/b.js", `const k = "sk-${"b".repeat(30)}";\n`, /sk-/],
+  ["src/c.js", `const k = '${SAVED_KEY}';\n`, /saved SDK key/],
+];
+for (const [file, content, rule] of SECRET_CASES) {
+  test(`trava de segredos: ${file} bloqueia a entrega sem repetir o segredo`, async () => {
+    const saved = process.env.CURSOR_API_KEY;
+    process.env.CURSOR_API_KEY = SAVED_KEY;
+    try {
+      issue(["complexity:low"]);
+      fx.handlers["codigo-1"] = (o) => {
+        write(o, "src/math.js", SUB_CODE);
+        write(o, file, content);
+        submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
+      };
+      const r = await run({ openPr: true });
+      assert.equal(res(r).status, "secret-blocked", JSON.stringify(res(r)));
+      assert.match(res(r).reason, rule);
+      assert.ok(!JSON.stringify(res(r)).includes(FAKE_KEY) && !JSON.stringify(res(r)).includes(SAVED_KEY), "o motivo não pode conter o segredo");
+      assert.ok(!onOrigin());
+      assert.equal(gh().prs.length, 0);
+    } finally {
+      if (saved === undefined) delete process.env.CURSOR_API_KEY;
+      else process.env.CURSOR_API_KEY = saved;
+    }
+  });
+}
 
 test("segredo no plano não vai para o comentário de seams", async () => {
   issue(["complexity:medium"]);

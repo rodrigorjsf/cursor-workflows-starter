@@ -2,7 +2,8 @@
 
 One recipe per pattern. Read the one for your case before writing the step, and pass every recipe through the cost
 checklist (cost.md). Names such as `MODELS`, `issueBlock`, `snapshotTree` or `runTests` are helpers you write in the
-workflow module; the recipe says what each does.
+workflow module; the recipe says what each does. A helper that runs a command (`runTests`, `snapshotTree`) is async: it
+goes through `ctx.exec`.
 
 ## Routing by label → model
 
@@ -40,19 +41,19 @@ The round goes in the prompt (journal key, rule 1). After the fix, re-review onl
 ## Fix until it passes (with a cap)
 
 ```ts
-let t = runTests(cmd, worktree);
-for (let round = 1; t.kind === "failed" && round <= 2; round++) {   // timeout and overflow are not code failures
+let t = await runTests(cmd, worktree);
+for (let round = 1; t.kind === "failed" && round <= 2; round++) {   // a timeout is not a code failure
   await ctx.agent(`${FIX_INSTRUCTIONS}\n\n## Round ${round}\n\n## Test output\n${t.output}`, {
     label: `fix-${round}`, model: MODELS.HIGH, cwd: worktree, schema: IMPL_SCHEMA,
   });
-  t = runTests(cmd, worktree);
+  t = await runTests(cmd, worktree);
 }
 if (!t.ok) return { status: t.kind === "failed" ? "tests-failed" : `tests-${t.kind}`, output: t.output };
 ```
 
-`runTests` runs the project's test command with a time limit and returns `kind` (`passed`, `failed`, `timeout`,
-`overflow`) plus truncated `output`. It unsets `NODE_TEST_CONTEXT`, which makes a nested `node --test` exit 0 even when
-it fails.
+`runTests` runs the project's test command with `ctx.exec` (`bash -c`, with a time limit) and returns `kind` (`passed`,
+`failed`, `timeout`) plus the end of the `output`. The run is a command node in the event log. It unsets
+`NODE_TEST_CONTEXT`, which makes a nested `node --test` exit 0 even when it fails.
 
 ## Fan-out with isolation
 
@@ -129,12 +130,12 @@ specification") becomes an **invariant** the code checks between two steps. The 
 - **Start:** the invariant holds before the first item (green suite, else `baseline-red`).
 
 ```ts
-const before = snapshotTree(worktree);
+const before = await snapshotTree(worktree);
 await ctx.agent(`${TEST_INSTRUCTIONS}\n\n${sliceBlock}`, { label: `test-${n}`, cwd: worktree, schema: TEST_SCHEMA });
-const changed = changesBetween(worktree, before, snapshotTree(worktree));
-if (changed.some((c) => !isTestFile(c.path) || c.status === "D")) { revertTo(worktree, before); /* retry */ }
-const red = runTests(testCommand, worktree);
-if (red.kind === "timeout" || red.kind === "overflow") { revertTo(worktree, before); /* end: tests-timeout or tests-overflow */ }
+const changed = await changesBetween(worktree, before, await snapshotTree(worktree));
+if (changed.some((c) => !isTestFile(c.path) || c.status === "D")) { await revertTo(worktree, before); /* retry */ }
+const red = await runTests(testCommand, worktree);
+if (red.kind === "timeout") { await revertTo(worktree, before); /* end: tests-timeout */ }
 if (red.kind === "passed") { /* the test is not red: retry, or alreadySatisfied with the evidence */ }
 ```
 
