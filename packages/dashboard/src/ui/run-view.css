@@ -58,7 +58,8 @@ a { color: var(--accent); }
 .replay input[type="range"] { width: 180px; }
 button, select { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
 button:hover { border-color: var(--accent); }
-.canvas { flex: 1; min-height: 0; position: relative; }
+.workspace { flex: 1; min-height: 0; display: flex; }
+.canvas { flex: 1; min-width: 0; min-height: 0; position: relative; }
 .notice { margin: 24px 16px; color: var(--muted); }
 .run-error { margin: 0; padding: 6px 16px; color: var(--failed); border-bottom: 1px solid var(--line); background: var(--panel); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
 
@@ -79,7 +80,8 @@ button:hover { border-color: var(--accent); }
 /* nodes: their sizes are set from NODE_SIZE (run-layout.ts), the sizes the layout assumes */
 .work { position: relative; padding: 8px 10px; background: var(--panel); border: 1.5px solid var(--line); border-left-width: 5px; border-radius: 8px; outline: none; }
 .work.command { padding-top: 6px; }
-.work:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.work { cursor: pointer; }
+.work:focus-visible, .work.selected { box-shadow: 0 0 0 2px var(--accent); }
 .work .title { display: flex; align-items: center; gap: 6px; font-weight: 600; }
 .work .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .work .sub { margin-top: 2px; color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -116,3 +118,46 @@ button:hover { border-color: var(--accent); }
 .tip div { display: flex; gap: 10px; justify-content: space-between; padding: 1px 0; }
 .tip dt { color: var(--muted); }
 .tip dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+
+/* the actions of the header: cancel, copy the resume command */
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.actions .confirm { display: inline-flex; align-items: center; gap: 8px; }
+.actions .command { width: min(560px, 90vw); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+.actions .copied { color: var(--ok); font-size: 12px; }
+.cancel-result { font-size: 12px; }
+.cancel-result.failed { color: var(--failed); }
+button.danger { color: var(--failed); border-color: var(--failed); }
+button.danger:hover { background: color-mix(in srgb, var(--failed) 12%, var(--panel)); }
+button:disabled { opacity: 0.6; cursor: default; }
+
+/* the log of a step, beside the canvas */
+.step-panel { flex: 0 0 min(46%, 680px); min-width: 0; display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line); }
+.step-panel > header { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.step-panel > header h2 { margin: 0; font-size: 14px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step-panel .close { font-size: 18px; line-height: 1; padding: 0 8px; }
+.step-panel .tail { font-size: 12px; color: var(--muted); }
+.step-panel .tail.live { color: var(--running); }
+.step-panel .tail.live::before { content: "● "; }
+.facts { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.facts div { display: flex; gap: 6px; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+.log { flex: 1; min-height: 0; overflow: auto; padding: 8px 12px 16px; outline: none; }
+.log:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.log .attempt > h2 { margin: 14px 0 4px; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.entry { margin: 10px 0; }
+.entry h3 { margin: 0 0 3px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.entry h3 .kind { text-transform: uppercase; letter-spacing: 0.04em; }
+.entry h3 code { color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+.entry pre { margin: 0; padding: 6px 8px; max-height: 22em; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.entry.prompt pre { border-left: 3px solid var(--accent); }
+.entry.message pre { border-left: 3px solid var(--ok); }
+.entry.tool pre.args { color: var(--muted); }
+.output { margin-top: 4px; position: relative; }
+.output .stream { position: absolute; top: 2px; right: 8px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); pointer-events: none; }
+.output.stderr pre { border-left: 3px solid var(--failed); }
+.gone { margin: 3px 0 0; font-size: 12px; font-style: italic; color: var(--muted); }
+@media (max-width: 800px) {
+  .workspace { flex-direction: column; }
+  .step-panel { flex: 0 0 48%; border-left: none; border-top: 1px solid var(--line); }
+}

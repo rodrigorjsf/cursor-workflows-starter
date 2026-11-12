@@ -2,8 +2,10 @@
 // run. The data comes from `useRunEvents`, the graph from `buildRunGraph` and the positions from `layoutRunGraph`; this file
 // puts them on a React Flow canvas.
 import { Background, Controls, type Edge, type FitViewOptions, type Node, ReactFlow, ReactFlowProvider, useReactFlow, useStore } from "@xyflow/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { JunctionNode, LaneNode, type LaneNodeData, StartNode, WorkNode, type WorkNodeData } from "./nodes.js";
+import { RunActions } from "./RunActions.js";
+import { StepLogPanel } from "./StepLogPanel.js";
 import { formatCents, formatDuration } from "./node-details.js";
 import { type ProgressStatus, type RunGraph, buildRunGraph, isWork } from "./run-graph.js";
 import { type RunLayout, layoutRunGraph } from "./run-layout.js";
@@ -52,7 +54,7 @@ function useClock(active: boolean): number {
   return now;
 }
 
-function toFlow(graph: RunGraph, layout: RunLayout, now: number): { nodes: Node[]; edges: Edge[] } {
+function toFlow(graph: RunGraph, layout: RunLayout, now: number, selectedId: string | undefined, open: (id: string) => void): { nodes: Node[]; edges: Edge[] } {
   const lanes: Node<LaneNodeData, "lane">[] = layout.lanes.map((lane) => ({
     id: `lane-${lane.index}`,
     type: "lane",
@@ -70,7 +72,8 @@ function toFlow(graph: RunGraph, layout: RunLayout, now: number): { nodes: Node[
     id: node.id,
     type: isWork(node.kind) ? "work" : node.kind === "start" ? "start" : "junction",
     position: { x: layout.nodes[node.id]!.x, y: layout.nodes[node.id]!.y },
-    data: { node, now: node.state === "running" ? now : 0 },
+    data: { node, now: node.state === "running" ? now : 0, onOpen: () => open(node.id) },
+    selected: node.id === selectedId,
     draggable: false,
   }));
   const state = new Map(graph.nodes.map((n) => [n.id, n.state]));
@@ -102,8 +105,8 @@ function frameOf(graph: RunGraph, layout: RunLayout, pane: { width: number; heig
  * by React Flow itself, which waits for the nodes to be measured; later ones are framed by hand, a moment after the layout
  * (or what is framed) changes.
  */
-function Canvas({ graph, layout, now }: { graph: RunGraph; layout: RunLayout; now: number }) {
-  const { nodes, edges } = useMemo(() => toFlow(graph, layout, now), [graph, layout, now]);
+function Canvas({ graph, layout, now, selectedId, onOpen }: { graph: RunGraph; layout: RunLayout; now: number; selectedId?: string; onOpen(id: string): void }) {
+  const { nodes, edges } = useMemo(() => toFlow(graph, layout, now, selectedId, onOpen), [graph, layout, now, selectedId, onOpen]);
   const { fitView } = useReactFlow();
   const pane = useStore((s) => ({ width: s.width, height: s.height }), (a, b) => a.width === b.width && a.height === b.height);
   const userMoved = useRef(false);
@@ -138,6 +141,10 @@ function Canvas({ graph, layout, now }: { graph: RunGraph; layout: RunLayout; no
       fitViewOptions={firstFrame.current}
       nodesDraggable={false}
       nodesConnectable={false}
+      nodesFocusable={false} // the node's own element is the control: it takes the focus, Enter and the click
+      onNodeClick={(_, node) => {
+        if (node.type === "work") onOpen(node.id);
+      }}
       zoomOnDoubleClick={false}
       minZoom={0.1}
       maxZoom={1.5}
@@ -167,7 +174,7 @@ const STATUS_TEXT: Record<ProgressStatus, string> = {
 const CONNECTION_TEXT: Record<Connection, string> = { waiting: "waiting for the run", live: "live", reconnecting: "reconnecting…", closed: "", "not-found": "" };
 
 export function RunView({ runId }: { runId: string }) {
-  const { events, status, connection } = useRunEvents(runId);
+  const { events, ids, status, info, connection, refresh } = useRunEvents(runId);
   /** null: the view follows the run (live, or the end of a finished one). A number: a replay, showing that many events. */
   const [replayAt, setReplayAt] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -178,6 +185,9 @@ export function RunView({ runId }: { runId: string }) {
   const graph = useMemo(() => buildRunGraph(shown, { settled }), [shown, settled]);
   const { layout, error: layoutError } = useLayout(graph);
   const clock = useClock(!replaying && !settled);
+  const [selectedId, setSelectedId] = useState<string>();
+  const open = useCallback((id: string) => setSelectedId(id), []);
+  const close = useCallback(() => setSelectedId(undefined), []);
   const now = replaying ? Date.parse(String(shown.at(-1)?.ts ?? "")) || 0 : clock;
 
   useEffect(() => {
@@ -205,6 +215,9 @@ export function RunView({ runId }: { runId: string }) {
   };
 
   const { run } = graph;
+  const selected = graph.nodes.find((n) => n.id === selectedId && isWork(n.kind));
+  /** In a replay, the log line it has reached; at its end, and outside a replay, the whole log. */
+  const upTo = replaying && replayAt < events.length ? (ids[replayAt - 1] ?? 0) : undefined;
   const counts = { steps: graph.nodes.filter((n) => n.kind === "step").length, commands: graph.nodes.filter((n) => n.kind === "command").length };
   const shownStatus = replaying && !settled ? "replaying" : STATUS_TEXT[run.status];
   const elapsed = run.startedAt === undefined ? undefined : Math.max(0, (run.endedAt !== undefined ? Date.parse(run.endedAt) : now) - Date.parse(run.startedAt));
@@ -283,24 +296,28 @@ export function RunView({ runId }: { runId: string }) {
             </>
           )}
         </div>
+        {!replaying && <RunActions runId={runId} status={status} info={info} onChanged={refresh} />}
       </header>
       {run.error !== undefined && (
         <p className="run-error" role="alert">
           {run.error}
         </p>
       )}
-      <div className="canvas">
-        {layoutError !== undefined ? (
-          <p className="notice" role="alert">
-            The run could not be drawn: {layoutError}
-          </p>
-        ) : layout && status !== undefined ? (
-          <ReactFlowProvider>
-            <Canvas graph={graph} layout={layout} now={now} />
-          </ReactFlowProvider>
-        ) : (
-          <p className="notice">{connection === "waiting" ? "Waiting for the run to start…" : "Drawing the run…"}</p>
-        )}
+      <div className="workspace">
+        <div className="canvas">
+          {layoutError !== undefined ? (
+            <p className="notice" role="alert">
+              The run could not be drawn: {layoutError}
+            </p>
+          ) : layout && status !== undefined ? (
+            <ReactFlowProvider>
+              <Canvas graph={graph} layout={layout} now={now} selectedId={selected?.id} onOpen={open} />
+            </ReactFlowProvider>
+          ) : (
+            <p className="notice">{connection === "waiting" ? "Waiting for the run to start…" : "Drawing the run…"}</p>
+          )}
+        </div>
+        {selected && <StepLogPanel key={selected.id} runId={runId} node={selected} now={now} live={!replaying && selected.state === "running"} upTo={upTo} onClose={close} />}
       </div>
     </main>
   );

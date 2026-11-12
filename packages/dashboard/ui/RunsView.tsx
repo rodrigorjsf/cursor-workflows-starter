@@ -1,6 +1,6 @@
 // The Runs menu: every run of every repo, newest first.
 import type { RunSummary } from "@cursor-workflows/runtime/observe";
-import { money, repoName, runDuration, startedLabel } from "./format.js";
+import { money, repoName, runDuration, runHref, startedLabel } from "./format.js";
 import { Loaded } from "./Loaded.js";
 import { usePoll } from "./usePoll.js";
 
@@ -38,7 +38,13 @@ export function RunsView() {
                     </td>
                     <td>{run.workflow}</td>
                     <td>
-                      <code>{run.runId}</code>
+                      {run.status === "missing" ? (
+                        <code>{run.runId}</code>
+                      ) : (
+                        <a href={runHref(run.runId)} title="Open the run">
+                          <code>{run.runId}</code>
+                        </a>
+                      )}
                     </td>
                     <td>{run.phase ?? ""}</td>
                     <td>{startedLabel(run.startedAt)}</td>

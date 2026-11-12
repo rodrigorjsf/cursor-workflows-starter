@@ -1,7 +1,7 @@
 // The Board: one kanban per workflow, a column per phase plus Awaiting approval, Done, Failed and Cancelled, a card per run.
 // The server decides which column a run is in; the Board polls, so a card moves a moment after its run does.
 import type { Board, BoardCard, BoardLink, BoardResponse } from "../src/board.js";
-import { money, repoName, runDuration } from "./format.js";
+import { money, repoName, runDuration, runHref } from "./format.js";
 import { Loaded } from "./Loaded.js";
 import { usePoll } from "./usePoll.js";
 
@@ -58,7 +58,11 @@ function CardView({ card }: { card: BoardCard }) {
   const shown = card.card;
   return (
     <li className={`card status-${card.status}`}>
-      <div className="card-title">{shown?.title ?? card.runId}</div>
+      <div className="card-title">
+        <a href={runHref(card.runId)} title="Open the run">
+          {shown?.title ?? card.runId}
+        </a>
+      </div>
       {shown?.subtitle && <div className="card-sub">{shown.subtitle}</div>}
       {shown && shown.badges.length > 0 && (
         <div className="chips">

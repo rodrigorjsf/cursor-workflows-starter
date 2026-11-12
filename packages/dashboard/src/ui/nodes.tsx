@@ -8,6 +8,8 @@ export interface WorkNodeData extends Record<string, unknown> {
   node: GraphNode;
   /** The clock in ms, for the time of a node that is still running. */
   now: number;
+  /** Opens the node's log. Called for a key press on the node; a click is React Flow's `onNodeClick`. */
+  onOpen?: () => void;
 }
 export interface LaneNodeData extends Record<string, unknown> {
   title: string;
