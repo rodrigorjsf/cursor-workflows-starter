@@ -112,9 +112,11 @@ test("a step runs through the backend: prompt, resolved options and a live signa
 const usedTokens = (tokens: number) => ({ report: { usage: { inputTokens: tokens - 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: tokens }, runs: [] } });
 const turn = (tokens: number): AttemptEvent => ({ type: "turn", usage: { inputTokens: tokens - 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 } });
 const nextMacrotask = () => new Promise((resolve) => setImmediate(resolve));
+/** What a streaming stub saw of its attempt: the turns it emitted and why it was stopped. */
+type Seen = { turns: number; reason?: unknown };
 /** What a backend does for an attempt that streams turns of `tokens` tokens until it is aborted, as an agent that never finishes would. */
 const streamsUntilAborted =
-  (tokens: number, seen: { turns: number; reason?: unknown } = { turns: 0 }): Behaviour =>
+  (tokens: number, seen: Seen = { turns: 0 }): Behaviour =>
   async ({ signal, onEvent }) => {
     while (!signal.aborted) {
       await nextMacrotask();
@@ -125,6 +127,34 @@ const streamsUntilAborted =
     seen.reason = signal.reason;
     return { outcome: { kind: "aborted", reason: signal.reason }, agentId: "agent-x", usage: usedTokens(seen.turns * tokens) };
   };
+/** Settles once the signal aborts (at once if it already has). */
+const whenAborted = (signal: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    if (signal.aborted) resolve();
+    else signal.addEventListener("abort", () => resolve(), { once: true });
+  });
+/**
+ * What a backend does for parallel attempts whose turns the test orders: `order[i]` is the prompt of the attempt that emits the
+ * i-th turn (of `tokens` tokens), and each turn waits for the one before it, through promises, never event-loop timing. After
+ * its last turn an attempt waits to be aborted, as an agent that never finishes would. `seen` is keyed by prompt.
+ */
+const turnsInOrder = (order: readonly string[], tokens: number, seen: Record<string, Seen>): Behaviour => {
+  const emitted = order.map(() => Promise.withResolvers<void>());
+  return async ({ prompt, signal, onEvent }) => {
+    const mine = seen[prompt]!;
+    for (const [i, who] of order.entries()) {
+      if (who !== prompt) continue;
+      if (i > 0) await Promise.race([emitted[i - 1]!.promise, whenAborted(signal)]);
+      if (signal.aborted) break;
+      mine.turns++;
+      onEvent(turn(tokens));
+      emitted[i]!.resolve();
+    }
+    await whenAborted(signal);
+    mine.reason = signal.reason;
+    return { outcome: { kind: "aborted", reason: signal.reason }, agentId: `agent-${prompt}`, usage: usedTokens(mine.turns * tokens) };
+  };
+};
 
 test("the step's token cap works through the backend: the turn that crosses it aborts the signal with the cap's error, and the step is not retried", async () => {
   writeRepoConfig(cwd, { workflows: { cfg: { roles: { classify: { maxTokensPerStep: 250, retries: 3 } } } } });
@@ -144,20 +174,17 @@ test("the step's token cap works through the backend: the turn that crosses it a
 });
 
 test("the run's token cap works through the backend: the turn that crosses it aborts every active attempt", async () => {
-  const bHanded = Promise.withResolvers<void>();
-  const seenA = { turns: 0, reason: undefined as unknown };
-  const seenB = { turns: 0, reason: undefined as unknown };
-  const { backend } = stubBackend(async (h) => {
-    if (h.prompt === "b") bHanded.resolve();
-    else await bHanded.promise; // a streams only once b is inside its attempt
-    return streamsUntilAborted(100, h.prompt === "a" ? seenA : seenB)(h);
-  });
+  // The order is fixed here, not by the event loop: a, b, then a again. Both attempts have emitted an event (so both agents
+  // exist) before the third turn crosses the cap, which therefore applies at once to both, and the total is exactly 300.
+  const seen = { a: { turns: 0, reason: undefined as unknown }, b: { turns: 0, reason: undefined as unknown } };
+  const { backend } = stubBackend(turnsInOrder(["a", "b", "a"], 100, seen));
   const wf = configWorkflow((ctx) => ctx.parallel([() => ctx.agent("a", { role: "classify", label: "a", retries: 0 }), () => ctx.agent("b", { role: "classify", label: "b", retries: 0 })]));
   const r = await runWorkflow(wf, {}, { cwd, backend, maxTokens: 250 });
 
   assert.equal(r.status, "failed");
   assert.match(r.error!, /^Token cap reached: 300 of 250\.$/, "the turns of both attempts, live");
-  for (const reason of [seenA.reason, seenB.reason]) assert.ok(reason instanceof BudgetExceededError, "both attempts were aborted with the run's budget error");
+  assert.deepEqual([seen.a.turns, seen.b.turns], [2, 1], "the turns came in the order the test set");
+  for (const reason of [seen.a.reason, seen.b.reason]) assert.ok(reason instanceof BudgetExceededError, "both attempts were aborted with the run's budget error");
   assert.equal(r.spentTokens, 300, "what the aborted attempts used is in the run's total");
   assert.deepEqual(stepEnds(logOf(r.runId)).map((e) => e.errorKind), ["budget", "budget"]);
 });
@@ -196,7 +223,7 @@ test("cancelling the run aborts the attempt's signal with the cancellation as it
   const seen: { reason?: unknown } = {};
   const { backend, handed } = stubBackend(async ({ signal }) => {
     setTimeout(() => controller.abort(), 10);
-    await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+    await whenAborted(signal);
     seen.reason = signal.reason;
     return { outcome: { kind: "aborted", reason: signal.reason }, agentId: "agent-1", usage: { report } };
   }, finished("done"));
@@ -228,7 +255,7 @@ test("a signal that is already aborted starts no attempt", async () => {
 test("the step's timeout aborts the attempt's signal with a timeout as its reason", async () => {
   const seen: { reason?: unknown } = {};
   const { backend } = stubBackend(async ({ signal }) => {
-    await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+    await whenAborted(signal);
     seen.reason = signal.reason;
     return { outcome: { kind: "aborted", reason: signal.reason }, agentId: "agent-1", usage: { report } };
   });
