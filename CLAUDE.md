@@ -1,4 +1,51 @@
-@AGENTS.md
+# cursor-workflows-starter: maintainer guide
+
+Canonical guide for agents and humans working on this repo. `AGENTS.md` is a symlink to this file, so Cursor, Codex
+and Claude Code read the same text. Line budget: 100 lines. It is loaded into every agent's context, so keep it short.
+Detail lives in the contributor section of the docs book (`CONTRIBUTING.md` until the book lands).
+
+## What this repo is
+
+A runtime for **deterministic workflows** on the Cursor SDK (`@cursor/sdk`), as npm workspaces:
+
+- `packages/runtime/`: the product. Engine, CLI (`src/cli.ts`), MCP server (`src/mcp-server.ts`), built-in
+  workflows (`workflows/`) and their offline tests (`test/`).
+- `skills/`: the skills distributed to users. `.agents/skills/` symlinks to them for dogfooding; never copy them.
+- `templates/`: files `wf init` writes into a target repo, such as the `AGENTS.md` rules block
+  (`templates/agents-md-block.md`).
+- The repo root is the dev space: this guide, the dogfood MCP config (`.mcp.json`, `.cursor/mcp.json`), `docs/`,
+  `scripts/`, repo-level tests (`test/`).
+
+The runtime resolves its own assets relative to its install location, never the repo root. The only repo it reads is
+the target repo it runs in (the cwd). Keep it that way.
+
+Workflows live in `packages/runtime/workflows/*.ts` (built in) and `.agents/workflows/*.ts` (per repo). The MCP server
+`workflows` or the CLI (`npm run wf -- ...`) runs them. Step agents read this file too (`settingSources: ["project"]`).
+
+## Working on the code
+
+- Before creating or editing a workflow, load the `cursor-workflow-authoring` skill
+  (`skills/cursor-workflow-authoring/`).
+- To convert existing skills and subagents, use `/skill-to-workflow`.
+- After any change run `npm run typecheck` and `npm test`. Tests are offline and use `packages/runtime/test/fake-sdk.ts`.
+- `@cursor/sdk` is pinned. When upgrading, check the `.d.ts` files in `node_modules/@cursor/sdk/dist/esm/` and rerun
+  the tests.
+- Keep distributed skills, templates and other agent-facing text in English. The docs book and README are pt-BR.
+
+## Rules
+
+- Never print or log the Cursor API key (`~/.cursor/sdk/auth.json`, `CURSOR_API_KEY`, `SdkLoginResult.apiKey`).
+- Inside a workflow step, do not start another workflow. The runtime blocks the accidental path: in steps the
+  `workflows` MCP server is swapped for one with no tools, and the CLI refuses `run`/`start` (`WF_INSIDE_WORKFLOW`).
+  It is not a security barrier: a shell command can bypass it. Do not try.
+- Before running a workflow from the chat, load the `run-workflow` skill (`skills/run-workflow/`): start, follow and
+  report, without redoing steps or editing files while the job runs.
+- Commit, push and PR are done by the workflow code, not by you.
+- Tests against the real API: prefer the models included in the plan (`composer-2.5`, Grok, `default`). Models that
+  use paid quota are allowed when the test needs them. Always pass `--max-tokens` and `--max-cents`. Full policy in
+  `CONTRIBUTING.md`.
+- Metrics live in `~/.cursor-workflows/metrics.db` (`npm run stats`, `npm run dash`). Never send the database, or an
+  export made with `--no-anonymize`, off the user's machine.
 
 ## Agent skills
 
