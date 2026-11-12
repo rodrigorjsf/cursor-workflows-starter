@@ -6,6 +6,8 @@
 // HOW: `npm run docs:mermaid` renders (CI). `npm run docs:mermaid -- --list` lists `file:line: diagram-type` and renders
 //   nothing. `--root <dir>` checks another tree. MERMAID_CLI replaces the renderer command (default: npx --yes
 //   @mermaid-js/mermaid-cli@11.17.0); it is called as `<command> -i <in.mmd> -o <out.svg> -p <puppeteer-config.json>`.
+//   CI sets MERMAID_CLI to an mmdc it installs with a pinned puppeteer and an explicitly downloaded browser: through
+//   npx, a restored npm cache skips puppeteer's postinstall and the browser is never fetched.
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

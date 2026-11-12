@@ -29,8 +29,17 @@ jobs:
 
   # Renderiza todo bloco Mermaid do repositório e falha em erro de sintaxe. Só aqui: o mermaid-cli usa um Chromium
   # headless, que trava na máquina do mantenedor (docs/contributing/03-diagramas.md).
+  #
+  # O renderizador e o puppeteer ficam fixados e instalados num diretório próprio, e o Chromium é baixado num passo
+  # explícito. Com `npx`, o cache do npm restaurado pelo setup-node trazia o pacote já instalado, o postinstall do
+  # puppeteer não rodava e o navegador nunca chegava a ~/.cache/puppeteer: todo bloco falhava com
+  # "Could not find chrome-headless-shell". Falha no download do navegador reprova o job; não há pulo.
   mermaid:
     runs-on: ubuntu-latest
+    env:
+      MERMAID_CLI_VERSION: 11.17.0
+      # Peer dependency do mermaid-cli (^23 || ^24 || ^25); fixar define a versão do chrome-headless-shell.
+      PUPPETEER_VERSION: 25.17.0
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -38,4 +47,13 @@ jobs:
           node-version: 22.x
           cache: npm
       - run: npm ci
+      - name: Install the Mermaid renderer and its browser
+        run: |
+          dir="$RUNNER_TEMP/mermaid"
+          mkdir -p "$dir"
+          npm install --no-save --no-package-lock --prefix "$dir" \
+            "@mermaid-js/mermaid-cli@$MERMAID_CLI_VERSION" "puppeteer@$PUPPETEER_VERSION"
+          cd "$dir" && ./node_modules/.bin/puppeteer browsers install chrome-headless-shell
       - run: npm run docs:mermaid
+        env:
+          MERMAID_CLI: ${{ runner.temp }}/mermaid/node_modules/.bin/mmdc
