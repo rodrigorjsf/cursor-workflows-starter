@@ -13,28 +13,21 @@
 **A. Copy the kit into the repository** (simplest). The workflows live in the kit's `workflows/` folder, versioned with
 the code.
 
-**B. Install the kit once and point each repository at it.** In the target repository create `.cursor/mcp.json`:
+**B. Install the kit once and point each repository at it.** The kit lives at `~/.cursor-workflows/kit`, installed once per
+machine by its installer (a missing kit is installed with the install guide, `INSTALL-AGENT.md`, in the kit's GitHub
+repository). In the target repository run `wf init`: it writes the `workflows` server into `.cursor/mcp.json` (through `${userHome}`) and `.mcp.json` (through
+`${HOME}`), a repo config at `.agents/workflows/config.json`, a `.workflows/` line in `.gitignore` and a marked rules
+block in `AGENTS.md`. It prints the diff and never commits.
 
-```json
-{
-  "mcpServers": {
-    "workflows": {
-      "command": "${userHome}/tools/cursor-workflows/node_modules/.bin/tsx",
-      "args": ["${userHome}/tools/cursor-workflows/packages/runtime/src/mcp-server.ts"],
-      "env": { "WF_CWD": "${workspaceFolder}", "WF_MAX_CENTS": "500", "WF_MAX_TOKENS": "2000000" }
-    }
-  }
-}
-```
-
-- `WF_MAX_CENTS` and `WF_MAX_TOKENS` are the run caps. Always set both (runtime-api.md, "Caps").
+- The run caps are config, not environment: the global file `~/.cursor-workflows/config.json` holds the hard caps, and
+  the repo config can only tighten them (runtime-api.md, "Caps").
 - `${workspaceFolder}` is the folder that holds the `.cursor/mcp.json`; in a global `~/.cursor/mcp.json` it does not
-  point at the open project, so use the project's `mcp.json`.
-- Claude Code: replicate the server in the repository's `.mcp.json` with absolute paths. In an interactive session it
-  asks approval for that server first.
-- Copy the `run-workflow` skill folder into the target repository (or link it globally). In Cursor, enable the server
-  under **Customize** in the sidebar if it does not show in the chat. An Enterprise admin can limit which MCP servers
-  members run.
+  point at the open project, so use the project's `mcp.json`. `wf init` writes `WF_CWD` for that reason.
+- Claude Code asks approval for the `.mcp.json` server in an interactive session.
+- The kit's skills (`run-workflow`, `cursor-workflow-authoring`, `skill-to-workflow`, `cursor-workflows-setup`) are
+  linked globally into `~/.claude/skills/`, which Cursor and Claude Code both read: nothing to copy into the repository.
+  In Cursor, enable the server under **Customize** in the sidebar if it does not show in the chat. An Enterprise admin
+  can limit which MCP servers members run.
 
 ## Writing a workflow for form B
 

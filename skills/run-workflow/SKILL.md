@@ -92,19 +92,18 @@ to the state it had before the step, and returns the job with `status: "cancelle
 If the `workflows` tools are not available, use the CLI from the terminal. The `argsSchema` from step 1 lives in the
 `meta` of the workflow file (a file in the kit's built-in `workflows/` folder or in the repository's
 `.agents/workflows/`): `wf list` returns only the name and description. The CLI writes the same job state, so steps 3 to 5 apply equally,
-with `--resume <runId>` in place of `resumeRunId` (relaunch with `start`, also when `next` shows `run`). The MCP caps
-live in the `env` of the `workflows` server in `mcp.json` and do not reach the shell: pass the values of
-`WF_MAX_CENTS` and `WF_MAX_TOKENS` as `--max-cents` and `--max-tokens`.
+with `--resume <runId>` in place of `resumeRunId` (relaunch with `start`, also when `next` shows `run`). Caps set in the
+`env` of the `workflows` server in `mcp.json` do not reach the shell, but the config files (global caps, repo config)
+do: pass `--max-cents` and `--max-tokens` to tighten this run further.
 
 ```bash
-npm run wf -- start <name> --args '<json>' --max-cents <N> --max-tokens <N> [--resume <runId>]   # returns {jobId, runId, log}
-npm run wf -- wait <jobId> --timeout 240   # repeat until status != running
-npm run wf -- cancel <jobId>               # only when the user asks to stop; returns the job with status cancelled
+wf start <name> --args '<json>' --max-cents <N> --max-tokens <N> [--resume <runId>]   # returns {jobId, runId, log}
+wf wait <jobId> --timeout 240   # repeat until status != running
+wf cancel <jobId>               # only when the user asks to stop; returns the job with status cancelled
 ```
 
 In Claude Code, run the `wait` with `timeout: 250000` on the Bash tool: its default (120000 ms) cuts the 240 s wait.
 
-In a repository that uses a kit installed elsewhere, there is no `wf` script: replace `npm run wf --` with
-`<kit>/node_modules/.bin/tsx <kit>/packages/runtime/src/cli.ts` and add `--cwd` with the repository root (where the
-MCP server keeps the jobs). `<kit>` comes from the `command` of the `workflows` server in `.cursor/mcp.json` or
-`.mcp.json`, with `${userHome}` replaced by `$HOME`.
+`wf` is the command the kit's installer puts on the PATH. Add `--cwd` with the repository root (where the MCP server
+keeps the jobs) when the shell is not in it. If `wf` is not found, ask the user to follow the `cursor-workflows-setup`
+skill. Inside the kit's own checkout, `npm run wf --` is the same command.

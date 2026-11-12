@@ -80,6 +80,22 @@
   `start_workflow` recusam um kit fora da faixa semver que o `kit` do `.agents/workflows/config.json` declara, com a
   versão do kit, a faixa e o que fazer; um `kit` que não é uma faixa semver também é recusado. A dependência `semver`
   entra no pacote do runtime.
+- **Instalador do kit, `wf upgrade` e o guia para agentes.** O `scripts/install.sh --tag vX.Y.Z` clona o kit na tag em
+  `~/.cursor-workflows/kit`, instala as dependências (`npm ci`), escreve o comando `wf` em `~/.local/bin`, liga as skills
+  do kit em `~/.claude/skills/` (que o Cursor também lê) por links simbólicos e grava a configuração global padrão
+  (`templates/global-config.json`: 3.000.000 de tokens e 500 centavos por run, 600.000 tokens por etapa, simultaneidade 4,
+  só etapas locais) se o arquivo não existir. Para antes de instalar se o Node for mais antigo que o `engines.node`, e não
+  toca numa pasta de skill, num link ou num `wf` que seja do usuário. `--dev` faz do kit instalado um link para a cópia de
+  trabalho (sem `npm ci`, que esvaziaria o `node_modules` dela, nem num `--refresh` depois), e `--refresh` refaz dependências, comando, links e
+  configuração para o kit que já está no lugar. O `wf upgrade` busca as tags, leva o kit instalado à release mais nova
+  (pré-lançamentos não contam) e roda o `install.sh --refresh` dessa tag: uma skill nova ganha link e o link de uma skill
+  que saiu é removido. Ele recusa uma instalação de desenvolvimento, um `wf` que roda de outra pasta e a falta de rede, sem
+  mexer no kit. O `INSTALL-AGENT.md`, público, em inglês e fixado na tag do pacote, conduz um agente da instalação ao
+  `wf init` e ao `wf doctor` sem outro documento; o `npm test` reprova se a tag dele, a dos READMEs e a do capítulo 2.1
+  divergirem da versão do pacote. A nova skill `cursor-workflows-setup` cobre init, doctor, upgrade, a validação no Cursor
+  IDE e a configuração. A dica do `wf doctor` para um kit mais antigo que a faixa passa a citar o `wf upgrade`, e a de
+  dependências ausentes cita o guia. A linha de uso do `wf` passa a listar `models`, que já existia. O capítulo 2.1 e os
+  READMEs passam a descrever esse fluxo.
 - **O estado do runtime funciona em worktree ligado e submódulo**, onde `.git` é um arquivo: antes, qualquer acesso a
   `.workflows/` falhava com `ENOTDIR`.
 

@@ -115,7 +115,7 @@ function checkDependencies(mcp: McpLaunches): CheckResult {
   }
   if (absent.length) {
     const where = kitRoot ? ` (${kitRoot})` : "";
-    return fail("dependencies", absent.join("\n"), `Rode \`npm ci\` na pasta do kit${where} para instalar as dependências. Se a pasta não existe, o kit ainda não foi instalado nesse caminho.`);
+    return fail("dependencies", absent.join("\n"), `Rode \`npm ci\` na pasta do kit${where} para instalar as dependências. Se a pasta não existe, o kit ainda não foi instalado nesse caminho: instale-o com o guia https://github.com/rodrigorjsf/cursor-workflows-starter/blob/main/INSTALL-AGENT.md`);
   }
   return pass("dependencies", found.join("\n"));
 }

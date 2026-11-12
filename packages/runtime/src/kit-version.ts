@@ -62,7 +62,7 @@ export function kitCompatibility(cwd: string, version: string = readKitPackage()
   if (semver.satisfies(version, range)) return { version, range };
   const where = `o kit instalado é a versão ${version}, fora da faixa "${range}" que o repositório declara em ${REPO_CONFIG_FILE} ("kit")`;
   if (semver.ltr(version, range)) {
-    return { version, range, problem: { message: `${where}: ele é mais antigo que a faixa`, hint: `Atualize o kit para uma versão dentro de "${range}".` } };
+    return { version, range, problem: { message: `${where}: ele é mais antigo que a faixa`, hint: `Atualize o kit com \`wf upgrade\` para uma versão dentro de "${range}".` } };
   }
   if (semver.gtr(version, range)) {
     return {

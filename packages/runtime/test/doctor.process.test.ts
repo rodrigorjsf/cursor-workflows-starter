@@ -209,6 +209,7 @@ test("the dependencies check looks for the command the IDE would run, and a miss
   assert.ok(missing.message.includes(".cursor/mcp.json"), missing.message);
   assert.match(missing.hint ?? "", /npm ci/);
   assert.ok(missing.hint?.includes(kit), missing.hint);
+  assert.match(missing.hint ?? "", /INSTALL-AGENT\.md/, "a kit that is not installed is installed with the guide");
 });
 
 test("a repo with no MCP server entry for the kit fails the dependencies check and points at `wf init`", () => {
@@ -365,6 +366,7 @@ test("a kit older than the repo's range fails, says so, and tells how to get a k
   assert.match(check.message, /mais antigo/);
   assert.match(check.message, /\.agents\/workflows\/config\.json/);
   assert.match(check.hint ?? "", /Atualize o kit/);
+  assert.match(check.hint ?? "", /`wf upgrade`/, "the command that moves the kit to a newer release exists now");
 });
 
 test("a kit newer than the repo's range fails too, and the hint is about the repo's range", () => {
