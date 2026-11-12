@@ -5,8 +5,8 @@ novo. Dois requisitos valem para todo script:
 
 1. **Um cabeçalho WHAT/WHY/WHEN/HOW** nas primeiras linhas, em comentário: o que faz, por que existe, quando rodar e
    como. O cabeçalho fica em inglês, como o resto do texto escrito para agentes.
-2. **Uma linha na tabela abaixo.** Os módulos de apoio em `scripts/lib/` (hoje, `scripts/lib/markdown.ts`) não são
-   procedimentos e ficam fora da tabela, mas também levam o cabeçalho.
+2. **Uma linha na tabela abaixo.** Os módulos de apoio em `scripts/lib/` (hoje, `scripts/lib/markdown.ts` e
+   `scripts/lib/cli.ts`) não são procedimentos e ficam fora da tabela, mas também levam o cabeçalho.
 
 O `npm test` confere os dois (`test/scripts-conventions.test.ts`): um script sem cabeçalho ou fora da tabela reprova.
 
