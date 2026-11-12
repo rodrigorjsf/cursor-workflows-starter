@@ -260,11 +260,11 @@ De onde veio um valor da configuração efetiva.
 
 ### ConfigViolation
 
-Uma tentativa de afrouxar um teto, ou um valor inválido que a camada trouxe. O teto vale e o pedido não tem efeito.
+Uma tentativa de afrouxar um teto, ou um padrão do código que um teto recusa. O teto vale e o pedido não tem efeito.
 
 | Campo | Tipo | Obrigatório | Descrição |
 | --- | --- | --- | --- |
-| `layer` | `"global" \| "repo" \| "env" \| "flag" \| "mcp"` | sim | A camada que fez o pedido. |
+| `layer` | `"default" \| "global" \| "repo" \| "env" \| "flag" \| "mcp"` | sim | A camada que fez o pedido; `default` é o modelo padrão do código de um papel que `allowedModels` recusa (as etapas do papel falham). |
 | `ref` | `string` | não | O arquivo, a variável de ambiente ou a flag do pedido. |
 | `path` | `string` | sim | Onde o valor está: ponteiro JSON dentro do arquivo (`/workflows/implement-issue/maxTokens`), ou o nome da variável ou da opção. |
 | `requested` | `unknown` | sim | O que a camada pediu. |

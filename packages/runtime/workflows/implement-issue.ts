@@ -302,10 +302,10 @@ export default defineWorkflow<Args>({
       "Implementa uma issue do GitHub com TDD fatia a fatia (red → green conferido pelo código), review em três eixos (Standards, Spec, Segurança) e PR no template Summary/Evidence/Merge Danger.",
     whenToUse: "Quando o usuário pedir para implementar/resolver uma issue específica pelo número.",
     phases: [{ title: "Triagem" }, { title: "Plano" }, { title: "Implementação" }, { title: "Review" }, { title: "Entrega" }],
-    // Papéis: as chaves de `workflows.implement-issue.roles` na config. O modelo de cada um é o default de código; a
-    // config e WF_MODEL_<PAPEL> o trocam. `fix` e `design` não declaram modelo: ele depende do tier ou do passo.
-    // `cloud`: etapas que escrevem no worktree local nunca vão para um agente na nuvem; as de leitura podem, quando
-    // a spec da nuvem chegar (elas leem o worktree do run, por isso `read-only`).
+    // Roles: the keys of `workflows.implement-issue.roles` in the config. Each role's model is a code default that the
+    // config and WF_MODEL_<ROLE> replace. `fix` and `design` declare no model: it depends on the tier or on the step.
+    // `cloud`: steps that write to the local worktree never go to a cloud agent; read-only ones may, once the cloud
+    // spec lands (they read the run's worktree, hence `read-only`).
     roles: [
       { name: "classify", description: "Classifica a complexidade quando a issue não tem label.", cloud: "ok", defaults: { model: COMPOSER, settingSources: NO_SETTINGS } },
       { name: "implement.low", description: "Escreve teste e código no tier LOW (e o refactor).", cloud: "never", envAliases: ["LOW"], defaults: { model: COMPOSER } },
@@ -354,7 +354,7 @@ export default defineWorkflow<Args>({
     if (!tier) {
       const c = await ctx.agent<{ tier: Tier; reason: string }>(`${CLASSIFY_INSTRUCTIONS}\n\n${issueBlock(issue)}`, {
         label: "classificar",
-        role: "classify", // settingSources vazio no papel: sem AGENTS.md, hooks, MCP nem as skills que qualquer outra camada carrega (medido)
+        role: "classify", // the role's settingSources is []: no AGENTS.md, hooks, MCP or the skills any other layer loads (measured)
         tools: [], // só texto: classificar não precisa ler o repositório
         memo: true,
         schema: CLASSIFY_SCHEMA,

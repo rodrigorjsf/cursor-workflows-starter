@@ -29,7 +29,7 @@ import {
   type SettingSource,
 } from "@cursor/sdk";
 import { Ajv } from "ajv";
-import { ConfigError, type LimitOverrides, type ResolvedConfig, type StepOverrides, allowedSources, isModelAllowed, loadEffectiveConfig } from "../config/index.js";
+import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedConfig, type StepOverrides, allowedSources, isModelAllowed, loadEffectiveConfig } from "../config/index.js";
 import { EVENT_SCHEMA_VERSION, type ErrorKind, type NewEvent, type StepRef, type WorkflowEvent } from "./events.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
 import { RunLockedError, RunStore } from "./run-store.js";
@@ -90,7 +90,7 @@ export interface RunOptions {
   /** Agentes simultâneos. Default 4 (o Cursor não documenta limite numérico; seja conservador). */
   concurrency?: number;
   /** The chat's overrides (`start_workflow`): they can only tighten the resolved limits; a looser one is a violation and has no effect. */
-  tighten?: LimitOverrides;
+  mcpOverrides?: LimitOverrides;
   /**
    * Camadas de configuração carregadas pelos agentes das etapas. Default ["project","team","mdm"]:
    * AGENTS.md, .cursor/rules, skills (.agents/skills, .cursor/skills, ...), hooks e MCP do projeto,
@@ -192,7 +192,7 @@ function applyOverrides(o: AgentCallOptions, overrides: StepOverrides): AgentCal
     const model = { ...o.model, ...overrides.model };
     if (model.id) merged.model = model as ModelSelection;
   }
-  for (const field of ["timeoutMs", "retries", "schemaRetries", "settingSources"] as const) {
+  for (const field of STEP_OVERRIDE_FIELDS) {
     if (overrides[field] !== undefined) Object.assign(merged, { [field]: overrides[field] });
   }
   return merged;
@@ -236,7 +236,7 @@ export async function runWorkflow<A, R>(
   // The config is read afresh at the start of every execution (also a resume): an edit takes effect on the next run.
   let resolved: ResolvedConfig;
   try {
-    resolved = loadEffectiveConfig(def, { cwd: opts.cwd, flags: { maxTokens: opts.maxTokens, maxCents: opts.maxCents, concurrency: opts.concurrency }, tighten: opts.tighten });
+    resolved = loadEffectiveConfig(def, { cwd: opts.cwd, flags: { maxTokens: opts.maxTokens, maxCents: opts.maxCents, concurrency: opts.concurrency }, mcpOverrides: opts.mcpOverrides });
   } catch (err) {
     if (err instanceof ConfigError) return refused(err.message); // nothing is written: a run with an unusable config never starts
     throw err;

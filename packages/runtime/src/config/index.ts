@@ -3,17 +3,17 @@
 
 import type { WorkflowDefinition } from "../runtime/workflow.js";
 import { ConfigError, type ConfigIssue, type LoadedConfig, globalConfigPath, loadConfigFile, repoConfigPath } from "./file.js";
-import { type LimitOverrides, type ResolvedConfig, resolveConfig } from "./resolve.js";
+import { type FlagLimits, type LimitOverrides, type ResolvedConfig, resolveConfig } from "./resolve.js";
 
 export { ConfigError, CONFIG_SCHEMA_PATH, globalConfigPath, repoConfigPath } from "./file.js";
-export { allowedSources, isModelAllowed, type LimitOverrides, type ResolvedConfig, type StepOverrides } from "./resolve.js";
+export { LIMIT_FIELDS, STEP_OVERRIDE_FIELDS, allowedSources, isModelAllowed, type FlagLimits, type LimitOverrides, type ResolvedConfig, type StepOverrides } from "./resolve.js";
 
 export interface LoadOptions {
   cwd: string;
   /** Default: `process.env`. */
   env?: Record<string, string | undefined>;
-  flags?: LimitOverrides;
-  tighten?: LimitOverrides;
+  flags?: FlagLimits;
+  mcpOverrides?: LimitOverrides;
 }
 
 /** Throws `ConfigError` (every problem of both files at once, each with its file and field path) when a layer cannot be used. */
@@ -31,5 +31,5 @@ export function loadEffectiveConfig(workflow: Pick<WorkflowDefinition, "meta" | 
   const global = load(globalConfigPath());
   const repo = load(repoConfigPath(opts.cwd));
   if (issues.length) throw new ConfigError(issues);
-  return resolveConfig({ workflow, global, repo, env: opts.env ?? process.env, flags: opts.flags, tighten: opts.tighten });
+  return resolveConfig({ workflow, global, repo, env: opts.env ?? process.env, flags: opts.flags, mcpOverrides: opts.mcpOverrides });
 }

@@ -369,7 +369,7 @@ test("allowedLocations without 'local' keeps every step from running", async () 
 test("tighten-only overrides (the chat): a lower limit applies, a looser one is a violation with no effect", async () => {
   writeGlobalConfig({ caps: { maxCents: 400 } });
   writeRepoConfig(cwd, { workflows: { cfg: { maxTokens: 1_000_000, maxCents: 300 } } });
-  const start = await startOf({ tighten: { maxTokens: 400_000, maxCents: 350, maxTokensPerStep: 50_000, concurrency: 8 } });
+  const start = await startOf({ mcpOverrides: { maxTokens: 400_000, maxCents: 350, maxTokensPerStep: 50_000, concurrency: 8 } });
   assert.equal(start.config.limits.maxTokens, 400_000);
   assert.deepEqual(start.provenance["/limits/maxTokens"], { layer: "mcp", ref: "start_workflow.overrides" });
   assert.equal(start.config.limits.maxCents, 300, "350 would loosen the repo's 300");
@@ -383,7 +383,7 @@ test("tighten-only overrides (the chat): a lower limit applies, a looser one is 
     ],
   );
 
-  const disable = await startOf({ tighten: { maxTokens: null } });
+  const disable = await startOf({ mcpOverrides: { maxTokens: null } });
   assert.equal(disable.config.limits.maxTokens, 1_000_000, "null from the chat is the loosest override");
   assert.equal(disable.violations[0]!.layer, "mcp");
 });
@@ -429,4 +429,43 @@ test("a label glob may contain slashes (file paths in labels): it matches, and i
   const start = runStartOf(logOf(r.runId));
   assert.deepEqual(Object.keys(start.config.labels), ["process:src/*"]);
   assert.deepEqual(start.provenance["/labels/process:src~1*/retries"], { layer: "repo", ref: repoConfigPath(cwd) });
+});
+
+test("a chat override of the per-step cap is a ceiling for every step, role and label caps included", async () => {
+  writeRepoConfig(cwd, {
+    workflows: { cfg: { maxTokensPerStep: 300_000, roles: { review: { maxTokensPerStep: 500_000 }, classify: { maxTokensPerStep: null }, "implement.low": { maxTokensPerStep: 50_000 } }, labels: { "x*": { maxTokensPerStep: 400_000 } } } },
+  });
+  const start = await startOf({ mcpOverrides: { maxTokensPerStep: 100_000 } });
+  assert.equal(start.config.limits.maxTokensPerStep, 100_000);
+  assert.equal(start.config.roles.review!.maxTokensPerStep, 100_000, "a role cap above the ceiling is brought down");
+  assert.equal(start.config.roles.classify!.maxTokensPerStep, 100_000, "so is a role that turned the cap off");
+  assert.equal(start.config.roles["implement.low"]!.maxTokensPerStep, 50_000, "a role cap already below the ceiling stands");
+  assert.equal(start.config.labels["x*"]!.maxTokensPerStep, 100_000);
+  assert.deepEqual(start.provenance["/roles/review/maxTokensPerStep"], { layer: "mcp", ref: "start_workflow.overrides" });
+  assert.deepEqual(start.provenance["/roles/implement.low/maxTokensPerStep"], { layer: "repo", ref: repoConfigPath(cwd) });
+});
+
+test("a limit that is not a valid number is an error naming where it came from: flags, chat overrides and env alike", async () => {
+  const refused = async (options: Parameters<typeof runWorkflow>[2] extends infer O ? Partial<O> : never, env: Record<string, string> = {}) => {
+    const r = await withEnv(env, () => runWorkflow(configWorkflow(async () => "done"), {}, { cwd, ...options }));
+    assert.equal(r.status, "failed");
+    return r.error!;
+  };
+  assert.match(await refused({ maxTokens: 1.5 }), /--max-tokens.*inteiro/);
+  assert.match(await refused({ maxCents: -1 }), /--max-cents/);
+  assert.match(await refused({ concurrency: 0 }), /RunOptions\.concurrency.*maior ou igual a 1/);
+  assert.match(await refused({ mcpOverrides: { concurrency: 0 } }), /start_workflow\.overrides.*concurrency/);
+  assert.match(await refused({ mcpOverrides: { maxTokens: 2.5 } }), /start_workflow\.overrides.*maxTokens/);
+  assert.match(await refused({}, { WF_MAX_TOKENS: "1.5" }), /WF_MAX_TOKENS/);
+  assert.equal(calls.length, 0);
+});
+
+test("a code-default model that a cap refuses shows up as a violation of the default, before any step runs", async () => {
+  writeGlobalConfig({ caps: { allowedModels: ["composer-*"] } });
+  const start = await startOf();
+  assert.deepEqual(
+    start.violations.map(({ layer, path, requested }) => ({ layer, path, requested })),
+    [{ layer: "default", path: "/roles/review/model/id", requested: "grok-4.7" }],
+  );
+  assert.match(start.violations[0]!.message, /review/);
 });

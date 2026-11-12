@@ -80,10 +80,10 @@ export interface ConfigSource {
   ref?: string;
 }
 
-/** Uma tentativa de afrouxar um teto, ou um valor inválido que a camada trouxe. O teto vale e o pedido não tem efeito. */
+/** Uma tentativa de afrouxar um teto, ou um padrão do código que um teto recusa. O teto vale e o pedido não tem efeito. */
 export interface ConfigViolation {
-  /** A camada que fez o pedido. */
-  layer: "global" | "repo" | "env" | "flag" | "mcp";
+  /** A camada que fez o pedido; `default` é o modelo padrão do código de um papel que `allowedModels` recusa (as etapas do papel falham). */
+  layer: "default" | "global" | "repo" | "env" | "flag" | "mcp";
   /** O arquivo, a variável de ambiente ou a flag do pedido. */
   ref?: string;
   /** Onde o valor está: ponteiro JSON dentro do arquivo (`/workflows/implement-issue/maxTokens`), ou o nome da variável ou da opção. */

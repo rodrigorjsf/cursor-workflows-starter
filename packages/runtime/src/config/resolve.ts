@@ -20,15 +20,18 @@ export interface LimitOverrides {
   concurrency?: number;
 }
 
+/** What the flag layer can set: there is no per-step flag. */
+export type FlagLimits = Pick<LimitOverrides, "maxTokens" | "maxCents" | "concurrency">;
+
 export interface ResolveInput {
   workflow: Pick<WorkflowDefinition, "meta" | "defaults" | "budget">;
   global?: LoadedConfig;
   repo?: LoadedConfig;
   env: Record<string, string | undefined>;
   /** CLI flags and options of whoever embeds the engine: trusted, clamped by the caps. */
-  flags?: LimitOverrides;
+  flags?: FlagLimits;
   /** The chat's overrides (`start_workflow`): they can only tighten what the other layers resolved. */
-  tighten?: LimitOverrides;
+  mcpOverrides?: LimitOverrides;
 }
 
 /** What the config layers change for one step. A field the layers left alone is absent: the call's own options stand. */
@@ -71,9 +74,22 @@ interface Cell {
 }
 
 const DEFAULT_CONCURRENCY = 4;
-const ROLE_FIELDS = ["timeoutMs", "retries", "schemaRetries", "maxTokensPerStep", "settingSources"] as const;
-const LIMIT_FIELDS = ["maxTokens", "maxTokensPerStep", "maxCents", "concurrency"] as const;
+export const LIMIT_FIELDS = ["maxTokens", "maxTokensPerStep", "maxCents", "concurrency"] as const;
+const MODEL_FIELDS = ["id", "params", "maxMode"] as const;
+/** The step settings the config layers override on top of a call's own options. */
+export const STEP_OVERRIDE_FIELDS = ["timeoutMs", "retries", "schemaRetries", "settingSources"] as const;
+const ROLE_FIELDS = [...STEP_OVERRIDE_FIELDS, "maxTokensPerStep"] as const;
 const lastSegment = (pointer: Pointer): string => pointer.slice(pointer.lastIndexOf("/") + 1);
+
+/** Why a value is not a valid limit, or undefined when it is. `null` means no limit, which concurrency cannot have. */
+function limitProblem(field: (typeof LIMIT_FIELDS)[number], value: unknown): string | undefined {
+  if (value === null) return field === "concurrency" ? "concurrency não pode ser null" : undefined;
+  if (typeof value !== "number" || !Number.isFinite(value)) return "esperava um número";
+  const min = field === "concurrency" ? 1 : 0;
+  if (value < min) return `esperava um número maior ou igual a ${min}`;
+  if (field !== "maxCents" && !Number.isInteger(value)) return "esperava um número inteiro";
+  return undefined;
+}
 
 export function isModelAllowed(allowed: string[] | null, id: string): boolean {
   return allowed === null || allowed.some((glob) => globMatches(glob, id));
@@ -110,12 +126,13 @@ function modelEnvNames(role: WorkflowRole): string[] {
 
 function envEntries(input: ResolveInput, roles: WorkflowRole[], issues: ConfigIssue[]): Entry[] {
   const entries: Entry[] = [];
-  for (const [name, field, integer] of [["WF_MAX_TOKENS", "maxTokens", true], ["WF_MAX_CENTS", "maxCents", false]] as const) {
+  for (const [name, field] of [["WF_MAX_TOKENS", "maxTokens"], ["WF_MAX_CENTS", "maxCents"]] as const) {
     const raw = input.env[name]?.trim();
     if (!raw) continue;
     const value = Number(raw);
-    if (!Number.isFinite(value) || value < 0 || (integer && !Number.isInteger(value))) {
-      issues.push({ ref: name, path: "", message: `esperava um número ${integer ? "inteiro " : ""}maior ou igual a 0, recebeu "${raw}"` });
+    const problem = limitProblem(field, value);
+    if (problem) {
+      issues.push({ ref: name, path: "", message: `${problem}, recebeu "${raw}"` });
       continue;
     }
     entries.push({ layer: "env", ref: name, path: name, at: pointerOf("limits", field), value });
@@ -128,7 +145,7 @@ function envEntries(input: ResolveInput, roles: WorkflowRole[], issues: ConfigIs
       issues.push({ ref: name, path: "", message: `modelo inválido "${input.env[name]}": use <id> ou <id>[param=valor,...]` });
       continue;
     }
-    for (const field of ["id", "params", "maxMode"] as const) {
+    for (const field of MODEL_FIELDS) {
       if (model[field] !== undefined) {
         entries.push({ layer: "env", ref: name, path: name, at: pointerOf("roles", role.name, "model", field), value: model[field], group: pointerOf("roles", role.name, "model") });
       }
@@ -141,7 +158,7 @@ function roleEntries(section: "roles" | "labels", name: string, prefs: RolePrefs
   const entries: Entry[] = [];
   const source = base + pointerOf(section, name);
   const label = section === "labels" ? name : undefined;
-  for (const field of ["id", "params", "maxMode"] as const) {
+  for (const field of MODEL_FIELDS) {
     const value = prefs.model?.[field];
     if (value !== undefined) {
       entries.push({ layer, ref, path: `${source}/model/${field}`, at: pointerOf(section, name, "model", field), value, group: pointerOf(section, name, "model"), label });
@@ -169,13 +186,27 @@ function fileEntries(file: LoadedConfig, layer: "global" | "repo", workflow: str
 
 const FLAG_REF: Partial<Record<keyof LimitOverrides, string>> = { maxTokens: "--max-tokens", maxCents: "--max-cents" };
 
-function flagEntries(flags: LimitOverrides | undefined): Entry[] {
-  return LIMIT_FIELDS.flatMap((field) => {
-    const value = flags?.[field];
-    if (value === undefined) return [];
+function flagEntries(flags: FlagLimits | undefined, issues: ConfigIssue[]): Entry[] {
+  const entries: Entry[] = [];
+  for (const field of LIMIT_FIELDS) {
+    const value = (flags as LimitOverrides | undefined)?.[field];
+    if (value === undefined) continue;
     const ref = FLAG_REF[field] ?? `RunOptions.${field}`;
-    return [{ layer: "flag" as const, ref, path: ref, at: pointerOf("limits", field), value }];
-  });
+    const problem = limitProblem(field, value);
+    if (problem) issues.push({ ref, path: "", message: `${problem}, recebeu ${JSON.stringify(value)}` });
+    else entries.push({ layer: "flag", ref, path: ref, at: pointerOf("limits", field), value });
+  }
+  return entries;
+}
+
+const MCP_OVERRIDES_REF = "start_workflow.overrides";
+
+function checkMcpOverrides(overrides: LimitOverrides | undefined, issues: ConfigIssue[]): void {
+  for (const field of LIMIT_FIELDS) {
+    const value = overrides?.[field];
+    const problem = value === undefined ? undefined : limitProblem(field, value);
+    if (problem) issues.push({ ref: MCP_OVERRIDES_REF, path: field, message: `${problem}, recebeu ${JSON.stringify(value)}` });
+  }
 }
 
 function checkRoleNames(input: ResolveInput, declared: string[], issues: ConfigIssue[]): void {
@@ -198,8 +229,9 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
     ...(input.global ? fileEntries(input.global, "global", meta.name) : []),
     ...(input.repo ? fileEntries(input.repo, "repo", meta.name) : []),
     ...envEntries(input, roles, issues),
-    ...flagEntries(input.flags),
+    ...flagEntries(input.flags, issues),
   ];
+  checkMcpOverrides(input.mcpOverrides, issues);
   if (issues.length) throw new ConfigError(issues);
 
   const rawCaps = input.global?.data.caps ?? {};
@@ -233,7 +265,7 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
   set(pointerOf("limits", "concurrency"), DEFAULT_CONCURRENCY, fromCode);
   for (const role of roles) {
     const code = { ...defaults, ...role.defaults };
-    for (const field of ["id", "params", "maxMode"] as const) {
+    for (const field of MODEL_FIELDS) {
       if (code.model?.[field] !== undefined) set(pointerOf("roles", role.name, "model", field), code.model[field], fromCode);
     }
     for (const field of ["timeoutMs", "retries", "schemaRetries"] as const) {
@@ -278,10 +310,12 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
     set(entry.at, entry.value, { layer: entry.layer, ref: entry.ref });
   }
 
-  // The chat can only tighten what the other layers resolved (cap included).
+  // The chat can only tighten what the other layers resolved (cap included). A per-step cap it sets is a ceiling for
+  // every role and label too, so those are brought down to it.
   const clampNumber = (value: number | null, cap: number | null): number | null => (cap === null ? value : value === null ? cap : Math.min(value, cap));
+  const fromChat: ConfigSource = { layer: "mcp", ref: MCP_OVERRIDES_REF };
   for (const field of LIMIT_FIELDS) {
-    const value = input.tighten?.[field];
+    const value = input.mcpOverrides?.[field];
     if (value === undefined) continue;
     const at = pointerOf("limits", field);
     const current = clampNumber(cells.get(at)!.value as number | null, capOf.get(field) ?? null);
@@ -289,14 +323,19 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
     if (looser) {
       violations.push({
         layer: "mcp",
-        ref: "start_workflow.overrides",
+        ref: MCP_OVERRIDES_REF,
         path: field,
         requested: value,
         applied: current,
         message: `${field} ${value === null ? "null (sem limite)" : value} afrouxaria o valor em vigor (${current}): o override do chat só pode apertar; ignorado`,
       });
-    } else {
-      set(at, value, { layer: "mcp", ref: "start_workflow.overrides" });
+      continue;
+    }
+    set(at, value, fromChat);
+    if (field === "maxTokensPerStep" && value !== null) {
+      for (const [otherAt, cell] of cells) {
+        if (otherAt !== at && lastSegment(otherAt) === field && (cell.value === null || (cell.value as number) > value)) set(otherAt, value, fromChat);
+      }
     }
   }
 
@@ -313,20 +352,36 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
     }
   }
 
-  const roleOf = (base: Pointer): EffectiveRole => {
-    const role: EffectiveRole = {};
+  /** The settings the cells hold under a role or label; `keep` filters the cells (the config layers only, for step overrides). */
+  const settingsOf = (base: Pointer, keep: (cell: Cell) => boolean = () => true): EffectiveRole => {
+    const settings: EffectiveRole = {};
     const model: Partial<ModelSelection> = {};
-    for (const field of ["id", "params", "maxMode"] as const) {
+    for (const field of MODEL_FIELDS) {
       const cell = cells.get(`${base}/model/${field}`);
-      if (cell) Object.assign(model, { [field]: cell.value });
+      if (cell && keep(cell)) Object.assign(model, { [field]: cell.value });
     }
-    if (Object.keys(model).length) role.model = model;
+    if (Object.keys(model).length) settings.model = model;
     for (const field of ROLE_FIELDS) {
       const cell = cells.get(`${base}/${field}`);
-      if (cell) Object.assign(role, { [field]: cell.value });
+      if (cell && keep(cell)) Object.assign(settings, { [field]: cell.value });
     }
-    return role;
+    return settings;
   };
+  // A code-default model that the allowlist refuses is not a request, so nothing dropped it: say so up front, because
+  // every step of that role will fail.
+  for (const role of roles) {
+    const at = pointerOf("roles", role.name, "model", "id");
+    const id = cells.get(at)?.value as string | undefined;
+    if (id !== undefined && !isModelAllowed(caps.allowedModels, id)) {
+      violations.push({
+        layer: "default",
+        path: at,
+        requested: id,
+        applied: null,
+        message: `o modelo ${id}, padrão do código do papel ${role.name}, não está em allowedModels: as etapas desse papel falham até a config ou WF_MODEL_${role.name.toUpperCase().replace(/[.-]/g, "_")} trocar o modelo`,
+      });
+    }
+  }
   const limit = (field: (typeof LIMIT_FIELDS)[number]) => cells.get(pointerOf("limits", field))!.value;
   const config: EffectiveConfig = {
     workflow: meta.name,
@@ -337,8 +392,8 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
       concurrency: limit("concurrency") as number,
     },
     caps,
-    roles: Object.fromEntries(roles.map((r) => [r.name, roleOf(pointerOf("roles", r.name))])),
-    labels: Object.fromEntries([...labels].map((glob) => [glob, roleOf(pointerOf("labels", glob))])),
+    roles: Object.fromEntries(roles.map((r) => [r.name, settingsOf(pointerOf("roles", r.name))])),
+    labels: Object.fromEntries([...labels].map((glob) => [glob, settingsOf(pointerOf("labels", glob))])),
   };
 
   return {
@@ -348,25 +403,9 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
     stepOverrides(role, label) {
       const best = role === undefined ? [...labels].filter((g) => globMatches(g, label)).sort((a, b) => literalLength(b) - literalLength(a))[0] : undefined;
       const base = role !== undefined ? pointerOf("roles", role) : best !== undefined ? pointerOf("labels", best) : undefined;
-      const overrides: StepOverrides = { maxTokensPerStep: config.limits.maxTokensPerStep };
-      if (base === undefined) return overrides;
-      const layered = (at: Pointer): Cell | undefined => {
-        const cell = cells.get(at);
-        return cell && cell.source.layer !== "default" ? cell : undefined;
-      };
-      const model: Partial<ModelSelection> = {};
-      for (const field of ["id", "params", "maxMode"] as const) {
-        const cell = layered(`${base}/model/${field}`);
-        if (cell) Object.assign(model, { [field]: cell.value });
-      }
-      if (Object.keys(model).length) overrides.model = model;
-      for (const field of ["timeoutMs", "retries", "schemaRetries", "settingSources"] as const) {
-        const cell = layered(`${base}/${field}`);
-        if (cell) Object.assign(overrides, { [field]: cell.value });
-      }
-      const perStep = cells.get(`${base}/maxTokensPerStep`);
-      if (perStep) overrides.maxTokensPerStep = perStep.value as number | null;
-      return overrides;
+      if (base === undefined) return { maxTokensPerStep: config.limits.maxTokensPerStep };
+      const { maxTokensPerStep, ...layered } = settingsOf(base, (cell) => cell.source.layer !== "default");
+      return { ...layered, maxTokensPerStep: maxTokensPerStep === undefined ? config.limits.maxTokensPerStep : maxTokensPerStep };
     },
   };
 }

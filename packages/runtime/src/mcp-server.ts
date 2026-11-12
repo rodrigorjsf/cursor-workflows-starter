@@ -6,7 +6,7 @@
 // Tools:
 //   list_workflows                                  → nome, descrição, quando usar, schema dos args
 //   start_workflow {name, args, resumeRunId?, overrides?} → {jobId, runId, violations?}
-//                                                   overrides: limites só mais apertados para este run
+//                                                   overrides: limits for this run, tighten-only
 //   wait_workflow  {jobId, timeoutSec}              → estado (status, fase, últimos eventos, resultado)
 //   get_workflow_status {jobId}                     → estado sem esperar
 //
@@ -22,7 +22,7 @@ import { readFileSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { type LimitOverrides, loadEffectiveConfig } from "./config/index.js";
+import { LIMIT_FIELDS, type LimitOverrides, loadEffectiveConfig } from "./config/index.js";
 import { INSIDE_WORKFLOW_ENV } from "./runtime/engine.js";
 import { installCrashHandlers, readJob, startJob, waitJob } from "./runtime/jobs.js";
 import { loadWorkflows } from "./runtime/registry.js";
@@ -94,19 +94,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       ],
 }));
 
-const OVERRIDE_KEYS = ["maxTokens", "maxTokensPerStep", "maxCents", "concurrency"] as const;
-
-/** The `overrides` argument as limit overrides. A non-number is an error; `null` is accepted and counts as a loosening attempt. */
+/**
+ * The `overrides` argument as limit overrides. Only the shape is checked here (an object of numbers, `null` counting as a
+ * loosening attempt); the config resolver rejects a number that is not a valid limit and ignores one that loosens.
+ */
 function parseOverrides(raw: unknown): LimitOverrides {
   if (raw === undefined) return {};
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new Error("overrides precisa ser um objeto");
-  const tighten: Record<string, number | null> = {};
+  const overrides: Record<string, number | null> = {};
   for (const [key, value] of Object.entries(raw)) {
-    if (!(OVERRIDE_KEYS as readonly string[]).includes(key)) throw new Error(`override desconhecido: ${key} (use ${OVERRIDE_KEYS.join(", ")})`);
-    if (value !== null && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) throw new Error(`override ${key} precisa ser um número maior ou igual a 0`);
-    tighten[key] = value as number | null;
+    if (!(LIMIT_FIELDS as readonly string[]).includes(key)) throw new Error(`override desconhecido: ${key} (use ${LIMIT_FIELDS.join(", ")})`);
+    if (value !== null && typeof value !== "number") throw new Error(`override ${key} precisa ser um número`);
+    overrides[key] = value;
   }
-  return tighten;
+  return overrides;
 }
 
 const text = (v: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(v, null, 2) }] });
@@ -123,16 +124,16 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       if (!def) return fail({ error: `workflow desconhecido: ${String(a.name)}` });
       const runId = typeof a.resumeRunId === "string" ? a.resumeRunId : undefined;
       // The config is read afresh here, so an unusable one is refused before a job exists, and a looser override is reported now.
-      let tighten: LimitOverrides;
+      let mcpOverrides: LimitOverrides;
       let violations;
       try {
-        tighten = parseOverrides(a.overrides);
-        violations = loadEffectiveConfig(def, { cwd, tighten }).violations;
+        mcpOverrides = parseOverrides(a.overrides);
+        violations = loadEffectiveConfig(def, { cwd, mcpOverrides }).violations;
       } catch (err) {
         if (err instanceof Error) return fail({ error: err.message });
         throw err;
       }
-      const { job } = startJob(def, a.args ?? {}, { cwd, tighten, runId });
+      const { job } = startJob(def, a.args ?? {}, { cwd, mcpOverrides, runId });
       return text({ jobId: job.jobId, runId: job.runId, next: "chame wait_workflow com este jobId", ...(violations.length ? { violations } : {}) });
     }
     case "wait_workflow": {

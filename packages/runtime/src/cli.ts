@@ -5,7 +5,7 @@
 //   wf whoami                         # mostra a conta em uso
 //   wf models                         # IDs de modelo liberados para a chave em uso
 //   wf list
-//   wf config show [workflow]         # configuração efetiva do repositório atual e a origem de cada valor
+//   wf config show [workflow]         # effective config of the current repo and where each value came from
 //   wf run <workflow> --args '<json>' [--max-cents N] [--resume <runId>]   # primeiro plano; imprime JSON no fim
 //   wf start <workflow> --args '<json>' [--resume <runId>]                 # segundo plano; imprime {jobId}
 //   wf status <jobId>

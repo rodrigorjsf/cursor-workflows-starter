@@ -156,6 +156,18 @@ test("start_workflow takes tighten-only overrides; a looser one is reported in t
   });
 });
 
+test("start_workflow refuses an override that is not a valid limit, before a job exists", async () => {
+  rmSync(repoConfig(), { force: true });
+  await withServer(async (client) => {
+    const zero = await call(client, "start_workflow", { name: "cfgwf", overrides: { concurrency: 0 } });
+    assert.equal(zero.isError, true);
+    assert.match(zero.body.error, /start_workflow\.overrides.*concurrency/);
+    const fraction = await call(client, "start_workflow", { name: "cfgwf", overrides: { maxTokens: 1.5 } });
+    assert.equal(fraction.isError, true);
+    assert.equal(fraction.body.jobId, undefined);
+  });
+});
+
 test("start_workflow refuses an unusable config up front, with the file and the field path, and starts no job", async () => {
   put(repoConfig(), { workflows: { cfgwf: { roles: { clasify: {} } } } });
   await withServer(async (client) => {
