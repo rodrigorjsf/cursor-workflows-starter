@@ -180,7 +180,7 @@
   também emitem `step-start`. A referência dos eventos (`docs/reference/events.md`) é gerada do tipo
   (`npm run docs:events`), e o `npm test` falha se ela divergir.
 - **Runs mais robustos.** Uma última linha incompleta no log ou no journal não impede o resume; um lock por run recusa
-  a segunda execução do mesmo `runId` (`já está em execução`); todo arquivo de estado é gravado de forma atômica;
+  a segunda execução do mesmo `runId` (`already running`); todo arquivo de estado é gravado de forma atômica;
   retomar um run cujo workflow mudou grava um aviso; cada run novo entra no índice global
   `~/.cursor-workflows/runs.jsonl` (`WF_HOME` muda o diretório do usuário).
 - **O estado de um job é projetado do log de eventos.** O registro do job (`.workflows/jobs/<jobId>.json`) guarda só id
@@ -202,7 +202,7 @@
   resumes inclusive, mais os turnos em andamento). Passou de um dos dois: o run do agente é cancelado na hora e a
   tentativa falha com o novo `errorKind: "budget"`, sem nova tentativa. A etapa que passa do próprio teto falha
   sozinha; o teto do run cancela todas as etapas ativas, nenhuma etapa nova começa e o run termina com
-  `Teto de tokens atingido`, depois de as etapas canceladas fecharem a conta. A ultrapassagem é de no máximo um turno
+  `Token cap reached`, depois de as etapas canceladas fecharem a conta. A ultrapassagem é de no máximo um turno
   por etapa ativa. Antes, um teto só era checado antes de cada tentativa.
 - **Configuração em camadas, com tetos globais e papéis.** Dois arquivos JSON, validados por um esquema que vai com o
   kit (`packages/runtime/schema/config.schema.json`): o global (`~/.cursor-workflows/config.json`, com os tetos
@@ -237,8 +237,9 @@
   (`${HOME}`), o `.agents/workflows/config.json` com `$schema` e a faixa de versão do kit, a linha `.workflows/` no
   `.gitignore` e um bloco de quatro linhas no `AGENTS.md` (criado se preciso). Imprime o diff do que mudou e não faz
   commit. Rodar de novo não muda nada; os outros servidores de um `mcp.json` existente ficam; `--no-agents-md` pula o
-  bloco e `--remove` o tira. Como o Claude Code lê o `CLAUDE.md` e não o `AGENTS.md`, o comando avisa no stderr quando o
-  `CLAUDE.md` não importa o `AGENTS.md` (não o edita). O `templates/agents-md-block.md` ganhou o link para o guia de instalação. O endereço
+  bloco e `--remove` o tira. Como o Claude Code lê o `CLAUDE.md` e não o `AGENTS.md`, o comando avisa no stderr, a cada
+  execução, quando um arquivo de memória do Claude Code (`CLAUDE.md`, `.claude/CLAUDE.md` ou `CLAUDE.local.md`, no
+  repositório ou acima dele) esconde o `AGENTS.md` sem importá-lo, com a linha de import que funciona (não o edita). O `templates/agents-md-block.md` ganhou o link para o guia de instalação. O endereço
   `$schema` do esquema passou a ser o da URL bruta (`raw.githubusercontent.com`): a da página do GitHub devolve HTML, que
   o editor não lê.
 - **`wf doctor` confere o ambiente que o IDE usa.** Roda oito verificações, cada falha com a dica de como corrigir:
@@ -279,7 +280,6 @@
   cria um agente novo e paga de novo. No dashboard, um run morto com agentes na nuvem ganha **Cancel cloud agent**.
 - **As mensagens do kit são em inglês.** Tudo o que o runtime, o CLI e o instalador imprimem, devolvem ou lançam (os
   prefixos `warning:` e `error:` do instalador inclusive); o guia de instalação e as skills citam as mensagens como saem.
-  O `wf init` avisa, a cada execução, quando um arquivo de memória do Claude Code esconde o `AGENTS.md`.
 - **Dashboard redesenhado.** Runs, Board e Metrics com um só arquivo de tokens de cor (claro e escuro) e um formatador
   en-US; na página do run, títulos de raia, zoom mínimo, log da etapa sobre o grafo no celular, foco do teclado que entra
   no log e volta ao nó, e o enquadramento da etapa aberta ou da que falhou.
