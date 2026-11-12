@@ -5,6 +5,7 @@
 //   wf whoami                         # mostra a conta em uso
 //   wf models                         # IDs de modelo liberados para a chave em uso
 //   wf list
+//   wf config show [workflow]         # effective config of the current repo and where each value came from
 //   wf run <workflow> --args '<json>' [--max-cents N] [--resume <runId>]   # primeiro plano; imprime JSON no fim
 //   wf start <workflow> --args '<json>' [--resume <runId>]                 # segundo plano; imprime {jobId}
 //   wf status <jobId>
@@ -20,10 +21,11 @@
 import "./console-to-stderr.js"; // o stdout leva o JSON do resultado: o console do SDK vai para o stderr
 import "./node-check.js"; // antes de tudo: o @cursor/sdk exige Node 22.13+
 import { spawn } from "node:child_process";
-import { openSync } from "node:fs";
+import { existsSync, openSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { Cursor } from "@cursor/sdk";
+import { globalConfigPath, loadEffectiveConfig, repoConfigPath } from "./config/index.js";
 import { INSIDE_WORKFLOW_ENV, runWorkflow } from "./runtime/engine.js";
 import { createJob, installCrashHandlers, jobLogPath, listJobs, readJob, readJobRecord, startJob, waitJob, writeJob } from "./runtime/jobs.js";
 import { loadWorkflows } from "./runtime/registry.js";
@@ -48,11 +50,21 @@ const { positionals, values } = parseArgs({
 const [command, name] = positionals;
 const cwd = resolve(values.cwd!);
 const out = (v: unknown) => process.stdout.write(JSON.stringify(v, null, 2) + "\n");
+/** The flag layer of the config: only what the command line says. WF_MAX_* are the env layer, read by the config. */
+const flagLimits = () => {
+  const number = (flag: "max-cents" | "max-tokens") => {
+    const raw = values[flag];
+    if (raw === undefined) return undefined;
+    const n = Number(raw);
+    if (raw.trim() === "" || !Number.isFinite(n) || n < 0) throw new Error(`--${flag} precisa ser um número maior ou igual a 0, recebeu "${raw}"`);
+    return n;
+  };
+  return { maxCents: number("max-cents"), maxTokens: number("max-tokens") };
+};
 const runOpts = () => ({
   cwd,
   runId: values.resume,
-  maxCents: values["max-cents"] ? Number(values["max-cents"]) : Number(process.env.WF_MAX_CENTS) || undefined, // sem valor: teto padrão do workflow
-  maxTokens: values["max-tokens"] ? Number(values["max-tokens"]) : Number(process.env.WF_MAX_TOKENS) || undefined,
+  ...flagLimits(),
   onEvent: (e: unknown) => process.stderr.write(JSON.stringify(e) + "\n"),
 });
 
@@ -89,6 +101,19 @@ async function main(): Promise<number> {
       out([...(await loadWorkflows(cwd)).values()].map((w) => ({ name: w.meta.name, description: w.meta.description })));
       return 0;
     }
+    case "config": {
+      if (name !== "show") throw new Error("uso: wf config show [workflow] [--max-tokens N] [--max-cents N]");
+      const known = await loadWorkflows(cwd);
+      const wanted = positionals[2];
+      if (wanted !== undefined && !known.has(wanted)) throw new Error(`workflow desconhecido: ${wanted}. Use \`wf list\`.`);
+      const shown = (wanted === undefined ? [...known.values()] : [known.get(wanted)!]).map((def) => {
+        const { config, provenance, violations } = loadEffectiveConfig(def, { cwd, flags: flagLimits() });
+        return [def.meta.name, { config, provenance, violations }] as const;
+      });
+      const file = (path: string) => ({ path, found: existsSync(path) });
+      out({ files: { global: file(globalConfigPath()), repo: file(repoConfigPath(cwd)) }, workflows: Object.fromEntries(shown) });
+      return 0;
+    }
     case "run": {
       const def = await resolveWorkflow();
       const args = JSON.parse(values.args!);
@@ -109,6 +134,7 @@ async function main(): Promise<number> {
       // Valida no pai, antes do spawn, para o erro aparecer aqui e não sumir num processo destacado.
       const def = await resolveWorkflow();
       JSON.parse(values.args!);
+      const { violations } = loadEffectiveConfig(def, { cwd, flags: flagLimits() }); // an unusable config fails here, with its field path
       const job = createJob(cwd, def.meta.name, values.resume);
       const log = openSync(jobLogPath(cwd, job.jobId), "a");
       const child = spawn(
@@ -122,7 +148,7 @@ async function main(): Promise<number> {
       const current = readJobRecord(cwd, job.jobId);
       if (current && child.pid) writeJob(cwd, { ...current, pid: child.pid });
       child.unref();
-      out({ jobId: job.jobId, runId: job.runId, log: jobLogPath(cwd, job.jobId), next: `wf wait ${job.jobId}` });
+      out({ jobId: job.jobId, runId: job.runId, log: jobLogPath(cwd, job.jobId), next: `wf wait ${job.jobId}`, ...(violations.length ? { violations } : {}) });
       return 0;
     }
     case "status": {
@@ -185,7 +211,7 @@ async function main(): Promise<number> {
       }
     }
     default:
-      process.stderr.write("uso: wf <login|whoami|list|run|start|status|wait|jobs|stats|metrics> ...\n");
+      process.stderr.write("uso: wf <login|whoami|list|config|run|start|status|wait|jobs|stats|metrics> ...\n");
       return 2;
   }
 }

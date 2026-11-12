@@ -21,7 +21,8 @@
     "stats": "tsx packages/runtime/src/cli.ts stats",
     "docs:check": "tsx scripts/check-docs.ts",
     "docs:mermaid": "tsx scripts/check-mermaid.ts",
-    "docs:events": "tsx scripts/events-reference.ts"
+    "docs:events": "tsx scripts/events-reference.ts",
+    "docs:config": "tsx scripts/config-reference.ts"
   },
   "devDependencies": {
     "@types/node": "^22.13.0",

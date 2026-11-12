@@ -50,8 +50,9 @@ e pode ser aberta em outro dispositivo. Gere a URL só quando for concluir o log
 `[plan_required] Cloud Agent is not available for free users. Please upgrade to Pro.`, e `models` dá o mesmo erro
 (medido em 2026-11-11).
 
-Ajuste os IDs do mapa de modelos em `packages/runtime/workflows/implement-issue.ts` ou nas variáveis `WF_MODEL_*`
-([2.2 · Configuração](02-configuracao-inicial.md)).
+Ajuste os modelos de cada papel na configuração JSON ou nas variáveis `WF_MODEL_*`
+([2.2 · Configuração](02-configuracao-inicial.md), [6.2](../reference/config.md)); os defaults estão em `meta.roles` de
+`packages/runtime/workflows/implement-issue.ts`.
 
 ## 5. Teste de fumaça real
 

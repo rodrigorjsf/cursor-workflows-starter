@@ -22,7 +22,11 @@ The runtime's messages are in Portuguese. This skill quotes the ones it matches,
      resume: `implement-issue` (`additionalProperties: false`) fails with `args inválidos`, and a workflow without
      that guard starts from scratch, without the journal.
 2. Call `start_workflow` with `{ name, args }` (and `resumeRunId`, if any). The step ends with the `jobId` in hand; a
-   return with `error` (`workflow desconhecido`) goes back to step 1.
+   return with `error` (`workflow desconhecido`, or an invalid config with its file and field path) goes back to
+   step 1, or to the user for the config.
+   - When the user asks for a tighter budget for this run, pass `overrides` (`maxTokens`, `maxCents`,
+     `maxTokensPerStep`, `concurrency`). They only tighten: a looser value comes back in `violations` and has no
+     effect, so tell the user.
 3. Chain `wait_workflow` calls with `{ jobId, timeoutSec: 45 }`, one right after the other, until `status` is no
    longer `running`. A return with `error` and no `status` (`job não encontrado`) also ends the wait: relay the error
    and the `jobId` to the user.

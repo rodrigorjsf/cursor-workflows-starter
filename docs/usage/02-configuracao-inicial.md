@@ -44,15 +44,17 @@ login salvo. Na dúvida, deixe a linha de fora e use `wf login`.
 ## 2. Modelos
 
 Os IDs dependem do plano e das restrições do admin. Liste com `npm run models` (`wf models`), que mostra `id`,
-`displayName`, `aliases` e `params` de cada modelo. O exemplo usa cinco papéis:
+`displayName`, `aliases` e `params` de cada modelo. O modelo de cada etapa vem do **papel** dela: o `implement-issue`
+declara oito (`classify`, `implement.low`, `implement.med`, `implement.high`, `review`, `fix`, `design`, `pr-text`).
+Cinco têm um modelo de código, e uma variável `WF_MODEL_*` o troca:
 
 | Variável | Papel | Default do exemplo |
 |---|---|---|
-| `WF_MODEL_CLASSIFY` | Classificar a complexidade quando a issue não tem label | `composer-2.5` |
-| `WF_MODEL_LOW` | Tarefas mecânicas | `composer-2.5` |
-| `WF_MODEL_MED` | Implementação típica | `grok-4.7` |
-| `WF_MODEL_HIGH` | Implementação complexa | `grok-4.7` com `reasoning_effort=high` |
-| `WF_MODEL_REVIEW` | Code review | `grok-4.7` com `reasoning_effort=high` |
+| `WF_MODEL_CLASSIFY` | `classify`: classificar a complexidade quando a issue não tem label | `composer-2.5` |
+| `WF_MODEL_LOW` (ou `WF_MODEL_IMPLEMENT_LOW`) | `implement.low`: tarefas mecânicas | `composer-2.5` |
+| `WF_MODEL_MED` (ou `WF_MODEL_IMPLEMENT_MED`) | `implement.med`: implementação típica | `grok-4.7` |
+| `WF_MODEL_HIGH` (ou `WF_MODEL_IMPLEMENT_HIGH`) | `implement.high`: implementação complexa | `grok-4.7` com `reasoning_effort=high` |
+| `WF_MODEL_REVIEW` | `review`: code review | `grok-4.7` com `reasoning_effort=high` |
 
 Os defaults são modelos do Cursor (Composer e Grok), que os planos pagos da The X Subscription incluem na franquia
 semanal. Eles mudaram depois de um teste num Premium em 2026-11-11
@@ -69,8 +71,12 @@ repositório ([5.1 · Segurança](../operating/01-governanca-e-custos.md#seguran
 §9). A variante com `reasoning_effort=high` (HIGH e REVIEW) não foi testada: confira em `npm run models` que o
 `grok-4.7` oferece `reasoning_effort` antes de usar esses defaults.
 
-`WF_MODEL_*` aceita só um ID. Os `params` (`reasoning_effort=high`) valem só quando a variável não está definida:
-`WF_MODEL_HIGH` ou `WF_MODEL_REVIEW` definidos no ambiente perdem o `reasoning_effort=high`.
+`WF_MODEL_<PAPEL>` com só um ID (`WF_MODEL_REVIEW=grok-5`) troca o ID e **mantém** os `params` do papel; com
+colchetes (`grok-5[reasoning_effort=low]`) troca também os `params`, e `grok-5[]` os limpa. Para ir além do ambiente,
+o modelo (com `params`), o `timeoutMs`, as tentativas e o teto de tokens de cada papel ficam em arquivos JSON, global
+e do repositório: [6.2 · Referência de configuração](../reference/config.md). O `wf config show` mostra o que vale e de
+onde veio. Mudança desde a versão anterior: as etapas `fix` (correção) e `design` (plano e desenho) são papéis
+próprios e não seguem mais `WF_MODEL_MED`/`WF_MODEL_HIGH`.
 
 > **Validação de modelo:** em runs locais, o SDK confere o ID (ou alias) contra o catálogo da sua conta antes de
 > rodar. Se o ID não existir para você, a etapa falha com `ConfigurationError`: `Cannot use this model: <id>.
@@ -86,6 +92,8 @@ repositório ([5.1 · Segurança](../operating/01-governanca-e-custos.md#seguran
 |---|---|
 | CLI | `--max-cents 200`, `--max-tokens 2000000` |
 | MCP / CLI (default) | Variáveis `WF_MAX_CENTS` e `WF_MAX_TOKENS` (nos `mcp.json` do exemplo: `500` e `2000000`) |
+| Arquivos de config | `maxTokens`, `maxCents` e `concurrency` por workflow, no arquivo global (`~/.cursor-workflows/config.json`) e no do repositório (`.agents/workflows/config.json`); no global, `caps` que o resto só pode apertar ([6.2](../reference/config.md#tetos)) |
+| Chat | `overrides` do `start_workflow` (`maxTokens`, `maxCents`, `maxTokensPerStep`, `concurrency`): só apertam |
 | Dentro do workflow | `ctx.budget.remainingCents()`, para rebaixar o modelo antes de estourar. `ctx.budget.spentCents()` dá o custo que o teto conta; `ctx.budget.chargedCents()`, só o cobrado |
 
 Como funciona:
@@ -152,7 +160,8 @@ Como funciona:
 | `WF_MAX_CENTS` | sem teto | Teto padrão por run, em centavos, comparado com `spentCents` (§3) |
 | `WF_MAX_TOKENS` | sem teto | Teto padrão de tokens por run. Defina junto com `WF_MAX_CENTS` (§3) |
 | `WORKFLOWS_DIR` | — | Pasta extra de workflows (além de `workflows/` do kit e `.agents/workflows/` do repositório) |
-| `WF_MODEL_*` | ver §2 | Mapa de modelos do exemplo (só o ID; sem `params`) |
+| `WF_MODEL_*` | ver §2 | Modelo de um papel do workflow (`WF_MODEL_<PAPEL>`): `id` mantém os `params`, `id[param=valor]` os troca ([6.2](../reference/config.md#papéis-globs-de-label-e-variáveis)) |
+| `WF_HOME` | `~/.cursor-workflows` | Pasta por usuário do kit: `config.json` global, índice de runs, banco de métricas |
 | `WF_MCP_SERVER_NAME` | `workflows` | Nome do servidor do kit no `mcp.json` do projeto. Dentro das etapas, o engine registra com esse nome um servidor inline sem tools, que encobre o do arquivo (§5). Mude se o seu `mcp.json` usa outro nome |
 | `NO_OPEN_BROWSER` | — | `wf login` imprime a URL no stderr em vez de abrir o navegador |
 

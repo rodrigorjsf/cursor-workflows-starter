@@ -14,6 +14,35 @@ export interface WorkflowPhase {
   detail?: string;
 }
 
+/**
+ * Whether a role's steps may run on a Cursor cloud agent (a later spec): `ok` as they are, `read-only` only when the
+ * step reads and never writes, `never` always local (the step depends on the local worktree).
+ */
+export type CloudCapability = "ok" | "read-only" | "never";
+
+/** What a role starts from, before the config layers change it. A call's own options override these. */
+export type RoleDefaults = Pick<AgentCallOptions, "model" | "timeoutMs" | "retries" | "schemaRetries" | "settingSources">;
+
+/**
+ * A named kind of step of a workflow (`classify`, `implement.low`, `review`...). The names are the public contract of
+ * the workflow's config: the keys under `workflows.<name>.roles` in the config files. A name the workflow does not
+ * declare is an error, in the config and in `agent({ role })`.
+ */
+export interface WorkflowRole {
+  /** Lowercase words joined by dots or dashes: `review`, `implement.low`. */
+  name: string;
+  /** One line: what the role's steps do. Shows up in `list_workflows`. */
+  description?: string;
+  cloud: CloudCapability;
+  /** The role's code defaults. They sit above `WorkflowDefinition.defaults` and below the options of the `agent()` call. */
+  defaults?: RoleDefaults;
+  /**
+   * Extra suffixes of the `WF_MODEL_<suffix>` env var that sets this role's model, besides the role name in upper case
+   * with dots and dashes as underscores (`implement.low` -> `WF_MODEL_IMPLEMENT_LOW`). Keeps old variable names working.
+   */
+  envAliases?: string[];
+}
+
 export interface WorkflowMeta {
   /** Nome estável: o `name` do start_workflow (MCP) e o de `wf run <nome>` (CLI). */
   name: string;
@@ -24,11 +53,19 @@ export interface WorkflowMeta {
   phases?: WorkflowPhase[];
   /** JSON Schema dos args; o runtime valida (Ajv) antes de rodar e falha o run se não bater. */
   argsSchema?: JsonSchema;
+  /** The roles of the workflow's steps. Config sets model, timeouts, retries... per role. */
+  roles?: WorkflowRole[];
 }
 
 export interface AgentCallOptions {
   /** Rótulo no log/progresso. */
   label?: string;
+  /**
+   * The step's role, one of `meta.roles`. The config layers (global file, repo file, env, flags) set the step's model,
+   * timeout, retries, schema retries and setting sources by role, and they win over the options of this call.
+   * A role the workflow does not declare fails the step.
+   */
+  role?: string;
   /** Agrupa no progresso; use dentro de parallel/pipeline em vez de phase() global. */
   phase?: string;
   /**

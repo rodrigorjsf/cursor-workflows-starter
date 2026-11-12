@@ -61,6 +61,7 @@ export default defineWorkflow<{ target: string }>({
 | Option | Meaning |
 |---|---|
 | `label` | Name of the step in progress and metrics. Always set it; without one the runtime uses a hash. |
+| `role` | One of `meta.roles`. The config files and `WF_MODEL_<ROLE>` set the step's model, timeout, retries, schema retries and setting sources by role; they win over the other options of the call, and the role's own `defaults` lose to them. A role the workflow does not declare fails the step. |
 | `phase` | Groups progress; use it inside `parallel`/`pipeline` instead of the global `ctx.phase`. |
 | `model` | `{ id, params? }`. Required for local agents; falls back to `defaults.model`. The SDK checks the id against the account catalog: an unknown id fails the step. `npm run models` lists the ids. |
 | `schema` | JSON Schema with `type: "object"` at the root. Turns the step into a structured one. |
@@ -78,13 +79,23 @@ export default defineWorkflow<{ target: string }>({
 ## Definition fields
 
 - `meta`: `name` (stable), `description` (one line), `whenToUse` (triggers the chat agent reads), `phases`,
-  `argsSchema` (validated with Ajv before the run; a mismatch fails the run with `args inválidos`).
+  `argsSchema` (validated with Ajv before the run; a mismatch fails the run with `args inválidos`), `roles`
+  (`{ name, cloud, defaults?, envAliases?, description? }[]`: the named kinds of step, such as `classify` or
+  `implement.low`; their names are the keys users configure under `workflows.<name>.roles`, so choose them as a public
+  contract. `cloud` is `ok`, `read-only` or `never`; `defaults` holds the role's `model`, `timeoutMs`, `retries`,
+  `schemaRetries`, `settingSources`).
 - `defaults`: `model`, `timeoutMs`, `retries`, `schemaRetries`, `tools`, `sandbox`, applied to every `agent()` call that
   does not override them.
-- `budget`: `{ maxTokens?, maxCents? }`, the cap when the caller passes none; an explicit `null` turns a cap off.
+- `budget`: `{ maxTokens?, maxCents? }`, the cap when nothing in the config sets one; an explicit `null` turns a cap off.
 
 ## Caps
 
+- The run's limits are layered: code defaults (`budget`, `defaults`, role defaults) < the global file
+  `~/.cursor-workflows/config.json` < the repo file `.agents/workflows/config.json` < env (`WF_MAX_TOKENS`,
+  `WF_MAX_CENTS`) < flags (`--max-tokens`, `--max-cents`) < the `overrides` of `start_workflow`. The global `caps` then
+  clamp the result: a lower number or a narrower list wins. The repo file and `overrides` can only tighten them; a
+  request that does not is reported as a violation and ignored. `wf config show [workflow]` prints the effective values
+  and where each came from.
 - A cap is checked **before** each step and each retry. A step that already started is not interrupted, and a step has
   no token cap of its own, so the overshoot can reach concurrency × one step. For tight caps use low `concurrency` and
   a short `timeoutMs` on steps that write.

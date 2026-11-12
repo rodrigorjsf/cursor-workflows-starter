@@ -54,4 +54,4 @@ Behaviour is configured in JSON, in two files, and the user's file holds the onl
 
 ---
 
-[← Anterior: 6.1 · Referência de eventos](../reference/events.md) · [Índice](../README.md) · [Próximo: 7.2 · ADR-0002: The event log is the source of truth →](0002-event-log-source-of-truth.md)
+[← Anterior: 6.2 · Referência de configuração](../reference/config.md) · [Índice](../README.md) · [Próximo: 7.2 · ADR-0002: The event log is the source of truth →](0002-event-log-source-of-truth.md)
