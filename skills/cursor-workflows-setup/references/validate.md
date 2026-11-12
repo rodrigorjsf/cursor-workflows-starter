@@ -1,6 +1,6 @@
 # Validate the kit in the Cursor IDE
 
-"The kit works in the Cursor IDE" means six scenarios pass in the real IDE, on the machine of the person who will use
+"The kit works in the Cursor IDE" means seven scenarios pass in the real IDE, on the machine of the person who will use
 it. The IDE's behavior is the evidence: never mark a scenario pass on your own reading of the output.
 
 ## The guided way
@@ -15,7 +15,8 @@ saw and writes the report. It asks questions, so the user runs it, in the IDE's 
 - It creates a private sandbox repo with three `complexity:low` issues (through `setup-sandbox-repo.sh`), then runs
   `wf init` and `wf doctor` on it. Scenario 1 is read from `wf doctor`, and counts only when the user says the terminal is
   the IDE's.
-- Each other scenario gets the exact text to type, then a result (pass, fail or skip) and a one-line note.
+- Each other scenario gets the exact text to type (or what to look at, in scenario 7), then a result (pass, fail or skip)
+  and a one-line note.
 - Scenario 5 quits Cursor, which ends the wizard (it runs in Cursor's terminal). The answers are kept: the user reopens
   Cursor and runs the wizard again, and it goes on from scenario 5.
 - It writes `validation-report.json` with local paths and repository names anonymized, shows the body of the issue, and
@@ -25,8 +26,8 @@ Done when the user has the report and has said whether to file it. Hand them the
 
 ## The scenarios by hand
 
-Without the wizard, walk the user through the same six, in order, and record each as pass or fail with a one-line
-note. Use a throwaway repo for scenarios 3 to 6, never one the user cares about, and keep the run caps low (the chat
+Without the wizard, walk the user through the same seven, in order, and record each as pass or fail with a one-line
+note. Use a throwaway repo for scenarios 3 to 7, never one the user cares about, and keep the run caps low (the chat
 accepts tighter `overrides` per run).
 
 1. **Doctor is green in the IDE's environment.** The user opens the IDE's own terminal in the repo and you run
@@ -49,6 +50,13 @@ accepts tighter `overrides` per run).
    steps.
 6. **A run cancels from the chat.** Start a run, then ask the chat to cancel it. Pass: the job ends `cancelled` and its
    `runId` can be resumed.
+7. **The dashboard shows the run live.** The user types `/run-workflow smoke` in the chat. The chat gives the dashboard
+   link (`dashboardUrl`, `http://127.0.0.1:4317` unless `WF_DASH_PORT` says otherwise) and opens it in Cursor's built-in
+   browser. Pass, all in that browser: the run's card is in the Ping column of the smoke board and moves to Done on its
+   own, without reloading; clicking the card opens the Run view, whose graph draws the `ping` step (it pulses while it
+   runs, then turns green); hovering the step shows its model, location, attempts, tokens, cost and duration; clicking it
+   opens its log (prompt, what the agent said, tool calls). A page that is blank, or a link that is refused, is a fail:
+   note what the browser showed.
 
 When a scenario fails, collect the `wf doctor --json` output and the failing job's `wf status <jobId>`, replace local
 paths and repo names with placeholders, show the user the text, and file a GitHub issue on the kit's repository only

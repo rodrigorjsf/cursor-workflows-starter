@@ -4,6 +4,18 @@
 
 ### Adicionado
 
+- **Dashboard: log da etapa, cancelar um run, comando de resume e o cenário 7 da validação.** Clicar num nó do grafo (ou
+  Enter nele) abre ao lado dele o log da etapa, ao vivo: por tentativa, o prompt, o que o agente disse, as chamadas de tool
+  com a saída de cada uma, ou, num comando de `ctx.exec`, a linha de comando e a saída com `stdout` e `stderr` apartados; a
+  vista acompanha o fim do log até o leitor rolar para cima, e no replay o painel mostra o log como estava naquele ponto. O
+  cabeçalho da página do run ganha **Cancel run**, que cancela pelo mesmo caminho do `wf cancel` (`POST
+  /api/runs/<runId>/cancel`, a única escrita do dashboard: exige o token CSRF de `/api/csrf` no cabeçalho `X-CSRF-Token` e
+  recusa uma origem de outro site), e **Copy resume command** num run `failed` ou `cancelled`
+  (`wf start <workflow> --args '<args>' --resume <runId> --cwd <repositório>`; o log guarda só o hash dos args, então o
+  comando traz um marcador no lugar deles). Os cartões do Board e as linhas da tabela Runs passam a abrir a página do run. O
+  assistente de validação no Cursor IDE ganha o cenário 7, "o dashboard mostra o run ao vivo", e o critério de release
+  (`releaseCriterionMet`) passa a pedir os sete em `pass`. No runtime, o que lê e cancela jobs sem precisar do engine foi para
+  `job-state.ts` (o `jobs.ts` reexporta), para o dashboard cancelar sem carregar o `@cursor/sdk`.
 - **Dashboard: o app, o quadro (Board) e `ctx.card`.** A página inicial do dashboard passa a ser um app em React com três
   menus, Runs, Board e Metrics (o painel de métricas de antes, no menu Metrics). O app é empacotado com o esbuild quando o
   dashboard sobe, guardado por hash do conteúdo em `~/.cursor-workflows/dashboard-cache/` e servido pelo próprio

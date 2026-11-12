@@ -2,7 +2,7 @@
   "name": "@cursor-workflows/dashboard",
   "version": "0.3.0",
   "private": true,
-  "description": "The kit's local dashboard: a read-only web server over the runs and the metrics of every repo.",
+  "description": "The kit's local dashboard: a local web server over the runs and the metrics of every repo; it reads, and its one action is cancelling a run.",
   "license": "MIT",
   "type": "module",
   "engines": {

@@ -192,7 +192,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
   /** The cancel action: the token and the origin first, then `cancelRun`, and an answer that says what it did. */
   async function cancel(req: IncomingMessage, res: ServerResponse, runId: string): Promise<void> {
     if (!sameOrigin(req) || !sameToken(req.headers["x-csrf-token"], csrfToken)) {
-      return send(res, 403, { error: "csrf token missing or wrong: reload the page" });
+      return send(res, 403, { error: "csrf token missing or wrong" });
     }
     const outcome = await cancelRun(runId, cancelTimeoutMs);
     switch (outcome.kind) {

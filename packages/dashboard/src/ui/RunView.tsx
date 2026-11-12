@@ -129,8 +129,8 @@ function Canvas({ graph, layout, now, selectedId, onOpen }: { graph: RunGraph; l
       cancelled = true;
       clearTimeout(timer);
     };
-    // Frame again when the layout or what is framed changes, not on every tick of the clock.
-  }, [layout, settled]);
+    // Frame again when the layout, what is framed or the size of the pane (a log panel opened beside it) changes, not on every tick of the clock.
+  }, [layout, settled, pane.width, pane.height]);
   return (
     <ReactFlow
       nodes={nodes}

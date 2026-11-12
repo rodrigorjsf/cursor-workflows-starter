@@ -117,7 +117,7 @@ function anonymizeFreeText(report: Report, fn: (text: string) => string): Report
 }
 
 /** The release criterion of the foundation spec: "works in the Cursor IDE" means these many scenarios pass. */
-const SCENARIO_COUNT = 6;
+const SCENARIO_COUNT = 7;
 
 const RESULTS: Record<string, Result> = { pass: "pass", fail: "fail" };
 

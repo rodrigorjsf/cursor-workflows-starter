@@ -83,7 +83,9 @@ function describeCall(item: ContentItem): { title: string; args?: string } {
       return { title: `$ ${words.join(" ")}`, ...(typeof cwd === "string" ? { args: `in ${cwd}` } : {}) };
     }
   }
-  return { title: tool, ...(parsed === undefined || parsed === null ? {} : { args: JSON.stringify(parsed, null, 2) }) };
+  // The SDK reports every MCP tool as `mcp`, the tool itself in `toolName`.
+  const reached = typeof parsed === "object" && parsed !== null ? (parsed as { toolName?: unknown }).toolName : undefined;
+  return { title: typeof reached === "string" ? `${tool}: ${reached}` : tool, ...(parsed === undefined || parsed === null ? {} : { args: JSON.stringify(parsed, null, 2) }) };
 }
 
 /** Adds `block` to `blocks`, joining it to the last one when both are the same stream and text is there for both. */

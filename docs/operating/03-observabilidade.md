@@ -224,7 +224,9 @@ por exemplo de subagents ou de compactação.
 O dashboard é um servidor local, um só por usuário, para os runs de **todos** os repositórios. Ele mora no pacote
 `packages/dashboard/` (as dependências dele nunca entram no runtime) e lê dois lugares: o índice global de runs
 (`~/.cursor-workflows/runs.jsonl`, que aponta o repositório de cada run) e, por run, o log de eventos
-(`<repositório>/.workflows/runs/<runId>/events.jsonl`); mais o banco de métricas, em modo leitura. Ele nunca escreve.
+(`<repositório>/.workflows/runs/<runId>/events.jsonl`); mais o banco de métricas, em modo leitura. Ele nunca escreve nos
+arquivos dos runs. A única ação dele é [cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume), pelo mesmo caminho do
+`wf cancel`.
 
 **Como abrir.** O `start_workflow` garante que o dashboard está rodando (inicia um processo destacado se nada responde
 na porta) e devolve `dashboardUrl` ao lado do `jobId`; a skill `run-workflow` abre o link no navegador embutido do
@@ -238,7 +240,7 @@ servidor `workflows`. Um dashboard que já está de pé continua sendo informado
 em `~/.cursor-workflows/dashboard.pid` e a saída em `dashboard.log`; `kill $(jq -r .pid ~/.cursor-workflows/dashboard.pid)`
 o encerra.
 
-**API JSON** (`GET`, só leitura):
+**API JSON** (`GET`; a única ação é o `POST` de cancelar um run):
 
 | Rota | Resposta |
 |---|---|
@@ -248,6 +250,8 @@ o encerra.
 | `/api/runs/<runId>/events` | stream de eventos (SSE) do log do run, ao vivo: veja [Acompanhar um run ao vivo](#acompanhar-um-run-ao-vivo) |
 | `/runs/<runId>` | a página do run: o grafo ao vivo, veja [Ver um run como grafo](#ver-um-run-como-grafo) (HTML, com o script e o estilo em `/assets/…`) |
 | `/api/runs/<runId>/steps/<stepId>/content` | o conteúdo de uma etapa: prompt, mensagens do agente, chamadas de tool e saída de comandos |
+| `/api/csrf` | `{csrfToken}`: o token que o `POST` de cancelar exige |
+| `POST /api/runs/<runId>/cancel` | cancela o job que executa o run (cabeçalho `X-CSRF-Token`): veja [Cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume) |
 | `/api/summary?days=` | o resumo de métricas dos painéis abaixo |
 | `/api/health` | `{app, pid}`: como quem chama sabe que é o dashboard que responde na porta |
 
@@ -309,16 +313,56 @@ para um run em andamento e para um que já terminou):
   nuvem trarão `cloud`), as tentativas, os tokens, o custo, a duração e o tipo do erro (`timeout`, `rate-limit`…; num
   comando, `exit 2`, `timeout`…). Os números somam todas as tentativas e todas as execuções do run; o custo é o que o teto
   de custo conta (o maior entre o bruto e o cobrado).
+- **Clicar** num nó (ou Enter nele) abre o [log da etapa](#o-log-de-uma-etapa) ao lado do grafo.
 - **Replay.** Num run que não está em andamento, **Replay** reconstrói o grafo evento a evento, na ordem do log, com
   velocidade de 1× a 20×, pausa e uma barra para ir a qualquer ponto. O grafo de qualquer trecho do log é o mesmo que o
-  run teria naquele instante.
+  run teria naquele instante, e o painel de log aberto mostra o log da etapa como ele estava naquele ponto (o replay anda
+  pelos eventos que mudam o desenho: o log de uma etapa aparece inteiro quando ela termina; a barra deixa parar em
+  qualquer evento).
 - Um run grande (o `implement-issue` passa de 50 comandos) não cabe na tela em tamanho legível: a tela enquadra os últimos
   nós de um run em andamento, ou os primeiros de um que terminou, e **Fit View** mostra tudo.
 
-A página só lê a API: o stream `?content=false` do run (o conteúdo das etapas é do log de cada etapa, que vem em outra
-tela) e `GET /api/runs/<runId>` para o status, que ela consulta a cada poucos segundos. Ela espera o run aparecer no índice
+A página lê a API: o stream `?content=false` do run (o conteúdo das etapas vem só do painel de log, que pede o de uma etapa
+por vez), `GET /api/runs/<runId>` para o status e o repositório, que ela consulta a cada poucos segundos, e só age para
+cancelar um run. Ela espera o run aparecer no índice
 (logo depois do `start_workflow` ele ainda pode não estar), fecha o stream quando o run termina e o reabre se um resume o
 põe de volta em andamento. Eventos de outra versão do esquema ou de tipo desconhecido são ignorados, não derrubam a tela.
+
+### O log de uma etapa
+
+Clicar num nó abre, ao lado do grafo, o log da etapa, montado só a partir dos eventos `content` dela:
+
+- **Etapa de agente:** por tentativa, o prompt (um re-prompt aparece como outro bloco), o que o agente disse (escrito
+  quando um turno termina), cada chamada de tool com os argumentos e, logo abaixo, a saída dela. Uma tool de MCP tem o título
+  `mcp: <nome da tool>`.
+- **Comando de `ctx.exec`:** a linha de comando (`$ git commit -m …`), o diretório e a saída, com `stdout` e `stderr`
+  separados e na ordem em que chegaram.
+- **Ao vivo.** Enquanto a etapa roda, o painel lê o conteúdo que já existe (`/api/runs/<runId>/steps/<stepId>/content`) e
+  segue o resto pelo stream (`/events?stepId=<stepId>&lastEventId=<a última linha lida>`), sem lacuna e sem repetição.
+  A vista acompanha o fim do log até o leitor subir a barra de rolagem; ao terminar a etapa, o painel lê o conteúdo mais uma
+  vez e fecha o stream. Esc (ou o botão ×) fecha o painel.
+- **Texto removido ou cortado.** Num run que passou pela retenção, o evento fica e o texto não: o painel diz que o texto
+  foi removido (com o tamanho). Um conteúdo cortado em 32768 caracteres diz que está cortado.
+
+O painel mostra tudo como texto, nunca como HTML: um log guarda o que um agente escreveu.
+
+### Cancelar um run e copiar o comando de resume
+
+No cabeçalho da página do run:
+
+- **Cancel run** (só num run em andamento) pede uma confirmação ali mesmo e cancela pelo mesmo caminho do `wf cancel` e do
+  `cancel_workflow` (`cancelJob`: `SIGTERM` ao processo do job, que cancela os agentes, desfaz a etapa de escrita em curso e
+  escreve o fim do run como `cancelled`). O cartão vai para a coluna Cancelled quando o log o registra. Se o job demora mais
+  do que a espera (20 s) para parar, a resposta diz que ele ainda está parando. Um run que não foi iniciado como job (`wf run`
+  num terminal) não tem processo registrado para sinalizar: o dashboard responde `409` e diz para dar Ctrl-C naquele terminal.
+- **Copy resume command** (num run `failed` ou `cancelled`) copia
+  `wf start <workflow> --args '<os args do primeiro start, em JSON>' --resume <runId> --cwd <repositório>`. O log guarda só o
+  hash dos args, nunca eles, então o comando traz um marcador no lugar: colado sem edição, o `wf` recusa o `--args` (não é
+  JSON) antes de iniciar qualquer coisa, em vez de retomar com outros args. O comando também aparece num campo de texto, para
+  copiar à mão quando o navegador não deixa escrever na área de transferência.
+
+O cancelamento exige o token CSRF (veja [Segurança](#segurança-do-dashboard)): a página lê o token em `/api/csrf` a cada
+cancelamento e o manda em `X-CSRF-Token`.
 
 A página do run tem um app à parte, também empacotado pelo próprio dashboard: o `esbuild` junta React, React Flow e
 elkjs quando o dashboard sobe (cerca de meio segundo; uma página pedida antes disso espera o mesmo build), e os arquivos
@@ -391,11 +435,14 @@ resposta traz o link sem o estado, e a seguinte, o estado. A resposta é guardad
 aberta, 1 hora depois de mesclada ou fechada, e 5 minutos quando o `gh` não consegue responder (sem login, sem rede, sem
 `gh`); uma consulta que falha mantém o último estado conhecido. Só a URL exata de uma PR do github.com vai ao `gh`.
 
-Segurança:
+### Segurança do dashboard
 
 - escuta só em `127.0.0.1`;
 - recusa `Host` diferente de `127.0.0.1` e `localhost` (proteção contra DNS rebinding);
-- aceita só `GET` e `HEAD`, e não envia cabeçalhos CORS;
+- aceita `GET` e `HEAD`, e um único `POST`, o de cancelar um run: ele exige o token CSRF (`/api/csrf`, um valor aleatório por
+  processo do dashboard, comparado em tempo constante, que só um script lendo uma resposta desta origem consegue ter) e
+  recusa um pedido que declare outra origem (`Origin` ou `Sec-Fetch-Site`); os outros métodos e as outras rotas dão `405`;
+- não envia cabeçalhos CORS;
 - abre o banco em modo leitura;
 - não carrega nada de fora: os apps web são empacotados localmente, sem CDN, sem fontes nem imagens remotas. A página
   inicial vai com a política `default-src 'self'; script-src 'self'; style-src 'self'`, sem código inline, e a página do

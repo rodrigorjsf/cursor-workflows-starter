@@ -60,7 +60,7 @@ test("the host check lets the loopback names through and refuses any other Host,
   }
 });
 
-test("it is read-only and sends no CORS headers", async () => {
+test("it accepts no write but the cancel action (see cancel.test.ts) and sends no CORS headers", async () => {
   for (const method of ["POST", "PUT", "DELETE", "PATCH"]) {
     const reply = await http(dash.url, "/api/runs", { method });
     assert.equal(reply.status, 405, method);

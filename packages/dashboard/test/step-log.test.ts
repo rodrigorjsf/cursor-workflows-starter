@@ -60,6 +60,13 @@ test("a command of ctx.exec is its command line with the output that came from i
   );
 });
 
+test("a call to an MCP tool is titled by the tool it reaches, not by the generic name the SDK gives every one of them", () => {
+  const log = buildStepLog([call("mcp", { providerIdentifier: "custom-user-tools", toolName: "submit_result", args: { answer: "pong" } }, "c1")]);
+  const [tool] = log.attempts[0]!.entries;
+  assert.equal(tool!.kind === "tool" && tool.title, "mcp: submit_result");
+  assert.match(String(tool!.kind === "tool" && tool.args), /"answer": "pong"/, "the arguments stay whole");
+});
+
 test("each attempt of a step is its own section, in the order the attempts began", () => {
   const log = buildStepLog([prompt("first try", "a1"), said("hmm", "a1"), prompt("second try", "a2"), said("better", "a2"), prompt("re-prompt: fix the schema", "a2")]);
   assert.deepEqual(

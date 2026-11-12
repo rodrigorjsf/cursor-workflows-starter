@@ -1,5 +1,5 @@
 // The actions of the Run view's header: cancel a running run, and copy the command that resumes one that stopped.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { copyText } from "./clipboard.js";
 import { canResume, resumeCommand } from "./resume-command.js";
 import { cancelRun } from "./run-actions.js";
@@ -19,6 +19,13 @@ export function RunActions({ runId, status, info, onChanged }: RunActionsProps) 
   const [cancel, setCancel] = useState<CancelState>({ step: "idle" });
   const [copied, setCopied] = useState<"yes" | "no">();
   const [shown, setShown] = useState(false);
+
+  // A resume puts a cancelled run back to running: it can be cancelled again, so what the last cancel said is forgotten.
+  const before = useRef(status);
+  useEffect(() => {
+    if (status === "running" && before.current !== "running") setCancel({ step: "idle" });
+    before.current = status;
+  }, [status]);
 
   const send = async () => {
     setCancel({ step: "sending" });

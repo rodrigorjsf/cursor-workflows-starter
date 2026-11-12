@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# WHAT: Walks a person through the six Cursor IDE validation scenarios: it creates a throwaway GitHub repo (with
+# WHAT: Walks a person through the seven Cursor IDE validation scenarios: it creates a throwaway GitHub repo (with
 #   setup-sandbox-repo.sh) and sets it up with `wf init`, runs `wf doctor` on it, says exactly what to type in the Cursor
 #   chat for each scenario, records what the person saw, writes validation-report.json and offers to file it as an issue.
-# WHY: "Works in the Cursor IDE" is the release criterion of the foundation spec, and six scenarios that passed, recorded
+# WHY: "Works in the Cursor IDE" is the release criterion of the foundation spec, and seven scenarios that passed, recorded
 #   the same way every time, are its evidence. The IDE's behaviour cannot be tested offline: a person has to look.
 # WHEN: Before a release, on a new machine or account, and after a new Cursor version. Run it in Cursor's own terminal
 #   (Terminal panel): scenario 1 counts only there, because the IDE picks its own Node and PATH.
@@ -10,7 +10,7 @@
 #   for the installed kit. Needs `wf`, a logged-in `gh` and the kit's dependencies. Answers are kept in
 #   `<report-dir>/progress.env` (default `~/.cursor-workflows/validation`), so Ctrl-C, or quitting Cursor in scenario 5,
 #   loses nothing: run it again. `WF_KIT_REPO=owner/repo` files the issue somewhere other than the kit's origin;
-#   `GH_VISIBILITY=--public` reaches the sandbox script. Scenarios 3 to 6 run workflows: about 800k tokens, on models the
+#   `GH_VISIBILITY=--public` reaches the sandbox script. Scenarios 3 to 7 run workflows: about 800k tokens, on models the
 #   plans include.
 #
 # The library below, down to the STAGES marker, is the /wizard skill's template.sh, unedited. The wizard's own helpers
@@ -190,7 +190,7 @@ finish() {
 }
 
 # ──────────────────────────────────────────────────────────────────────────
-# STAGES: a sandbox repo, the six scenarios of the foundation spec, and the report.
+# STAGES: a sandbox repo, the seven scenarios (six of the foundation spec, the dashboard's of the live dashboard spec), and the report.
 # ──────────────────────────────────────────────────────────────────────────
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -198,7 +198,7 @@ KIT="$(cd "$HERE/../.." && pwd -P)"
 SELF="$HERE/$(basename "${BASH_SOURCE[0]}")"
 REPORT_DIR="${1:-${WF_HOME:-$HOME/.cursor-workflows}/validation}"
 ENV_FILE="$REPORT_DIR/progress.env" # the library's value store: it keeps the answers across runs
-TOTAL_STAGES=9
+TOTAL_STAGES=10
 
 # ── Helpers of this wizard ────────────────────────────────────────────────
 
@@ -238,7 +238,7 @@ ask_note() {
 
 # scenario_stage N "Title" opens the stage of scenario N and saves its title for the report.
 scenario_stage() {
-  stage "Scenario $1 of 6 · $2"
+  stage "Scenario $1 of 7 · $2"
   record "S$1_TITLE" "$2"
 }
 
@@ -295,7 +295,7 @@ if SANDBOX_DIR=$(_existing SANDBOX_DIR) && [[ -d "$SANDBOX_DIR" ]]; then
   SANDBOX_REPO=$(_existing SANDBOX_REPO)
   say "Reusing the sandbox of the earlier run: $SANDBOX_REPO, in $SANDBOX_DIR"
 else
-  say "Scenarios 3 to 6 run workflows on a throwaway repository with issues to implement."
+  say "Scenarios 3 to 7 run workflows on a throwaway repository with issues to implement."
   ask SANDBOX_REPO "Name of the new repository (owner/name):"
   [[ "$SANDBOX_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "Expected owner/name, got \"$SANDBOX_REPO\"."
   SANDBOX_DIR="$HOME/tmp/${SANDBOX_REPO##*/}"
@@ -439,7 +439,25 @@ if ! keep_recorded 6; then
   ask_note 6
 fi
 
-# ── Stage 9 · report ──────────────────────────────────────────────────────
+# ── Stage 9 · scenario 7 ──────────────────────────────────────────────────
+scenario_stage 7 "the dashboard shows the run live"
+if ! keep_recorded 7; then
+  step "In a chat of the sandbox window, type:"
+  say "    /run-workflow smoke"
+  note "The chat starts the run, gives the dashboard link (http://127.0.0.1:${WF_DASH_PORT:-4317}) and opens it in Cursor's built-in browser. Open the link there yourself if the chat did not."
+  step "On the Board, look at the smoke board:"
+  say "    - a card for the run is in the Ping column while it runs, and moves to Done by itself, without reloading the page."
+  step "Click the card. The Run view opens:"
+  say "    - the graph draws the ping step: it pulses while the step runs and turns green when it ends."
+  say "    - hover the step: its model, location, attempts, tokens, cost and duration appear."
+  say "    - click the step: its log opens beside the graph, with the prompt, what the agent said and its tool calls."
+  note "Pass: all of this works in Cursor's built-in browser. If not, note what you saw (a blank page, an address that was refused, a card that never moved)."
+  pause "Press Enter when you have looked."
+  ask_choice S7_RESULT "Result: pass, fail or skip?" pass fail skip
+  ask_note 7
+fi
+
+# ── Stage 10 · report ─────────────────────────────────────────────────────
 stage "Report"
 doctor_args=()
 [[ -s "$REPORT_DIR/doctor.json" ]] && doctor_args=(--doctor "$REPORT_DIR/doctor.json")

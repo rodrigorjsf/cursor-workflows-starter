@@ -86,7 +86,7 @@ export function StepLogPanel({ runId, node, now, live, upTo, onClose }: StepLogP
   const feed = useStepLog(runId, node.id, live);
   const log = useMemo(() => buildStepLog(feed.items, { upTo }), [feed.items, upTo]);
   const scroller = useRef<HTMLDivElement>(null);
-  const following = useRef(true);
+  const following = useRef(live); // a step that is still going is followed at its tail; a finished one is read from its start
 
   // Follow the tail: after new content, go to the bottom, unless the reader scrolled up to read.
   useEffect(() => {
@@ -145,6 +145,7 @@ export function StepLogPanel({ runId, node, now, live, upTo, onClose }: StepLogP
         className="log"
         ref={scroller}
         role="log"
+        aria-live="off" // a tail of many lines a second is not something to announce
         tabIndex={0}
         aria-label="Step log"
         onScroll={(e) => {

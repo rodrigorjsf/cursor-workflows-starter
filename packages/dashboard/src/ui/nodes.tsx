@@ -35,13 +35,26 @@ function Handles() {
   );
 }
 
-/** A step or a command: its label, what it runs, and a tooltip with the details that appears on hover or focus. */
-export function WorkNode({ data }: NodeProps<Node<WorkNodeData, "work">>) {
-  const { node, now } = data;
+/** A step or a command: its label, what it runs, and a tooltip with the details that appears on hover or focus. Clicking it (or Enter on it) opens its log. */
+export function WorkNode({ data, selected }: NodeProps<Node<WorkNodeData, "work">>) {
+  const { node, now, onOpen } = data;
   const rows = describeNode(node, now);
   const what = node.kind === "command" ? node.detail.command : node.detail.model;
   return (
-    <div className={`work ${node.kind} state-${node.state}`} style={NODE_SIZE[node.kind]} tabIndex={0} aria-label={`${node.label}: ${node.state}`}>
+    <div
+      className={`work ${node.kind} state-${node.state}${selected ? " selected" : ""}`}
+      style={NODE_SIZE[node.kind]}
+      tabIndex={0}
+      role="button"
+      aria-pressed={selected}
+      aria-label={`${node.label}: ${node.state}. Open its log`}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        event.stopPropagation();
+        onOpen?.();
+      }}
+    >
       <Handles />
       <div className="title">
         <Glyph state={node.state} />

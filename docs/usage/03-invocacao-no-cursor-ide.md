@@ -249,7 +249,7 @@ dentro do kit e depois copie.
 
 ## Validar no Cursor IDE
 
-"Funciona no Cursor IDE" é um critério com evidência: seis cenários passam no IDE de verdade, na máquina de quem vai
+"Funciona no Cursor IDE" é um critério com evidência: sete cenários passam no IDE de verdade, na máquina de quem vai
 usar o kit. O kit traz o que torna isso repetível: um workflow barato, o `smoke`, e um assistente guiado.
 
 **O `smoke`** é o workflow mais barato que prova o caminho inteiro (chat → MCP → job destacado → SDK → resultado
@@ -266,7 +266,7 @@ cenário 1 só vale ali, porque o IDE escolhe o próprio Node e PATH. Ele:
 1. confere a máquina (`wf`, `gh` logado, dependências do kit) e pergunta a versão do Cursor;
 2. cria um repositório privado descartável no GitHub, com três issues `complexity:low`, reaproveitando o
    [`setup-sandbox-repo.sh`](../../scripts/verify/setup-sandbox-repo.sh), e roda `wf init` nele. Pede confirmação antes de criar, e se parar no meio retoma de onde parou, sem criar duas vezes o repositório nem as issues;
-3. roda o `wf doctor` no repositório (cenário 1) e, para cada um dos outros cinco, diz exatamente o que digitar no chat
+3. roda o `wf doctor` no repositório (cenário 1) e, para cada um dos outros seis, diz exatamente o que digitar no chat (ou o que olhar, no 7)
    e pergunta o resultado (`pass`, `fail` ou `skip`) e uma nota de uma linha;
 4. escreve o `validation-report.json`, mostra o corpo da issue e só a abre no repositório do kit depois que você confirma.
 
@@ -278,17 +278,18 @@ cenário 1 só vale ali, porque o IDE escolhe o próprio Node e PATH. Ele:
 | 4 | O `implement-issue` LOW abre um PR no repositório descartável | `/run-workflow implement-issue 1`, pedindo para abrir o PR (`openPr: true`; sem isso o workflow não abre PR) | o job termina e o PR existe |
 | 5 | O run sobrevive ao reinício do Cursor | `/run-workflow implement-issue 2`; com o job rodando, feche o Cursor por completo e abra de novo | o job termina mesmo com o Cursor reiniciado no meio (um job ainda rodando não é um `pass`: espere); ou falhou com `runId` e o resume termina sem repetir etapas |
 | 6 | O run cancela pelo chat | `/run-workflow implement-issue 3`; com o job rodando, peça ao chat para cancelar | o job termina `cancelled`, com o `runId` para retomar |
+| 7 | O dashboard mostra o run ao vivo | `/run-workflow smoke`; o chat abre o link do dashboard no navegador embutido do Cursor | no navegador embutido: o cartão do run está na coluna Ping do quadro do `smoke` e vai sozinho para Done, sem recarregar; o clique no cartão abre o grafo, com a etapa `ping` que pisca e fica verde; passar o mouse na etapa mostra modelo, tokens, custo e duração; clicar nela abre o log (prompt, o que o agente disse, chamadas de tool) |
 
 No cenário 5, fechar o Cursor fecha o terminal dele e, com ele, o assistente. As respostas ficam em
 `~/.cursor-workflows/validation/progress.env`: reabra o Cursor, rode o assistente de novo e ele segue do cenário 5, com
-as respostas dos anteriores mantidas (Enter confirma cada uma). Os cenários 3 a 6 rodam workflows e gastam cerca de 800
+as respostas dos anteriores mantidas (Enter confirma cada uma). Os cenários 3 a 7 rodam workflows e gastam cerca de 800
 mil tokens, em modelos que os planos incluem (o `implement-issue` LOW mediu 339 mil;
 [8.2 §13](../research/verificacoes-locais.md)).
 
 O relatório tem, por cenário, o resultado (`pass`, `fail` ou `skipped`) e a nota, mais os fatos do ambiente (SO, Node,
 versão do kit e do Cursor, se o terminal era o do IDE) e o resultado do `wf doctor`. Caminhos locais, o nome do
 repositório descartável, a conta e a máquina viram marcadores (`~`, `<sandbox-dir>`, `<kit>`, `<sandbox-repo>`, `<owner>`, `<user>`, `<host>`, `<email>`, `<path>`), e
-formatos conhecidos de segredo viram `[REDACTED]`. O critério de release (`releaseCriterionMet`) vale só com os seis em
+formatos conhecidos de segredo viram `[REDACTED]`. O critério de release (`releaseCriterionMet`) vale só com os sete em
 `pass`. `WF_KIT_REPO=dono/repo` abre a issue em outro repositório que não o de origem do kit.
 
 ## Paridade Cursor × Claude Code
