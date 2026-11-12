@@ -3,7 +3,7 @@
 // of the Cursor SDK: `jobs.ts` adds what starts a job. See there for what a job is.
 //
 // The job record (`.workflows/jobs/<jobId>.json`) holds identity only: job id, run id, pid and heartbeat, plus how the job
-// was started (args and limit flags), so a resume can repeat it exactly. Everything else
+// was started (args and limit flags), so a resume can repeat it exactly, and when a cancel killed its frozen process. Everything else
 // (status, phase, recent lines, spend, result) is a projection of the run's event log
 // (`.workflows/runs/<runId>/events.jsonl`), computed on every read: one source of truth, and no state file to be left
 // half-written.
@@ -46,6 +46,11 @@ export interface JobRecord {
   refused?: string;
   /** How the job was started. Absent in records an older kit wrote. */
   start?: JobStart;
+  /**
+   * Only when a cancel killed the job's frozen process (`cancelJob`, SIGKILL): when (ISO 8601). The killed process writes
+   * no run end, so this is what tells its execution's end from a crash; the job stays `failed` all the same.
+   */
+  killedByCancel?: string;
 }
 
 /** What `wf status`, `wf jobs`, `get_workflow_status` and `wait_workflow` return: the record plus the projection of the log. */
@@ -241,8 +246,10 @@ export function runningJobOf(cwd: string, runId: string): JobState | undefined {
 
 /** Writes the record. Only the identity fields reach the disk, even when `record` is a `JobState`. */
 export function writeJob(cwd: string, record: JobRecord): void {
-  const { jobId, runId, pid, heartbeat, refused, start } = record;
-  writeFileAtomic(join(jobsDir(cwd), `${jobId}.json`), JSON.stringify({ jobId, runId, pid, heartbeat, ...(refused === undefined ? {} : { refused }), ...(start === undefined ? {} : { start }) }, null, 2));
+  const { jobId, runId, pid, heartbeat, refused, start, killedByCancel } = record;
+  const optional = { refused, start, killedByCancel };
+  for (const key of Object.keys(optional) as Array<keyof typeof optional>) if (optional[key] === undefined) delete optional[key];
+  writeFileAtomic(join(jobsDir(cwd), `${jobId}.json`), JSON.stringify({ jobId, runId, pid, heartbeat, ...optional }, null, 2));
 }
 
 /** True when `record.pid` is the process of this job and not another one that got the number: its command line carries the job id. */
@@ -259,7 +266,8 @@ export interface CancelResult extends JobState {
  * Asks the job's process to cancel (SIGTERM: the process cancels the active agent runs, reverts the in-flight write step,
  * writes the run's end and exits) and waits up to `timeoutMs` for the job to leave `running`. A process that has stopped
  * answering (its heartbeat is stale, so the job already shows as failed) cannot handle a signal: it is killed, which frees
- * the run for a resume but cannot revert the step; once it is gone, the cloud agents its run left running are cancelled
+ * the run for a resume but cannot revert the step, and its record is marked (`killedByCancel`) so the resume does not take
+ * that end for a crash; once it is gone, the cloud agents its run left running are cancelled
  * through the Cursor API, and a resume afterwards starts a new agent in place of each, at new cost. A job whose process
  * already ended gets no signal: those agents are cancelled the same way. So does a job whose pid another process got: the
  * job's process ended, and the other process is left alone. Either way the job stays `failed`, its run's end never written.
@@ -286,6 +294,10 @@ export async function cancelJob(cwd: string, jobId: string, timeoutMs: number): 
   } catch (err) {
     return { ...before, note: `could not signal process ${record.pid}: ${err instanceof Error ? err.message : String(err)}` };
   }
+  // The killed process writes no run end and runs no code again (not even its heartbeat): the record says the cancel killed
+  // it, so a resume tells this end from a crash (`wasKilledByCancel`). Written now, not once the process is gone: a process
+  // that outlives the wait is still killed, and a second cancel finds it gone and marks nothing.
+  if (signal === "SIGKILL") writeJob(cwd, { ...record, killedByCancel: new Date().toISOString() });
   // A killed process never writes the run's end: the wait is for it to be gone. A cancelled one: for the job to leave `running`.
   const stopping = (state: JobState) => (signal === "SIGKILL" ? isAlive(record.pid) : state.status === "running");
   let state: JobState = before;
@@ -304,6 +316,16 @@ export async function cancelJob(cwd: string, jobId: string, timeoutMs: number): 
     return { ...state, note: `process ${record.pid} had no heartbeat and was killed (SIGKILL) without undoing the step in progress; the run stays resumable${left}` };
   }
   return { ...state, note: state.status === "running" ? `SIGTERM sent to process ${record.pid}, which is still stopping; check with wait_workflow` : `SIGTERM sent to process ${record.pid}` };
+}
+
+/**
+ * Did a cancel kill job `jobId` of `repo` (`cancelJob` on a frozen job)? Its execution then ended with no run end, as after a
+ * crash, but it was cancelled. False for a job whose process died on its own, also when it was cancelled afterwards, and when
+ * the id is not a plain name or the record is not there. Only reads: nothing is created.
+ */
+export function wasKilledByCancel(repo: string, jobId: string): boolean {
+  if (!/^[A-Za-z0-9_-]+$/.test(jobId)) return false;
+  return typeof parseJobRecord(join(jobsDirIn(repo), `${jobId}.json`))?.killedByCancel === "string";
 }
 
 /** Waits up to `timeoutMs` for the job to end; returns its current state (ended or not). */
