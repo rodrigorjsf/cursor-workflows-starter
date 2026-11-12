@@ -106,8 +106,11 @@ Como funciona:
   - O teto da **etapa** só derruba a etapa: ela lança `Teto de tokens da etapa "x" atingido: 300 de 250.`, e o
     workflow decide (em `parallel` vira `null`, com um `warning`).
   - O teto do **run** cancela todas as etapas ativas, nenhuma etapa nova começa, e o run termina com
-    `Teto de tokens atingido: 500 de 450.` O run espera as etapas canceladas fecharem a conta (até 30 s), então o
+    `Teto de tokens atingido: 500 de 450.` Isso vale mesmo que o código do workflow capture o erro da etapa e siga
+    adiante: o run termina `failed`. O run espera as etapas canceladas fecharem a conta (até 30 s), então o
     `run-end` é o último evento do log e os tokens delas entram no total.
+  - Uma etapa que já gastou todo o seu teto numa tentativa que falhou (`>=`, como no teto do run) não ganha nova
+    tentativa: nenhum agente é criado.
   - A ultrapassagem é de **no máximo um turno por etapa ativa**. Quanto vale um turno depende do SDK: ele reporta o
     uso só no fim do turno, e medimos 1 `send` = 1 `turn-ended` ([verificações locais](../research/verificacoes-locais.md)
     §6), então um turno pode ser o laço inteiro do agente. O teto corta entre os turnos (a cada re-prompt de schema, a

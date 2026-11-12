@@ -100,7 +100,8 @@ export default defineWorkflow<{ target: string }>({
   checked on every turn while a step runs: the turn that takes the step (all its attempts together) or the run (resumes
   included) strictly above the cap cancels the SDK run at once, and the attempt fails as `errorKind: "budget"` with no
   retry. A step over its own cap fails alone (an `agent()` error, `null` in `parallel`); the run's cap cancels every
-  active step, starts none, and ends the run with `Teto de tokens atingido`. The overshoot is at most one turn per
+  active step, starts none, and ends the run with `Teto de tokens atingido` (even if the workflow code catches the step's
+  error and carries on). A step that already used its whole cap gets no further attempt. The overshoot is at most one turn per
   active step. The SDK reports usage only at the end of a turn and a turn can be the agent's whole loop, so keep a short
   `timeoutMs` on steps that write. The cents cap is checked only **before** each step and retry (cost arrives after the
   step).

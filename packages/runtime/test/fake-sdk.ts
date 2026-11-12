@@ -40,6 +40,14 @@ export const Agent = {
       async send(msg: string, options?: any) {
         const behave = script.shift() ?? (() => ({ status: "finished", result: "ok" }));
         const r = await behave(o, msg, n++);
+        /** One delta reaches the caller; a turn's usage also counts toward the agent's total (what getUsage() sums). */
+        const deliver = async (update: any, live: boolean) => {
+          if (update.type === "turn-ended" && update.usage) {
+            turnUsages.push(update.usage);
+            if (live) stats.turnsDelivered++;
+          }
+          await options?.onDelta?.({ update });
+        };
         if (r?.live) {
           // Opt-in, like the real SDK: send() hands back the run first and the deltas stream after it, one per macrotask,
           // until the run is cancelled (nothing is delivered after cancel()). The result is "cancelled" in that case.
@@ -48,11 +56,7 @@ export const Agent = {
             for (const update of r.deltas ?? DEFAULT_DELTAS) {
               await new Promise((resolve) => setImmediate(resolve));
               if (cancelled) return;
-              if (update.type === "turn-ended" && update.usage) {
-                turnUsages.push(update.usage);
-                stats.turnsDelivered++;
-              }
-              await options?.onDelta?.({ update });
+              await deliver(update, true);
             }
           })();
           return {
@@ -63,15 +67,13 @@ export const Agent = {
             },
             wait: async () => {
               await streamed;
+              if (r.rejectWait) throw r.rejectWait; // the run fails after its turns, e.g. with a RateLimitError
               if (cancelled && r.stuckAfterCancel) await new Promise(() => {}); // a wait() that never settles once cancelled
               return { id: "r", status: "finished", model: o.model, ...r, ...(cancelled ? { status: "cancelled" } : {}) };
             },
           };
         }
-        for (const update of r?.deltas ?? DEFAULT_DELTAS) {
-          if (update.type === "turn-ended" && update.usage) turnUsages.push(update.usage);
-          await options?.onDelta?.({ update });
-        }
+        for (const update of r?.deltas ?? DEFAULT_DELTAS) await deliver(update, false);
         if (r?.hang) return { cancel: async () => {}, wait: () => new Promise(() => {}) };
         return { cancel: async () => void stats.cancels++, wait: async () => ({ id: "r", status: "finished", model: o.model, ...r }) };
       },

@@ -8,20 +8,23 @@ import "./isolate-home.js";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { calls, costConfig, script, stats } from "@cursor/sdk";
+import { RateLimitError, calls, costConfig, script, stats } from "@cursor/sdk";
 import { runWorkflow } from "../src/runtime/engine.js";
 import type { WorkflowEvent } from "../src/runtime/events.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { clearConfig, configWorkflow, writeGlobalConfig, writeRepoConfig } from "./config-fixtures.js";
 
 const cwd = join(import.meta.dirname, ".tmp", `live-caps-${process.pid}`);
-afterEach(() => {
-  clearConfig(cwd);
-  rmSync(cwd, { recursive: true, force: true });
+const reset = () => {
   script.length = 0;
   calls.length = 0;
   Object.assign(stats, { active: 0, maxActive: 0, disposed: 0, usageReads: 0, cancels: 0, turnsDelivered: 0 });
   Object.assign(costConfig, { raw: 9, charged: 7, getUsageError: undefined, createErrorCode: undefined });
+};
+afterEach(() => {
+  clearConfig(cwd);
+  rmSync(cwd, { recursive: true, force: true });
+  reset();
 });
 
 /** One finished turn that used `tokens` tokens in all (10 of them output). */
@@ -53,14 +56,14 @@ test("a step that crosses its per-step cap during a turn is cancelled on the spo
   assert.equal(r.spentTokens, 300);
 });
 
-/** A send() for one step by its label (the agent is named `<workflow>:<label>`), so parallel steps need no send order. */
-const byLabel = (plan: Record<string, ReturnType<typeof live>>) => (o: any, msg: string, n: number) => plan[o.name.split(":")[1]]!(o, msg, n);
+/** A send() chosen by the step's prompt, so parallel steps need no send order. */
+const byPrompt = (plan: Record<string, ReturnType<typeof live>>) => (o: any, msg: string, n: number) => plan[msg]!(o, msg, n);
 
 test("a step cut by its own cap fails alone: the run goes on, as it does for any failed step", async () => {
   writeRepoConfig(cwd, { workflows: { cfg: { roles: { classify: { maxTokensPerStep: 250 } } } } });
-  for (let i = 0; i < 2; i++) script.push(byLabel({ runaway: live(10, 100), fine: live(2, 100) }));
+  for (let i = 0; i < 2; i++) script.push(byPrompt({ runaway: live(10, 100), fine: live(2, 100) }));
   const events: WorkflowEvent[] = [];
-  const wf = configWorkflow((ctx) => ctx.parallel([() => ctx.agent("a", { role: "classify", label: "runaway" }), () => ctx.agent("b", { role: "review", label: "fine" })]));
+  const wf = configWorkflow((ctx) => ctx.parallel([() => ctx.agent("runaway", { role: "classify", label: "runaway" }), () => ctx.agent("fine", { role: "review", label: "fine" })]));
   const r = await runWorkflow(wf, {}, { cwd, onEvent: (e) => events.push(e) });
 
   assert.equal(r.status, "finished", r.error);
@@ -73,19 +76,23 @@ test("a step cut by its own cap fails alone: the run goes on, as it does for any
 });
 
 test("the overshoot is bounded by one turn: the turn that crosses the cap is the last one the step is paid for", async () => {
-  for (const { cap, turnTokens } of [{ cap: 250, turnTokens: 100 }, { cap: 300, turnTokens: 100 }, { cap: 99, turnTokens: 100 }, { cap: 1000, turnTokens: 330 }]) {
+  // Each case is a step that would run 50 turns. `turns` is the turn that first takes the total strictly above the cap.
+  const cases = [
+    { cap: 250, turnTokens: 100, turns: 3, spent: 300 },
+    { cap: 300, turnTokens: 100, turns: 4, spent: 400 }, // exactly the cap is not over it
+    { cap: 99, turnTokens: 100, turns: 1, spent: 100 },
+    { cap: 1000, turnTokens: 330, turns: 4, spent: 1320 },
+  ];
+  for (const { cap, turnTokens, turns, spent } of cases) {
     writeRepoConfig(cwd, { workflows: { cfg: { roles: { classify: { maxTokensPerStep: cap, retries: 0 } } } } });
-    script.length = 0;
-    Object.assign(stats, { cancels: 0, turnsDelivered: 0 });
+    reset();
     script.push(live(50, turnTokens));
     const r = await runWorkflow(configWorkflow((ctx) => ctx.agent("p", { role: "classify", label: "c" })), {}, { cwd });
 
-    const spent = r.spentTokens;
-    const turnsPaid = Math.floor(cap / turnTokens) + 1; // the first turn that takes the total strictly above the cap
     assert.equal(r.status, "failed");
-    assert.equal(stats.turnsDelivered, turnsPaid, `cap ${cap}, turns of ${turnTokens}: the step was cut at turn ${turnsPaid} of 50`);
-    assert.equal(spent, turnsPaid * turnTokens);
-    assert.ok(spent > cap && spent - cap <= turnTokens, `cap ${cap}: spent ${spent}, overshoot ${spent - cap} is at most one turn (${turnTokens})`);
+    assert.equal(stats.turnsDelivered, turns, `cap ${cap}, turns of ${turnTokens}: the step was cut at turn ${turns} of 50`);
+    assert.equal(r.spentTokens, spent);
+    assert.ok(r.spentTokens - cap <= turnTokens, `cap ${cap}: the overshoot (${r.spentTokens - cap}) is at most one turn (${turnTokens})`);
   }
 });
 
@@ -140,7 +147,7 @@ test("a global per-step cap is enforced even when the repo asks for none", async
 });
 
 test("the run's cap cancels every active step at once and the run ends with a budget error", async () => {
-  for (let i = 0; i < 2; i++) script.push(byLabel({ a: live(10, 100), b: live(10, 100) }));
+  for (let i = 0; i < 2; i++) script.push(byPrompt({ a: live(10, 100), b: live(10, 100) }));
   const events: WorkflowEvent[] = [];
   const wf = configWorkflow((ctx) => ctx.parallel([() => ctx.agent("a", { role: "classify", label: "a", retries: 0 }), () => ctx.agent("b", { role: "review", label: "b", retries: 0 })]));
   const r = await runWorkflow(wf, {}, { cwd, maxTokens: 450, onEvent: (e) => events.push(e) });
@@ -150,7 +157,6 @@ test("the run's cap cancels every active step at once and the run ends with a bu
   assert.equal(stats.cancels, 2, "both active steps were cancelled, not only the one whose turn crossed");
   assert.equal(stats.turnsDelivered, 5, "no further turn was delivered to either step");
   assert.equal(r.spentTokens, 500, "what the cancelled steps used is in the run's total");
-  assert.ok(r.spentTokens - 450 <= 100, "overshoot of at most one turn");
 
   const log = logOf(r.runId);
   const ends = stepEnds(log);
@@ -218,4 +224,73 @@ test("a cut does not wait for the SDK: a run whose wait() never settles after ca
   assert.equal(r.status, "failed");
   assert.match(r.error!, /Teto de tokens da etapa "c" atingido: 200 de 150/);
   assert.equal(stats.cancels, 1);
+});
+
+test("a workflow that swallows the step's budget error does not turn a crossed run cap into a finished run", async () => {
+  script.push(live(10, 100));
+  const wf = configWorkflow(async (ctx) => {
+    try {
+      await ctx.agent("p", { role: "classify", label: "c", retries: 0 });
+    } catch {
+      /* the workflow degrades on its own */
+    }
+    return "fallback";
+  });
+  const r = await runWorkflow(wf, {}, { cwd, maxTokens: 150 });
+
+  assert.equal(r.status, "failed", "the run's cap was crossed: the run ends with the budget error whatever the workflow does with it");
+  assert.match(r.error!, /^Teto de tokens atingido: 200 de 150\.$/);
+  assert.equal(r.result, undefined);
+  const runEnd = logOf(r.runId).at(-1) as Extract<WorkflowEvent, { type: "run-end" }>;
+  assert.deepEqual([runEnd.type, runEnd.status], ["run-end", "failed"]);
+});
+
+test("a step that already used its whole cap in a failed attempt is not retried: no agent is created for the retry", async () => {
+  writeRepoConfig(cwd, { workflows: { cfg: { roles: { classify: { maxTokensPerStep: 200, retries: 2 } } } } });
+  script.push(() => ({ live: true, deltas: [turn(100), turn(100)], status: "error", error: { message: "boom" } }), live(5, 100));
+  const r = await runWorkflow(configWorkflow((ctx) => ctx.agent("p", { role: "classify", label: "c" })), {}, { cwd });
+
+  assert.equal(r.status, "failed");
+  assert.match(r.error!, /Teto de tokens da etapa "c" atingido: 200 de 200/, "exactly the cap is not over it, but nothing is left for another attempt");
+  assert.equal(calls.length, 1);
+  assert.deepEqual(stepEnds(logOf(r.runId)).map((e) => [e.attempt, e.errorKind]), [[1, "run-error"]]);
+});
+
+test("a cap crossed while the agent answers a schema re-prompt cuts the step too", async () => {
+  writeRepoConfig(cwd, { workflows: { cfg: { roles: { classify: { maxTokensPerStep: 150, retries: 2 } } } } });
+  script.push(live(1, 100), live(5, 100)); // the first answer never calls submit_result, so the engine re-prompts
+  const schema = { type: "object", required: ["tier"], properties: { tier: { type: "string" } } };
+  const r = await runWorkflow(configWorkflow((ctx) => ctx.agent("p", { role: "classify", label: "c", schema })), {}, { cwd });
+
+  assert.equal(r.status, "failed");
+  assert.match(r.error!, /Teto de tokens da etapa "c" atingido: 200 de 150/);
+  assert.equal(calls.length, 1, "one agent: the re-prompt went to the same conversation, and a budget failure is not retried");
+  assert.equal(stats.turnsDelivered, 2, "the one turn of the first answer and the first turn of the re-prompt");
+  assert.equal(stats.cancels, 1);
+  assert.equal(stepEnds(logOf(r.runId))[0]!.errorKind, "budget");
+});
+
+test("the tokens of an attempt that failed on a rate limit are counted once while it backs off, not twice", { timeout: 15_000 }, async () => {
+  const rateLimited = Object.assign(new RateLimitError("slow down"), { isRetryable: true }); // the engine sleeps 2 s before the retry
+  let aSends = 0;
+  script.push(...[0, 1, 2].map(() => (o: any, msg: string, n: number) => {
+    if (msg === "b") return live(2, 40)();
+    return aSends++ === 0 ? { live: true, deltas: [turn(100), turn(100)], rejectWait: rateLimited } : live(1, 10)();
+  }));
+  let turns = 0;
+  let aTurned!: () => void;
+  const afterSecondTurn = new Promise<void>((resolve) => (aTurned = resolve));
+  const wf = configWorkflow((ctx) =>
+    ctx.parallel([
+      () => ctx.agent("a", { role: "classify", label: "a", retries: 1 }),
+      async () => {
+        await afterSecondTurn; // b starts while a's failed attempt is already charged and a is sleeping before its retry
+        return ctx.agent("b", { role: "classify", label: "b", retries: 0 });
+      },
+    ]),
+  );
+  const r = await runWorkflow(wf, {}, { cwd, maxTokens: 300, onEvent: (e) => e.type === "turn" && ++turns === 2 && aTurned() });
+
+  assert.equal(r.status, "finished", r.error);
+  assert.equal(r.spentTokens, 290, "a's 200 + b's 80 + a's retry 10: each counted once");
 });
