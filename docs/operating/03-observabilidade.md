@@ -329,7 +329,8 @@ para um run em andamento e para um que já terminou):
   qualquer evento).
 - Um run grande (o `implement-issue` passa de 50 comandos) não cabe na tela em tamanho legível: a tela enquadra só os nós
   que cabem com o texto legível, em volta de um foco (o nó com o log aberto; num run que terminou, o primeiro nó que falhou
-  ou parou, ou senão a primeira etapa; num run em andamento, o nó mais recente), e **Fit View** mostra tudo.
+  ou foi interrompido, ou senão a primeira etapa: um nó cancelado não é foco; num run em andamento, o nó mais recente), e
+  **Fit View** mostra tudo.
 
 A página lê a API: o stream `?content=false` do run (o conteúdo das etapas vem só do painel de log, que pede o de uma etapa
 por vez), `GET /api/runs/<runId>` para o status e o repositório, que ela consulta a cada poucos segundos, e só age para
@@ -366,10 +367,12 @@ No cabeçalho da página do run:
   escreve o fim do run como `cancelled`). O cartão vai para a coluna Cancelled quando o log o registra. Se o job demora mais
   do que a espera (20 s) para parar, a resposta diz que ele ainda está parando. Um run que não foi iniciado como job (`wf run`
   num terminal) não tem processo registrado para sinalizar: o dashboard responde `409` e diz para dar Ctrl-C naquele terminal.
-- **Cancel cloud agent** (num run `failed` cujo processo morreu com uma etapa na nuvem interrompida e o agente registrado
-  no log) chama a mesma rota: ela cancela, pela API da Cursor, os cloud agents que o run deixou rodando e a página mostra a
-  nota da resposta (`200`), que os nomeia. Quando não há mais nada a cancelar (por exemplo, num segundo clique, já que o
-  cancelamento anterior não fica registrado), a rota responde `409` e a página mostra a mensagem.
+- **Cancel cloud agent** (**Cancel N cloud agents** quando são vários; num run `failed` cujo processo morreu com uma etapa
+  na nuvem interrompida e o agente registrado no log) chama a mesma rota: ela cancela, pela API da Cursor e com a chave do
+  usuário, os cloud agents que o run deixou rodando e a página mostra a nota da resposta (`200`), que os nomeia, no lugar
+  do botão. O cancelamento não fica registrado no log, então depois de recarregar a página o botão volta; quando não há
+  mais nada a cancelar, a rota responde `409` e a página mostra a mensagem. Um resume depois disso não reanexa aos agentes
+  cancelados: cria outros, que custam de novo ([6.2 §Etapas na nuvem](../reference/config.md#etapas-na-nuvem)).
 - **Copy resume command** (num run `failed` ou `cancelled`) copia
   `wf start <workflow> --args '<args>' --resume <runId> --cwd <repositório>`, com os mesmos `--max-cents`, `--max-tokens` e
   `--overrides` do start. O registro do job da última execução (`.workflows/jobs/<jobId>.json`, campo `start`) guarda os
@@ -470,7 +473,10 @@ aberta, 1 hora depois de mesclada ou fechada, e 5 minutos quando o `gh` não con
   posiciona os nós do grafo com o atributo `style` de cada elemento; essa diretiva libera só atributos `style`, nunca
   um elemento `<style>` nem um script;
 - só escreve um endereço de fora: o link do agente de uma etapa na nuvem (`https://cursor.com/agents/<id>`). Ele só abre
-  quando você clica, numa nova aba e sem `Referer`; o dashboard não faz nenhum pedido a ele.
+  quando você clica, numa nova aba e sem `Referer`; o dashboard não faz nenhum pedido a ele;
+- só chama a API da Cursor num caso: o `POST` de cancelar um run cujo processo morreu, quando o log nomeia cloud agents
+  cuja tentativa não terminou. O servidor carrega então o SDK e cancela os runs desses agentes com a chave que o SDK acha
+  no ambiente do dashboard (`CURSOR_API_KEY`, senão a do `wf login`).
 
 Verificado em 2026-11-11 no WSL2: escuta só em `127.0.0.1`, responde 403 a um `Host` estranho, não envia
 cabeçalhos CORS e não é alcançável pelo IP do WSL.

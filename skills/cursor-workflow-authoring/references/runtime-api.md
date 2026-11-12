@@ -152,7 +152,12 @@ if (!tests.ok) { /* tests.exitCode, tests.timedOut, tests.tail: the last 32768 c
   has instead of paying for another (code that changes the step's prompt or options starts a new step, and the old agent finishes
   unwatched unless the run is cancelled). Cancelling a running run cancels its cloud runs. Cancelling a run whose process already
   died (`wf cancel`, `cancel_workflow`, the dashboard's cancel route) cancels, through the Cursor API, the cloud runs of the agents
-  its log shows without an end. The client stops waiting for a cloud run after two hours: the engine asks
+  its log shows without an end; it writes nothing to the log, so those steps stay interrupted. Two cases make the resumed step
+  start a new cloud agent, at new cost, instead of reattaching, each with a warning: the cloud no longer has the agent
+  (`cloud agent <id>, left by an interrupted attempt, is no longer there: starting a new one`), or no run of the agent is going
+  and its newest was cancelled, as after that cancel
+  (`cloud agent <id>, left by an interrupted attempt, was cancelled: starting a new one`). The resume deletes the old agent's
+  snapshot branch, so what it committed there does not come back. The client stops waiting for a cloud run after two hours: the engine asks
   the cloud, and a run still going is waited for again, so only the step's `timeoutMs` bounds a long step.
 
 ## Caps

@@ -21,6 +21,8 @@ const prose = (md: string) => md.replace(/```[\s\S]*?```/g, "").replace(/`[^`]*`
 
 test("the guide is in English and links to no other document: an agent needs nothing else", () => {
   assert.doesNotMatch(prose(GUIDE), NOT_ENGLISH);
+  // The kit prints English (packages/runtime/test/messages-english.test.ts), and the guide quotes it as printed.
+  assert.doesNotMatch(GUIDE, /\b(Portuguese|pt-BR)\b/i, "the kit's messages are English: the guide must not say otherwise");
   const doc = parseMarkdown(GUIDE);
   const relative = doc.links.map((l) => l.target).filter((t) => !/^[a-z][a-z0-9+.-]*:/i.test(t));
   assert.deepEqual(relative, [], "a relative link would send the agent to a file it may not have");
