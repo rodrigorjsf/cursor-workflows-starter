@@ -19,7 +19,7 @@ export function addUsage(acc: UsageTotals, u: Partial<UsageTotals> | undefined):
 }
 
 export function withRatio(u: UsageTotals): UsageTotals & { cacheHitRatio: number | null } {
-  // Medido na API: inputTokens já inclui leitura e escrita de cache, e totalTokens = input + output.
+  // Measured on the API: inputTokens already includes cache reads and writes, and totalTokens = input + output.
   return { ...u, cacheHitRatio: u.inputTokens > 0 ? Math.round((u.cacheReadTokens / u.inputTokens) * 1000) / 1000 : null };
 }
 
@@ -34,19 +34,34 @@ export interface Ledger {
   usage: UsageTotals;
 }
 
+/** The cost the cap counts for an attempt: the larger of the raw and the charged cost (the charged cost alone is 0 for usage included in the plan). */
+const attemptCents = (e: { rawCents?: number; chargedCents: number }) => Math.max(e.rawCents ?? 0, e.chargedCents);
+
 /**
  * Replays a run's spend from its events: every attempt that called the API, failed ones included, in every execution of
  * the run. A step served from the journal or the memo spent nothing now: its cost is already in the attempt that ran it.
- * An attempt that never reached its `step-end` (a crash mid-step) cannot be counted.
+ * An attempt that never reached its `step-end` (the process died mid-step) is counted by the turns it finished: those
+ * tokens were spent. Its cost in cents never reached the log, so the cents cap cannot count it.
  */
 export function replayLedger(events: Iterable<WorkflowEvent>): Ledger {
   const ledger: Ledger = { spentCents: 0, chargedCents: 0, spentTokens: 0, usage: emptyUsage() };
+  const unfinished = new Map<string, UsageTotals>(); // tokens of the turns of each attempt that has not ended
   for (const e of events) {
-    if (e.type !== "step-end" || e.cached) continue;
-    ledger.spentCents += Math.max(e.rawCents ?? 0, e.chargedCents);
-    ledger.chargedCents += e.chargedCents;
-    ledger.spentTokens += e.usage?.totalTokens ?? 0;
-    addUsage(ledger.usage, e.usage);
+    if (e.type === "turn") {
+      const tokens = unfinished.get(e.attemptId) ?? emptyUsage();
+      addUsage(tokens, { ...e.usage, totalTokens: e.usage.inputTokens + e.usage.outputTokens }); // the cache is already in the input
+      unfinished.set(e.attemptId, tokens);
+    } else if (e.type === "step-end" && !e.cached) {
+      unfinished.delete(e.attemptId);
+      ledger.spentCents += attemptCents(e);
+      ledger.chargedCents += e.chargedCents;
+      ledger.spentTokens += e.usage?.totalTokens ?? 0;
+      addUsage(ledger.usage, e.usage);
+    }
+  }
+  for (const tokens of unfinished.values()) {
+    ledger.spentTokens += tokens.totalTokens;
+    addUsage(ledger.usage, tokens);
   }
   return ledger;
 }
@@ -78,8 +93,7 @@ function recentLine(e: WorkflowEvent): string | undefined {
       return oneLine(`▶ ${e.label} [${e.model ?? "?"}]${e.attempt > 1 ? ` tentativa ${e.attempt}` : ""}`);
     case "step-end": {
       const cache = e.usage && e.usage.cacheReadTokens > 0 ? ` cache-read ${e.usage.cacheReadTokens}` : "";
-      // Cost as the cap counts it: max(raw, charged). The charged cost alone is 0 for usage included in the plan.
-      const cents = Math.max(e.rawCents ?? 0, e.chargedCents);
+      const cents = attemptCents(e);
       return oneLine(`${e.ok ? "✓" : "✗"} ${e.label}${e.cached ? ` (${e.cached})` : ""}${cents ? ` ${cents}¢` : ""}${cache}`);
     }
     case "warning":

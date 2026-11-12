@@ -8,6 +8,16 @@
 import type { ModelSelection, RunUsage, SettingSource } from "@cursor/sdk";
 import type { UsageTotals } from "./workflow.js";
 
+/**
+ * True when a line of the event log is a `content` event, decided from the start of the line, without parsing it: the log
+ * writes `v`, `ts`, `runId` and `type`, in that order, ahead of every other field (see `stamp` in engine.ts). Readers that
+ * never need content skip such lines to avoid parsing the bulk of a log. Matching the top-level key only matters: a `type`
+ * key inside a nested value (a workflow result, say) must not look like an event type.
+ */
+export function isContentLine(line: string): boolean {
+  return /^\{"v":\d+,"ts":"[^"\\]*","runId":"(?:[^"\\]|\\.)*","type":"content"/.test(line);
+}
+
 /** Versão atual do esquema dos eventos. Suba quando um campo mudar de sentido ou for removido (campos novos opcionais não exigem). */
 export const EVENT_SCHEMA_VERSION = 1;
 
@@ -90,7 +100,7 @@ export interface RunEndEvent extends EventBase {
   status: "finished" | "failed";
   /** O campo `status` do resultado do workflow, quando ele devolve um objeto com esse campo (por exemplo `done`). */
   outcomeStatus?: string;
-  /** O valor que o workflow retornou. É o que `wait_workflow` e `wf status` devolvem como `result`. */
+  /** O valor que o workflow retornou. É o que `wait_workflow` e `wf status` devolvem como `result`. Não é conteúdo de etapa: a retenção não o apaga (o workflow decide o que devolve), mas a redação de segredos vale para ele. */
   result?: unknown;
   /** A mensagem do erro que encerrou o run. */
   error?: string;

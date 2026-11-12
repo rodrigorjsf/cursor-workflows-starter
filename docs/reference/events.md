@@ -76,7 +76,7 @@ Inclui os campos de [`EventBase`](#eventbase).
 | --- | --- | --- | --- |
 | `status` | `"finished" \| "failed"` | sim | `finished` = o workflow retornou; `failed` = lançou um erro (inclusive teto de custo ou de tokens). |
 | `outcomeStatus` | `string` | não | O campo `status` do resultado do workflow, quando ele devolve um objeto com esse campo (por exemplo `done`). |
-| `result` | `unknown` | não | O valor que o workflow retornou. É o que `wait_workflow` e `wf status` devolvem como `result`. |
+| `result` | `unknown` | não | O valor que o workflow retornou. É o que `wait_workflow` e `wf status` devolvem como `result`. Não é conteúdo de etapa: a retenção não o apaga (o workflow decide o que devolve), mas a redação de segredos vale para ele. |
 | `error` | `string` | não | A mensagem do erro que encerrou o run. |
 
 ### `group-start`

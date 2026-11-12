@@ -82,11 +82,11 @@ export interface RunOptions {
   apiKey?: string;
   /** Id do run. Para retomar, passe o id de um run anterior (o journal evita repetir etapas concluídas). */
   runId?: string;
-  /** O job que executa este run (`wf start`, `start_workflow`): vai no `run-start`, e o estado do job é a projeção da execução que o leva. */
+  /** The job executing this run (`wf start`, `start_workflow`). It goes in the `run-start`, and a job's state is the projection of the execution that carries its id. */
   jobId?: string;
-  /** Teto de custo do run inteiro, somando as execuções anteriores (resumes). Num resume, o valor passado é o novo teto total. */
+  /** Cost cap for the whole run, earlier executions (resumes) included. Passed to a resume, it is the new total cap. */
   maxCents?: number | null;
-  /** Teto de tokens do run inteiro, com a mesma regra de `maxCents`. */
+  /** Token cap for the whole run, with the same rule as `maxCents`. */
   maxTokens?: number | null;
   /** Agentes simultâneos. Default 4 (o Cursor não documenta limite numérico; seja conservador). */
   concurrency?: number;
@@ -99,9 +99,9 @@ export interface RunOptions {
   /** Onde ficam journal e estado. Default <cwd>/.workflows/runs. */
   stateDir?: string;
   /**
-   * Por quanto tempo o conteúdo das etapas fica nos logs de eventos do repositório (default: os últimos 30 runs ou 14 dias).
-   * Ao iniciar o run, o `text` dos eventos `content` dos runs fora da retenção é apagado; o resto do log fica.
-   * Um limite `null` desliga aquele limite.
+   * How long step content stays in the repo's event logs (default: the last 30 runs or 14 days). When the run starts, the
+   * `text` of the `content` events of runs outside the retention is deleted; the rest of the log stays. A `null` limit
+   * turns that limit off.
    */
   retention?: RetentionPolicy;
   onEvent?: (e: WorkflowEvent) => void;
@@ -117,7 +117,7 @@ export interface RunOutcome<R> {
   status: "finished" | "failed";
   result?: R;
   error?: string;
-  /** true quando o runtime recusou o run antes de começar (argumentos inválidos, run já em execução): nada foi gravado no log. */
+  /** true when the runtime refused the run before it started (invalid args, run already executing): nothing was written to the log. */
   refused?: true;
   /** Custo do Cursor que o teto usa: soma, por tentativa, do maior entre `rawCostCents` e `chargedCents`. Acumula entre resumes do run. */
   spentCents: number;
@@ -245,8 +245,8 @@ async function executeRun<A, R>(
   store: RunStore,
 ): Promise<RunOutcome<R>> {
   // spentCents = Σ max(bruto, cobrado). O cobrado sozinho é 0 para uso incluído no plano e não protegeria nada.
-  // O gasto parte do que o log do run já registra (execuções anteriores, tentativas que falharam inclusive): o orçamento
-  // acumula entre resumes e nunca recomeça do zero.
+  // Spend starts from what the run's log already records (earlier executions, failed attempts included): the budget
+  // accumulates across resumes and never restarts from zero.
   let spentCents = store.ledger.spentCents;
   let chargedCents = store.ledger.chargedCents;
   let spentTokens = store.ledger.spentTokens;

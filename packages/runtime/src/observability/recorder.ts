@@ -4,8 +4,8 @@
 //  - Só insere (tentativas, turnos, usage_runs, métricas); `runs` recebe o fechamento no fim. Um resume do mesmo
 //    run_id é uma nova execução (exec_id), então somar as tentativas nunca conta duas vezes.
 //  - Hits de journal/memo viram tentativas de custo zero com `cached`, para a view de economia.
-//  - Nada de conteúdo: prompts só como hash e tamanho. O texto dos prompts, as mensagens do agente, as tools e a saída
-//    de comandos ficam no log de eventos local do run (eventos `content`) e nunca chegam aqui.
+//  - No content: prompts only as a hash and a size. Prompt text, agent messages, tool calls and command output live in
+//    the run's local event log (`content` events) and never reach this recorder.
 
 import { randomUUID } from "node:crypto";
 import type { WorkflowEvent } from "../runtime/events.js";

@@ -98,7 +98,7 @@ async function main(): Promise<number> {
         if (!existing) throw new Error(`job ${values.job} não encontrado`);
         const { done } = startJob(def, args, runOpts(), existing);
         const state = await done;
-        if (state.status !== "finished" && state.error) process.stderr.write(`${state.error}\n`); // vai para o log do job (.workflows/jobs/<jobId>.log)
+        if (state.status !== "finished" && state.error) process.stderr.write(`${state.error}\n`); // goes to the job's log (.workflows/jobs/<jobId>.log)
         return state.status === "finished" ? 0 : 1;
       }
       const outcome = await runWorkflow(def, args, runOpts());

@@ -7,6 +7,7 @@
 
 import { readFileSync, readdirSync, statSync, utimesSync } from "node:fs";
 import { join } from "node:path";
+import { isContentLine } from "./events.js";
 import { writeFileAtomic } from "./state-files.js";
 
 /** What to keep. A limit left out takes the default; `null` turns that limit off. */
@@ -21,9 +22,6 @@ export interface RetentionPolicy {
 export const DEFAULT_RETENTION = { runs: 30, days: 14 } as const;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** True for a `content` line, by its serialized form (see `readEventLog`). */
-const isContentLine = (line: string) => line.includes('"type":"content"');
 
 /** The log text with the `text` of every content event removed, or undefined when there was nothing to remove. Other lines stay byte for byte. */
 function withoutContentText(log: string): string | undefined {

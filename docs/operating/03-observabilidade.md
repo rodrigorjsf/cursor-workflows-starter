@@ -291,7 +291,8 @@ Para validar a entrega depois, por exemplo quando o PR é aceito ou recusado, us
   - cada texto é cortado em 32768 caracteres (`truncated` e `chars` dizem o quanto havia);
   - **retenção:** ao iniciar um run, o `text` dos runs do repositório fora dos 30 mais recentes (contando o que
     começa) ou sem atividade há mais de 14 dias é apagado. O evento fica, com tipo, ids e tamanho. O journal não
-    entra: é o estado do resume. `RunOptions.retention` muda os limites (`null` desliga um deles).
+    entra: é o estado do resume. O `result` do `run-end` (o que o workflow devolveu) também não é conteúdo de etapa e
+    fica, mas passa pela redação como todo evento. `RunOptions.retention` muda os limites (`null` desliga um deles).
 - **Permissões:** pasta `0700`, arquivo `0600`.
 - **Export anonimizado por padrão:** sem nome de repositório, sem `agent_id`, sem prompt, com erros redigidos. Use
   `--no-anonymize` só para análise local.

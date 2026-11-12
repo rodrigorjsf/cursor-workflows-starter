@@ -9,7 +9,7 @@
 //   wait_workflow  {jobId, timeoutSec}              → estado (status, fase, últimas linhas de resumo, gasto, resultado)
 //   get_workflow_status {jobId}                     → estado sem esperar
 //
-// O estado é a projeção do log de eventos do run (jobs.ts): o registro do job guarda só a identidade.
+// The state is a projection of the run's event log (jobs.ts): the job record holds identity only.
 //
 // Os jobs rodam dentro deste processo. Se o cliente reiniciar o servidor, o job em andamento morre e
 // passa a aparecer como "failed" com o runId; relance com start_workflow {resumeRunId} — o journal

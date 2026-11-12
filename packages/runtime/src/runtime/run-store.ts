@@ -8,7 +8,7 @@
 import { randomUUID } from "node:crypto";
 import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { EVENT_SCHEMA_VERSION, type RunStartEvent, type WorkflowEvent } from "./events.js";
+import { EVENT_SCHEMA_VERSION, type RunStartEvent, type WorkflowEvent, isContentLine } from "./events.js";
 import { Journal } from "./journal.js";
 import { type Ledger, replayLedger } from "./projection.js";
 import { type Redactor, createRedactor } from "./redaction.js";
@@ -138,9 +138,6 @@ export function eventLogPath(cwd: string, runId: string): string {
 
 const isEvent = (v: unknown): v is WorkflowEvent =>
   typeof v === "object" && v !== null && typeof (v as { type?: unknown }).type === "string";
-
-/** True for a `content` line, by its serialized form: `"type":"content"` cannot occur inside a JSON string (quotes are escaped there). */
-const isContentLine = (line: string) => line.includes('"type":"content"');
 
 /**
  * Reads an event log. A torn last line, or any line that is not an event, is skipped and counted. `content: false` leaves

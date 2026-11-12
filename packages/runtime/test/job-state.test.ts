@@ -9,6 +9,7 @@ import { readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { calls, costConfig, script, stats } from "@cursor/sdk";
+import { runWorkflow } from "../src/runtime/engine.js";
 import { jobsDir, listJobs, readJob, startJob, waitJob, writeJob } from "../src/runtime/jobs.js";
 import { defineWorkflow } from "../src/runtime/workflow.js";
 
@@ -154,13 +155,17 @@ test("a job the runtime refuses before the run starts projects as failed, with t
   assert.equal((await first.done).status, "finished");
 });
 
-test("a process that crashes ends its run in the log: the job projects as failed with the crash and the run id to resume", async () => {
-  const proc = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), join(import.meta.dirname, "crash-job.ts"), cwd, "crashed", "run-crashed"], {
+/** Runs crash-job.ts to its end: a job whose only step ran one turn, then the process died of an uncaught exception. */
+async function crashAJob(jobId: string, runId: string): Promise<void> {
+  const proc = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), join(import.meta.dirname, "crash-job.ts"), cwd, jobId, runId], {
     env: { ...process.env, TSX_TSCONFIG_PATH: join(import.meta.dirname, "..", "tsconfig.test.json") },
     stdio: ["ignore", "ignore", "ignore"],
   });
-  const code = await new Promise((resolve) => proc.on("exit", resolve));
-  assert.equal(code, 1);
+  assert.equal(await new Promise((resolve) => proc.on("exit", resolve)), 1);
+}
+
+test("a process that crashes ends its run in the log: the job projects as failed with the crash and the run id to resume", async () => {
+  await crashAJob("crashed", "run-crashed");
   const view = readJob(cwd, "crashed")!;
   assert.equal(view.status, "failed");
   assert.equal(view.error, 'crash: boom; relance com resumeRunId="run-crashed"');
@@ -198,4 +203,26 @@ test("recent lines are one-line summaries: no prompt, agent message, tool call o
   assert.match(recent[0]!, /^first line second line x+…$/, "line breaks collapse and a long line is cut");
   assert.doesNotMatch(JSON.stringify(readJob(cwd, job.jobId)), /PROMPT-MARKER|AGENT-TEXT-MARKER|TOOL-ARGS-MARKER|COMMAND-OUTPUT-MARKER/, "the whole job state carries no step content");
   assert.equal(readJob(cwd, job.jobId)!.result, "OUTPUT-MARKER final answer", "only what the workflow itself returned is the result");
+});
+
+test("a workflow result that looks like a content event does not hide the run's end from the projection", async () => {
+  const wf = defineWorkflow({ meta: { name: "lookalike", description: "lookalike" }, async run() { return { type: "content", note: "mine" }; } });
+  const { job, done } = startJob(wf, {}, { cwd });
+  await done;
+  const view = readJob(cwd, job.jobId)!;
+  assert.equal(view.status, "finished");
+  assert.deepEqual(view.result, { type: "content", note: "mine" });
+});
+
+test("the tokens of an attempt that died mid-step still count: the job shows them and a resume starts from them", async () => {
+  await crashAJob("crashed", "run-crashed");
+  const view = readJob(cwd, "crashed")!;
+  assert.equal(view.spentTokens, 110, "the turn the attempt finished before the crash was paid for");
+  assert.equal(view.spentCents, 0, "its cost never reached the log, so only tokens are known");
+  assert.equal(view.usage.inputTokens, 100);
+
+  const other = defineWorkflow({ meta: { name: "after", description: "after" }, defaults: { model: { id: "m" } }, run: (ctx) => ctx.agent("a different step", { label: "after" }) });
+  const resumed = await runWorkflow(other, {}, { cwd, runId: "run-crashed" });
+  assert.equal(resumed.status, "finished", resumed.error);
+  assert.deepEqual([resumed.spentTokens, resumed.spentCents], [220, 9], "110 from the attempt that died + 110 from the new one");
 });

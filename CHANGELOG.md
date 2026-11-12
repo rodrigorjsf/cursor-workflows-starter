@@ -25,15 +25,17 @@
   run, o texto dos runs do repositório fora dos 30 mais recentes ou com mais de 14 dias é apagado (`RunOptions.retention`
   muda os limites); os metadados ficam.
 - **O orçamento acumula entre resumes.** O gasto (centavos e tokens) é recomposto do log do run, tentativas que falharam
-  inclusive, e um resume com `--max-cents`/`--max-tokens` define o novo teto total.
+  inclusive, e um resume com `--max-cents`/`--max-tokens` define o novo teto total. Uma tentativa que morreu no meio da
+  etapa conta os tokens dos turnos que terminou (o custo em centavos dela nunca chegou ao log).
 - **O estado do runtime funciona em worktree ligado e submódulo**, onde `.git` é um arquivo: antes, qualquer acesso a
   `.workflows/` falhava com `ENOTDIR`.
 
 ### Mudado
 
 - **`WF_METRICS_STORE_PROMPTS` foi removida.** O banco de métricas nunca mais guarda o texto de um prompt (só hash e
-  tamanho); o texto fica no log de eventos local. O evento `step-start` perdeu o campo `prompt`, e a coluna
-  `attempts.prompt_text` continua no esquema, sempre vazia.
+  tamanho); o texto fica no log de eventos local. O evento `step-start` perdeu o campo `prompt`. A coluna
+  `attempts.prompt_text` continua no esquema, sempre vazia, e a migração 3 do banco apaga o texto que versões antigas
+  gravaram com a opção.
 - **O repositório vira npm workspaces.** O runtime (engine, CLI, servidor MCP, workflows embutidos e seus testes
   offline) fica no pacote `packages/runtime/` (`@cursor-workflows/runtime`) e resolve seus assets pelo local de
   instalação, nunca pela raiz do repositório. As skills distribuídas (`run-workflow`, `cursor-workflow-authoring`,
