@@ -109,18 +109,28 @@ test("a creation that never answers fails the step on its timeout instead of han
 
 test("schema re-prompts share the step timeout instead of restarting it", async () => {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  script.push(async () => (await sleep(250), { status: "finished", result: "no submit_result call" })); // the re-prompt follows
-  script.push(() => ({ hang: true }));
+  // Wide margins, so that no scheduling delay on a busy machine can reorder things: the first send ends a full second before
+  // the step times out (or the re-prompt would never start), and a restart would end a full second after the timeout does.
+  const stepTimeoutMs = 2_000;
+  const firstSendMs = 1_000;
+  let firstSendAt = 0;
+  let repromptAt = 0;
+  script.push(async () => ((firstSendAt = Date.now()), await sleep(firstSendMs), { status: "finished", result: "no submit_result call" })); // the re-prompt follows
+  script.push(() => ((repromptAt = Date.now()), { hang: true }));
   const wf = defineWorkflow({
     meta: { name: "reprompt-timeout", description: "reprompt" },
     defaults: { model },
-    run: (ctx) => ctx.agent("x", { label: "x", retries: 0, timeoutMs: 400, schema: { type: "object", properties: { a: { type: "string" } } } }),
+    run: (ctx) => ctx.agent("x", { label: "x", retries: 0, timeoutMs: stepTimeoutMs, schema: { type: "object", properties: { a: { type: "string" } } } }),
   });
   const outcome = await runWorkflow(wf, {}, { cwd, runId: "r-reprompt" });
   assert.equal(outcome.status, "failed");
   const stepEnd = eventsOf("r-reprompt").find((e) => e.type === "step-end");
   assert.ok(stepEnd && stepEnd.type === "step-end" && stepEnd.errorKind === "timeout");
-  assert.ok(stepEnd.durationMs! < 600, `the re-prompt had the rest of the 400 ms, not a fresh 400 ms (took ${stepEnd.durationMs} ms)`);
+  assert.equal(stepEnd.schemaReprompts, 1, "the first send answered without submit_result, so a re-prompt followed it");
+  // The re-prompt starts `beforeReprompt` ms into the step. With the rest of the allowance the step ends at `stepTimeoutMs`;
+  // with a fresh one, at `beforeReprompt + stepTimeoutMs`. Half way between the two is the line.
+  const beforeReprompt = repromptAt - firstSendAt;
+  assert.ok(stepEnd.durationMs! < stepTimeoutMs + beforeReprompt / 2, `the re-prompt had the rest of the ${stepTimeoutMs} ms, not a fresh ${stepTimeoutMs} ms (took ${stepEnd.durationMs} ms, the re-prompt started after ${beforeReprompt} ms)`);
   assert.equal(stats.cancelled, 1, "the hung re-prompt run was cancelled");
 });
 
