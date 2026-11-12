@@ -175,3 +175,47 @@ test("a chapter outside the conventions draws the job lifecycle as a state machi
     "no stateDiagram-v2 in the book shows running, finished, failed and cancelled",
   );
 });
+
+/** Every `.ts` source of the runtime, joined: what it can print or log. */
+function runtimeSource(): string {
+  const dir = join(ROOT, "packages", "runtime", "src");
+  return (readdirSync(dir, { recursive: true }) as string[])
+    .filter((file) => file.endsWith(".ts"))
+    .map((file) => readFileSync(join(dir, file), "utf8"))
+    .join("\n");
+}
+
+// Wording-keyed: a quoted warning is written `warning` ("<the message, with ... or (...) for what varies>").
+test("a runtime warning the book quotes is one the runtime emits, word for word: a reader searches the log for it", () => {
+  const source = runtimeSource();
+  const wrong: string[] = [];
+  let quotes = 0;
+  for (const file of markdownFiles(ROOT, "docs")) {
+    for (const m of read(file).replace(/\s+/g, " ").matchAll(/`warning` \("([^"]+)"\)/g)) {
+      quotes++;
+      const fragments = m[1]!.split(/\(\.\.\.\)|\.\.\./).map((f) => f.trim()).filter((f) => f.length >= 8);
+      for (const fragment of fragments) if (!source.includes(fragment)) wrong.push(`${file}: "${fragment}"`);
+    }
+  }
+  assert.ok(quotes >= 2, "the book quotes the engine's cost warnings");
+  assert.deepEqual(wrong, [], "the runtime has no such message (its messages are English): quote it as the runtime prints it");
+});
+
+test("the docs that describe reattaching a cloud step name every case in which a resume starts a new cloud agent instead", () => {
+  const backend = read("packages/runtime/src/runtime/backend-cloud.ts");
+  const union = /type NotResumed = ([^;]+);/.exec(backend)?.[1];
+  assert.ok(union, "backend-cloud.ts no longer declares NotResumed");
+  const reasons = [...union.matchAll(/"([^"]+)"/g)].map((m) => m[1]!);
+  assert.ok(reasons.includes("was cancelled"), "an agent whose run was cancelled is a reason a resume starts a new one");
+  const docs = [
+    "docs/internals/01-arquitetura.md",
+    "docs/reference/config.md",
+    "skills/cursor-workflow-authoring/references/runtime-api.md",
+    "skills/skill-to-workflow/references/runtime-api.md",
+  ];
+  const missing = docs.flatMap((file) => {
+    const text = read(file).replace(/\s+/g, " ");
+    return reasons.filter((reason) => !text.includes(`${reason}: starting a new one`)).map((reason) => `${file}: ${reason}`);
+  });
+  assert.deepEqual(missing, [], "quote the backend's warning (`... left by an interrupted attempt, <reason>: starting a new one`) for each case");
+});
