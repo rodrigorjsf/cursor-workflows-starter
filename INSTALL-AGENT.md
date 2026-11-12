@@ -69,8 +69,10 @@ It writes `.cursor/mcp.json` and `.mcp.json` (the `workflows` MCP server, with n
 for the whole team), `.agents/workflows/config.json` (editor autocomplete and the kit version range), the `.workflows/`
 line in `.gitignore`, and a short marked block of safety rules in `AGENTS.md`. Running it again changes nothing.
 
-Done when it exits 0 and you have shown the user the diff it printed on stdout. It never runs git: the user reviews the
-diff and commits. The user can decline the `AGENTS.md` block with `wf init --no-agents-md` and undo it later with
+Done when it exits 0, you have shown the user the diff it printed on stdout, and you have relayed, as printed, any stderr
+line that starts with `wf init: Claude Code reads`. That line means a Claude Code memory file (such as `CLAUDE.md`) hides
+`AGENTS.md`, so Claude Code does not see the kit's safety rules; it names the import line to add. The user decides:
+`wf init` does not write Claude Code's memory files. It never runs git: the user reviews the diff and commits. The user can decline the `AGENTS.md` block with `wf init --no-agents-md` and undo it later with
 `wf init --remove`.
 
 ## 5. Run the doctor
