@@ -65,6 +65,14 @@ test("the guide runs install, login check, init, doctor, in that order, and ever
   for (const command of named) assert.ok(commands.includes(command), `the guide names wf ${command}, which the CLI does not have`);
 });
 
+test("step 4 relays wf init's Claude Code note: the setup skill that also says so comes in only after the install", () => {
+  const step = GUIDE.split(/^## /m).find((section) => /^\d+\. Set up the repo/.test(section));
+  assert.ok(step, "no section 'Set up the repo'");
+  assert.ok(step.includes("`wf init: Claude Code reads"), "step 4 names the note by the prefix wf init prints");
+  assert.match(step, /\bstderr\b/, "step 4 says the note comes on stderr");
+  assert.match(step.replace(/\s+/g, " "), /Done when[^.]*relayed/, "relaying the note is part of the step's Done when");
+});
+
 test("the setup skill only names wf commands that exist", () => {
   const commands = wfCommands();
   const text = ["SKILL.md", "references/config.md", "references/validate.md"].map((f) => read("skills", "cursor-workflows-setup", f)).join("\n");
