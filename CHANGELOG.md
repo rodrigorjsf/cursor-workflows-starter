@@ -21,6 +21,17 @@
   violação e não tem efeito). A skill `run-workflow` abre o `dashboardUrl` no navegador embutido do Cursor. `npm run dash`
   continua iniciando o dashboard à mão. O processo do dashboard não carrega o `@cursor/sdk` (o `reconcile` das métricas o
   importa só quando roda): 86 MB de memória em vez de 315 MB, e a subida cai de 0,7 s para 0,1 s no import.
+- **Dashboard: stream de eventos ao vivo e conteúdo das etapas.** `GET /api/runs/<runId>/events` é um stream de
+  Server-Sent Events do log do run: reenvia o que já está no log e depois cada evento que o run acrescenta, cada um com o
+  número da linha dele no log como `id`. O `Last-Event-ID` (o `EventSource` reconecta com ele sozinho) ou `?lastEventId=`
+  retoma de onde o cliente parou, sem lacuna e sem repetição, mesmo se a retenção reescreveu o log nesse meio-tempo;
+  `?content=false` deixa o conteúdo das etapas de fora. Uma linha só sai quando está completa, e as linhas danificadas ou
+  em branco só gastam o número delas. Eventos de outra versão do esquema ou de tipo desconhecido passam sem alteração.
+  `GET /api/runs/<runId>/steps/<stepId>/content` devolve o conteúdo de uma etapa (prompt, mensagens do agente, chamadas de
+  tool e saída de comandos, como o log os guardou, já sem segredos) e o `id` da última linha lida, para abrir o stream a
+  partir dele. Um log que a projeção não consegue ler derrubava `GET /api/runs` inteiro com `500`; agora só aquele run
+  aparece como `missing`, com o motivo. O runtime expõe `tailRun` e `readStepContent` em
+  `@cursor-workflows/runtime/observe`.
 - **`wf gc`: limpa o que os runs do `implement-issue` deixam.** Cada run tem o seu worktree, a sua branch local e, depois
   do push, a sua branch no origin, e nada as removia. `wf gc` lista o que vai remover e remove: o worktree, a branch
   local e a branch do origin de um run cujo PR foi mergeado ou fechado, e os de um run que falhou há mais de

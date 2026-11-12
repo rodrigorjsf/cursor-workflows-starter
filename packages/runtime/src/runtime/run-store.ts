@@ -200,7 +200,8 @@ export function eventLogPath(cwd: string, runId: string): string {
   return join(runDirPath(cwd, runId), EVENTS_FILE);
 }
 
-const isEvent = (v: unknown): v is WorkflowEvent =>
+/** A log line is an event when it is an object with a string `type`. Nothing else is required: an event of another schema version, or of a type this code does not know, is still one (readers treat it as opaque). */
+export const isEvent = (v: unknown): v is WorkflowEvent =>
   typeof v === "object" && v !== null && typeof (v as { type?: unknown }).type === "string";
 
 /**

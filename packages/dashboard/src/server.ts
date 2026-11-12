@@ -4,9 +4,11 @@
 //   no CORS headers, so another site's script cannot read it.
 // - It reads: the global runs index and each run's event log (`@cursor-workflows/runtime/observe`), and the metrics
 //   database, opened read-only the first time it exists. A machine with no history gets empty states, not an error.
+// - A run's event log is also served live: `/api/runs/<runId>/events` is a Server-Sent Events stream that replays the log and
+//   then follows it as the run appends, and `/api/runs/<runId>/steps/<stepId>/content` is one step's content.
 import { existsSync } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
-import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, defaultDbPath, listRuns, openDb, readRun, summary } from "@cursor-workflows/runtime/observe";
+import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, type RunTail, defaultDbPath, listRuns, openDb, readRun, readStepContent, summary, tailRun } from "@cursor-workflows/runtime/observe";
 import { METRICS_PAGE } from "./metrics-page.js";
 
 /** Host names a request may carry: the loopback names. Anything else is a page of another site asking the browser to talk to us. */
@@ -79,9 +81,40 @@ function decodeSegment(segment: string): string {
   }
 }
 
+/** How often an open stream looks at its run's log for new lines. The log is a file, possibly on a filesystem that does not report changes. */
+const TAIL_POLL_MS = 200;
+
 /** A number from a query parameter, clamped to [min, max]; `fallback` when it is not a number. */
 function clamped(raw: string | null, fallback: number, min: number, max: number): number {
   return Math.min(Math.max(Number(raw ?? fallback) || fallback, min), max);
+}
+
+/** The id a reader has seen up to, from the `Last-Event-ID` header a reconnecting EventSource sends (it wins) or the `lastEventId` query. Undefined when neither is there; NaN when it is not a whole number of 0 or more. */
+function resumeId(req: IncomingMessage, url: URL): number | undefined {
+  const raw = req.headers["last-event-id"] ?? url.searchParams.get("lastEventId") ?? undefined;
+  if (raw === undefined || Array.isArray(raw)) return undefined;
+  return /^\d{1,15}$/.test(raw) ? Number(raw) : Number.NaN;
+}
+
+/** Sends the events of `tail` as server-sent events, now and as the run appends them, until the client goes away. */
+function stream(req: IncomingMessage, res: ServerResponse, tail: RunTail): void {
+  res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" });
+  if (req.method === "HEAD") {
+    res.end();
+    return;
+  }
+  res.flushHeaders();
+  const pump = () => {
+    try {
+      const events = tail.poll();
+      if (events.length > 0) res.write(events.map(({ id, event }) => `id: ${id}\ndata: ${JSON.stringify(event)}\n\n`).join(""));
+    } catch {
+      res.destroy(); // the log became unreadable: the client reconnects
+    }
+  };
+  pump();
+  const timer = setInterval(pump, TAIL_POLL_MS);
+  res.once("close", () => clearInterval(timer));
 }
 
 export async function startDashboard(options: DashboardOptions): Promise<DashboardServer> {
@@ -118,10 +151,26 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
         return;
       }
       default: {
-        const run = /^\/api\/runs\/([^/]+)$/.exec(url.pathname);
-        const detail = run && readRun(decodeSegment(run[1]!));
-        if (detail) send(res, 200, detail);
-        else send(res, 404, { error: run ? "run not found" : "not found" });
+        const match = /^\/api\/runs\/([^/]+)(?:\/(.*))?$/.exec(url.pathname);
+        if (!match) return send(res, 404, { error: "not found" });
+        const runId = decodeSegment(match[1]!);
+        const rest = match[2];
+        if (rest === undefined) {
+          const detail = readRun(runId);
+          return detail ? send(res, 200, detail) : send(res, 404, { error: "run not found" });
+        }
+        if (rest === "events") {
+          const after = resumeId(req, url);
+          if (Number.isNaN(after)) return send(res, 400, { error: "Last-Event-ID must be a whole number: the id of the last event received" });
+          const tail = tailRun(runId, { after, content: url.searchParams.get("content") !== "false" });
+          return tail ? stream(req, res, tail) : send(res, 404, { error: "run not found" });
+        }
+        const step = /^steps\/([^/]+)\/content$/.exec(rest);
+        if (step) {
+          const content = readStepContent(runId, decodeSegment(step[1]!));
+          return content ? send(res, 200, content) : send(res, 404, { error: "run or step not found" });
+        }
+        send(res, 404, { error: "not found" });
       }
     }
   }

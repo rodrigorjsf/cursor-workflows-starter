@@ -244,6 +244,8 @@ o encerra.
 |---|---|
 | `/api/runs?limit=` | `{runs}`: os runs de todos os repositórios, do mais novo ao mais antigo (até 200, no máximo 1000), cada um com `status` (`running`, `finished`, `failed`, `cancelled` ou `missing`), `repo`, `workflow`, `phase`, `startedAt`, `finishedAt`, `error`, `executions` e o gasto |
 | `/api/runs/<runId>` | o mesmo run com `recent` (as últimas linhas de andamento), `result` e `usage` |
+| `/api/runs/<runId>/events` | stream de eventos (SSE) do log do run, ao vivo: veja [Acompanhar um run ao vivo](#acompanhar-um-run-ao-vivo) |
+| `/api/runs/<runId>/steps/<stepId>/content` | o conteúdo de uma etapa: prompt, mensagens do agente, chamadas de tool e saída de comandos |
 | `/api/summary?days=` | o resumo de métricas dos painéis abaixo |
 | `/api/health` | `{app, pid}`: como quem chama sabe que é o dashboard que responde na porta |
 
@@ -251,6 +253,38 @@ O `status` de um run vem da projeção do log. Um run cuja execução não escre
 processo segura o lock dele; sem processo, aparece como `failed`, com o comando para retomar. Numa máquina sem histórico
 (sem índice de runs e sem banco de métricas) a API devolve listas vazias, e o banco passa a ser lido assim que o primeiro
 run o cria, sem reiniciar o dashboard.
+
+### Acompanhar um run ao vivo
+
+`GET /api/runs/<runId>/events` é um stream de Server-Sent Events do log de eventos do run: primeiro o que já está no
+log, depois cada evento no instante em que o run o acrescenta (o dashboard olha o arquivo a cada 200 ms). Cada mensagem
+é um evento, no formato do log (`docs/reference/events.md`), e o `id` dela é o **número da linha** do evento no log,
+contando de 1. Linhas em branco ou danificadas (a última linha de um processo que caiu) gastam um número e não são
+enviadas, então um `id` nunca muda enquanto o log cresce, nem quando a retenção reescreve o log sem o texto do conteúdo.
+Uma linha só é enviada quando está completa.
+
+- **Retomar.** Informe o último `id` recebido no cabeçalho `Last-Event-ID` (o `EventSource` do navegador faz isso sozinho
+  ao reconectar) ou em `?lastEventId=<n>` (o cabeçalho vence); o stream continua na linha seguinte. Sem nenhum dos dois,
+  começa do início. Um valor que não é um número inteiro é `400`.
+- **`?content=false`** deixa os eventos `content` (prompts, texto do agente, saída de comandos: o grosso do log) fora do
+  stream. Os `id` continuam contando as linhas deles.
+- O stream não termina sozinho: um run retomado continua no mesmo log. Quem lê decide quando parar (o `run-end` do último
+  `run-start` é o fim de uma execução) e fecha a conexão.
+- Eventos de outra versão do esquema (`v` diferente) e de tipo desconhecido passam como estão, sem campo acrescentado nem
+  removido: quem lê usa o `v` para interpretá-los.
+- Um run que o índice não conhece é `404`. Logo depois do `start_workflow` o run ainda pode não estar no índice (o processo
+  do run o registra ao começar): tente de novo.
+
+`GET /api/runs/<runId>/steps/<stepId>/content` devolve `{runId, stepId, lastEventId, content}`: os eventos `content` da etapa
+(uma chamada de `agent()` ou um comando de `ctx.exec`), na ordem do log e entre todas as tentativas e execuções (o
+`attemptId` de cada um as separa). Cada item é o evento do log com o seu `id`; o `text` já saiu do log sem segredos
+conhecidos (`[REDACTED]`), e o dashboard não o altera. Num run fora da retenção os itens continuam, com `chars` e sem
+`text`. `lastEventId` é o `id` da última linha do log nesse instante: abrir o stream com `Last-Event-ID` igual a ele
+continua de onde a leitura parou, sem lacuna e sem repetição. Uma etapa sem conteúdo (servida do journal) devolve a lista
+vazia; um run ou uma etapa que o log não tem é `404`.
+
+Um log que o dashboard não consegue ler ou projetar (danificado, ou com eventos que o código não entende) deixa só aquele
+run como `missing`, com o motivo em `error`; os outros runs e o stream de eventos dele continuam funcionando.
 
 Hoje a página inicial (`/`) é a das métricas:
 

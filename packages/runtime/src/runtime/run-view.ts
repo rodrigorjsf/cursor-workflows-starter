@@ -12,7 +12,7 @@ import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn } from "./run-store
 import { type RunsIndexEntry, readRunsIndex } from "./runs-index.js";
 import type { UsageTotals } from "./workflow.js";
 
-/** How a run stands: the status of its latest execution, or `missing` when its log cannot be read (the repo or the run's directory is gone). */
+/** How a run stands: the status of its latest execution, or `missing` when its log cannot be read or projected (the repo or the run's directory is gone, or the log is damaged). */
 export type RunViewStatus = "running" | RunStatus | "missing";
 
 export interface RunSummary {
@@ -62,13 +62,16 @@ function detailOf(entry: RunsIndexEntry): RunDetail {
     usage: withRatio(NO_USAGE),
   });
   const log = join(runDirIn(entry.repo, entry.runId), EVENTS_FILE);
+  // A log this code cannot read or project (damage, or events a newer or older kit wrote) is that run's problem: it shows as
+  // `missing` with the reason, and never fails the listing of the other runs.
   let events;
+  let execution;
   try {
     events = readEventLog(log, { content: false }).events;
+    execution = projectLatestExecution(events);
   } catch (err) {
     return missing(`could not read ${log}: ${err instanceof Error ? err.message : String(err)}`);
   }
-  const execution = projectLatestExecution(events);
   if (!execution) return missing(`no run-start in ${log}`);
 
   let { status, error } = execution;
@@ -115,4 +118,10 @@ export function listRuns(limit = 200): RunSummary[] {
 export function readRun(runId: string): RunDetail | undefined {
   const entry = indexedRuns().find((e) => e.runId === runId);
   return entry && detailOf(entry);
+}
+
+/** Where the event log of an indexed run is, whether or not the file exists. Undefined when the runs index has no such run. The run id is only compared with the index, never used as a path. */
+export function eventLogOf(runId: string): string | undefined {
+  const entry = indexedRuns().find((e) => e.runId === runId);
+  return entry && join(runDirIn(entry.repo, entry.runId), EVENTS_FILE);
 }

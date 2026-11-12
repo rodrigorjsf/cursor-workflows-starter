@@ -5,6 +5,7 @@
 export { defaultDbPath, openDb, type Db } from "./observability/db.js";
 export { summary } from "./observability/queries.js";
 export { type RunDetail, type RunSummary, type RunViewStatus, listRuns, readRun } from "./runtime/run-view.js";
+export { type LoggedEvent, type RunTail, type StepContent, type StepContentItem, type TailOptions, readStepContent, tailRun } from "./runtime/run-tail.js";
 export {
   DASHBOARD_APP,
   DASHBOARD_HOST,
