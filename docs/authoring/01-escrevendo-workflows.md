@@ -38,7 +38,7 @@ documento explica o *porquê* das regras e traz as receitas, que a skill aponta.
   de segurança é uma segunda camada, não a única.
 - **Regra de escopo.** Medido em 2026-11-11, antes dela: uma etapa de correção editou um arquivo fora do
   repositório para "consertar" o ambiente depois de uma falha causada pelo shell de login dos testes
-  ([verificações locais](../research/verificacoes-locais.md) §9). A `SCOPE_RULE` reduz a chance, mas nada impede a
+  ([8.2 §9](../research/verificacoes-locais.md)). A `SCOPE_RULE` reduz a chance, mas nada impede a
   escrita. Ver [5.1 · Segurança](../operating/01-governanca-e-custos.md#segurança).
 - **Sandbox.** No Linux exige `bubblewrap`. Segundo a doc, restringe só as chamadas de shell e os processos que
   elas disparam (escrita no cwd, em temporários e nos caminhos do `sandbox.json`; leitura livre; rede só pela
@@ -50,7 +50,7 @@ documento explica o *porquê* das regras e traz as receitas, que a skill aponta.
 
 ## Custo
 
-Toda receita abaixo deve passar pelo [checklist de custo](../operating/02-custos-e-cache.md#6-checklist-de-custo). As
+Toda receita abaixo deve passar pelo checklist de custo ([5.2 §6](../operating/02-custos-e-cache.md#6-checklist-de-custo)). As
 práticas que mais pesam:
 
 - decidir por código em vez de chamar o modelo;

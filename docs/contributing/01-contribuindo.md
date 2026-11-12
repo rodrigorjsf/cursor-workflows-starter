@@ -94,7 +94,7 @@ projeto da forma mais completa possível**. Vale para quem rodar testes pagos em
    - os caminhos HIGH e de review com um modelo de terceiros (por exemplo `gpt-5.3-codex`), se o teste for justamente
      esse.
 3. **Sempre com teto.** Estime o custo antes, rode com `--max-tokens` e `--max-cents`, e registre o resultado e o
-   custo em [`docs/research/verificacoes-locais.md`](../research/verificacoes-locais.md). Nesta conta o `getUsage()`
+   custo em [8.2](../research/verificacoes-locais.md). Nesta conta o `getUsage()`
    não informa custo de agentes locais: o valor real fica no dashboard de uso do Cursor.
 4. **Segurança primeiro.** Nunca imprima nem versione a chave, e não rode etapas que escrevem fora de um repositório
    descartável. Veja [SECURITY.md](../../SECURITY.md).

@@ -130,7 +130,7 @@ O conteúdo do kit em `81d7356` é idêntico ao de `a69f2a2`
 ### O que mudou entre `a69f2a2` e a versão 0.1.0
 
 Veja o [CHANGELOG](../../CHANGELOG.md) e, com a evidência de cada item,
-[`docs/research/verificacoes-locais.md`](../research/verificacoes-locais.md).
+[8.2](../research/verificacoes-locais.md).
 
 ### Fontes primárias
 
@@ -149,7 +149,7 @@ página em Markdown naquela data.
 - n8n: <https://docs.n8n.io/workflows/> (acesso em 2026-11-12).
 - Pacote `@cursor/sdk@1.3.1` no npm (tipos `.d.ts` e README).
 - Fórum oficial do Cursor (<https://forum.cursor.com>), citado como relato de usuário quando não há doc.
-- Testes contra a API real: [`docs/research/verificacoes-locais.md`](../research/verificacoes-locais.md) e os
+- Testes contra a API real: [8.2](../research/verificacoes-locais.md) e os
   workflows de [`scripts/verify/`](../../scripts/verify/README.md).
 
 Cópias dessas páginas, feitas na mesma data, ficam no estudo de origem

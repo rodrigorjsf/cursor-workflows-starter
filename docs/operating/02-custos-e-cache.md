@@ -8,7 +8,7 @@ seção de custo das skills `cursor-workflow-authoring` e `/skill-to-workflow`.
 > - **[DOC]**: doc oficial. Quando há link, ele aponta para a página oficial (acesso em 2026-11-11).
 > - **[FÓRUM]**: relato no fórum oficial do Cursor (indica quando a equipe respondeu).
 > - **[TESTE]**: medido contra a API real em 2026-11-11
->   ([docs/research/verificacoes-locais.md](../research/verificacoes-locais.md)).
+>   ([8.2](../research/verificacoes-locais.md)).
 > - **[I]**: inferência.
 >
 > Preços e comportamento de cache mudam com frequência. Confira a página

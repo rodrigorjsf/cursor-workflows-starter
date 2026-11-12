@@ -12,7 +12,7 @@ O objetivo é responder com dados:
 
 > **Marcas de confiança:** [PKG] = lido no `@cursor/sdk@1.3.1`; [DOC] = doc oficial do Cursor, com link para a
 > página (acesso em 2026-11-11); [TESTE] = medido contra a API real em 2026-11-11
-> ([docs/research/verificacoes-locais.md](../research/verificacoes-locais.md)); [I] = inferência; [S] = resumo de busca.
+> ([8.2](../research/verificacoes-locais.md)); [I] = inferência; [S] = resumo de busca.
 
 ## 1. Começo rápido
 

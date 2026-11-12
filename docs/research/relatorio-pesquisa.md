@@ -37,7 +37,7 @@
 > - **[DOC]**: doc oficial. Com link, é a página ao vivo (acesso em 2026-11-11); sem link, é o espelho local.
 > - **[FÓRUM]**: relato no fórum oficial do Cursor (indica quando a equipe respondeu).
 > - **[TESTE]**: medido contra a API real em 2026-11-11
->   ([docs/research/verificacoes-locais.md](verificacoes-locais.md)).
+>   ([8.2](verificacoes-locais.md)).
 > - **[S]**: resumo de busca, ainda a confirmar.
 > - **[I]**: inferência minha.
 

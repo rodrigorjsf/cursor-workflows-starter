@@ -57,7 +57,7 @@ flowchart TB
      tentativas dela somadas), só ela é cancelada e falha com `StepBudgetError`, que não é fatal. A tentativa cortada
      fecha com `errorKind: "budget"` e não é repetida. A ultrapassagem é de no máximo um turno por etapa ativa.
      Antes disso, medido em 2026-11-11: uma etapa começou abaixo de `--max-tokens 300000` e o run fechou em 344 mil
-     ([verificações locais](../research/verificacoes-locais.md) §9).
+     ([8.2 §9](../research/verificacoes-locais.md)).
 4. **Agente novo:** `Agent.create` com o modelo da etapa, a allowlist de tools, os subagents e MCP servers
    inline, o sandbox (se pedido) e `settingSources: ["project","team","mdm"]`.
    - Com `schema`, registra a custom tool `submit_result` e garante `"mcp"` na allowlist.
@@ -71,13 +71,13 @@ flowchart TB
      [DOC](https://cursor.com/docs/sdk/typescript#errors) [DOC](https://cursor.com/docs/sdk/typescript#cursormodelslist).
    - No plano Free, o `Agent.create` já falha com `UnknownAgentError` `plan_required` (403): a validação local do
      modelo consulta o catálogo (`GET /v1/models`), bloqueado no Free (medido em 2026-11-11,
-     [verificações locais](../research/verificacoes-locais.md) §4).
+     [8.2 §4](../research/verificacoes-locais.md)).
 5. **Run:** `send(prompt)` (tolera `AgentBusyError` com espera curta; nenhum apareceu nas 3 etapas com schema
    medidas em 2026-11-11) e `wait()` com timeout. Ao estourar o timeout, o engine **aguarda** `run.cancel()` antes
    de seguir, para a próxima tentativa não editar o mesmo cwd em paralelo.
 6. **Schema:** se a run terminou e o agente não chamou `submit_result` com JSON válido, o engine reenvia o
    pedido na mesma conversa (`schemaRetries`, default 2). O Ajv valida dentro do `execute()`, e o erro volta para
-   o modelo corrigir. Medido em 2026-11-11 ([verificações locais](../research/verificacoes-locais.md) §7): o
+   o modelo corrigir. Medido em 2026-11-11 ([8.2 §7](../research/verificacoes-locais.md)): o
    `submit_result` aparece e é chamado, e uma submissão inválida foi corrigida dentro do mesmo turno (2 chamadas,
    `schemaReprompts: 0`). O re-prompt do engine não foi exercitado ao vivo, porque o modelo chamou `submit_result`
    até num prompt que pedia só texto; ele está coberto só pelos testes offline.
@@ -100,7 +100,7 @@ flowchart TB
      [DOC](https://cursor.com/docs/sdk/typescript#token-usage) (ver [5.3](../operating/03-observabilidade.md)).
    - Num Premium, em 2026-11-11, foi o caso de toda chamada, inclusive do `Agent.getUsage(agentId)` estático
      depois do descarte. Os tokens dos `turn-ended` bateram com os de `RunResult.usage`
-     ([verificações locais](../research/verificacoes-locais.md) §5–6).
+     ([8.2 §5–6](../research/verificacoes-locais.md)).
 8. **Sucesso:** grava no journal e devolve o valor.
 9. **Falha** (status `error`/`cancelled`, timeout, schema não entregue): repete até `retries` (default 1) com
    um agente novo e então lança `StepFailedError`. `RateLimitError` cobre o limite de rajada e o teto mensal de uso
@@ -133,7 +133,7 @@ flowchart TB
 | Etapa concluída tem saída no formato esperado | `submit_result` + Ajv + re-prompt; senão a etapa falha |
 | Falha é explícita | `agent()` lança erro. `parallel`/`pipeline` transformam a falha de um item em `null` e registram `warning`, mas o teto de custo e o erro de conta (`plan_required`) sempre abortam |
 | O modelo de cada etapa é o do código ou o que a configuração pôs no papel dela, e um ID não liberado falha | Validação do SDK contra o catálogo da conta. A configuração em camadas (código < arquivo global < arquivo do repositório < ambiente < flag < override do chat) troca modelo, tempo e tentativas por papel; os tetos do arquivo global limitam tudo e só podem ser apertados. O `run-start` grava a configuração efetiva e a origem de cada valor ([6.2 · Referência de configuração](../reference/config.md)) |
-| Teto de gasto (não é gasto máximo) | Teto por run (centavos e tokens), teto de tokens por etapa e `RateLimitError`. Os de tokens valem a cada turno, durante a etapa: o run do agente é cancelado no turno que passa do teto, e a ultrapassagem é de no máximo um turno por etapa ativa. Um turno do SDK pode ser o laço inteiro do agente, então o `timeoutMs` da tentativa (criação do agente, envio e re-prompts dividem esse tempo) segue sendo o freio dentro dele (antes do teto ao vivo: 344 mil tokens com `--max-tokens 300000`, [verificações locais](../research/verificacoes-locais.md) §9). O teto em centavos, checado antes de cada tentativa, depende do custo do `getUsage()`: em uso cobrado por request (passo 3) e quando o `getUsage()` falha (passo 7), só o de tokens vale, contado pelos eventos `turn-ended` |
+| Teto de gasto (não é gasto máximo) | Teto por run (centavos e tokens), teto de tokens por etapa e `RateLimitError`. Os de tokens valem a cada turno, durante a etapa: o run do agente é cancelado no turno que passa do teto, e a ultrapassagem é de no máximo um turno por etapa ativa. Um turno do SDK pode ser o laço inteiro do agente, então o `timeoutMs` da tentativa (criação do agente, envio e re-prompts dividem esse tempo) segue sendo o freio dentro dele (antes do teto ao vivo: 344 mil tokens com `--max-tokens 300000`, [8.2 §9](../research/verificacoes-locais.md)). O teto em centavos, checado antes de cada tentativa, depende do custo do `getUsage()`: em uso cobrado por request (passo 3) e quando o `getUsage()` falha (passo 7), só o de tokens vale, contado pelos eventos `turn-ended` |
 | Retomar sem repetir etapas | Journal + `runId` gravado no job desde o início |
 | Um run sobrevive a reinício do Cursor e do MCP server | Todo job roda em um processo destacado (`spawnJob`, nova sessão, sem pipe com quem o iniciou); o MCP server e o CLI só iniciam, leem o estado e pedem o cancelamento ([ADR-0003](../adr/0003-detached-jobs.md)) |
 | Um run que caiu aparece como `failed`, com o `runId` para retomar | O processo do job atualiza um heartbeat no registro do job (a cada 5 s, por uma thread própria: uma chamada síncrona longa, como uma suíte de testes, não o atrasa). Processo morto, ou heartbeat parado há mais de 30 s, projeta `failed` |
@@ -163,7 +163,7 @@ flowchart TB
   vem desligado [DOC](https://cursor.com/docs/sdk/typescript#sandbox-options). Custom tools, como `submit_result`,
   nunca pedem aprovação; regras de deny e o sandbox ainda valem para elas
   [DOC](https://cursor.com/docs/sdk/typescript#custom-tools). Medido em 2026-11-11: uma etapa de correção editou
-  um arquivo fora do repositório ([verificações locais](../research/verificacoes-locais.md) §9). A regra de escopo
+  um arquivo fora do repositório ([8.2 §9](../research/verificacoes-locais.md)). A regra de escopo
   nas instruções das etapas que escrevem é só um pedido no prompt, e o sandbox não foi testado neste kit. Veja
   [5.1 · Governança](../operating/01-governanca-e-custos.md#segurança).
 - **Gasto máximo.** O teto é checado antes de cada tentativa, e uma tentativa só é limitada pelo `timeoutMs` dela.

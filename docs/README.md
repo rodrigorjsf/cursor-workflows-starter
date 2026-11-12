@@ -6,8 +6,8 @@ montado e como o `npm test` o confere: [9.2 · Convenções do livro](contributi
 
 ## Por onde começar
 
-Chegou agora? Leia a Parte 1: [o problema](vision/01-o-problema.md), [a ideia e as referências](vision/02-a-ideia-e-as-referencias.md)
-e os [conceitos](vision/03-conceitos.md). Depois siga o seu perfil:
+Chegou agora? Leia a Parte 1: o problema ([1.1](vision/01-o-problema.md)), a ideia e as referências ([1.2](vision/02-a-ideia-e-as-referencias.md))
+e os conceitos ([1.3](vision/03-conceitos.md)). Depois siga o seu perfil:
 
 | Perfil | Comece por | Depois |
 |---|---|---|

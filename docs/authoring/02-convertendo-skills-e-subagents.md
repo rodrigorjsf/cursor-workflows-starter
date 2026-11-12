@@ -87,7 +87,7 @@ os arquivos de contexto que existem no planejar, desenhar, julgar e no texto do 
 o classificar recebe só a issue, e os eixos Spec e Segurança, a issue e o diff. Testes, diff, commit, comentário e PR são código: zero tokens.
 As etapas que escrevem (teste, código, correção, refactor) ficam com todas as tools, `task` inclusive, e o default do
 engine (`["project","team","mdm"]`): é a exceção do workflow ao item de `tools` do
-[checklist](../operating/02-custos-e-cache.md#6-checklist-de-custo).
+checklist ([5.2 §6](../operating/02-custos-e-cache.md#6-checklist-de-custo)).
 
 O que a conversão exigiu além dos passos da skill virou receita em [4.1](01-escrevendo-workflows.md#receitas)
 (invariantes entre etapas, resume com invariantes, checkpoint em dois runs, review em eixos) e referência em
