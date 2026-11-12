@@ -251,12 +251,15 @@ o encerra.
 | `/runs/<runId>` | a página do run: o grafo ao vivo, veja [Ver um run como grafo](#ver-um-run-como-grafo) (HTML, com o script e o estilo em `/assets/…`) |
 | `/api/runs/<runId>/steps/<stepId>/content` | o conteúdo de uma etapa: prompt, mensagens do agente, chamadas de tool e saída de comandos |
 | `/api/csrf` | `{csrfToken}`: o token que o `POST` de cancelar exige |
-| `POST /api/runs/<runId>/cancel` | cancela o job que executa o run (cabeçalho `X-CSRF-Token`); num run que não está executando, cancela pela API da Cursor os cloud agents que o processo morto deixou rodando e responde `200` com um `note`, ou `409` se não havia nada a cancelar: veja [Cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume) |
+| `POST /api/runs/<runId>/cancel` | cancela o job que executa o run (cabeçalho `X-CSRF-Token`); num run travado, encerra o processo com `SIGKILL` e cancela pela API da Cursor os cloud agents que o run deixou rodando; num run que não está executando, cancela por essa API os cloud agents que o processo morto deixou rodando e responde `200` com um `note`, ou `409` se não havia nada a cancelar: veja [Cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume) |
 | `/api/summary?days=` | o resumo de métricas dos painéis abaixo |
 | `/api/health` | `{app, pid}`: como quem chama sabe que é o dashboard que responde na porta |
 
-O `status` de um run vem da projeção do log. Um run cuja execução não escreveu o `run-end` só é `running` enquanto um
-processo segura o lock dele; sem processo, aparece como `failed`, com o comando para retomar. Numa máquina sem histórico
+O `status` de um run vem da projeção do log, com a mesma regra que o `wf status` aplica ao job. Um run cuja execução não
+escreveu o `run-end` só é `running` enquanto um processo segura o lock dele e, num run iniciado como job, enquanto o
+heartbeat desse job tem menos de 30 s. Sem processo, aparece como `failed`, com o comando para retomar. Com o heartbeat
+parado, o processo travou: o run aparece como `failed`, com o mesmo erro do `wf status` (`no heartbeat for <N>s`) e o
+comando para retomar, embora o processo ainda segure o lock. Numa máquina sem histórico
 (sem índice de runs e sem banco de métricas) a API devolve listas vazias, e o banco passa a ser lido assim que o primeiro
 run o cria, sem reiniciar o dashboard.
 
@@ -328,9 +331,10 @@ para um run em andamento e para um que já terminou):
   pelos eventos que mudam o desenho: o log de uma etapa aparece inteiro quando ela termina; a barra deixa parar em
   qualquer evento).
 - Um run grande (o `implement-issue` passa de 50 comandos) não cabe na tela em tamanho legível: a tela enquadra só os nós
-  que cabem com o texto legível, em volta de um foco (o nó com o log aberto; num run que terminou, o primeiro nó que falhou
-  ou foi interrompido, ou senão a primeira etapa: um nó cancelado não é foco; num run em andamento, o nó mais recente), e
-  **Fit View** mostra tudo.
+  que cabem com o texto legível, em volta de um foco (o nó com o log aberto; num run que terminou, o primeiro nó que
+  falhou, foi cancelado ou foi interrompido, ou senão a primeira etapa; num run em andamento, o nó mais recente), e
+  **Fit View** mostra tudo. Ao chegar pelo Tab a um nó fora da tela, a tela o centraliza no mesmo zoom; a partir daí não
+  acompanha mais o run até **Fit View**.
 
 A página lê a API: o stream `?content=false` do run (o conteúdo das etapas vem só do painel de log, que pede o de uma etapa
 por vez), `GET /api/runs/<runId>` para o status e o repositório, que ela consulta a cada poucos segundos, e só age para
@@ -367,13 +371,22 @@ No cabeçalho da página do run:
   escreve o fim do run como `cancelled`). O cartão vai para a coluna Cancelled quando o log o registra. Se o job demora mais
   do que a espera (20 s) para parar, a resposta diz que ele ainda está parando. Um run que não foi iniciado como job (`wf run`
   num terminal) não tem processo registrado para sinalizar: o dashboard responde `409` e diz para dar Ctrl-C naquele terminal.
-- **Cancel cloud agent** (**Cancel N cloud agents** quando são vários; num run `failed` cujo processo morreu com uma etapa
-  na nuvem interrompida e o agente registrado no log) chama a mesma rota: ela cancela, pela API da Cursor e com a chave do
-  usuário, os cloud agents que o run deixou rodando e a página mostra a nota da resposta (`200`), que os nomeia, no lugar
-  do botão. O cancelamento não fica registrado no log, então depois de recarregar a página o botão volta; quando não há
-  mais nada a cancelar, a rota responde `409` e a página mostra a mensagem. Um resume depois disso não reanexa aos agentes
-  cancelados: cria outros, que custam de novo ([6.2 §Etapas na nuvem](../reference/config.md#etapas-na-nuvem)). Quando a
-  nota diz que um agente não foi alcançado, a página a mostra como falha e mantém o botão.
+- **Cancel cloud agent** (**Cancel N cloud agents** quando são vários; num run `failed` cujo processo morreu ou travou com
+  uma etapa na nuvem interrompida e o agente registrado no log) chama a mesma rota: ela cancela, pela API da Cursor e com a
+  chave do usuário, os cloud agents que o run deixou rodando e a página mostra a nota da resposta (`200`), que os nomeia, no
+  lugar do botão. O cancelamento não fica registrado no log, então depois de recarregar a página o botão volta; quando não
+  há mais nada a cancelar, a rota responde `409` e a página mostra a mensagem, como resultado concluído, não como erro.
+  Um resume depois disso não reanexa aos agentes cancelados: cria outros, que custam de novo
+  ([6.2 §Etapas na nuvem](../reference/config.md#etapas-na-nuvem)).
+  Quando a nota diz que um agente não foi alcançado, a página a mostra como falha e mantém o botão.
+- **Um run travado** (o processo do job vivo, mas sem heartbeat há mais de 30 s) aparece como `failed`, com o erro
+  `no heartbeat for <N>s`, embora o processo ainda segure o lock. A rota acha esse job (`cancelRun` procura o processo que
+  ainda segura um run `failed`) e o entrega ao `cancelJob`, que encerra o processo com `SIGKILL`, sem desfazer a etapa em
+  curso, e depois cancela pela API da Cursor os cloud agents que o run deixou rodando, como o `wf cancel` faz. O run segue
+  `failed` e retomável, e a nota começa com `process <pid> had no heartbeat and was killed (SIGKILL)` e nomeia os agentes
+  cancelados; um resume depois disso cria agentes novos, que custam de novo. Com uma etapa na nuvem interrompida, o botão é
+  o **Cancel cloud agent** acima. Um run travado sem etapa na nuvem não ganha botão na página: cancele o job dele com
+  `wf cancel <jobId>` (o `wf jobs` lista os jobs do repositório), pelo mesmo caminho.
 - **Copy resume command** (num run `failed` ou `cancelled`) copia
   `wf start <workflow> --args '<args>' --resume <runId> --cwd <repositório>`, com os mesmos `--max-cents`, `--max-tokens` e
   `--overrides` do start. O registro do job da última execução (`.workflows/jobs/<jobId>.json`, campo `start`) guarda os
@@ -412,7 +425,8 @@ dashboard não sobe e diz o motivo.
 
 *Captura do painel Metrics com dados sintéticos (SDK falso), não com uso real.*
 
-- **KPIs:** runs, custo, tokens, parcela em cache, tentativas falhas, etapas sem API, custos a reconciliar;
+- **KPIs:** runs, custo, tokens, parcela em cache, tentativas falhas, etapas sem API, custos a reconciliar. O KPI runs
+  conta todo run da janela, também os que só rodam comandos, como a coluna Runs do painel de custo por entrega;
 - **Painel 1:** gasto diário por workflow;
 - **Painel 2:** custo por entrega;
 - **Painel 3:** faixa de contexto × ¢/1k tokens × taxa de sucesso, por modelo;
@@ -432,7 +446,7 @@ workflow que não declara nem percorre fase alguma tem uma coluna só, `Running`
 | terminou e o workflow devolveu `seams-proposed` ou `pending` | **Awaiting approval** |
 | terminou entregue (`done`, `ok`…) ou com um resultado que não diz um status | **Done** |
 | terminou com outro status (`tests-failed`, `baseline-red`…) | **Failed** |
-| terminou com erro, estourou o teto, ou o processo morreu sem terminá-lo | **Failed** |
+| terminou com erro, estourou o teto, ou o processo morreu ou travou sem terminá-lo | **Failed** |
 | cancelado | **Cancelled** |
 
 Um run cujo log não dá para ler (`missing`) não tem estado e fica fora do quadro; o menu Runs o mostra, com o motivo. A
@@ -475,7 +489,7 @@ aberta, 1 hora depois de mesclada ou fechada, e 5 minutos quando o `gh` não con
   um elemento `<style>` nem um script;
 - só escreve um endereço de fora: o link do agente de uma etapa na nuvem (`https://cursor.com/agents/<id>`). Ele só abre
   quando você clica, numa nova aba e sem `Referer`; o dashboard não faz nenhum pedido a ele;
-- só chama a API da Cursor num caso: o `POST` de cancelar um run cujo processo morreu, quando o log nomeia cloud agents
+- só chama a API da Cursor num caso: o `POST` de cancelar um run cujo processo morreu ou travou, quando o log nomeia cloud agents
   cuja tentativa não terminou. O servidor carrega então o SDK e cancela os runs desses agentes com a chave que o SDK acha
   no ambiente do dashboard (`CURSOR_API_KEY`, senão a do `wf login`). O dashboard que o `start_workflow` inicia herda o
   ambiente do servidor MCP, `CURSOR_API_KEY` inclusive; o do `npm run dash`, o do terminal.

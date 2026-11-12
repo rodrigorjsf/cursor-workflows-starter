@@ -1,4 +1,4 @@
-// The cloud backend: one attempt of a step on a Cursor cloud agent (ADR-0006). A cloud agent is not a local agent somewhere
+// The cloud backend: one attempt of a step on a Cursor cloud agent (ADR-0007). A cloud agent is not a local agent somewhere
 // else: it rejects custom tools and tool allowlists, ignores setting sources, and sees only what was pushed to a remote. So
 // before the agent is created the worktree is pushed as a snapshot branch (cloud-snapshot.ts) and the agent starts from it;
 // when the attempt ends the branch is deleted. The backend never sends custom tools, allowlists or setting sources, and
