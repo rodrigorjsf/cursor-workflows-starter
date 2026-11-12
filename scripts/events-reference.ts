@@ -6,11 +6,12 @@
 // HOW:  `npm run docs:events` rewrites the page. `npx tsx scripts/events-reference.ts --check` only compares it and
 //       exits 1 when it is out of date. The source is parsed, not imported: no event code runs. The page's number and
 //       footer come from the book index (docs/README.md), so adding a chapter next to it needs no edit here.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { bookPlace } from "./check-docs.js";
+import { isEntryPoint, writeGeneratedPage } from "./lib/cli.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const EVENTS_SOURCE = join(ROOT, "packages", "runtime", "src", "runtime", "events.ts");
@@ -164,21 +165,7 @@ export function generateEventsReference(sourceText: string, root = ROOT): string
   return `${out.join("\n").trimEnd()}\n`;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isEntryPoint(import.meta.url)) {
   const page = generateEventsReference(readFileSync(EVENTS_SOURCE, "utf8"));
-  if (process.argv.includes("--check")) {
-    const current = (() => {
-      try {
-        return readFileSync(EVENTS_PAGE, "utf8");
-      } catch {
-        return undefined;
-      }
-    })();
-    if (current === page) process.exit(0);
-    process.stderr.write(`${relative(ROOT, EVENTS_PAGE)} is out of date: run \`npm run docs:events\`\n`);
-    process.exit(1);
-  }
-  mkdirSync(dirname(EVENTS_PAGE), { recursive: true });
-  writeFileSync(EVENTS_PAGE, page);
-  process.stdout.write(`wrote ${relative(ROOT, EVENTS_PAGE)}\n`);
+  process.exitCode = writeGeneratedPage({ root: ROOT, path: EVENTS_PAGE, page, script: "docs:events", check: process.argv.includes("--check") });
 }

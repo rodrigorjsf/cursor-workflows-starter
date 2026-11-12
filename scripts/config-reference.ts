@@ -7,10 +7,11 @@
 //       when it is out of date. A schema definition with no entry in SECTIONS below makes the generator throw: add its
 //       section title there. The page's number and footer come from the book index (docs/README.md), so adding a
 //       chapter next to it needs no edit here.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bookPlace } from "./check-docs.js";
+import { isEntryPoint, writeGeneratedPage } from "./lib/cli.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const CONFIG_SCHEMA = join(ROOT, "packages", "runtime", "schema", "config.schema.json");
@@ -158,21 +159,7 @@ export function generateConfigReference(schemaText: string, root = ROOT): string
   return `${out.join("\n").trimEnd()}\n`;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isEntryPoint(import.meta.url)) {
   const page = generateConfigReference(readFileSync(CONFIG_SCHEMA, "utf8"));
-  if (process.argv.includes("--check")) {
-    const current = (() => {
-      try {
-        return readFileSync(CONFIG_PAGE, "utf8");
-      } catch {
-        return undefined;
-      }
-    })();
-    if (current === page) process.exit(0);
-    process.stderr.write(`${relative(ROOT, CONFIG_PAGE)} is out of date: run \`npm run docs:config\`\n`);
-    process.exit(1);
-  }
-  mkdirSync(dirname(CONFIG_PAGE), { recursive: true });
-  writeFileSync(CONFIG_PAGE, page);
-  process.stdout.write(`wrote ${relative(ROOT, CONFIG_PAGE)}\n`);
+  process.exitCode = writeGeneratedPage({ root: ROOT, path: CONFIG_PAGE, page, script: "docs:config", check: process.argv.includes("--check") });
 }
