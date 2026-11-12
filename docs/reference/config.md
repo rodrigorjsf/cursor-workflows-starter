@@ -118,7 +118,7 @@ Valida os dois arquivos de configuração do kit: o global (`~/.cursor-workflows
 
 ```json
 {
-  "$schema": "https://github.com/rodrigorjsf/cursor-workflows-starter/blob/main/packages/runtime/schema/config.schema.json",
+  "$schema": "https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/main/packages/runtime/schema/config.schema.json",
   "caps": {
     "maxTokens": 3000000,
     "maxTokensPerStep": 600000,

@@ -38,6 +38,14 @@
   é lida de novo a cada run; o `run-start` grava a configuração efetiva, a origem de cada valor e as violações;
   `wf config show [workflow]` imprime os três. `start_workflow` aceita `overrides` que só apertam. A referência
   (`docs/reference/config.md`) é gerada do esquema (`npm run docs:config`), e o `npm test` falha se ela divergir.
+- **`wf init` grava os arquivos do kit no repositório alvo.** Num repositório novo, ele cria o `.cursor/mcp.json`
+  (aponta para o kit por usuário em `${userHome}/.cursor-workflows/kit`, sem `WF_MAX_*`), o `.mcp.json` do Claude Code
+  (`${HOME}`), o `.agents/workflows/config.json` com `$schema` e a faixa de versão do kit, a linha `.workflows/` no
+  `.gitignore` e um bloco de quatro linhas no `AGENTS.md` (criado se preciso). Imprime o diff do que mudou e não faz
+  commit. Rodar de novo não muda nada; os outros servidores de um `mcp.json` existente ficam; `--no-agents-md` pula o
+  bloco e `--remove` o tira. O `templates/agents-md-block.md` ganhou o link para o guia de instalação. O endereço
+  `$schema` do esquema passou a ser o da URL bruta (`raw.githubusercontent.com`): a da página do GitHub devolve HTML, que
+  o editor não lê.
 - **O estado do runtime funciona em worktree ligado e submódulo**, onde `.git` é um arquivo: antes, qualquer acesso a
   `.workflows/` falhava com `ENOTDIR`.
 
