@@ -34,7 +34,8 @@ Para as práticas de implementação (cache, contexto, prompts, memo), veja
 3. **Review condicional:** o review só roda quando o tier ou o tamanho do diff justificam.
 4. **Laços com teto:** nenhum "repita até passar" sem limite.
 5. **Concorrência baixa** (default 4): N agentes em paralelo custam ~N vezes os tokens.
-6. **Resume:** relançar não paga de novo as etapas já concluídas.
+6. **Resume:** relançar não paga de novo as etapas já concluídas, e o gasto do run acumula entre resumes (tentativas
+   que falharam inclusive): o teto de um resume é o novo teto total, e o orçamento nunca recomeça do zero.
 7. **Visibilidade:** `spentCents` e `usage` (tokens por tipo e `cacheHitRatio`) no resultado; `chargedCents` e
    `usage` por etapa nos eventos. `spentCents` é o custo que o teto usa; `chargedCents` (só o cobrado) também
    aparece no resultado (`RunOutcome`), no estado do job e em `ctx.budget`.

@@ -6,8 +6,10 @@
 // Tools:
 //   list_workflows                                  → nome, descrição, quando usar, schema dos args
 //   start_workflow {name, args, resumeRunId?}       → {jobId, runId}
-//   wait_workflow  {jobId, timeoutSec}              → estado (status, fase, últimos eventos, resultado)
+//   wait_workflow  {jobId, timeoutSec}              → estado (status, fase, últimas linhas de resumo, gasto, resultado)
 //   get_workflow_status {jobId}                     → estado sem esperar
+//
+// O estado é a projeção do log de eventos do run (jobs.ts): o registro do job guarda só a identidade.
 //
 // Os jobs rodam dentro deste processo. Se o cliente reiniciar o servidor, o job em andamento morre e
 // passa a aparecer como "failed" com o runId; relance com start_workflow {resumeRunId} — o journal

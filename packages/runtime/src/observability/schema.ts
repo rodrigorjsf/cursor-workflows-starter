@@ -80,7 +80,7 @@ CREATE TABLE attempts (
   tools             TEXT,                   -- JSON (allowlist) ou NULL = padrão
   prompt_hash       TEXT,
   prompt_chars      INTEGER,
-  prompt_text       TEXT,                   -- só com WF_METRICS_STORE_PROMPTS=1
+  prompt_text       TEXT,                   -- legado: nunca mais gravado (o texto dos prompts fica só no log de eventos local)
   ok                INTEGER NOT NULL,
   error_kind        TEXT,                   -- timeout | run-error | schema | rate-limit | exception
   schema_reprompts  INTEGER DEFAULT 0,

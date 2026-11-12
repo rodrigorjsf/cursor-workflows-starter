@@ -29,9 +29,11 @@ import {
   type SettingSource,
 } from "@cursor/sdk";
 import { Ajv } from "ajv";
-import { EVENT_SCHEMA_VERSION, type ErrorKind, type NewEvent, type StepRef, type WorkflowEvent } from "./events.js";
+import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type NewEvent, type StepRef, type WorkflowEvent } from "./events.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
+import { addUsage, emptyUsage, withRatio } from "./projection.js";
 import { RunLockedError, RunStore } from "./run-store.js";
+import type { RetentionPolicy } from "./retention.js";
 import { registerRun } from "./runs-index.js";
 import { stateDir as runtimeStateDir } from "./state.js";
 import { type Capture, SUBMIT_TOOL, repromptMessage, schemaInstruction, submitResultTool } from "./structured.js";
@@ -80,7 +82,11 @@ export interface RunOptions {
   apiKey?: string;
   /** Id do run. Para retomar, passe o id de um run anterior (o journal evita repetir etapas concluídas). */
   runId?: string;
+  /** O job que executa este run (`wf start`, `start_workflow`): vai no `run-start`, e o estado do job é a projeção da execução que o leva. */
+  jobId?: string;
+  /** Teto de custo do run inteiro, somando as execuções anteriores (resumes). Num resume, o valor passado é o novo teto total. */
   maxCents?: number | null;
+  /** Teto de tokens do run inteiro, com a mesma regra de `maxCents`. */
   maxTokens?: number | null;
   /** Agentes simultâneos. Default 4 (o Cursor não documenta limite numérico; seja conservador). */
   concurrency?: number;
@@ -92,6 +98,12 @@ export interface RunOptions {
   settingSources?: SettingSource[];
   /** Onde ficam journal e estado. Default <cwd>/.workflows/runs. */
   stateDir?: string;
+  /**
+   * Por quanto tempo o conteúdo das etapas fica nos logs de eventos do repositório (default: os últimos 30 runs ou 14 dias).
+   * Ao iniciar o run, o `text` dos eventos `content` dos runs fora da retenção é apagado; o resto do log fica.
+   * Um limite `null` desliga aquele limite.
+   */
+  retention?: RetentionPolicy;
   onEvent?: (e: WorkflowEvent) => void;
   /**
    * Banco de métricas (SQLite). Default: ~/.cursor-workflows/metrics.db ($WF_METRICS_DB). `false` desliga;
@@ -105,7 +117,9 @@ export interface RunOutcome<R> {
   status: "finished" | "failed";
   result?: R;
   error?: string;
-  /** Custo do Cursor que o teto usa: soma, por tentativa, do maior entre `rawCostCents` e `chargedCents`. */
+  /** true quando o runtime recusou o run antes de começar (argumentos inválidos, run já em execução): nada foi gravado no log. */
+  refused?: true;
+  /** Custo do Cursor que o teto usa: soma, por tentativa, do maior entre `rawCostCents` e `chargedCents`. Acumula entre resumes do run. */
   spentCents: number;
   /** Soma de `chargedCents` (o valor cobrado; 0 para uso incluído no plano, BYOK e créditos). */
   chargedCents: number;
@@ -117,22 +131,6 @@ export interface RunOutcome<R> {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const ajv = new Ajv({ allErrors: true, strict: false });
 
-const emptyUsage = (): UsageTotals => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0 });
-
-function addUsage(acc: UsageTotals, u: Partial<UsageTotals> | undefined): void {
-  if (!u) return;
-  acc.inputTokens += u.inputTokens ?? 0;
-  acc.outputTokens += u.outputTokens ?? 0;
-  acc.cacheReadTokens += u.cacheReadTokens ?? 0;
-  acc.cacheWriteTokens += u.cacheWriteTokens ?? 0;
-  acc.totalTokens += u.totalTokens ?? 0;
-}
-
-function withRatio(u: UsageTotals): UsageTotals & { cacheHitRatio: number | null } {
-  // Medido na API: inputTokens já inclui leitura e escrita de cache, e totalTokens = input + output.
-  return { ...u, cacheHitRatio: u.inputTokens > 0 ? Math.round((u.cacheReadTokens / u.inputTokens) * 1000) / 1000 : null };
-}
-
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
 /** Modelo + params ordenados: "composer-2[reasoning_effort=low]". Esforço e contexto viram braços distintos. */
@@ -140,6 +138,17 @@ export function modelKey(m: ModelSelection | undefined): string | undefined {
   if (!m) return undefined;
   const params = [...(m.params ?? [])].sort((a, b) => a.id.localeCompare(b.id)).map((p) => `${p.id}=${p.value}`);
   return params.length || m.maxMode ? `${m.id}[${[...params, ...(m.maxMode ? ["max"] : [])].join(",")}]` : m.id;
+}
+
+/** The output of a finished shell tool call, as one text: exit code, stdout, then stderr. Undefined when the call has no result. */
+function shellOutput(result: unknown): string | undefined {
+  const r = result as { status?: string; value?: { exitCode?: number; stdout?: string; stderr?: string }; error?: unknown } | undefined;
+  if (r?.status === "success" && r.value) {
+    const { exitCode, stdout = "", stderr = "" } = r.value;
+    return `exit ${exitCode}\n${stdout}${stderr ? `\n[stderr]\n${stderr}` : ""}`;
+  }
+  if (r?.status === "error") return `error: ${JSON.stringify(r.error)}`;
+  return undefined;
 }
 
 function repoIdentity(cwd: string): { name: string; hash: string } {
@@ -206,7 +215,7 @@ export async function runWorkflow<A, R>(
   opts: RunOptions,
 ): Promise<RunOutcome<R>> {
   const runId = opts.runId ?? newRunId(def.meta.name);
-  const refused = (error: string): RunOutcome<R> => ({ runId, status: "failed", error, spentCents: 0, chargedCents: 0, spentTokens: 0, usage: withRatio(emptyUsage()) });
+  const refused = (error: string): RunOutcome<R> => ({ runId, status: "failed", error, refused: true, spentCents: 0, chargedCents: 0, spentTokens: 0, usage: withRatio(emptyUsage()) });
 
   if (def.meta.argsSchema) {
     const validate = ajv.compile(def.meta.argsSchema);
@@ -215,7 +224,7 @@ export async function runWorkflow<A, R>(
 
   let store: RunStore;
   try {
-    store = RunStore.open(join(opts.stateDir ?? runtimeStateDir(opts.cwd, "runs"), runId), runId);
+    store = RunStore.open(join(opts.stateDir ?? runtimeStateDir(opts.cwd, "runs"), runId), runId, { secrets: [opts.apiKey] });
   } catch (err) {
     if (err instanceof RunLockedError) return refused(err.message); // nothing is written: the run belongs to the other execution
     throw err;
@@ -236,10 +245,12 @@ async function executeRun<A, R>(
   store: RunStore,
 ): Promise<RunOutcome<R>> {
   // spentCents = Σ max(bruto, cobrado). O cobrado sozinho é 0 para uso incluído no plano e não protegeria nada.
-  let spentCents = 0;
-  let chargedCents = 0;
-  let spentTokens = 0;
-  const totals = emptyUsage();
+  // O gasto parte do que o log do run já registra (execuções anteriores, tentativas que falharam inclusive): o orçamento
+  // acumula entre resumes e nunca recomeça do zero.
+  let spentCents = store.ledger.spentCents;
+  let chargedCents = store.ledger.chargedCents;
+  let spentTokens = store.ledger.spentTokens;
+  const totals = { ...store.ledger.usage };
   const outcome = (status: "finished" | "failed", extra: { result?: R; error?: string }): RunOutcome<R> => ({
     runId,
     status,
@@ -252,7 +263,8 @@ async function executeRun<A, R>(
 
   // Métricas: o recorder é carregado só se ligado (importa node:sqlite sob demanda).
   let recorder: { record(e: WorkflowEvent): void; close(): void } | undefined;
-  const stamp = (e: NewEvent): WorkflowEvent => ({ v: EVENT_SCHEMA_VERSION, ts: new Date().toISOString(), runId, ...e }) as WorkflowEvent;
+  // Every event is stamped and redacted here, once: the log, the recorder and the listeners all get the same redacted event.
+  const stamp = (e: NewEvent): WorkflowEvent => store.redact({ v: EVENT_SCHEMA_VERSION, ts: new Date().toISOString(), runId, ...e } as WorkflowEvent);
   let logFailed = false;
   const append = (event: WorkflowEvent) => {
     try {
@@ -275,6 +287,29 @@ async function executeRun<A, R>(
     }
     opts.onEvent?.(event);
   };
+  /**
+   * The content of one attempt (prompts, what the agent said, tool calls, command output). It goes to the event log only:
+   * not to the metrics recorder, not to `onEvent` listeners. Agent text arrives in deltas and is written one message per turn.
+   */
+  function attemptContent(ref: StepRef, attemptId: string) {
+    const write = (kind: ContentKind, raw: string, extra: { tool?: string; callId?: string } = {}) => {
+      const { text, chars, truncated } = store.prepareContent(raw);
+      append(stamp({ type: "content", ...ref, attemptId, kind, ...extra, text, chars, truncated: truncated || undefined }));
+    };
+    let said = "";
+    return {
+      write,
+      /** Adds a piece of what the agent is saying. */
+      say: (delta: string) => void (said += delta),
+      /** Writes what the agent said since the last flush as one message. */
+      flush() {
+        if (!said) return;
+        write("agent-message", said);
+        said = "";
+      },
+    };
+  }
+
   let recorderWarning: string | undefined; // reported after run-start: every execution in the log opens with it
   if (opts.metricsDb !== false && process.env.WF_METRICS !== "off") {
     try {
@@ -284,15 +319,16 @@ async function executeRun<A, R>(
       recorderWarning = `métricas desligadas: ${err instanceof Error ? err.message : String(err)}`;
     }
   }
-  const storePrompts = process.env.WF_METRICS_STORE_PROMPTS === "1";
   const workflowHash = sha(JSON.stringify(def.meta) + JSON.stringify(def.defaults ?? {}) + def.run.toString()).slice(0, 16);
   const startedAt = new Date().toISOString();
+  const pruned = store.pruneOldContent(opts.retention);
   emit({
     type: "run-start",
     workflow: def.meta.name,
     workflowHash,
     argsHash: sha(JSON.stringify(args ?? null)).slice(0, 16),
     repo: repoIdentity(opts.cwd),
+    jobId: opts.jobId,
   });
   if (recorderWarning) emit({ type: "warning", message: recorderWarning });
   if (store.previousStart && store.previousStart.workflowHash !== workflowHash) {
@@ -308,6 +344,9 @@ async function executeRun<A, R>(
     } catch (err) {
       emit({ type: "warning", message: `não foi possível registrar o run no índice global: ${err instanceof Error ? err.message : String(err)}` });
     }
+  }
+  for (const { runId: prunedRun, error } of pruned.failed) {
+    emit({ type: "warning", message: `não foi possível apagar o conteúdo antigo do run ${prunedRun}: ${error}` });
   }
   if (store.tornTail.events) emit({ type: "warning", message: "a última linha do log de eventos estava incompleta (queda no meio de uma gravação): ignorada" });
   if (store.tornTail.journal) emit({ type: "warning", message: "a última linha do journal estava incompleta (queda no meio de uma gravação): a etapa dela roda de novo" });
@@ -514,7 +553,6 @@ async function executeRun<A, R>(
         settingSources: sources,
         promptHash,
         promptChars: prompt.length,
-        prompt: storePrompts ? prompt : undefined,
       });
     };
     /** A step served without calling the API still emits its step-start, so it exists in the log like any other. */
@@ -561,6 +599,8 @@ async function executeRun<A, R>(
         const attemptId = randomUUID();
         const startedAt = Date.now();
         emitStart(attemptId, attempt, false);
+        const content = attemptContent(ref, attemptId);
+        content.write("prompt", prompt);
         // Contadores alimentados pelo stream de deltas do SDK.
         const c = { turns: 0, steps: 0, stepsInTurn: 0, summaries: 0, reprompts: 0, toolCalls: {} as Record<string, number> };
         // Soma dos turn-ended desta tentativa: reserva de tokens quando getUsage() não responde.
@@ -572,15 +612,25 @@ async function executeRun<A, R>(
                 c.steps++;
                 c.stepsInTurn++;
                 break;
+              case "text-delta":
+                content.say(update.text);
+                break;
               case "tool-call-started": {
                 const name = update.toolCall?.type ?? "unknown";
                 c.toolCalls[name] = (c.toolCalls[name] ?? 0) + 1;
+                content.write("tool-call", JSON.stringify((update.toolCall as { args?: unknown }).args ?? null), { tool: name, callId: update.callId });
+                break;
+              }
+              case "tool-call-completed": {
+                const output = update.toolCall?.type === "shell" ? shellOutput(update.toolCall.result) : undefined;
+                if (output !== undefined) content.write("command-output", output, { tool: "shell", callId: update.callId });
                 break;
               }
               case "summary-completed":
                 c.summaries++;
                 break;
               case "turn-ended":
+                content.flush();
                 if (update.usage) {
                   emit({ type: "turn", ...ref, attemptId, idx: c.turns, steps: c.stepsInTurn, usage: update.usage });
                   const t = update.usage;
@@ -598,7 +648,8 @@ async function executeRun<A, R>(
         let charge: Charge | undefined;
         let errorKind: ErrorKind | undefined;
         let resolvedModel: string | undefined;
-        const endEvent = (ok: boolean) =>
+        const endEvent = (ok: boolean) => {
+          content.flush();
           emit({
             type: "step-end",
             ...ref,
@@ -628,6 +679,7 @@ async function executeRun<A, R>(
             usageRuns: charge?.runs,
             durationMs: Date.now() - startedAt,
           });
+        };
         try {
           agent = await Agent.create({
             apiKey: opts.apiKey,
@@ -653,7 +705,9 @@ async function executeRun<A, R>(
           let schemaTries = o.schemaRetries ?? 2;
           while (o.schema && result.status === "finished" && !capture.submitted && schemaTries-- > 0) {
             c.reprompts++;
-            result = await waitWithTimeout(await send(agent, repromptMessage(capture), sendOpts), o.timeoutMs ?? 20 * 60_000);
+            const reprompt = repromptMessage(capture);
+            content.write("prompt", reprompt);
+            result = await waitWithTimeout(await send(agent, reprompt, sendOpts), o.timeoutMs ?? 20 * 60_000);
           }
           charge = await chargeUsage(agent, turnUsage);
 
@@ -751,6 +805,7 @@ async function executeRun<A, R>(
     type: "run-end",
     status: final.status,
     outcomeStatus: r && typeof r === "object" && typeof r.status === "string" ? r.status : undefined,
+    result: final.result,
     error: final.error,
   });
   recorder?.close();

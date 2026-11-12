@@ -66,14 +66,17 @@ export interface JsonlRead<T> {
   skipped: number;
 }
 
-/** Reads a JSON Lines file, skipping blank lines and anything that does not parse or fails `isRecord`. A missing file is empty. */
-export function readJsonl<T>(file: string, isRecord: (value: unknown) => value is T): JsonlRead<T> {
+/**
+ * Reads a JSON Lines file, skipping blank lines and anything that does not parse or fails `isRecord`. A missing file is
+ * empty. Lines for which `ignore` returns true are passed over before they are parsed, and are not counted as skipped.
+ */
+export function readJsonl<T>(file: string, isRecord: (value: unknown) => value is T, ignore?: (line: string) => boolean): JsonlRead<T> {
   const text = readIfExists(file);
   if (text === undefined) return { records: [], skipped: 0 };
   const records: T[] = [];
   let skipped = 0;
   for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
+    if (!line.trim() || ignore?.(line)) continue;
     try {
       const value: unknown = JSON.parse(line);
       if (isRecord(value)) records.push(value);

@@ -2,38 +2,64 @@
 // longo e consulte o resultado depois (MCP e shell do agente têm timeouts; um workflow de
 // implementação leva minutos). CLI e MCP leem o mesmo diretório, então um job iniciado por um
 // pode ser consultado pelo outro.
+//
+// O registro do job (`.workflows/jobs/<jobId>.json`) guarda só a identidade: id do job, id do run, pid e heartbeat.
+// Todo o resto (status, fase, últimas linhas, gasto, resultado) é uma projeção do log de eventos do run
+// (`.workflows/runs/<runId>/events.jsonl`), calculada a cada leitura: há uma fonte de verdade e nenhum arquivo de
+// estado para ficar pela metade.
 
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { type RunOptions, newRunId, runWorkflow } from "./engine.js";
+import { type ExecutionState, type Ledger, projectExecution, replayLedger, withRatio } from "./projection.js";
+import { abortOpenRuns, eventLogPath, readEventLog } from "./run-store.js";
 import { stateDir } from "./state.js";
 import { writeFileAtomic } from "./state-files.js";
-import { type RunOptions, type RunOutcome, newRunId, runWorkflow } from "./engine.js";
-import type { WorkflowEvent } from "./events.js";
 import type { WorkflowDefinition } from "./workflow.js";
 
-export interface JobState {
+/** O que fica em disco: a identidade do job. */
+export interface JobRecord {
   jobId: string;
-  workflow: string;
-  status: "running" | "finished" | "failed";
   /** Gravado no início: permite retomar com o mesmo journal mesmo se o processo morrer. */
   runId: string;
   /** Processo que executa o job; usado para detectar job órfão. */
   pid: number;
-  startedAt: string;
+  /** Último instante em que o processo do job se declarou vivo (ISO 8601). */
+  heartbeat: string;
+  /**
+   * Só quando o runtime recusou o job antes de o run começar (argumentos inválidos, run já em execução): o motivo. O log do
+   * run não é do job nesse caso (pode ser de outra execução), então o motivo fica aqui.
+   */
+  refused?: string;
+}
+
+/** O que `wf status`, `wf jobs`, `get_workflow_status` e `wait_workflow` devolvem: o registro mais a projeção do log. */
+export interface JobState {
+  jobId: string;
+  runId: string;
+  pid: number;
+  heartbeat: string;
+  /** `meta.name` do workflow. Ausente enquanto o processo do job não começou o run. */
+  workflow?: string;
+  status: "running" | "finished" | "failed";
+  startedAt?: string;
   finishedAt?: string;
   phase?: string;
-  /** Últimos eventos, para o agente do chat mostrar progresso. */
+  /** As últimas linhas de progresso, uma linha cada. Nunca texto de prompt ou de saída de agente. */
   recent: string[];
   result?: unknown;
   error?: string;
-  /** Custo que o teto usa: Σ max(bruto, cobrado). */
-  spentCents?: number;
+  /** Custo que o teto usa: Σ max(bruto, cobrado). Acumula entre resumes. */
+  spentCents: number;
   /** Só o cobrado (0 para uso incluído no plano). */
-  chargedCents?: number;
-  spentTokens?: number;
-  usage?: RunOutcome<unknown>["usage"];
+  chargedCents: number;
+  spentTokens: number;
+  usage: Ledger["usage"] & { cacheHitRatio: number | null };
 }
+
+/** De quanto em quanto tempo um processo de job atualiza o heartbeat do registro. */
+export const HEARTBEAT_MS = 5_000;
 
 export function jobsDir(cwd: string): string {
   return stateDir(cwd, "jobs");
@@ -52,17 +78,56 @@ function isAlive(pid: number): boolean {
   }
 }
 
-export function readJob(cwd: string, jobId: string): JobState | undefined {
+/** O registro do job em disco (só a identidade), sem a projeção. */
+export function readJobRecord(cwd: string, jobId: string): JobRecord | undefined {
   const file = join(jobsDir(cwd), `${jobId}.json`);
   if (!existsSync(file)) return undefined;
-  const job = JSON.parse(readFileSync(file, "utf8")) as JobState;
-  if (job.status === "running" && !isAlive(job.pid)) {
-    // Processo morreu sem fechar o job (crash, reinício do MCP server, máquina desligada).
-    job.status = "failed";
-    job.error = `processo ${job.pid} terminou sem concluir o job; relance com resumeRunId="${job.runId}"`;
-    writeJob(cwd, job);
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as JobRecord;
+  } catch {
+    return undefined; // não é um registro que este runtime escreveu
   }
-  return job;
+}
+
+const unfinished = (record: JobRecord): string => `processo ${record.pid} terminou sem concluir o job; relance com resumeRunId="${record.runId}"`;
+
+/** O estado do job: o registro e a projeção do log do run. Só lê. */
+function project(cwd: string, record: JobRecord): JobState {
+  const { events } = readEventLog(eventLogPath(cwd, record.runId), { content: false });
+  const execution: ExecutionState | undefined = projectExecution(events, record.jobId);
+  const ledger = execution?.ledger ?? replayLedger(events);
+  const state: JobState = {
+    jobId: record.jobId,
+    runId: record.runId,
+    pid: record.pid,
+    heartbeat: record.heartbeat,
+    workflow: execution?.workflow,
+    status: execution?.status ?? "running",
+    startedAt: execution?.startedAt,
+    finishedAt: execution?.finishedAt,
+    phase: execution?.phase,
+    recent: execution?.recent ?? [],
+    result: execution?.result,
+    error: execution?.error,
+    spentCents: ledger.spentCents,
+    chargedCents: ledger.chargedCents,
+    spentTokens: ledger.spentTokens,
+    usage: withRatio(ledger.usage),
+  };
+  if (record.refused !== undefined) {
+    state.status = "failed";
+    state.error = record.refused;
+  } else if (state.status === "running" && !isAlive(record.pid)) {
+    // O processo morreu sem fechar o run (crash, reinício do MCP server, máquina desligada).
+    state.status = "failed";
+    state.error = unfinished(record);
+  }
+  return state;
+}
+
+export function readJob(cwd: string, jobId: string): JobState | undefined {
+  const record = readJobRecord(cwd, jobId);
+  return record && project(cwd, record);
 }
 
 export function listJobs(cwd: string): JobState[] {
@@ -72,55 +137,19 @@ export function listJobs(cwd: string): JobState[] {
     .filter((j): j is JobState => Boolean(j));
 }
 
-export function writeJob(cwd: string, job: JobState): void {
-  writeFileAtomic(join(jobsDir(cwd), `${job.jobId}.json`), JSON.stringify(job, null, 2));
+/** Grava o registro. Só os campos de identidade vão para o disco, mesmo que `record` seja um `JobState`. */
+export function writeJob(cwd: string, record: JobRecord): void {
+  const { jobId, runId, pid, heartbeat, refused } = record;
+  writeFileAtomic(join(jobsDir(cwd), `${jobId}.json`), JSON.stringify({ jobId, runId, pid, heartbeat, ...(refused === undefined ? {} : { refused }) }, null, 2));
 }
 
 /** Cria o registro do job antes de rodar (CLI `start` grava no pai, antes do spawn). */
-export function createJob(cwd: string, workflow: string, runId?: string, jobId: string = randomUUID().slice(0, 8), pid = process.pid): JobState {
-  // Data/hora ficam no job, não no workflow: o script precisa ser determinístico para o resume.
-  const job: JobState = {
-    jobId,
-    workflow,
-    status: "running",
-    runId: runId ?? newRunId(workflow),
-    pid,
-    startedAt: new Date().toISOString(),
-    recent: [],
-  };
-  writeJob(cwd, job);
-  return job;
+export function createJob(cwd: string, workflow: string, runId?: string, jobId: string = randomUUID().slice(0, 8), pid = process.pid): JobRecord {
+  // Data/hora ficam no registro, não no workflow: o script precisa ser determinístico para o resume.
+  const record: JobRecord = { jobId, runId: runId ?? newRunId(workflow), pid, heartbeat: new Date().toISOString() };
+  writeJob(cwd, record);
+  return record;
 }
-
-function describe(e: WorkflowEvent): string | undefined {
-  switch (e.type) {
-    case "log":
-      return e.message;
-    case "phase":
-      return `== ${e.title}`;
-    case "step-start":
-      if (e.cached) return undefined; // servida do journal/memo: o step-end seguinte já a mostra
-      return `▶ ${e.label} [${e.model ?? "?"}]${e.attempt > 1 ? ` tentativa ${e.attempt}` : ""}`;
-    case "step-end": {
-      const cache = e.usage && e.usage.cacheReadTokens > 0 ? ` cache-read ${e.usage.cacheReadTokens}` : "";
-      // Custo como o teto o conta: max(bruto, cobrado). O cobrado sozinho é 0 para uso incluído no plano.
-      const cents = Math.max(e.rawCents ?? 0, e.chargedCents);
-      return `${e.ok ? "✓" : "✗"} ${e.label}${e.cached ? ` (${e.cached})` : ""}${cents ? ` ${cents}¢` : ""}${cache}`;
-    }
-    case "warning":
-      return `⚠ ${e.message}`;
-    case "metric":
-      return `· ${e.name} = ${e.value}`;
-    case "run-start":
-    case "run-end":
-    case "group-start":
-    case "group-end":
-    case "turn":
-      return undefined;
-  }
-}
-
-const activeJobs = new Map<string, { cwd: string; job: JobState }>();
 
 /**
  * Handlers de processo para MCP server e CLI. O cookbook oficial (dag-task-runner) avisa que o SDK
@@ -132,52 +161,38 @@ export function installCrashHandlers(): void {
     process.stderr.write(`[wf] unhandledRejection ignorada: ${reason instanceof Error ? reason.message : String(reason)}\n`);
   });
   process.on("uncaughtException", (err) => {
-    for (const { cwd, job } of activeJobs.values()) {
-      Object.assign(job, { status: "failed", error: `crash: ${err.message}; relance com resumeRunId="${job.runId}"`, finishedAt: new Date().toISOString() });
-      writeJob(cwd, job);
-    }
+    // O estado do job vem do log do run: fecha os runs deste processo nele, com o motivo e o jeito de retomar.
+    abortOpenRuns((runId) => `crash: ${err.message}; relance com resumeRunId="${runId}"`);
     process.stderr.write(`[wf] uncaughtException: ${err.stack ?? err.message}\n`);
     process.exit(1);
   });
 }
 
-/** Roda o workflow no processo atual para um job já criado (ou cria um). */
+/** Roda o workflow no processo atual para um job já criado (ou cria um). `done` resolve com o estado final do job. */
 export function startJob<A>(
   def: WorkflowDefinition<A, unknown>,
   args: A,
   opts: RunOptions,
-  existing?: JobState,
-): { job: JobState; done: Promise<JobState> } {
+  existing?: JobRecord,
+): { job: JobRecord; done: Promise<JobState> } {
   const job = existing ?? createJob(opts.cwd, def.meta.name, opts.runId);
-  job.pid = process.pid;
-  writeJob(opts.cwd, job);
-  activeJobs.set(job.jobId, { cwd: opts.cwd, job });
-  const done = runWorkflow(def, args, {
-    ...opts,
-    runId: job.runId,
-    onEvent: (e) => {
-      if (e.type === "phase") job.phase = e.title;
-      const line = describe(e);
-      if (line === undefined) return opts.onEvent?.(e);
-      job.recent = [...job.recent, line].slice(-20);
-      writeJob(opts.cwd, job);
-      opts.onEvent?.(e);
-    },
-  }).then((outcome) => {
-    Object.assign(job, {
-      status: outcome.status,
-      result: outcome.result,
-      error: outcome.error,
-      spentCents: outcome.spentCents,
-      chargedCents: outcome.chargedCents,
-      spentTokens: outcome.spentTokens,
-      usage: outcome.usage,
-      finishedAt: new Date().toISOString(),
-    });
+  const beat = () => {
+    job.pid = process.pid;
+    job.heartbeat = new Date().toISOString();
     writeJob(opts.cwd, job);
-    activeJobs.delete(job.jobId);
-    return job;
-  });
+  };
+  beat();
+  const heartbeat = setInterval(beat, HEARTBEAT_MS);
+  heartbeat.unref();
+  const done = runWorkflow(def, args, { ...opts, runId: job.runId, jobId: job.jobId })
+    .then((outcome) => {
+      if (outcome.status === "failed" && outcome.refused) {
+        job.refused = outcome.error;
+        writeJob(opts.cwd, job);
+      }
+    })
+    .finally(() => clearInterval(heartbeat))
+    .then(() => readJob(opts.cwd, job.jobId)!);
   return { job, done };
 }
 

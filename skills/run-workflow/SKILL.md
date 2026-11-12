@@ -53,8 +53,10 @@ The runtime's messages are in Portuguese. This skill quotes the ones it matches,
    - `args inválidos`: fix the args from the `argsSchema` (step 1) and start a new run, without `resumeRunId`.
    - `O plano da conta não dá acesso` or `Limite de uso do Cursor atingido`: a resume would fail the same way; the
      step ends with the relay.
-   - `Teto de custo atingido` or `Teto de tokens atingido`: a resume restarts the count from zero, with the whole cap
-     again. Offer to resume while saying so, and the user decides.
+   - `Teto de custo atingido` or `Teto de tokens atingido`: the cap is a total for the run, and a resume starts from
+     what the run already spent. The same cap stops it at the same step. Tell the user that continuing takes a higher
+     total cap: `--resume <runId> --max-cents <new total>` on the CLI, or a higher `WF_MAX_CENTS` / `WF_MAX_TOKENS` in the
+     `env` of the `workflows` server in `mcp.json`. The user decides.
    - `já está em execução`: another process is still executing that run, so a second execution is refused. Do not
      resume again; follow the job that is already running (`wait_workflow` or `get_workflow_status` with its
      `jobId`), and tell the user if you do not have it.

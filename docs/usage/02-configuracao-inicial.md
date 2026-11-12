@@ -116,6 +116,10 @@ Como funciona:
   §5). Nessa conta, `spentCents` fica em 0 e o `--max-cents` nunca dispara: só o `--max-tokens` protege. O custo
   só sai da estimativa da tabela `pricing` ([5.3 §3](../operating/03-observabilidade.md#3-modelo-de-dados)) e do dashboard de uso
   da conta.
+- O teto vale para o run inteiro, não para cada execução. Num resume, o gasto das execuções anteriores (tentativas que
+  falharam inclusive) é recomposto do log de eventos do run e conta de novo: `--max-cents` e `--max-tokens` passados ao
+  resume são o novo teto **total**. Para estender um run que parou no teto, retome com um teto maior que o gasto
+  (`--resume <runId> --max-cents <novo total>`); com o mesmo teto, o resume para no mesmo ponto.
 - O teto compara `maxCents` com `spentCents`: a soma, por tentativa, do maior entre `rawCostCents` (custo bruto, sem
   descontos) e `chargedCents` (o cobrado). `chargedCents` sozinho é **0 para uso incluído no plano, BYOK e
   créditos** ([DOC](https://cursor.com/docs/sdk/typescript#agentgetusage)). Antes o teto somava só `chargedCents` e

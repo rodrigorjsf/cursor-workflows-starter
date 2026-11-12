@@ -13,11 +13,27 @@
   a segunda execução do mesmo `runId` (`já está em execução`); todo arquivo de estado é gravado de forma atômica;
   retomar um run cujo workflow mudou grava um aviso; cada run novo entra no índice global
   `~/.cursor-workflows/runs.jsonl` (`WF_HOME` muda o diretório do usuário).
+- **O estado de um job é projetado do log de eventos.** O registro do job (`.workflows/jobs/<jobId>.json`) guarda só id
+  do job, id do run, pid e heartbeat. `wf status`, `wf jobs`, `get_workflow_status` e `wait_workflow` calculam status,
+  fase, gasto, resultado e as últimas linhas (`recent`) do log a cada leitura: não há arquivo de estado para ficar pela
+  metade, e as linhas são resumos de uma linha, nunca texto de prompt ou de saída. O `run-end` passa a levar o `result`,
+  e o `run-start`, o `jobId`. Um processo que cai com exceção não tratada fecha o run no log como `failed`.
+- **O conteúdo das etapas fica só no log de eventos local.** Prompts, o que o agente disse, chamadas de tool e saída de
+  comandos entram no log como eventos `content` (cortados em 32768 caracteres), nunca no banco de métricas, nos exports
+  dele, nos ouvintes de `onEvent` nem em `recent`. Formatos conhecidos de segredo e o valor das variáveis de ambiente com
+  `KEY`, `TOKEN`, `SECRET` ou `PASSWORD` no nome são trocados por `[REDACTED]` antes de qualquer gravação. Ao iniciar um
+  run, o texto dos runs do repositório fora dos 30 mais recentes ou com mais de 14 dias é apagado (`RunOptions.retention`
+  muda os limites); os metadados ficam.
+- **O orçamento acumula entre resumes.** O gasto (centavos e tokens) é recomposto do log do run, tentativas que falharam
+  inclusive, e um resume com `--max-cents`/`--max-tokens` define o novo teto total.
 - **O estado do runtime funciona em worktree ligado e submódulo**, onde `.git` é um arquivo: antes, qualquer acesso a
   `.workflows/` falhava com `ENOTDIR`.
 
 ### Mudado
 
+- **`WF_METRICS_STORE_PROMPTS` foi removida.** O banco de métricas nunca mais guarda o texto de um prompt (só hash e
+  tamanho); o texto fica no log de eventos local. O evento `step-start` perdeu o campo `prompt`, e a coluna
+  `attempts.prompt_text` continua no esquema, sempre vazia.
 - **O repositório vira npm workspaces.** O runtime (engine, CLI, servidor MCP, workflows embutidos e seus testes
   offline) fica no pacote `packages/runtime/` (`@cursor-workflows/runtime`) e resolve seus assets pelo local de
   instalação, nunca pela raiz do repositório. As skills distribuídas (`run-workflow`, `cursor-workflow-authoring`,

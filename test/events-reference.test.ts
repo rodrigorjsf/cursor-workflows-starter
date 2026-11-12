@@ -13,12 +13,12 @@ test("the committed events reference page matches the event type", () => {
 
 test("the page documents every event type, its fields and their comments", () => {
   const page = generateEventsReference(source);
-  for (const type of ["log", "phase", "run-start", "run-end", "group-start", "group-end", "step-start", "turn", "step-end", "metric", "warning"]) {
+  for (const type of ["log", "phase", "run-start", "run-end", "group-start", "group-end", "step-start", "turn", "content", "step-end", "metric", "warning"]) {
     assert.match(page, new RegExp(`^### \`${type}\``, "m"), `section of ${type}`);
   }
   assert.match(page, /\| `stepId` \| `string` \| sim \|/, "a required field of the step position");
   assert.match(page, /\| `parentId` \| `string \\\| null` \| sim \|/, "a union type keeps its pipe escaped inside the table");
-  assert.match(page, /\| `prompt` \| `string` \| não \| Só quando WF_METRICS_STORE_PROMPTS=1\. \|/, "an optional field carries its comment");
+  assert.match(page, /\| `jobId` \| `string` \| não \| O job \(`wf start`, `start_workflow`\) que iniciou esta execução\./, "an optional field carries its comment");
   assert.match(page, /### `step-start`[\s\S]*\[`EventBase`\]\(#eventbase\)[\s\S]*\[`StepRef`\]\(#stepref\)/, "a step event says it also has the common and the position fields");
 });
 

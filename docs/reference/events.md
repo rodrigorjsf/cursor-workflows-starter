@@ -64,6 +64,7 @@ Inclui os campos de [`EventBase`](#eventbase).
 | `workflowHash` | `string` | sim | Hash do código e da meta do workflow: compare métricas só entre versões iguais. |
 | `argsHash` | `string` | sim | Hash dos args: dá para ver que dois runs tiveram a mesma entrada sem guardar a entrada. |
 | `repo` | `{ name: string; hash: string }` | sim | O repositório do run: nome da pasta raiz do git e um hash curto do remote `origin` (ou do caminho). |
+| `jobId` | `string` | não | O job (`wf start`, `start_workflow`) que iniciou esta execução. Ausente em `wf run`. O estado de um job é a projeção das execuções que levam o id dele. |
 
 ### `run-end`
 
@@ -75,6 +76,7 @@ Inclui os campos de [`EventBase`](#eventbase).
 | --- | --- | --- | --- |
 | `status` | `"finished" \| "failed"` | sim | `finished` = o workflow retornou; `failed` = lançou um erro (inclusive teto de custo ou de tokens). |
 | `outcomeStatus` | `string` | não | O campo `status` do resultado do workflow, quando ele devolve um objeto com esse campo (por exemplo `done`). |
+| `result` | `unknown` | não | O valor que o workflow retornou. É o que `wait_workflow` e `wf status` devolvem como `result`. |
 | `error` | `string` | não | A mensagem do erro que encerrou o run. |
 
 ### `group-start`
@@ -121,9 +123,8 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 | `attempt` | `number` | sim | Número da tentativa, a partir de 1. |
 | `tools` | `string[]` | não | A allowlist de tools da etapa, quando há. |
 | `settingSources` | `SettingSource[]` | sim | As camadas de configuração que a etapa carrega. |
-| `promptHash` | `string` | sim | Hash do prompt: o conteúdo não vai para o log por padrão. |
+| `promptHash` | `string` | sim | Hash do prompt. O texto fica nos eventos `content` do log local, nunca aqui nem no banco de métricas. |
 | `promptChars` | `number` | sim | Tamanho do prompt em caracteres. |
-| `prompt` | `string` | não | Só quando WF_METRICS_STORE_PROMPTS=1. |
 
 ### `turn`
 
@@ -137,6 +138,22 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 | `idx` | `number` | sim | Número do turno na tentativa, a partir de 0. |
 | `steps` | `number` | sim | Passos (chamadas ao modelo) do turno. |
 | `usage` | `TurnUsage` | sim | Tokens do turno. |
+
+### `content`
+
+O conteúdo de uma etapa, que não cabe nos outros eventos: o texto dos prompts, do que o agente disse, das chamadas de tool e da saída de comandos. Só o log de eventos local guarda isto. Não vai para o banco de métricas, nem para os exports dele, nem para os ouvintes de `onEvent`, nem para as linhas de progresso de `wf status` e `wait_workflow`. Chaves e tokens conhecidos já saem do `text` trocados por `[REDACTED]`. O conteúdo de um run velho é apagado ao iniciar outro run (retenção); o evento fica, sem o `text`.
+
+Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
+
+| Campo | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `attemptId` | `string` | sim | A tentativa a que o conteúdo pertence (o `attemptId` do `step-start`). |
+| `kind` | `ContentKind` | sim | O que o `text` guarda. |
+| `tool` | `string` | não | O nome da tool (`shell`, `read`…), em `tool-call` e `command-output`. |
+| `callId` | `string` | não | O id da chamada de tool no stream do agente: liga o `tool-call` ao `command-output` dela. |
+| `text` | `string` | não | O conteúdo, já sem segredos e cortado em 32768 caracteres. Ausente depois que a retenção o apagou. |
+| `chars` | `number` | sim | Tamanho do conteúdo em caracteres antes do corte. Fica depois que a retenção apaga o `text`. |
+| `truncated` | `boolean` | não | true quando o `text` é só o começo do conteúdo. |
 
 ### `step-end`
 
@@ -206,6 +223,14 @@ Tokens de um turno do agente (evento `turn-ended` do SDK: soma de todos os passo
 | `cacheReadTokens` | `number` | sim | Parte da entrada lida do cache de prompt do provedor. |
 | `cacheWriteTokens` | `number` | sim | Parte da entrada escrita no cache de prompt do provedor. |
 | `reasoningTokens` | `number` | não | Tokens de raciocínio do turno, quando o modelo os reporta. |
+
+### ContentKind
+
+O que um `content` guarda: o que foi enviado ao agente, o que ele disse, as tools que chamou, a saída dos comandos.
+
+```ts
+type ContentKind = "prompt" | "agent-message" | "tool-call" | "command-output";
+```
 
 ### ErrorKind
 
