@@ -93,4 +93,7 @@ test("while the log covers the canvas, the canvas is hidden, so its nodes and zo
   assert.ok(overlay, "the log is drawn over the canvas on a narrow screen");
   const hidden = rules.find((r) => r.width === overlay.width && /:has\(\s*\.step-panel\s*\)/.test(r.selector) && /\.canvas$/.test(r.selector) && /visibility:\s*hidden/.test(r.decls));
   assert.ok(hidden, `under ${overlay.width}px, a workspace with the log open hides its canvas (visibility: hidden)`);
+  // React Flow writes `visibility: visible` on each node's own style, which a hidden parent does not override.
+  const nodes = rules.find((r) => r.width === overlay.width && /:has\(\s*\.step-panel\s*\)/.test(r.selector) && /\.react-flow__node\b/.test(r.selector) && /visibility:\s*hidden\s*!important/.test(r.decls));
+  assert.ok(nodes, `under ${overlay.width}px, the canvas's nodes are hidden too, over React Flow's inline style (!important)`);
 });
