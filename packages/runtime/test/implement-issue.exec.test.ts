@@ -76,6 +76,24 @@ test("a refactor suite that outlives its limit ends tests-timeout like every oth
   assert.equal(readFileSync(join(worktreeOf(r.runId), "src", "math.js"), "utf8"), SUB_CODE, "the worktree is back at the last green");
 });
 
+test("a refactor suite killed by a signal ends tests-killed like every other suite, and the refactor is undone", async () => {
+  issue(["complexity:low"]);
+  let standards = 0;
+  fx.handlers["review:standards"] = (o) =>
+    submit(o, ++standards === 1 ? { findings: [{ file: "src/math.js", rule: "Mysterious Name", kind: "hard", note: "name" }], worst: "name" } : { findings: [], worst: "" });
+  fx.handlers["refatorar-1"] = (o) => {
+    write(o, "src/math.js", `${SUB_CODE}\nprocess.kill(process.ppid, "SIGKILL");\n`); // a test file that imports it kills the runner
+    submit(o, { summary: "kills", filesChanged: ["src/math.js"] });
+  };
+  const r = await run({});
+  assert.equal(res(r).status, "tests-killed", JSON.stringify(res(r)));
+  const events = eventsOf(r.runId);
+  const refactor = execStarts(events).find((s) => s.label === "suite:refactor");
+  assert.ok(refactor, "the suite that was killed is the refactor's");
+  assert.equal(execEnd(events, refactor).ok, false);
+  assert.equal(readFileSync(join(worktreeOf(r.runId), "src", "math.js"), "utf8"), SUB_CODE, "the worktree is back at the last green");
+});
+
 test("the command limits come from the repo config when the run passes none: tests and network from the settings, local git from execTimeoutMs", async () => {
   issue(["complexity:low"]);
   writeRepoConfig(fx.repo, { workflows: { "implement-issue": { execTimeoutMs: 123_456, settings: { testTimeoutSec: 1, networkTimeoutSec: 7 } } } });
