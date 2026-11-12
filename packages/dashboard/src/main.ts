@@ -24,6 +24,7 @@ try {
 }
 
 writeInstance({ pid: process.pid, port, startedAt: new Date().toISOString() });
+say(`web app built (${dashboard.webHash}): the app and the Run view, before the dashboard listened`);
 say(`dashboard listening on ${dashboard.url} (metrics database: ${defaultDbPath()})`);
 
 let stopping = false;

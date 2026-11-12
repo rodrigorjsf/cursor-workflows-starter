@@ -30,6 +30,8 @@ export interface DashboardServer {
   /** The server's origin, `http://127.0.0.1:<port>`. */
   url: string;
   port: number;
+  /** The content hash of the pages' build it serves (see web-bundle.ts), built or read from the cache before it listened. */
+  webHash: string;
   close(): Promise<void>;
 }
 
@@ -290,6 +292,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
   return {
     url: `http://${DASHBOARD_HOST}:${port}`,
     port,
+    webHash: web.hash,
     close: () =>
       new Promise<void>((resolve) => {
         server.close(() => {
