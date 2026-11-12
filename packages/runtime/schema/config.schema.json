@@ -180,7 +180,7 @@
         "$comment": { "$ref": "#/definitions/comment" },
         "sliceCaps": { "$ref": "#/definitions/sliceCaps", "description": "`implement-issue`: máximo de fatias TDD (ciclos red → green) por tier. As fatias do plano que passam do teto ficam adiadas: o PR só referencia a issue, sem fechá-la. Padrão: LOW 1, MED 3, HIGH 5." },
         "extraSlices": { "type": "integer", "minimum": 0, "description": "`implement-issue`: máximo de fatias extras que o review pode abrir (um requisito faltando ou errado vira uma fatia TDD nova). Padrão: 2." },
-        "fixRounds": { "type": "integer", "minimum": 0, "description": "`implement-issue`: rodadas de correção de uma fatia cuja suíte falha depois do green; passadas todas, o run encerra com `tests-failed`. Padrão: 2." },
+        "fixRounds": { "type": "integer", "minimum": 0, "description": "`implement-issue`: rodadas de correção de uma fatia cuja suíte falha depois do green; passadas todas, o run encerra com `tests-failed`. Uma rodada só conta quando a etapa de correção chega ao fim: interrompida (cancelamento ou queda), o resume a refaz. Padrão: 2." },
         "redGreenAttempts": { "type": "integer", "minimum": 1, "description": "`implement-issue`: tentativas de cada etapa red e de cada etapa green de uma fatia. Uma tentativa que viola o TDD é desfeita e a próxima leva o problema no prompt; na última, o run encerra com `tdd-violation` ou `test-not-red`. Padrão: 2." },
         "maxDiffChars": { "type": "integer", "minimum": 1, "description": "`implement-issue`: tamanho máximo, em caracteres, do diff que entra no prompt do review e no do PR. O que passa dele é cortado (com a estatística do diff inteiro) e o agente lê o resto nos arquivos. Padrão: 40000." },
         "labelTiers": {

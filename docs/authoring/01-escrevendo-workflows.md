@@ -225,7 +225,8 @@ etapa interrompida deixaria edições pela metade. Por isso o `implement-issue`:
   tentativa dela (`revertOnRetry`) parte do worktree de antes da etapa, não do que a tentativa que falhou deixou;
 - conta as quedas do processo no meio de cada etapa de escrita: quando um resume a encontra em andamento, soma uma; passado
   o limite (`maxStepCrashes`), o run encerra com `step-crash-loop` em vez de retomar a etapa de novo. Um cancelamento no
-  meio da etapa não é queda e não conta;
+  meio da etapa não é queda e não conta. Vale também para as etapas de correção: a rodada interrompida é refeita com o
+  mesmo id, não contada;
 - põe um número de sequência no prompt de cada etapa de escrita, para o journal nunca devolver uma escrita antiga;
 - guarda os relatórios de review por rodada, para o resume não pedir um review novo sobre um diff diferente;
 - reaproveita a branch existente no resume (sem `worktree add -B`, que a zeraria) e roda a suíte de novo antes do
