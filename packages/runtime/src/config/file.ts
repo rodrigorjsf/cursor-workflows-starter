@@ -40,6 +40,8 @@ export interface WorkflowPrefs {
   maxCents?: number | null;
   concurrency?: number;
   execTimeoutMs?: number;
+  /** The workflow's own settings (its `meta.settings`), by name. The schema validates the ones the kit ships. */
+  settings?: Record<string, unknown>;
   roles?: Record<string, RolePrefs>;
   labels?: Record<string, RolePrefs>;
 }

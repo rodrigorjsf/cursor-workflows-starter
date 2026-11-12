@@ -3,7 +3,8 @@
 // instruções estão em workflows/implement-issue/prompts.ts; créditos em docs/vision/02-a-ideia-e-as-referencias.md.
 //
 // O que é decidido em CÓDIGO (não pelo modelo):
-//   - o tier (LOW/MED/HIGH) vem das labels da issue; só sem label um classificador barato decide;
+//   - o tier (LOW/MED/HIGH) vem das labels da issue, e vale o mais alto entre os que casam (a ordem das labels não rebaixa
+//     uma issue difícil); só sem label que case um classificador barato decide;
 //   - MED: um planejador define seams e fatias verticais; HIGH: três designers desenham a interface de formas
 //     radicalmente diferentes e um juiz escolhe ou combina ("Design it twice"); LOW: uma fatia, sem planejador;
 //   - MED/HIGH param depois do plano (status "seams-proposed", comentário na issue, plano guardado no progresso do
@@ -22,10 +23,12 @@
 //   - o progresso (fatias, saídas red/green, plano proposto, relatórios de review, etapa de escrita em andamento)
 //     fica em .workflows/runs/<runId>/tdd-progress.json. O resume desfaz uma etapa interrompida, não refaz nem
 //     reconfere o que passou, e reaproveita o review já feito. Etapas que escrevem nunca vêm do journal: o efeito
-//     delas está no worktree, e cada uma leva um número de sequência no prompt;
+//     delas está no worktree, e cada uma leva um número de sequência no prompt. Uma etapa que derrubou o processo mais
+//     de `maxStepCrashes` vezes não é retomada de novo ("step-crash-loop"), e cada nova tentativa de uma etapa que
+//     escreve parte do worktree de antes dela (`revertOnRetry`);
 //   - o review roda sempre, em três eixos separados e em paralelo (Standards, Spec, Segurança), sem misturar nem
 //     reordenar relatórios. Bloqueia: padrão documentado violado, requisito faltando ou errado, falha de segurança.
-//     Requisito faltando ou errado vira fatia TDD extra (até 2); padrão e segurança viram refactor sem tocar testes;
+//     Requisito faltando ou errado vira fatia TDD extra (até `extraSlices`); padrão e segurança viram refactor sem tocar testes;
 //     depois, só os eixos que bloquearam são revistos ("review-blocking" se continuar);
 //   - antes do commit a suíte roda de novo (vermelha → "tests-failed"); commits feitos por agentes são desfeitos
 //     (`reset --soft` para a base, mantendo a árvore); a trava de segredos olha o diff desde a base, o comentário
@@ -35,6 +38,10 @@
 //   - todo comando (testes, git, gh) roda por `ctx.exec` (implement-issue/commands.ts): assíncrono, com teto de tempo
 //     (testes: `testTimeoutSec`; `git push` e `gh`: `networkTimeoutSec`; git local: 5 min) e como nó de comando no log
 //     do run. Um erro do `gh` ou do `git` falha o run com a mensagem dele; "sem PR" é só a resposta conhecida do `gh`.
+//
+// Os limites (fatias por tier, fatias extras, rodadas de correção, tentativas de red e green, tamanho do diff, mapa
+// label → tier, limite de quedas) são os `settings` do workflow: os valores abaixo são os padrões, e o repositório os troca em
+// `workflows.implement-issue.settings` (docs/reference/config.md).
 //
 // Custo por etapa (passo 4 da /skill-to-workflow). "[]" = settingSources vazio: sem AGENTS.md, regras, hooks, MCP e
 // sem as skills que o SDK carrega com qualquer outra camada (medido: 58).
@@ -53,7 +60,7 @@
 // do engine (project, team, mdm). A allowlist de escrita do SDK ainda não foi medida, e os hooks do time e do MDM
 // têm de valer onde o agente escreve.
 // Agentes por caminho, típico (sem retentativas nem achados) e pior caso (2 tentativas por etapa, 2 correções por
-// fatia, 2 fatias extras, refactor, re-review). Teto padrão: 3 milhões de tokens (`budget`); --max-tokens troca:
+// fatia, 2 fatias extras, refactor, re-review; com os ajustes padrão). Teto padrão: 3 milhões de tokens (`budget`); --max-tokens troca:
 //   LOW   típico 6  (1 fatia + 3 reviews + PR)                     pior caso ~26
 //   MED   típico 11 (plano; até 3 fatias + 3 reviews + PR)          pior caso ~39
 //   HIGH  típico 20 (3 designers + juiz; até 5 fatias + ...)        pior caso ~55
@@ -107,22 +114,47 @@ const GROK_HIGH: ModelSelection = { id: "grok-4.7", params: HIGH_EFFORT };
 /** The role of the steps that write code at a tier: `implement.low`, `implement.med`, `implement.high`. */
 const implementRole = (tier: Tier) => `implement.${tier.toLowerCase()}`;
 
-/** Labels da issue → tier. Ajuste ao vocabulário do seu time. */
-const LABEL_TIERS: Record<string, Tier> = {
-  "complexity:low": "LOW",
-  "good first issue": "LOW",
-  "complexity:medium": "MED",
-  "complexity:high": "HIGH",
-  security: "HIGH",
-};
+const TIER_RANK: Record<Tier, number> = { LOW: 0, MED: 1, HIGH: 2 };
 
-const SLICE_CAP: Record<Tier, number> = { LOW: 1, MED: 3, HIGH: 5 };
-const EXTRA_SLICE_CAP = 2;
-const MAX_FIX_ROUNDS = 2;
+/**
+ * Os ajustes do workflow (`meta.settings`): os padrões do código. O arquivo de configuração global e o do repositório os
+ * trocam em `workflows.implement-issue.settings` (o esquema valida, docs/reference/config.md documenta), e o run os lê de
+ * `ctx.settings`. Cada ajuste vale inteiro: o de uma camada de cima troca o de baixo, sem combinar campos.
+ */
+type Settings = {
+  /** Máximo de fatias TDD por tier; as do plano que passam dele ficam adiadas. */
+  sliceCaps: Record<Tier, number>;
+  /** Máximo de fatias extras que o review pode abrir. */
+  extraSlices: number;
+  /** Rodadas de correção de uma fatia cuja suíte falha depois do green. */
+  fixRounds: number;
+  /** Tentativas de cada etapa red e green de uma fatia. */
+  redGreenAttempts: number;
+  /** Caracteres do diff que entram no prompt do review e do PR. */
+  maxDiffChars: number;
+  /** Labels da issue → tier (a comparação ignora maiúsculas). Ajuste ao vocabulário do seu time. */
+  labelTiers: Record<string, Tier>;
+  /** Quedas do processo que uma mesma etapa de escrita pode causar antes de o resume desistir dela. */
+  maxStepCrashes: number;
+};
+const SETTINGS: Settings = {
+  sliceCaps: { LOW: 1, MED: 3, HIGH: 5 },
+  extraSlices: 2,
+  fixRounds: 2,
+  redGreenAttempts: 2,
+  maxDiffChars: 40_000,
+  labelTiers: {
+    "complexity:low": "LOW",
+    "good first issue": "LOW",
+    "complexity:medium": "MED",
+    "complexity:high": "HIGH",
+    security: "HIGH",
+  },
+  maxStepCrashes: 2,
+};
 const READ_ONLY = ["read", "grep", "glob", "ls", "semSearch"];
 const REVIEW_TOOLS = ["read", "grep", "glob", "ls"];
 const NO_SETTINGS: SettingSource[] = [];
-const MAX_DIFF_CHARS = 40_000;
 /** Teto de tempo do `git` local (add, diff, commit com hooks…): passado disso há um hook ou um lock parado. */
 const LOCAL_GIT_TIMEOUT_MS = 5 * 60_000;
 const NETWORK_TIMEOUT_SEC = 120;
@@ -217,6 +249,17 @@ async function existingPr(cmd: Commands, branch: string, repoFlag: string[], cwd
   return url?.trim() || undefined;
 }
 
+/** O tier das labels da issue: o mais alto entre os que casam, para a ordem das labels nunca rebaixar uma issue difícil. */
+function tierOfLabels(labels: Array<{ name: string }>, labelTiers: Record<string, Tier>): Tier | undefined {
+  const known = new Map(Object.entries(labelTiers).map(([label, tier]) => [label.toLowerCase(), tier]));
+  let best: Tier | undefined;
+  for (const { name } of labels) {
+    const tier = known.get(name.toLowerCase());
+    if (tier && (!best || TIER_RANK[tier] > TIER_RANK[best])) best = tier;
+  }
+  return best;
+}
+
 const branchExists = (cmd: Commands, cwd: string, branch: string) => cmd.gitIs(cwd, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`);
 
 /** Escreve um corpo longo num arquivo temporário para `--body-file` (sem limite de argumento de linha de comando). */
@@ -232,12 +275,12 @@ async function withBodyFile<T>(body: string, fn: (path: string) => Promise<T>): 
 }
 
 /** Diff desde a base do worktree, para o review e o PR. Grande demais: estatística + início, e o agente lê o resto. */
-async function diffSinceBase(cmd: Commands, cwd: string, base: string): Promise<string> {
+async function diffSinceBase(cmd: Commands, cwd: string, base: string, maxChars: number): Promise<string> {
   await cmd.git(cwd, "add", "-A");
   const diff = await cmd.gitRead(cwd, "diff", "--cached", "--no-color", base);
-  if (diff.length <= MAX_DIFF_CHARS) return "```diff\n" + diff + "\n```";
+  if (diff.length <= maxChars) return "```diff\n" + diff + "\n```";
   const stat = await cmd.gitRead(cwd, "diff", "--cached", "--stat", base);
-  return `(diff truncated: read the files for the rest)\n\n${stat}\n\n\`\`\`diff\n${diff.slice(0, MAX_DIFF_CHARS)}\n\`\`\``;
+  return `(diff truncated: read the files for the rest)\n\n${stat}\n\n\`\`\`diff\n${diff.slice(0, maxChars)}\n\`\`\``;
 }
 
 /** Regras de segredo para qualquer texto que vai sair da máquina. Devolve a regra que disparou, nunca o trecho. */
@@ -302,6 +345,8 @@ export default defineWorkflow<Args>({
       { name: "design", description: "Plans the slices (MED) or designs and judges the interface (HIGH).", cloud: "read-only", defaults: { settingSources: NO_SETTINGS } },
       { name: "pr-text", description: "Writes the PR body text.", cloud: "read-only", defaults: { model: COMPOSER, settingSources: NO_SETTINGS } },
     ],
+    // The tunable limits; the config files change them (see `Settings`). Copied: the config layer never edits the constant.
+    settings: structuredClone(SETTINGS),
     argsSchema: {
       type: "object",
       required: ["issue"],
@@ -327,6 +372,7 @@ export default defineWorkflow<Args>({
 
   async run(ctx) {
     const { issue: number, repo, openPr = false } = ctx.args;
+    const settings = ctx.settings as unknown as Settings; // o esquema da configuração valida os tipos; os padrões vêm de `meta.settings`
     const globs = ctx.args.testGlobs?.length ? ctx.args.testGlobs : DEFAULT_TEST_GLOBS;
     const protectedGlobs = ctx.args.protectedGlobs ?? DEFAULT_PROTECTED_GLOBS;
     const testTimeout = (ctx.args.testTimeoutSec ?? 600) * 1000;
@@ -342,7 +388,8 @@ export default defineWorkflow<Args>({
     ctx.phase("Triage");
     const repoFlag = repo ? ["--repo", repo] : [];
     const issue = JSON.parse(await cmd.gh(ctx.cwd, "issue", "view", String(number), ...repoFlag, "--json", "number,title,body,labels")) as Issue;
-    let tier = issue.labels.map((l) => LABEL_TIERS[l.name.toLowerCase()]).find(Boolean);
+    const labelTier = tierOfLabels(issue.labels, settings.labelTiers);
+    let tier = labelTier;
     if (!tier) {
       const c = await ctx.agent<{ tier: Tier; reason: string }>(`${CLASSIFY_INSTRUCTIONS}\n\n${issueBlock(issue)}`, {
         label: "classificar",
@@ -356,7 +403,7 @@ export default defineWorkflow<Args>({
     const base = { issue: issue.number, tier };
     ctx.log(`Issue #${issue.number} → tier ${tier} (role ${implementRole(tier)})`);
     ctx.metric("tier", tier); // covariável de dificuldade: compare modelos dentro do mesmo tier
-    ctx.metric("tier_source", issue.labels.some((l) => LABEL_TIERS[l.name.toLowerCase()]) ? "label" : "classifier");
+    ctx.metric("tier_source", labelTier ? "label" : "classifier");
     const ctxFiles = CONTEXT_FILES.filter((f) => existsSync(join(ctx.cwd, f)));
     const contextBlock = listBlock("Repository context files (read the ones that matter)", ctxFiles);
 
@@ -379,7 +426,7 @@ export default defineWorkflow<Args>({
       const approved = listBlock("Approved seams (use exactly these)", ctx.args.seams ?? []);
       // O planejador sabe o teto: sem isso, propôs 5 fatias para um tier de 3 na issue #8, e o PR saiu parcial.
       const capBlock =
-        `## Slice cap\nThis tier does up to ${SLICE_CAP[tier]} slices. To fit the whole issue, one slice may cover ` +
+        `## Slice cap\nThis tier does up to ${settings.sliceCaps[tier]} slices. To fit the whole issue, one slice may cover ` +
         "cases of one behaviour that are tested together (the odd and the even case of a function; the value and the error). " +
         "If it still does not fit, put last what can wait.";
       const planData = `${issueBlock(issue)}\n\n${capBlock}\n\n${contextBlock}${approved ? `\n\n${approved}` : ""}`;
@@ -432,10 +479,10 @@ export default defineWorkflow<Args>({
           "### Slices (one per red → green cycle)",
           "",
           ...plan.slices.map(
-            (s, i) => `${i + 1}. ${s.behavior} (seam: ${s.seam}; test: ${s.testIdea})${i >= SLICE_CAP[tier] ? " (deferred)" : ""}`,
+            (s, i) => `${i + 1}. ${s.behavior} (seam: ${s.seam}; test: ${s.testIdea})${i >= settings.sliceCaps[tier] ? " (deferred)" : ""}`,
           ),
-          ...(plan.slices.length > SLICE_CAP[tier]
-            ? ["", `The slices marked deferred are left out by the tier ${tier} slice cap (${SLICE_CAP[tier]} slices): the PR only references the issue, without closing it.`]
+          ...(plan.slices.length > settings.sliceCaps[tier]
+            ? ["", `The slices marked deferred are left out by the tier ${tier} slice cap (${settings.sliceCaps[tier]} slices): the PR only references the issue, without closing it.`]
             : []),
           "",
           `Test command: \`${ctx.args.testCommand ?? plan.testCommand}\``,
@@ -475,12 +522,30 @@ export default defineWorkflow<Args>({
       progress.data.baseCommit = (await cmd.gitRead(worktree, "rev-parse", "HEAD")).trim();
       progress.save();
     }
-    // Uma etapa de escrita interrompida (o processo caiu no meio): volta ao estado de antes dela.
+    // Uma etapa de escrita interrompida (o processo caiu no meio, ou o run foi cancelado nela): volta ao estado de antes dela.
     if (progress.data.inFlight) {
-      ctx.log(`undoing the interrupted step ${progress.data.inFlight.id}`);
-      await revertTo(cmd, worktree, progress.data.inFlight.before);
+      const { id, before, interrupted } = progress.data.inFlight;
+      ctx.log(`undoing the interrupted step ${id}`);
+      await revertTo(cmd, worktree, before);
+      // Só uma queda conta para o limite: numa etapa `interrupted` o código estava vivo (cancelamento).
+      if (!interrupted) progress.data.crashes = { ...progress.data.crashes, [id]: (progress.data.crashes?.[id] ?? 0) + 1 };
       progress.data.inFlight = undefined;
       progress.save();
+    }
+    // Uma etapa que já derrubou o processo mais vezes que o limite não é retomada de novo (o worktree já voltou ao estado de antes dela).
+    const looping = Object.entries(progress.data.crashes ?? {}).find(([, crashes]) => crashes > settings.maxStepCrashes);
+    if (looping) {
+      const [step, crashes] = looping;
+      ctx.log(`step ${step} crashed the process ${crashes} times (limit ${settings.maxStepCrashes}): not resuming it again`);
+      return {
+        ...base,
+        status: "step-crash-loop",
+        step,
+        crashes,
+        limit: settings.maxStepCrashes,
+        worktree,
+        hint: "find what makes this step kill the process, or raise workflows.implement-issue.settings.maxStepCrashes in the config and resume the run; a new run starts the count again",
+      };
     }
     const testCommand = ctx.args.testCommand ?? plan.testCommand ?? "npm test";
     const suite = (label: string) => runTests(cmd, testCommand, worktree, { timeoutMs: testTimeout, label: `suite:${label}` });
@@ -506,10 +571,11 @@ export default defineWorkflow<Args>({
       const before = await snapshotTree(cmd, worktree);
       const seq = (progress.data.writeSeq ?? 0) + 1;
       progress.data.writeSeq = seq;
-      progress.data.inFlight = { id, before, resumes: 0 };
+      progress.data.inFlight = { id, before };
       progress.save();
       try {
-        const value = await ctx.agent<T>(`${prompt}\n\n<!-- write step ${seq} -->`, { ...opts, cwd: worktree });
+        // revertOnRetry: o worktree é só desta etapa, e uma nova tentativa não pode herdar o que a que falhou deixou.
+        const value = await ctx.agent<T>(`${prompt}\n\n<!-- write step ${seq} -->`, { ...opts, cwd: worktree, revertOnRetry: true });
         return { value, before };
       } catch (err) {
         try {
@@ -517,7 +583,9 @@ export default defineWorkflow<Args>({
           settle();
         } catch {
           // O desfazer falhou (o run foi cancelado, ou o git travou): o erro da etapa é o que sobe, e o registro "em andamento" fica,
-          // para o resume voltar ao snapshot de antes dela.
+          // para o resume voltar ao snapshot de antes dela. Marcado `interrupted`: o processo não caiu, não é uma queda para o limite.
+          progress.data.inFlight = { id, before, interrupted: true };
+          progress.save();
         }
         throw err;
       }
@@ -552,7 +620,7 @@ export default defineWorkflow<Args>({
       // red: um teste (ou a atualização dos que fixam o comportamento antigo); a suíte tem de falhar
       if (!rec.red) {
         let problem = "";
-        for (let attempt = rec.redAttempt ?? 1; attempt <= 2 && !rec.red; attempt++) {
+        for (let attempt = rec.redAttempt ?? 1; attempt <= settings.redGreenAttempts && !rec.red; attempt++) {
           if (attempt > 1) tddRetries++;
           rec.redAttempt = attempt;
           progress.upsert(rec);
@@ -580,7 +648,7 @@ export default defineWorkflow<Args>({
               `The change was undone: ${deleted.length ? `you deleted tests (${deleted.join(", ")})` : "you changed the runner configuration"}. ` +
               "Write or update tests, without deleting any.";
             lastProblem = problem;
-            if (attempt === 2) return "tdd-violation";
+            if (attempt === settings.redGreenAttempts) return "tdd-violation";
             continue;
           }
           const res = await suite(`red:${sfx}`);
@@ -602,7 +670,7 @@ export default defineWorkflow<Args>({
               "The test passed without implementation. If the behaviour already exists, answer alreadySatisfied: true with the evidence; " +
               "otherwise, write a test that fails because the slice's behaviour is missing.";
             lastProblem = problem;
-            if (attempt === 2) return "test-not-red";
+            if (attempt === settings.redGreenAttempts) return "test-not-red";
             continue;
           }
           settle();
@@ -619,7 +687,7 @@ export default defineWorkflow<Args>({
       // green: o mínimo de código; nada de testes, runner ou teste da fatia; a suíte tem de passar
       if (!rec.greenDone) {
         let problem = "";
-        for (let attempt = rec.greenAttempt ?? 1; attempt <= 2 && !rec.greenDone; attempt++) {
+        for (let attempt = rec.greenAttempt ?? 1; attempt <= settings.redGreenAttempts && !rec.greenDone; attempt++) {
           if (attempt > 1) tddRetries++;
           rec.greenAttempt = attempt;
           progress.upsert(rec);
@@ -633,7 +701,7 @@ export default defineWorkflow<Args>({
             lastProblem = problem;
             await revertTo(cmd, worktree, before);
             settle();
-            if (attempt === 2) return "tdd-violation";
+            if (attempt === settings.redGreenAttempts) return "tdd-violation";
             continue;
           }
           settle();
@@ -643,8 +711,8 @@ export default defineWorkflow<Args>({
         if (!rec.greenDone) return "tdd-violation";
       }
       let res = await suite(`green:${sfx}`);
-      for (let round = (rec.fixRound ?? 0) + 1; res.kind === "failed" && round <= MAX_FIX_ROUNDS; round++) {
-        ctx.log(`slice ${sfx}: tests failed; fix ${round}/${MAX_FIX_ROUNDS}`);
+      for (let round = (rec.fixRound ?? 0) + 1; res.kind === "failed" && round <= settings.fixRounds; round++) {
+        ctx.log(`slice ${sfx}: tests failed; fix ${round}/${settings.fixRounds}`);
         rec.fixRound = round;
         progress.upsert(rec);
         const { before } = await writeStep<Impl>(`fix:${key}:${round}`, `${P.FIX_INSTRUCTIONS}\n\n${sliceBlock(sl)}\n\n## Test output\n${res.output}`, {
@@ -671,9 +739,9 @@ export default defineWorkflow<Args>({
     /** Falha de fatia: o worktree volta ao estado do começo dela (verde), para o resume e para quem inspeciona. */
     const sliceStart = () => snapshotTree(cmd, worktree);
 
-    const planned = plan.slices.slice(0, SLICE_CAP[tier]);
-    const deferred = plan.slices.slice(SLICE_CAP[tier]).map((s) => `${s.behavior} (seam: ${s.seam})`);
-    if (deferred.length) ctx.log(`cap of ${SLICE_CAP[tier]} slices at tier ${tier}: ${deferred.length} deferred`);
+    const planned = plan.slices.slice(0, settings.sliceCaps[tier]);
+    const deferred = plan.slices.slice(settings.sliceCaps[tier]).map((s) => `${s.behavior} (seam: ${s.seam})`);
+    if (deferred.length) ctx.log(`cap of ${settings.sliceCaps[tier]} slices at tier ${tier}: ${deferred.length} deferred`);
     ctx.metric("slices_planned", plan.slices.length);
     for (const [i, sl] of planned.entries()) {
       const start = await sliceStart();
@@ -695,7 +763,7 @@ export default defineWorkflow<Args>({
         Object.assign(reports, pinned);
         return true;
       }
-      const diff = await diffSinceBase(cmd, worktree, progress.data.baseCommit!);
+      const diff = await diffSinceBase(cmd, worktree, progress.data.baseCommit!, settings.maxDiffChars);
       const extra: Record<Axis, string> = {
         standards: listBlock("Repository standards files", standardsFiles) || "## Repository standards files\nNone: use only the smell baseline.",
         spec: listBlock("Slices deferred by the cap (not 'missing')", deferred),
@@ -735,7 +803,7 @@ export default defineWorkflow<Args>({
     if (redo.length) {
       const b = blockingOf(reports);
       // Requisito faltando ou errado: comportamento novo, então nova fatia TDD (red → green), com teto.
-      for (const [i, f] of [...b.missing, ...b.wrong].slice(0, EXTRA_SLICE_CAP).entries()) {
+      for (const [i, f] of [...b.missing, ...b.wrong].slice(0, settings.extraSlices).entries()) {
         const behavior = f.behavior ?? f.note;
         const seam = f.seam ?? "the closest public interface";
         const key = sliceKey("x", behavior, seam);
@@ -807,7 +875,7 @@ export default defineWorkflow<Args>({
       prUrl = await existingPr(cmd, branch, repoFlag, worktree);
       if (!prUrl) {
         const text = await ctx.agent<PrText>(
-          `${P.PR_INSTRUCTIONS}\n\n${contextBlock}\n\n${issueBlock(issue)}\n\n## Diff\n${await diffSinceBase(cmd, worktree, baseCommit)}`,
+          `${P.PR_INSTRUCTIONS}\n\n${contextBlock}\n\n${issueBlock(issue)}\n\n## Diff\n${await diffSinceBase(cmd, worktree, baseCommit, settings.maxDiffChars)}`,
           { label: "pr-texto", role: "pr-text", cwd: worktree, tools: REVIEW_TOOLS, schema: PR_SCHEMA, memo: true },
         );
         const body = buildPrBody({

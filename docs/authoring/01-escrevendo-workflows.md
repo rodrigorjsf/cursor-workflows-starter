@@ -83,8 +83,13 @@ práticas que mais pesam:
 
 ### Roteamento por label → modelo
 
+Quando várias labels casam, vale o tier mais alto: a ordem das labels nunca rebaixa uma issue difícil. O mapa fica em
+`meta.settings`, para o repositório trocá-lo na configuração (`workflows.<nome>.settings`).
+
 ```ts
-const tier = issue.labels.map((l) => LABEL_TIERS[l.name.toLowerCase()]).find(Boolean)
+const RANK = { LOW: 0, MED: 1, HIGH: 2 };
+const matched = issue.labels.map((l) => LABEL_TIERS[l.name.toLowerCase()]).filter(Boolean);
+const tier = matched.sort((a, b) => RANK[b] - RANK[a])[0]
   ?? (await ctx.agent<{ tier: Tier }>(`${CLASSIFY_INSTRUCTIONS}\n\n${issueBlock(issue)}`, {
     label: "classificar", model: MODELS.CLASSIFY, tools: [], settingSources: [], memo: true, schema: TIER_SCHEMA,
   })).tier;
@@ -214,8 +219,12 @@ etapa interrompida deixaria edições pela metade. Por isso o `implement-issue`:
 
 - guarda o progresso por item (e as saídas que viram evidência) em `.workflows/runs/<runId>/tdd-progress.json`,
   fora da árvore versionada (`ProgressStore`), com a chave de cada item derivada do conteúdo, não da posição;
-- marca a etapa de escrita em andamento antes de chamá-la e, no resume, volta ao snapshot de antes dela; uma etapa
-  que falha é desfeita antes de o erro subir;
+- marca a etapa de escrita em andamento antes de chamá-la e, no resume, volta ao snapshot de antes dela (inclusive os
+  arquivos novos que ninguém pôs no índice); uma etapa que falha é desfeita antes de o erro subir, e cada nova
+  tentativa dela (`revertOnRetry`) parte do worktree de antes da etapa, não do que a tentativa que falhou deixou;
+- conta as quedas do processo no meio de cada etapa de escrita: quando um resume a encontra em andamento, soma uma; passado
+  o limite (`maxStepCrashes`), o run encerra com `step-crash-loop` em vez de retomar a etapa de novo. Um cancelamento no
+  meio da etapa não é queda e não conta;
 - põe um número de sequência no prompt de cada etapa de escrita, para o journal nunca devolver uma escrita antiga;
 - guarda os relatórios de review por rodada, para o resume não pedir um review novo sobre um diff diferente;
 - reaproveita a branch existente no resume (sem `worktree add -B`, que a zeraria) e roda a suíte de novo antes do

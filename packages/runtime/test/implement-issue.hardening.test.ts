@@ -172,7 +172,7 @@ test("queda do processo durante uma etapa: o resume volta ao snapshot de antes d
   const file = join(fx.repo, ".workflows", "runs", first.runId, "tdd-progress.json");
   const p = JSON.parse(readFileSync(file, "utf8"));
   git(worktreeOf(), "add", "-A");
-  p.inFlight = { id: "green:simulada", before: git(worktreeOf(), "write-tree").trim(), resumes: 0 };
+  p.inFlight = { id: "green:simulada", before: git(worktreeOf(), "write-tree").trim() };
   writeFileSync(file, JSON.stringify(p));
   writeFileSync(join(worktreeOf(), "test", "sub.test.js"), weakTest);
 

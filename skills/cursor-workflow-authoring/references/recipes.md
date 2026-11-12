@@ -8,10 +8,13 @@ goes through `ctx.exec`.
 ## Routing by label → model
 
 The tier, and with it the model, comes from an input datum (a label, a diff size); a cheap classifier step runs only
-when no datum decides.
+when no datum decides. When several labels match, take the highest tier: the order of the labels must never downgrade a
+hard issue. Keep the label map in `meta.settings`, so a repo can change it in its config.
 
 ```ts
-const tier = issue.labels.map((l) => LABEL_TIERS[l.name.toLowerCase()]).find(Boolean)
+const RANK = { LOW: 0, MED: 1, HIGH: 2 };
+const matched = issue.labels.map((l) => LABEL_TIERS[l.name.toLowerCase()]).filter(Boolean);
+const tier = matched.sort((a, b) => RANK[b] - RANK[a])[0]
   ?? (await ctx.agent<{ tier: Tier }>(`${CLASSIFY_INSTRUCTIONS}\n\n${issueBlock(issue)}`, {
     label: "classify", model: MODELS.CLASSIFY, tools: [], settingSources: [], memo: true, schema: TIER_SCHEMA,
   })).tier;
@@ -148,8 +151,12 @@ half-made edits. So:
 
 - keep the progress per item (and the outputs that become evidence) in `.workflows/runs/<runId>/<name>-progress.json`,
   outside the versioned tree, with each item's key derived from its content, not from its position;
-- mark the write step in progress before calling it and, on resume, go back to the snapshot from before it; a step that
-  fails is undone before the error rises;
+- mark the write step in progress before calling it and, on resume, go back to the snapshot from before it (new files
+  nobody staged included); a step that fails is undone before the error rises, and each retry of it starts from the
+  tree as it was before the step (`revertOnRetry` on the `agent()` call), not from what the failed attempt left;
+- count the crashes of each write step: a resume that finds a step still marked in progress adds one, and past a limit
+  the run ends with a status of its own instead of resuming the step again; a cancel in the middle of the step is not
+  a crash;
 - put a sequence number in the prompt of every write step, so the journal never returns an old write;
 - keep the review reports per round, so a resume does not ask for a new review of a different diff;
 - reuse the existing branch on resume (no `worktree add -B`, which would reset it) and run the suite again before the

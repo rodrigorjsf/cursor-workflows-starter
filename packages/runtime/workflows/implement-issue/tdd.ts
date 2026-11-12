@@ -86,9 +86,15 @@ export async function changesBetween(cmd: Commands, cwd: string, before: string,
 
 export const changedBetween = async (cmd: Commands, cwd: string, before: string, after: string) => (await changesBetween(cmd, cwd, before, after)).map((c) => c.path);
 
-/** Desfaz o que uma etapa mudou: volta índice e arquivos ao snapshot (remove os novos, restaura os alterados). */
+/**
+ * Desfaz o que uma etapa mudou: volta índice e arquivos ao snapshot (remove os novos, restaura os alterados). O `read-tree`
+ * deixa para trás o arquivo novo que ninguém pôs no índice (o agente criou e o processo caiu antes do próximo `git add`):
+ * todo arquivo que o snapshot tinha está na árvore, então o que sobra sem rastreio é da etapa, e `clean` o apaga. Os
+ * ignorados (`node_modules`) ficam.
+ */
 export async function revertTo(cmd: Commands, cwd: string, tree: string): Promise<void> {
   await cmd.git(cwd, "read-tree", "--reset", "-u", tree);
+  await cmd.git(cwd, "clean", "-fdq");
 }
 
 /** Volta só estes caminhos ao snapshot: os que existiam são restaurados, os criados depois são apagados. */
@@ -186,7 +192,15 @@ export interface SliceRecord {
 }
 
 /** Etapa que escreve em andamento: se o processo cair, o resume volta a `before` antes de seguir. */
-export interface InFlight { id: string; before: string; resumes: number }
+export interface InFlight {
+  id: string;
+  before: string;
+  /**
+   * O código chegou a ver a etapa terminar sem o desfazer (um cancelamento no meio dela, ou um git que travou): o processo
+   * não caiu, então o resume não conta isto como uma queda.
+   */
+  interrupted?: boolean;
+}
 
 export interface Progress {
   /** Commit do worktree antes de qualquer mudança: base do diff do review e do commit final. */
@@ -201,6 +215,11 @@ export interface Progress {
   refactorSummary?: string;
   deliveredCommit?: string;
   inFlight?: InFlight;
+  /**
+   * Quantas vezes o processo caiu no meio de cada etapa de escrita (por id), contadas pelo resume que a encontrou em andamento.
+   * Passadas `maxStepCrashes`, o run para em vez de retomar a etapa de novo. A contagem fica: o resume seguinte também para.
+   */
+  crashes?: Record<string, number>;
   /** Contador das etapas de escrita: entra no prompt para o journal nunca devolver uma escrita antiga. */
   writeSeq?: number;
   slices: SliceRecord[];

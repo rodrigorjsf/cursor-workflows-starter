@@ -184,7 +184,7 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 | `usage` | `UsageTotals` | não | Tokens da tentativa por tipo, como o Cursor os reportou. |
 | `reasoningTokens` | `number` | não | Tokens de raciocínio, quando o modelo os reporta. |
 | `errorKind` | `ErrorKind` | não | Por que a tentativa falhou, quando `ok` é false. |
-| `reverted` | `boolean` | não | true = o run foi cancelado no meio de uma etapa que escreve e as alterações dela no diretório de trabalho foram desfeitas (o diretório voltou ao estado de antes da etapa). Se não foi possível desfazer, há um `warning` com o motivo. |
+| `reverted` | `boolean` | não | true = as alterações da tentativa no diretório de trabalho foram desfeitas (o diretório voltou ao estado de antes da etapa): o run foi cancelado no meio de uma etapa que escreve, ou a tentativa falhou e a etapa pede `revertOnRetry` antes de tentar de novo. Se não foi possível desfazer, há um `warning` com o motivo. |
 | `error` | `string` | não | A mensagem do erro, quando `ok` é false. |
 | `schemaReprompts` | `number` | não | Re-prompts feitos até o agente chamar `submit_result` com JSON válido. |
 | `turns` | `number` | não | Turnos do agente na tentativa. |
@@ -265,6 +265,7 @@ A configuração efetiva de um run: o que as camadas e os tetos globais decidira
 | `roles` | `Record<string, EffectiveRole>` | sim | Um item por papel que o workflow declara (`meta.roles`). |
 | `labels` | `Record<string, EffectiveRole>` | sim | Preferências por glob de label, para etapas sem papel. |
 | `execTimeoutMs` | `number` | sim | Tempo máximo, em milissegundos, de um comando de `ctx.exec` que não passa o próprio `timeoutMs`. |
+| `settings` | `Record<string, unknown>` | sim | Os ajustes que o workflow declara (`meta.settings`), cada um com o padrão do código ou o valor que um arquivo de configuração trocou. A origem de cada um está em `provenance` (`/settings/<nome>`). Vazio quando o workflow não declara nenhum. |
 
 ### EffectiveLimits
 

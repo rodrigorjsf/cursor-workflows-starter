@@ -175,6 +175,8 @@ export interface EffectiveConfig {
   labels: Record<string, EffectiveRole>;
   /** Tempo máximo, em milissegundos, de um comando de `ctx.exec` que não passa o próprio `timeoutMs`. */
   execTimeoutMs: number;
+  /** Os ajustes que o workflow declara (`meta.settings`), cada um com o padrão do código ou o valor que um arquivo de configuração trocou. A origem de cada um está em `provenance` (`/settings/<nome>`). Vazio quando o workflow não declara nenhum. */
+  settings: Record<string, unknown>;
 }
 
 /** O run começou (ou foi retomado: cada execução emite o seu). */
@@ -322,7 +324,7 @@ export interface StepEndEvent extends EventBase, StepRef {
   reasoningTokens?: number;
   /** Por que a tentativa falhou, quando `ok` é false. */
   errorKind?: ErrorKind;
-  /** true = o run foi cancelado no meio de uma etapa que escreve e as alterações dela no diretório de trabalho foram desfeitas (o diretório voltou ao estado de antes da etapa). Se não foi possível desfazer, há um `warning` com o motivo. */
+  /** true = as alterações da tentativa no diretório de trabalho foram desfeitas (o diretório voltou ao estado de antes da etapa): o run foi cancelado no meio de uma etapa que escreve, ou a tentativa falhou e a etapa pede `revertOnRetry` antes de tentar de novo. Se não foi possível desfazer, há um `warning` com o motivo. */
   reverted?: boolean;
   /** A mensagem do erro, quando `ok` é false. */
   error?: string;
