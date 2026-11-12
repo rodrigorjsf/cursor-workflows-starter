@@ -56,6 +56,13 @@ test("a step that crosses its per-step cap during a turn is cancelled on the spo
   assert.equal(r.spentTokens, 300);
 });
 
+/** A promise and the function that settles it, for a test that decides when something may go on. */
+const deferred = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => (resolve = done));
+  return { promise, resolve };
+};
+
 /** A send() chosen by the step's prompt, so parallel steps need no send order. */
 const byPrompt = (plan: Record<string, ReturnType<typeof live>>) => (o: any, msg: string, n: number) => plan[msg]!(o, msg, n);
 
@@ -67,12 +74,11 @@ const byPrompt = (plan: Record<string, ReturnType<typeof live>>) => (o: any, msg
  */
 const holdUntilAllSent = (plan: Record<string, ReturnType<typeof live>>) => {
   let sent = 0;
-  let allSent!: () => void;
-  const gate = new Promise<void>((resolve) => (allSent = resolve));
+  const allSent = deferred();
   return (o: any, msg: string, n: number) => {
     const behaviour = plan[msg]!(o, msg, n);
-    if (++sent === Object.keys(plan).length) allSent();
-    return { ...behaviour, gate };
+    if (++sent === Object.keys(plan).length) allSent.resolve();
+    return { ...behaviour, gate: allSent.promise };
   };
 };
 
@@ -163,14 +169,26 @@ test("a global per-step cap is enforced even when the repo asks for none", async
   assert.match(r.error!, /Teto de tokens da etapa "c" atingido: 200 de 150/);
 });
 
-/** The run's cap crossed by the fifth turn of two parallel live steps (100 tokens each, cap 450); `slowB` creates b's agent 30 ms late. */
-async function runCapCrossedByTwoSteps(slowB: boolean) {
-  if (slowB) costConfig.createGate = (o) => (String(o.name).endsWith(":b") ? new Promise((resolve) => setTimeout(resolve, 30)) : undefined);
+/**
+ * The run's cap crossed by the fifth turn of two parallel live steps (100 tokens each, cap 450). `delayBCreationMs` creates b's
+ * agent that much later than a's. The turns still wait for both runs (`holdUntilAllSent`), so this is about every active step
+ * having a run to cancel; a step cut before it has a run is the next test.
+ */
+async function runCapCrossedByTwoSteps({ delayBCreationMs }: { delayBCreationMs: number }) {
+  let bDelayed = false;
+  if (delayBCreationMs) {
+    costConfig.createGate = (o) => {
+      if (!String(o.name).endsWith(":b")) return undefined;
+      bDelayed = true;
+      return new Promise((resolve) => setTimeout(resolve, delayBCreationMs));
+    };
+  }
   const plan = holdUntilAllSent({ a: live(10, 100), b: live(10, 100) });
   script.push(plan, plan);
   const wf = configWorkflow((ctx) => ctx.parallel([() => ctx.agent("a", { role: "classify", label: "a", retries: 0 }), () => ctx.agent("b", { role: "review", label: "b", retries: 0 })]));
   const r = await runWorkflow(wf, {}, { cwd, maxTokens: 450 });
 
+  assert.equal(bDelayed, delayBCreationMs > 0, "b's agent was held back exactly when the test asked for it");
   assert.equal(r.status, "failed");
   assert.match(r.error!, /^Teto de tokens atingido: 500 de 450\.$/, "the sum of both steps' turns, live");
   assert.equal(stats.cancels, 2, "both active steps were cancelled, not only the one whose turn crossed");
@@ -186,27 +204,25 @@ async function runCapCrossedByTwoSteps(slowB: boolean) {
   assert.match(runEnd.error!, /Teto de tokens atingido/);
 }
 
-test("the run's cap cancels every active step at once and the run ends with a budget error", () => runCapCrossedByTwoSteps(false));
+test("the run's cap cancels every active step at once and the run ends with a budget error", () => runCapCrossedByTwoSteps({ delayBCreationMs: 0 }));
 
-test("the run's cap cancels every active step at once even when the second step's agent is created late", () => runCapCrossedByTwoSteps(true));
+test("the run's cap cancels every active step at once even when the second step's agent is created late", () => runCapCrossedByTwoSteps({ delayBCreationMs: 30 }));
 
 test("a step the run's cap cuts while its agent is still being created never sends: it ends as 'budget', with no turn and nothing to cancel", async () => {
-  let bIsCreating!: () => void;
-  const bStartedCreating = new Promise<void>((resolve) => (bIsCreating = resolve));
-  let created!: () => void;
-  const bMayCreate = new Promise<void>((resolve) => (created = resolve));
+  const bCreating = deferred();
+  const releaseB = deferred();
   costConfig.createGate = (o) => {
     if (!String(o.name).endsWith(":b")) return undefined;
-    bIsCreating();
-    return bMayCreate; // b's agent is not created until the test says so
+    bCreating.resolve();
+    return releaseB.promise; // b's agent is not created until the test says so
   };
   // One send only (a step that sent would find the script empty and run as a plain, finished step). Its first turn waits until
   // b is inside Agent.create, so the cap cannot be crossed before b has started: that would be another path (a step refused at its start).
-  script.push(() => ({ ...live(10, 100)(), gate: bStartedCreating }));
+  script.push(() => ({ ...live(10, 100)(), gate: bCreating.promise }));
   let turns = 0;
   const wf = configWorkflow((ctx) => ctx.parallel([() => ctx.agent("a", { role: "classify", label: "a", retries: 0 }), () => ctx.agent("b", { role: "review", label: "b", retries: 0 })]));
   // The second turn of a takes the run over its cap (200 > 150) while b is still waiting for its agent; b's creation completes right after.
-  const r = await runWorkflow(wf, {}, { cwd, maxTokens: 150, onEvent: (e) => e.type === "turn" && ++turns === 2 && created() });
+  const r = await runWorkflow(wf, {}, { cwd, maxTokens: 150, onEvent: (e) => e.type === "turn" && ++turns === 2 && releaseB.resolve() });
 
   assert.equal(r.status, "failed");
   assert.match(r.error!, /^Teto de tokens atingido: 200 de 150\.$/);

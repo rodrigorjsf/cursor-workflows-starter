@@ -118,8 +118,8 @@ export const Agent = {
           throw Object.assign(new Error(costConfig.getUsageError), { code: "feature_unavailable" });
         }
         const cost = costConfig.raw === undefined ? undefined : { chargedCents: costConfig.charged, rawCostCents: costConfig.raw };
-        // Como no SDK: o total do agente é a soma dos turnos que ele emitiu (ou o uso padrão, se nenhum). Um agente que nunca
-        // chamou send() não usou nada.
+        // Como no SDK: o total do agente é a soma dos turnos que ele emitiu (ou o uso padrão, se nenhum).
+        // An agent that never called send() used nothing.
         const sum = (turnUsages.length || n === 0 ? turnUsages : [TURN_USAGE]).reduce(
           (a, u) => ({
             inputTokens: a.inputTokens + u.inputTokens,
