@@ -8,7 +8,7 @@
 import { randomUUID } from "node:crypto";
 import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { EVENT_SCHEMA_VERSION, type RunStartEvent, type WorkflowEvent, isContentLine } from "./events.js";
+import { EVENT_SCHEMA_VERSION, type RunStartEvent, type RunStatus, type WorkflowEvent, isContentLine } from "./events.js";
 import { Journal } from "./journal.js";
 import { type Ledger, replayLedger } from "./projection.js";
 import { type Redactor, createRedactor } from "./redaction.js";
@@ -157,7 +157,7 @@ const openStores = new Set<RunStore>();
  * error. For a crash handler (`uncaughtException`) and for a second SIGINT/SIGTERM: the process is about to exit, and the
  * log must say why, since a job's state is read from it. A run that already wrote its `run-end` is left as it is.
  */
-export function abortOpenRuns(error: (runId: string) => string, status: "failed" | "cancelled" = "failed"): void {
+export function abortOpenRuns(error: (runId: string) => string, status: Exclude<RunStatus, "finished"> = "failed"): void {
   for (const store of [...openStores]) store.abort(error(store.runId), status);
 }
 
@@ -223,7 +223,7 @@ export class RunStore {
   }
 
   /** Writes the `run-end` of an execution that cannot finish (see `abortOpenRuns`). Never throws. */
-  abort(error: string, status: "failed" | "cancelled" = "failed"): void {
+  abort(error: string, status: Exclude<RunStatus, "finished"> = "failed"): void {
     if (this.ended) return;
     try {
       this.appendEvent(this.redact({ v: EVENT_SCHEMA_VERSION, ts: new Date().toISOString(), runId: this.runId, type: "run-end", status, error }));

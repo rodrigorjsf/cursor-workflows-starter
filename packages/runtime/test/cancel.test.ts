@@ -168,6 +168,7 @@ test("a workflow that catches the error of a cancelled step still ends cancelled
   assert.equal(outcome.status, "cancelled");
   assert.equal(outcome.result, undefined, "the partial result of a cancelled run is not reported");
   assert.equal(calls.length, 1, "the step after the cancellation never created an agent");
+  assert.equal(eventsOf("r-swallow").filter((e) => e.type === "step-start").length, 1, "and never started");
 });
 
 test("a workflow stuck outside any step still ends when the run is cancelled", async () => {
@@ -353,4 +354,49 @@ test("only the in-flight write step is reverted: a step that completed before th
   assert.equal(outcome.status, "cancelled");
   assert.equal(read(repo, "first.txt"), "kept\n", "the completed step's work is in the journal and stays on disk");
   assert.ok(!existsSync(join(repo, "second.txt")));
+});
+
+test("a step that asks to start after the cancel starts nothing and warns about nothing, even in a git repository", async () => {
+  const repo = makeRepo();
+  script.push(() => ({ hang: true }));
+  const wf = defineWorkflow({
+    meta: { name: "after-cancel", description: "asks for another step after the cancel" },
+    defaults: { model },
+    async run(ctx) {
+      await ctx.agent("a", { label: "a", cwd: repo, retries: 0, timeoutMs: 5000 }).catch(() => {});
+      await ctx.agent("b", { label: "b", cwd: repo }).catch(() => {});
+    },
+  });
+  const controller = new AbortController();
+  await runWorkflow(wf, {}, { cwd, runId: "r-after", signal: controller.signal, onEvent: abortOnFirstStep(controller) });
+
+  const log = eventsOf("r-after");
+  assert.deepEqual(log.filter((e) => e.type === "step-start").map((e) => e.type === "step-start" && e.label), ["a"], "step b never started");
+  assert.deepEqual(log.filter((e) => e.type === "warning"), [], "a clean repository was reverted: nothing to warn about");
+  assert.equal(calls.length, 1);
+});
+
+test("a revert goes back to the start of the step, not of the attempt that was running", async () => {
+  const repo = makeRepo();
+  script.push(() => {
+    writeFileSync(join(repo, "partial.txt"), "left by the failed first attempt\n");
+    return { status: "error", error: { message: "boom" } }; // the attempt fails and is retried
+  });
+  script.push(() => ({ hang: true }));
+  const wf = defineWorkflow({
+    meta: { name: "retrying", description: "retries once" },
+    defaults: { model },
+    run: (ctx) => ctx.agent("edit", { label: "edit", cwd: repo, retries: 1, timeoutMs: 5000 }),
+  });
+  const controller = new AbortController();
+  const outcome = await runWorkflow(wf, {}, {
+    cwd,
+    runId: "r-retry",
+    signal: controller.signal,
+    onEvent: (e) => {
+      if (e.type === "step-start" && e.attempt === 2) setTimeout(() => controller.abort(), 10);
+    },
+  });
+  assert.equal(outcome.status, "cancelled");
+  assert.ok(!existsSync(join(repo, "partial.txt")), "what the first attempt left is gone too");
 });

@@ -77,7 +77,7 @@ Inclui os campos de [`EventBase`](#eventbase).
 
 | Campo | Tipo | Obrigatório | Descrição |
 | --- | --- | --- | --- |
-| `status` | `"finished" \| "failed" \| "cancelled"` | sim | `finished` = o workflow retornou; `failed` = lançou um erro (inclusive teto de custo ou de tokens); `cancelled` = o run foi cancelado (`wf cancel`, `cancel_workflow`, SIGINT ou SIGTERM) e pode ser retomado com o mesmo `runId`. |
+| `status` | `RunStatus` | sim | Como a execução terminou. |
 | `outcomeStatus` | `string` | não | O campo `status` do resultado do workflow, quando ele devolve um objeto com esse campo (por exemplo `done`). |
 | `result` | `unknown` | não | O valor que o workflow retornou. É o que `wait_workflow` e `wf status` devolvem como `result`. Não é conteúdo de etapa: a retenção não o apaga (o workflow decide o que devolve), mas a redação de segredos vale para ele. |
 | `error` | `string` | não | A mensagem do erro que encerrou o run. |
@@ -288,6 +288,14 @@ Uma tentativa de afrouxar um teto, ou um padrão do código que um teto recusa. 
 | `requested` | `unknown` | sim | O que a camada pediu. |
 | `applied` | `unknown` | sim | O que passou a valer: o teto, ou o valor que já valia antes do pedido. |
 | `message` | `string` | sim | A explicação, em uma linha. |
+
+### RunStatus
+
+Como uma execução do run terminou: `finished` = o workflow retornou; `failed` = lançou um erro (inclusive teto de custo ou de tokens); `cancelled` = o run foi cancelado (`wf cancel`, `cancel_workflow`, SIGINT ou SIGTERM) e pode ser retomado com o mesmo `runId`.
+
+```ts
+type RunStatus = "finished" | "failed" | "cancelled";
+```
 
 ### TurnUsage
 

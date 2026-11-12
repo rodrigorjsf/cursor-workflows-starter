@@ -30,9 +30,9 @@ import {
 } from "@cursor/sdk";
 import { Ajv } from "ajv";
 import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedConfig, type StepOverrides, allowedSources, isModelAllowed, loadEffectiveConfig } from "../config/index.js";
-import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type NewEvent, type StepRef, type WorkflowEvent } from "./events.js";
+import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type NewEvent, type RunStatus, type StepRef, type WorkflowEvent } from "./events.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
-import { addUsage, emptyUsage, withRatio } from "./projection.js";
+import { addUsage, emptyUsage, resumeHint, withRatio } from "./projection.js";
 import { RunLockedError, RunStore } from "./run-store.js";
 import type { RetentionPolicy } from "./retention.js";
 import { registerRun } from "./runs-index.js";
@@ -41,7 +41,7 @@ import { type Capture, SUBMIT_TOOL, repromptMessage, schemaInstruction, submitRe
 import type { AgentCallOptions, Budget, UsageTotals, WorkflowContext, WorkflowDefinition } from "./workflow.js";
 import { revertToSnapshot, takeSnapshot } from "./worktree-snapshot.js";
 
-export type { ErrorKind, TurnUsage, WorkflowEvent } from "./events.js";
+export type { ErrorKind, RunStatus, TurnUsage, WorkflowEvent } from "./events.js";
 
 /** Erro que encerra o run inteiro, inclusive dentro de parallel/pipeline (não vira null). */
 export class FatalRunError extends Error {}
@@ -136,7 +136,7 @@ export interface RunOptions {
 
 export interface RunOutcome<R> {
   runId: string;
-  status: "finished" | "failed" | "cancelled";
+  status: RunStatus;
   result?: R;
   error?: string;
   /** true when the runtime refused the run before it started (invalid args, run already executing): nothing was written to the log. */
@@ -297,7 +297,7 @@ async function executeRun<A, R>(
   let chargedCents = store.ledger.chargedCents;
   let spentTokens = store.ledger.spentTokens;
   const totals = { ...store.ledger.usage };
-  const outcome = (status: "finished" | "failed" | "cancelled", extra: { result?: R; error?: string }): RunOutcome<R> => ({
+  const outcome = (status: RunStatus, extra: { result?: R; error?: string }): RunOutcome<R> => ({
     runId,
     status,
     ...extra,
@@ -448,7 +448,7 @@ async function executeRun<A, R>(
 
   // Cancellation. `cancelled` rejects when the signal aborts; it is only ever raced against something, never awaited alone.
   const signal = opts.signal;
-  const cancelMessage = `run cancelado; relance com resumeRunId="${runId}" para continuar de onde parou`;
+  const cancelMessage = `run cancelado; ${resumeHint(runId)}`;
   const cancelled = signal
     ? new Promise<never>((_, reject) => {
         const fire = () => reject(new RunCancelledError(cancelMessage));
@@ -736,6 +736,11 @@ async function executeRun<A, R>(
       const attempts = 1 + (o.retries ?? 1);
       let lastError = "";
       for (let attempt = 1; attempt <= attempts; attempt++) {
+        if (signal?.aborted) {
+          // Cancelled while queued or between attempts: this attempt never starts (no step-start). The attempts before it may have left edits.
+          if (attempt > 1) await revert();
+          assertNotCancelled();
+        }
         assertBudget();
         const attemptId = randomUUID();
         const startedAt = Date.now();
@@ -827,7 +832,6 @@ async function executeRun<A, R>(
           });
         };
         try {
-          assertNotCancelled();
           agent = await within(deadline, Agent.create({
             apiKey: opts.apiKey,
             name: `${def.meta.name}:${label}`,

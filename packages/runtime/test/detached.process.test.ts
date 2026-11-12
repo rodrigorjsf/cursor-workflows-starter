@@ -224,3 +224,36 @@ test("a second signal while the run is still stopping ends the process at once, 
   assert.ok(end && end.type === "run-end" && end.status === "cancelled", "the log says cancelled, not a crash");
   assert.equal(wf("status", started.jobId).status, "cancelled");
 });
+
+test("a frozen job (alive, heartbeat stale) shows as failed with its run id; cancel kills it, and the run can then be resumed", async () => {
+  const started = wf("start", "twostep", "--args", '{"hang":true}');
+  await until("the second step to start", () => eventsOf(started.runId).some((e) => e.type === "step-start" && e.label === "two"));
+  const { pid } = jobRecord(started.jobId);
+
+  process.kill(pid, "SIGSTOP"); // the whole process stops: no step progress, no heartbeat
+  const staleAfter = { ...env, WF_HEARTBEAT_STALE_MS: "1500" }; // the readers' threshold, so the test need not wait 30 s
+  const read = (...args: string[]) => JSON.parse(spawnSync(process.execPath, [...tsx("cli.ts"), ...args, "--cwd", repo], { env: staleAfter, encoding: "utf8" }).stdout) as Record<string, any>;
+  const frozen = await until("the job to show as failed", () => {
+    const state = read("status", started.jobId);
+    return state.status === "failed" ? state : undefined;
+  });
+  assert.equal(frozen.runId, started.runId);
+  assert.match(frozen.error, /sem sinal de vida/);
+  assert.match(frozen.error, new RegExp(`resumeRunId="${started.runId}"`));
+  assert.ok(alive(pid), "the process is still there, holding the run");
+
+  const cancelled = read("cancel", started.jobId);
+  assert.match(cancelled.note, /encerrado à força/);
+  assert.ok(!alive(pid));
+  const resumed = wf("start", "twostep", "--args", "{}", "--resume", started.runId);
+  const done = wf("wait", resumed.jobId, "--timeout", "60");
+  assert.equal(done.status, "finished", `the stale lock of the killed process does not block the resume: ${JSON.stringify(done)}`);
+});
+
+test("a --timeout that is not a number of seconds is an error, not a wait that returns at once", () => {
+  for (const command of ["wait", "cancel"]) {
+    const r = spawnSync(process.execPath, [...tsx("cli.ts"), command, "anyjob", "--timeout", "soon", "--cwd", repo], { env, encoding: "utf8" });
+    assert.equal(r.status, 1, command);
+    assert.match(r.stderr, /--timeout precisa ser um número de segundos/, command);
+  }
+});

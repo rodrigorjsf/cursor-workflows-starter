@@ -6,18 +6,19 @@
 //   wf models                         # IDs de modelo liberados para a chave em uso
 //   wf list
 //   wf config show [workflow]         # effective config of the current repo and where each value came from
-//   wf run <workflow> --args '<json>' [--max-cents N] [--resume <runId>]   # primeiro plano; imprime JSON no fim; Ctrl-C cancela
-//   wf start <workflow> --args '<json>' [--resume <runId>]                 # segundo plano (processo destacado); imprime {jobId}
+//   wf run <workflow> --args '<json>' [--max-cents N] [--resume <runId>]   # primeiro plano; imprime JSON no fim
+//   wf start <workflow> --args '<json>' [--resume <runId>]                 # segundo plano; imprime {jobId}
 //   wf status <jobId>
 //   wf wait <jobId> [--timeout 240]       # espera até o timeout e imprime o estado
-//   wf cancel <jobId> [--timeout 30]      # cancela o job (SIGTERM ao processo) e espera ele encerrar; o run pode ser retomado
+//   wf cancel <jobId> [--timeout 30]      # cancel the job (SIGTERM to its process) and wait for it to stop; the run stays resumable
 //   wf jobs
-//
-// `run` e `start` aceitam também --overrides '<json>': limites mais apertados só para este run (a camada do chat; só aperta).
 //   wf stats [--days 30]                  # resumo de custo/eficiência (banco ~/.cursor-workflows/metrics.db)
 //   wf metrics export [--days 30] [--format csv|json] [--out dir] [--no-anonymize]
 //   wf metrics reconcile                  # completa custos que o Cursor ainda não tinha reportado
 //   wf metrics mark <runId> accepted|rejected
+//
+// `start` runs the job in a detached process. SIGINT (Ctrl-C) or SIGTERM on a running `run` cancels it, like `wf cancel`.
+// `run` and `start` also take --overrides '<json>': limits tighter than the config's, for this run only (the chat's layer).
 //
 // STATUS: verificado contra a API real num plano Premium em 2026-11-11 (docs/research/verificacoes-locais.md).
 
@@ -28,7 +29,7 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { Cursor } from "@cursor/sdk";
 import { globalConfigPath, loadEffectiveConfig, parseLimitOverrides, repoConfigPath } from "./config/index.js";
-import { INSIDE_WORKFLOW_ENV, runWorkflow } from "./runtime/engine.js";
+import { INSIDE_WORKFLOW_ENV, type RunStatus, runWorkflow } from "./runtime/engine.js";
 import { cancelJob, cancelOnSignals, installCrashHandlers, listJobs, readJob, readJobRecord, spawnJob, startJob, waitJob } from "./runtime/jobs.js";
 import { loadWorkflows } from "./runtime/registry.js";
 
@@ -53,6 +54,12 @@ const { positionals, values } = parseArgs({
 const [command, name] = positionals;
 const cwd = resolve(values.cwd!);
 const out = (v: unknown) => process.stdout.write(JSON.stringify(v, null, 2) + "\n");
+/** `--timeout`, in milliseconds. A value that is not a number of seconds is an error: it would make the wait return at once. */
+const timeoutMs = (): number => {
+  const seconds = Number(values.timeout);
+  if (values.timeout!.trim() === "" || !Number.isFinite(seconds) || seconds < 0) throw new Error(`--timeout precisa ser um número de segundos maior ou igual a 0, recebeu "${values.timeout}"`);
+  return seconds * 1000;
+};
 /** The flag layer of the config: only what the command line says. WF_MAX_* are the env layer, read by the config. */
 const flagLimits = () => {
   const number = (flag: "max-cents" | "max-tokens") => {
@@ -74,7 +81,7 @@ const runOpts = () => ({
   onEvent: (e: unknown) => process.stderr.write(JSON.stringify(e) + "\n"),
 });
 /** 0 finished; 130 cancelled (the shell's code for a run stopped by SIGINT); 1 failed. */
-const exitCodeOf = (status: "finished" | "failed" | "cancelled") => (status === "finished" ? 0 : status === "cancelled" ? 130 : 1);
+const exitCodeOf = (status: RunStatus) => (status === "finished" ? 0 : status === "cancelled" ? 130 : 1);
 
 async function resolveWorkflow() {
   const def = (await loadWorkflows(cwd)).get(name ?? "");
@@ -127,7 +134,7 @@ async function main(): Promise<number> {
       const args = JSON.parse(values.args!);
       const opts = { ...runOpts(), signal: cancelOnSignals() }; // SIGINT and SIGTERM cancel the run, the same as `wf cancel`
       if (values.job) {
-        // Modo filho de `wf start` (e de `start_workflow`): o pai já criou o job.
+        // Child mode of `wf start` and `start_workflow`: the parent already created the job.
         const existing = readJobRecord(cwd, values.job);
         if (!existing) throw new Error(`job ${values.job} não encontrado`);
         const { done } = startJob(def, args, opts, existing);
@@ -145,7 +152,7 @@ async function main(): Promise<number> {
       const args = JSON.parse(values.args!);
       const overrides = overridesFlag();
       const { violations } = loadEffectiveConfig(def, { cwd, flags: flagLimits(), mcpOverrides: overrides }); // an unusable config fails here, with its field path
-      const { job, log } = spawnJob({ cwd, workflow: def.meta.name, args, resumeRunId: values.resume, maxCents: values["max-cents"], maxTokens: values["max-tokens"], overrides });
+      const { job, log } = spawnJob({ cwd, workflow: def.meta.name, args, resumeRunId: values.resume, ...flagLimits(), overrides });
       out({ jobId: job.jobId, runId: job.runId, log, next: `wf wait ${job.jobId}`, ...(violations.length ? { violations } : {}) });
       return 0;
     }
@@ -154,12 +161,12 @@ async function main(): Promise<number> {
       return 0;
     }
     case "wait": {
-      out((await waitJob(cwd, name ?? "", Number(values.timeout) * 1000)) ?? { error: "job não encontrado" });
+      out((await waitJob(cwd, name ?? "", timeoutMs())) ?? { error: "job não encontrado" });
       return 0;
     }
     case "cancel": {
-      // Espera o processo encerrar (cancelar para os agentes, desfaz a etapa em andamento e grava o fim do run); no máximo 30 s.
-      out((await cancelJob(cwd, name ?? "", Math.min(Number(values.timeout), 30) * 1000)) ?? { error: "job não encontrado" });
+      // Waits for the process to stop (it cancels the agents, reverts the in-flight step and writes the run's end), 30 s at most.
+      out((await cancelJob(cwd, name ?? "", Math.min(timeoutMs(), 30_000))) ?? { error: "job não encontrado" });
       return 0;
     }
     case "jobs": {

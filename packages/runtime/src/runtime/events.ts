@@ -187,11 +187,14 @@ export interface RunStartEvent extends EventBase {
   violations: ConfigViolation[];
 }
 
+/** Como uma execução do run terminou: `finished` = o workflow retornou; `failed` = lançou um erro (inclusive teto de custo ou de tokens); `cancelled` = o run foi cancelado (`wf cancel`, `cancel_workflow`, SIGINT ou SIGTERM) e pode ser retomado com o mesmo `runId`. */
+export type RunStatus = "finished" | "failed" | "cancelled";
+
 /** O run terminou. */
 export interface RunEndEvent extends EventBase {
   type: "run-end";
-  /** `finished` = o workflow retornou; `failed` = lançou um erro (inclusive teto de custo ou de tokens); `cancelled` = o run foi cancelado (`wf cancel`, `cancel_workflow`, SIGINT ou SIGTERM) e pode ser retomado com o mesmo `runId`. */
-  status: "finished" | "failed" | "cancelled";
+  /** Como a execução terminou. */
+  status: RunStatus;
   /** O campo `status` do resultado do workflow, quando ele devolve um objeto com esse campo (por exemplo `done`). */
   outcomeStatus?: string;
   /** O valor que o workflow retornou. É o que `wait_workflow` e `wf status` devolvem como `result`. Não é conteúdo de etapa: a retenção não o apaga (o workflow decide o que devolve), mas a redação de segredos vale para ele. */

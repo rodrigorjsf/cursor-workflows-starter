@@ -56,7 +56,7 @@ CREATE TABLE runs (
   repo_hash      TEXT,
   started_at     TEXT NOT NULL,
   finished_at    TEXT,
-  status         TEXT,                      -- finished | failed (do runtime)
+  status         TEXT,                      -- finished | failed | cancelled (do runtime)
   outcome_status TEXT,                      -- result.status devolvido pelo workflow (ex.: done, tests-failed)
   outcome_class  TEXT,                      -- delivered | failed | error | cancelled | unknown
   human_verdict  TEXT,                      -- accepted | rejected (wf metrics mark)
@@ -82,7 +82,7 @@ CREATE TABLE attempts (
   prompt_chars      INTEGER,
   prompt_text       TEXT,                   -- legado: nunca mais gravado (o texto dos prompts fica só no log de eventos local)
   ok                INTEGER NOT NULL,
-  error_kind        TEXT,                   -- timeout | run-error | schema | rate-limit | exception
+  error_kind        TEXT,                   -- timeout | run-error | schema | rate-limit | cancelled | exception
   schema_reprompts  INTEGER DEFAULT 0,
   turns             INTEGER DEFAULT 0,
   steps             INTEGER DEFAULT 0,      -- passos (step-completed) no stream; um passo pode agrupar várias chamadas ao modelo

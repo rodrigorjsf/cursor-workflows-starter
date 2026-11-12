@@ -67,6 +67,8 @@ The runtime's messages are in Portuguese. This skill quotes the ones it matches,
    - Anything else (a step that failed, a process that died or stopped answering: `terminou sem concluir o job`,
      `sem sinal de vida`): offer to relaunch **resuming**: `start_workflow` with the same `name` and `args` and
      `resumeRunId` equal to the job's `runId`. Completed steps are not repeated.
+     With `sem sinal de vida` the process may still be alive and holding the run; if the resume then returns
+     `já está em execução`, ask the user whether to cancel the job (`cancel_workflow` ends a frozen process), then resume.
    On a relaunch, go back to step 3 with the new `jobId`.
 6. When `status` is `cancelled`, the run was stopped on purpose. Relay that with the `runId`, and offer to resume it
    as in step 5 if the user wants to continue; the steps it finished are not repeated.

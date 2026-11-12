@@ -9,14 +9,14 @@
 //                                                   overrides: limits for this run, tighten-only
 //   wait_workflow  {jobId, timeoutSec}              → estado (status, fase, últimas linhas de resumo, gasto, resultado)
 //   get_workflow_status {jobId}                     → estado sem esperar
-//   cancel_workflow {jobId}                         → cancela o job e devolve o estado (o run pode ser retomado)
+//   cancel_workflow {jobId}                         → cancel the job and return its state (the run stays resumable)
 //
 // The state is a projection of the run's event log (jobs.ts): the job record holds identity only.
 //
-// Cada job roda em um processo destacado (`spawnJob`): este servidor só inicia, lê o estado e pede o cancelamento.
-// Reiniciar o servidor (ou o Cursor) não afeta um run em andamento; o servidor novo o encontra pelos arquivos do job.
-// Um job cujo processo morreu, ou cujo heartbeat parou, aparece como "failed" com o runId; relance com
-// start_workflow {resumeRunId} — o journal evita repetir etapas concluídas.
+// Each job runs in a detached process (`spawnJob`): this server only starts it, reads its state and asks it to cancel.
+// Restarting the server (or Cursor) does not affect a run in progress; the new server finds it through the job's files.
+// A job whose process died, or whose heartbeat stopped, shows as "failed" with its runId; relaunch with
+// start_workflow {resumeRunId}: the journal keeps finished steps from repeating.
 //
 // STATUS: exercitado por stdio (initialize, tools/list, list_workflows) nos testes de fumaça do kit.
 
@@ -99,6 +99,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           name: "cancel_workflow",
           description:
             "Cancela um job em andamento: para os agentes ativos, desfaz a etapa que estava escrevendo e marca o job como cancelled. " +
+            "Um processo travado (job failed com 'sem sinal de vida') é encerrado à força. " +
             "O run pode ser retomado depois com start_workflow {resumeRunId}. Só chame quando o usuário pedir para parar.",
           inputSchema: { type: "object", required: ["jobId"], properties: { jobId: { type: "string" } } },
         },

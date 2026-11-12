@@ -2,7 +2,7 @@
 // beating while the job's main thread is blocked in a synchronous call (a test run started with execFileSync, say).
 // Plain JavaScript on purpose: it needs nothing but node:fs, and a worker must not depend on the TypeScript loader.
 //
-// workerData: { file: the job record's path, record: { jobId, runId, pid }, intervalMs }
+// workerData: { file: the job record's path, record: the job record as it is when the job starts, intervalMs }
 import { renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { workerData } from "node:worker_threads";

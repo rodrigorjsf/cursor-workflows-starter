@@ -19,7 +19,8 @@ import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import type { LimitOverrides } from "../config/index.js";
 import { type RunOptions, newRunId, runWorkflow } from "./engine.js";
-import { type ExecutionState, type Ledger, projectExecution, replayLedger, withRatio } from "./projection.js";
+import type { RunStatus } from "./events.js";
+import { type ExecutionState, type Ledger, projectExecution, replayLedger, resumeHint, withRatio } from "./projection.js";
 import { abortOpenRuns, eventLogPath, readEventLog } from "./run-store.js";
 import { stateDir } from "./state.js";
 import { writeFileAtomic } from "./state-files.js";
@@ -49,7 +50,7 @@ export interface JobState {
   heartbeat: string;
   /** The workflow's `meta.name`. Absent until the job's process has started the run. */
   workflow?: string;
-  status: "running" | "finished" | "failed" | "cancelled";
+  status: "running" | RunStatus;
   startedAt?: string;
   finishedAt?: string;
   phase?: string;
@@ -104,10 +105,14 @@ export function readJobRecord(cwd: string, jobId: string): JobRecord | undefined
   }
 }
 
-const unfinished = (record: JobRecord): string => `processo ${record.pid} terminou sem concluir o job; relance com resumeRunId="${record.runId}"`;
+/** What a running job's process is doing: `gone` (not there), `silent` (there, but its heartbeat stopped), or `alive`. */
+type Liveness = "alive" | "silent" | "gone";
 
-/** The state of the job: the record plus the projection of the run's log. Only reads. */
-function jobStateOf(cwd: string, record: JobRecord): JobState {
+/**
+ * The state of the job: the record plus the projection of the run's log. Only reads. `liveness` is set only for a run
+ * the log shows as not ended (and not refused): whether its process is still doing the job decides `failed`.
+ */
+function inspect(cwd: string, record: JobRecord): { state: JobState; liveness?: Liveness } {
   const { events } = readEventLog(eventLogPath(cwd, record.runId), { content: false });
   const execution: ExecutionState | undefined = projectExecution(events, record.jobId);
   const ledger = execution?.ledger ?? replayLedger(events);
@@ -132,20 +137,26 @@ function jobStateOf(cwd: string, record: JobRecord): JobState {
   if (record.refused !== undefined) {
     state.status = "failed";
     state.error = record.refused;
-  } else if (state.status === "running") {
-    const silentMs = Date.now() - Date.parse(record.heartbeat);
-    if (!isAlive(record.pid)) {
-      // The process died without ending the run (crash, machine shut down).
-      state.status = "failed";
-      state.error = unfinished(record);
-    } else if (silentMs > fromEnv("WF_HEARTBEAT_STALE_MS", HEARTBEAT_STALE_MS)) {
-      // Alive, or a recycled pid, but it has not said so for too long: frozen, stopped, or not the job's process any more.
-      state.status = "failed";
-      state.error = `sem sinal de vida há ${Math.round(silentMs / 1000)}s (processo ${record.pid}); relance com resumeRunId="${record.runId}"`;
-    }
+    return { state };
   }
-  return state;
+  if (state.status !== "running") return { state };
+  const silentMs = Date.now() - Date.parse(record.heartbeat);
+  if (!isAlive(record.pid)) {
+    // The process died without ending the run (crash, machine shut down).
+    state.status = "failed";
+    state.error = `processo ${record.pid} terminou sem concluir o job; ${resumeHint(record.runId)}`;
+    return { state, liveness: "gone" };
+  }
+  if (silentMs > fromEnv("WF_HEARTBEAT_STALE_MS", HEARTBEAT_STALE_MS)) {
+    // Alive, or a recycled pid, but it has not said so for too long: frozen, stopped, or not the job's process any more.
+    state.status = "failed";
+    state.error = `sem sinal de vida há ${Math.round(silentMs / 1000)}s (processo ${record.pid}); ${resumeHint(record.runId)}`;
+    return { state, liveness: "silent" };
+  }
+  return { state, liveness: "alive" };
 }
+
+const jobStateOf = (cwd: string, record: JobRecord): JobState => inspect(cwd, record).state;
 
 export function readJob(cwd: string, jobId: string): JobState | undefined {
   const record = readJobRecord(cwd, jobId);
@@ -184,7 +195,7 @@ export function installCrashHandlers(): void {
   });
   process.on("uncaughtException", (err) => {
     // A job's state comes from the run's log: end this process's runs in it, with the reason and how to resume.
-    abortOpenRuns((runId) => `crash: ${err.message}; relance com resumeRunId="${runId}"`);
+    abortOpenRuns((runId) => `crash: ${err.message}; ${resumeHint(runId)}`);
     process.stderr.write(`[wf] uncaughtException: ${err.stack ?? err.message}\n`);
     process.exit(1);
   });
@@ -211,7 +222,7 @@ function startHeartbeat(cwd: string, job: JobRecord): { stop(): Promise<void> } 
   let worker: Worker | undefined;
   try {
     worker = new Worker(new URL("./heartbeat-worker.mjs", import.meta.url), {
-      workerData: { file: join(jobsDir(cwd), `${job.jobId}.json`), record: { jobId: job.jobId, runId: job.runId, pid: process.pid }, intervalMs },
+      workerData: { file: join(jobsDir(cwd), `${job.jobId}.json`), record: { ...job }, intervalMs }, // the whole record: the worker rewrites it with a new heartbeat, so it never drops a field
       execArgv: [], // plain JavaScript: no TypeScript loader needed in the worker
     });
     worker.unref();
@@ -260,9 +271,9 @@ export interface SpawnJobOptions {
   args: unknown;
   /** The run to resume (a new job over an existing run). */
   resumeRunId?: string;
-  /** The flag layer of the config, as the command line wrote them (`--max-cents`, `--max-tokens`). */
-  maxCents?: string;
-  maxTokens?: string;
+  /** The flag layer of the config (`--max-cents`, `--max-tokens`). */
+  maxCents?: number;
+  maxTokens?: number;
   /** The chat's overrides: the process applies them as the tighten-only layer of the config. */
   overrides?: LimitOverrides;
 }
@@ -277,8 +288,8 @@ export function spawnJob(o: SpawnJobOptions): { job: JobRecord; log: string } {
   const log = jobLogPath(o.cwd, job.jobId);
   const cli = fileURLToPath(new URL("../cli.ts", import.meta.url)); // the runtime's own CLI, wherever the kit is installed
   const flags = [
-    ...(o.maxCents === undefined ? [] : ["--max-cents", o.maxCents]),
-    ...(o.maxTokens === undefined ? [] : ["--max-tokens", o.maxTokens]),
+    ...(o.maxCents === undefined ? [] : ["--max-cents", String(o.maxCents)]),
+    ...(o.maxTokens === undefined ? [] : ["--max-tokens", String(o.maxTokens)]),
     ...(o.overrides && Object.keys(o.overrides).length ? ["--overrides", JSON.stringify(o.overrides)] : []),
   ];
   const out = openSync(log, "a");
@@ -316,24 +327,32 @@ export interface CancelResult extends JobState {
 
 /**
  * Asks the job's process to cancel (SIGTERM: the process cancels the active agent runs, reverts the in-flight write step,
- * writes the run's end and exits) and waits up to `timeoutMs` for the job to leave `running`. A job that already ended is
- * left alone, and so is a process that is not the job's. Undefined when there is no such job.
+ * writes the run's end and exits) and waits up to `timeoutMs` for the job to leave `running`. A process that has stopped
+ * answering (its heartbeat is stale, so the job already shows as failed) cannot handle a signal: it is killed, which frees
+ * the run for a resume but cannot revert the step. A job that already ended is left alone, and so is a process that is not
+ * the job's. Undefined when there is no such job.
  */
 export async function cancelJob(cwd: string, jobId: string, timeoutMs: number): Promise<CancelResult | undefined> {
   const record = readJobRecord(cwd, jobId);
   if (!record) return undefined;
-  const before = jobStateOf(cwd, record);
-  if (before.status !== "running") return { ...before, note: `o job já terminou (${before.status}); nada a cancelar` };
+  const { state: before, liveness } = inspect(cwd, record);
+  if (liveness === undefined || liveness === "gone") return { ...before, note: `o job já terminou (${before.status}); nada a cancelar` };
   if (!isJobProcess(record)) return { ...before, note: `o processo ${record.pid} não é o processo do job (o pid foi reaproveitado?); nenhum sinal enviado` };
+  const signal = liveness === "silent" ? "SIGKILL" : "SIGTERM";
   try {
-    process.kill(record.pid, "SIGTERM");
+    process.kill(record.pid, signal);
   } catch (err) {
     return { ...before, note: `não foi possível sinalizar o processo ${record.pid}: ${err instanceof Error ? err.message : String(err)}` };
   }
+  // A killed process never writes the run's end: the wait is for it to be gone. A cancelled one: for the job to leave `running`.
+  const stopping = (state: JobState) => (signal === "SIGKILL" ? isAlive(record.pid) : state.status === "running");
   let state: JobState = before;
-  for (const deadline = Date.now() + timeoutMs; state.status === "running" && Date.now() < deadline; ) {
+  for (const deadline = Date.now() + timeoutMs; stopping(state) && Date.now() < deadline; ) {
     await new Promise((r) => setTimeout(r, 200));
     state = readJob(cwd, jobId) ?? state;
+  }
+  if (signal === "SIGKILL") {
+    return { ...state, note: `o processo ${record.pid} estava sem sinal de vida e foi encerrado à força (SIGKILL), sem desfazer a etapa em andamento; o run continua retomável` };
   }
   return { ...state, note: state.status === "running" ? `SIGTERM enviado ao processo ${record.pid}, que ainda está encerrando; confira com wait_workflow` : `SIGTERM enviado ao processo ${record.pid}` };
 }
@@ -351,7 +370,7 @@ export function cancelOnSignals(): AbortSignal {
       controller.abort();
       return;
     }
-    abortOpenRuns((runId) => `run cancelado à força por um segundo ${name}; relance com resumeRunId="${runId}"`, "cancelled");
+    abortOpenRuns((runId) => `run cancelado à força por um segundo ${name}; ${resumeHint(runId)}`, "cancelled");
     process.exit(exitCode);
   };
   process.on("SIGINT", handle("SIGINT", 130));
