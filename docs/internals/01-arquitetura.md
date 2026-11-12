@@ -166,9 +166,11 @@ poderia estourar o tempo dela e a saída dela ficaria invisível.
 ## O `AgentBackend`: quem roda a tentativa
 
 O motor não sabe onde o agente roda: cada tentativa de uma etapa passa por um `AgentBackend`
-(`packages/runtime/src/runtime/backend.ts`). Hoje há um, o local (`Agent.create` com as opções `local` do SDK). O backend
-de nuvem do [ADR-0005](../adr/0005-cloud-backend-and-location-cap.md) entra atrás da mesma interface, sem mexer no
-motor.
+(`packages/runtime/src/runtime/backend.ts`). Há dois, um por location. O local (`Agent.create` com as opções `local` do
+SDK) é o padrão. O de nuvem (`backend-cloud.ts`, [ADR-0005](../adr/0005-cloud-backend-and-location-cap.md)) cria o agente
+com as opções `cloud` contra um snapshot do worktree. O motor escolhe o backend pela location da etapa, a do papel na
+configuração; `RunOptions.backend` substitui o da location dele. Os dois rodam a tentativa por `runAttempt` (o mesmo cuidado
+com abortos, cancelamento e uso).
 
 ```ts
 interface AgentBackend {
@@ -179,9 +181,9 @@ interface AgentBackend {
 
 | Parte | O que carrega |
 |---|---|
-| `prompt` e `options` (`StepOptions`) | O prompt e as opções da etapa já resolvidas: nome, modelo, `cwd`, tools, subagents, MCP servers, camadas de configuração, sandbox (com o teto `requireSandbox` aplicado), `schema` e `schemaRetries` |
+| `prompt` e `options` (`StepOptions`) | O prompt e as opções da etapa já resolvidas: nome, modelo, `cwd`, tools, subagents, MCP servers, camadas de configuração, sandbox (com o teto `requireSandbox` aplicado), `writes` (a etapa pode alterar arquivos), `schema` e `schemaRetries` |
 | `signal` | O interruptor da tentativa. O motor o aborta por todo motivo que encerra a tentativa antes da hora e põe o motivo em `signal.reason`: o cancelamento do run (`RunCancelledError`), o `timeoutMs` da etapa e o teto de tokens que passou. O backend cancela o run do agente em andamento, espera ele parar, lê o uso que a tentativa deixou, descarta o agente e devolve `aborted` com esse motivo |
-| `onEvent` | O que acontece durante a tentativa, em ordem: `agent` (o agente existe), `text`, `step`, `tool-call`, `tool-output`, `summary`, `reprompt` e `turn`. O motor conta, grava o conteúdo no log e, a cada `turn`, aplica os tetos de tokens ao vivo: pode abortar o `signal` de dentro do callback, e o backend cancela na hora |
+| `onEvent` | O que acontece durante a tentativa, em ordem: `agent` (o agente existe), `text`, `step`, `tool-call`, `tool-output`, `summary`, `reprompt`, `warning` e `turn`. O motor conta, grava o conteúdo no log e, a cada `turn`, aplica os tetos de tokens ao vivo: pode abortar o `signal` de dentro do callback, e o backend cancela na hora |
 | `AttemptResult` | `outcome` (`finished` com o valor, `run-error`, `schema`, `aborted`, ou `error` classificado como `account`, `usage-limit`, `rate-limit` ou `other`), o `agentId`, o modelo resolvido e a leitura do uso (o relatório do agente, ou o motivo de não ter conseguido lê-lo) |
 
 O contrato, além da tabela:
@@ -194,7 +196,17 @@ O contrato, além da tabela:
   descartado.
 - A saída estruturada é do backend. O local registra a custom tool `submit_result` (e garante `"mcp"` na allowlist) e
   reenvia o pedido na mesma conversa até o schema ser satisfeito; o motor só recebe o valor validado e os eventos
-  `reprompt`. O backend de nuvem entrega o mesmo contrato com um bloco JSON final (ADR-0005).
+  `reprompt`. O de nuvem entrega o mesmo contrato com um bloco JSON final: o prompt traz o schema e pede, no fim da
+  resposta, um bloco de código `json`; o último bloco é validado com o Ajv e um bloco ausente ou inválido volta ao agente
+  como follow-up, dentro dos `schemaRetries` da etapa.
+- O backend de nuvem não manda custom tools, allowlist de tools nem camadas de configuração (o cloud agent as recusa ou
+  ignora; o backend avisa das camadas com um `warning`). Antes de criar o agente ele empurra um snapshot do worktree
+  (`cloud-snapshot.ts`: o estado em disco, não commitado inclusive, sem tocar no índice nem na `HEAD` do usuário, e sem
+  `.workflows/`) para uma branch `wf/cloud-snapshot/<run>/<id>` do remote `cloud.remote` (padrão `origin`) e a apaga quando
+  a tentativa termina, de qualquer jeito que termine. O `warning` não conta como "o agente existe": o teto de tokens segue
+  esperando o evento `agent`.
+- Uma etapa na nuvem não usa o memo. Hoje só roda ali a etapa de leitura (`writes: false`); a que escreve falha antes de
+  gastar, com a mensagem que diz o que fazer.
 - Os testes trocam o SDK (`packages/runtime/test/fake-sdk.ts`) ou o próprio backend (`RunOptions.backend`). Os testes do
   motor com o SDK falso passam pelo backend local, e os de `backend.test.ts` usam um backend de mentira para provar que
   tetos ao vivo, cancelamento e tempo funcionam pela interface.

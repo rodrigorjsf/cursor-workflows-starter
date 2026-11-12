@@ -19,9 +19,10 @@
 //  - The returned promise settles with a report for every way an attempt can end, a failure included; it rejects only
 //    on a bug. The report says how the attempt ended and what it used, so the engine can charge it.
 //
-// Today there is one backend, the local one: `Agent.create` with the SDK's `local` options. The cloud spec (#5) adds a
-// second behind this same interface (ADR-0005). Tests substitute the SDK (test/fake-sdk.ts) or the backend itself
-// (`RunOptions.backend`); the engine has no other way to reach an agent.
+// There are two backends, one per location: the local one (here) is `Agent.create` with the SDK's `local` options, and the
+// cloud one (backend-cloud.ts) is `Agent.create` with its `cloud` options against a snapshot of the worktree (ADR-0005).
+// Both run the attempt through `runAttempt`, which holds the abort, cancellation and usage rules above. Tests substitute the
+// SDK (test/fake-sdk.ts) or a backend (`RunOptions.backend`); the engine has no other way to reach an agent.
 import {
   Agent,
   AgentBusyError,
@@ -55,6 +56,8 @@ export interface StepOptions extends Pick<AgentCallOptions, "tools" | "disallowe
   settingSources: SettingSource[];
   /** Run the agent's commands in the SDK sandbox. */
   sandbox: boolean;
+  /** The step can change files: its `tools` allowlist is absent or has more than read-only tools. */
+  writes: boolean;
   /** Re-prompts allowed, in the same conversation, when a structured step has not delivered a valid result. */
   schemaRetries: number;
 }
@@ -75,7 +78,9 @@ export type AttemptEvent =
   /** A turn ended. `usage` is what the turn used, when the backend knows. The live token caps are checked here. */
   | { type: "turn"; usage?: TurnUsage }
   /** A structured step has not delivered a valid result: `message` is sent to the agent as a follow-up. */
-  | { type: "reprompt"; message: string };
+  | { type: "reprompt"; message: string }
+  /** Something the user should know about how the attempt runs (a setting this location ignores, a leftover it could not clean up). */
+  | { type: "warning"; message: string };
 
 /** What a backend could read of the attempt's usage: the agent's own report, or why it could not be read. */
 export type UsageReading = { report: AgentUsage } | { failed: string };
@@ -194,8 +199,9 @@ function shellOutput(result: unknown): string | undefined {
 }
 
 /**
- * The agent's usage and cost. The cost "may lag a little after the run ends" (SDK doc): it is read again when it comes back
- * empty. A local agent's usage can answer 403 `feature_unavailable` (it is rolled out per account): no point asking again.
+ * The agent's usage and cost: a local agent's, or the cloud usage API's for a cloud agent. The cost "may lag a little after
+ * the run ends" (SDK doc): it is read again when it comes back empty. A local agent's usage can answer 403
+ * `feature_unavailable` (it is rolled out per account): no point asking again.
  */
 async function readUsage(agent: SDKAgent): Promise<UsageReading> {
   let lastErr: unknown;
@@ -272,10 +278,18 @@ class RunCanceller {
   }
 }
 
-/** Runs the attempt on this machine, in the step's cwd. */
-async function runLocalAttempt(prompt: string, o: StepOptions, signal: AbortSignal, onEvent: (event: AttemptEvent) => void): Promise<AttemptResult> {
-  // A structured step is answered through a custom tool, `submit_result`, that validates the object in this process.
-  const capture: Capture = { value: undefined, submitted: false };
+/**
+ * Runs one attempt around an agent, the same wherever the agent runs: creates it (an abort that arrives meanwhile disposes
+ * it), reports it, hands `converse` the way to send a message and wait for the answer, and reports how the attempt ended.
+ * Whatever the SDK throws once the signal is aborted is a consequence of the abort: the cause is the signal's reason. The
+ * run an abort cancels is waited for before the usage is read and before anything else touches the agent's directory.
+ */
+export async function runAttempt(
+  signal: AbortSignal,
+  onEvent: (event: AttemptEvent) => void,
+  createAgent: () => Promise<SDKAgent>,
+  converse: (exchange: (message: string) => Promise<RunResult>) => Promise<AttemptOutcome>,
+): Promise<AttemptResult> {
   const canceller = new RunCanceller(signal);
   const sendOpts: SendOptions = { onDelta: attemptDeltas(onEvent) };
   let agent: SDKAgent | undefined;
@@ -283,8 +297,77 @@ async function runLocalAttempt(prompt: string, o: StepOptions, signal: AbortSign
   let outcome: AttemptOutcome;
   try {
     signal.throwIfAborted(); // no agent is created for an attempt that is already over
-    const created = await within(
-      signal,
+    const created = await within(signal, createAgent(), (late) => void late[Symbol.asyncDispose]().catch(() => {}));
+    agent = created;
+    onEvent({ type: "agent", agentId: created.agentId });
+    signal.throwIfAborted();
+    let answered = false;
+    /** One message and its answer. An aborted attempt throws the signal's reason as soon as it knows, before anything else. */
+    const exchange = async (message: string): Promise<RunResult> => {
+      const run = await within(signal, sendWhenFree(created, message, sendOpts), (late) => void late.cancel().catch(() => {}), SEND_GRACE_MS);
+      canceller.bind(run);
+      signal.throwIfAborted();
+      try {
+        const answer = await within(signal, run.wait());
+        signal.throwIfAborted();
+        if (!answered) model = answer.model?.id; // the first answer names the model the alias resolved to
+        answered = true;
+        return answer;
+      } finally {
+        canceller.bind(undefined); // finished or abandoned: an abort has nothing to cancel until the next send()
+      }
+    };
+    outcome = await converse(exchange);
+  } catch (err) {
+    outcome = signal.aborted ? { kind: "aborted", reason: signal.reason } : classifyError(err);
+  }
+  try {
+    // Let the run cancelled by an abort stop before its usage is read and anything else touches the cwd. A timeout or an error also costs.
+    await canceller.stopped();
+    const usage = agent ? await readUsage(agent) : undefined;
+    return { outcome, agentId: agent?.agentId, model, usage };
+  } finally {
+    canceller.dispose();
+    if (agent) await agent[Symbol.asyncDispose]().catch(() => {});
+  }
+}
+
+/** What a structured step's answer holds: the validated result, or why there is none and what to tell the agent. */
+export type Delivery = { ok: true; value: unknown } | { ok: false; message: string; reprompt: string };
+
+/**
+ * Sends `message` and, for a structured step (`check` given), re-prompts in the SAME conversation, up to `schemaRetries`
+ * times, until `check` accepts the answer. Says how the attempt ended.
+ */
+export async function converse(
+  exchange: (message: string) => Promise<RunResult>,
+  message: string,
+  { schemaRetries, check, onEvent }: { schemaRetries: number; check?: (answer: RunResult) => Delivery; onEvent: (event: AttemptEvent) => void },
+): Promise<AttemptOutcome> {
+  let answer = await exchange(message);
+  let delivery = check?.(answer);
+  for (let tries = schemaRetries; check && delivery && !delivery.ok && answer.status === "finished" && tries > 0; tries--) {
+    onEvent({ type: "reprompt", message: delivery.reprompt });
+    answer = await exchange(delivery.reprompt);
+    delivery = check(answer);
+  }
+  if (answer.status !== "finished") return { kind: "run-error", message: `run ${answer.status}: ${answer.error?.message ?? "no detail"}` };
+  if (delivery && !delivery.ok) return { kind: "schema", message: delivery.message };
+  return { kind: "finished", value: delivery ? delivery.value : (answer.result ?? "") };
+}
+
+/** Runs the attempt on this machine, in the step's cwd. */
+async function runLocalAttempt(prompt: string, o: StepOptions, signal: AbortSignal, onEvent: (event: AttemptEvent) => void): Promise<AttemptResult> {
+  // A structured step is answered through a custom tool, `submit_result`, that validates the object in this process.
+  const capture: Capture = { value: undefined, submitted: false };
+  const check = (): Delivery =>
+    capture.submitted
+      ? { ok: true, value: capture.value }
+      : { ok: false, message: `the agent did not deliver a valid ${SUBMIT_TOOL} (${capture.lastError ?? "no call"})`, reprompt: repromptMessage(capture) };
+  return runAttempt(
+    signal,
+    onEvent,
+    () =>
       Agent.create({
         apiKey: o.apiKey,
         name: o.name,
@@ -301,53 +384,8 @@ async function runLocalAttempt(prompt: string, o: StepOptions, signal: AbortSign
           customTools: o.schema ? { [SUBMIT_TOOL]: submitResultTool(o.schema, capture) } : undefined,
         },
       }),
-      (late) => void late[Symbol.asyncDispose]().catch(() => {}),
-    );
-    agent = created;
-    onEvent({ type: "agent", agentId: created.agentId });
-    signal.throwIfAborted();
-    /** One message and its answer. An aborted attempt throws the signal's reason as soon as it knows, before anything else. */
-    const exchange = async (message: string): Promise<RunResult> => {
-      const run = await within(signal, sendWhenFree(created, message, sendOpts), (late) => void late.cancel().catch(() => {}), SEND_GRACE_MS);
-      canceller.bind(run);
-      signal.throwIfAborted();
-      try {
-        const answer = await within(signal, run.wait());
-        signal.throwIfAborted();
-        return answer;
-      } finally {
-        canceller.bind(undefined); // finished or abandoned: an abort has nothing to cancel until the next send()
-      }
-    };
-    let result = await exchange(o.schema ? prompt + schemaInstruction() : prompt);
-    model = result.model?.id;
-    // Structured output: re-prompt in the SAME conversation until the model calls submit_result with valid JSON.
-    let schemaTries = o.schemaRetries;
-    while (o.schema && result.status === "finished" && !capture.submitted && schemaTries-- > 0) {
-      const message = repromptMessage(capture);
-      onEvent({ type: "reprompt", message });
-      result = await exchange(message);
-    }
-    if (result.status !== "finished") {
-      outcome = { kind: "run-error", message: `run ${result.status}: ${result.error?.message ?? "no detail"}` };
-    } else if (o.schema && !capture.submitted) {
-      outcome = { kind: "schema", message: `the agent did not deliver a valid ${SUBMIT_TOOL} (${capture.lastError ?? "no call"})` };
-    } else {
-      outcome = { kind: "finished", value: o.schema ? capture.value : (result.result ?? "") };
-    }
-  } catch (err) {
-    // Once the signal is aborted, whatever else the SDK throws is a consequence of it: the cause is the signal's reason.
-    outcome = signal.aborted ? { kind: "aborted", reason: signal.reason } : classifyError(err);
-  }
-  try {
-    // Let the run cancelled by an abort stop before its usage is read and anything else touches the cwd. A timeout or an error also costs.
-    await canceller.stopped();
-    const usage = agent ? await readUsage(agent) : undefined;
-    return { outcome, agentId: agent?.agentId, model, usage };
-  } finally {
-    canceller.dispose();
-    if (agent) await agent[Symbol.asyncDispose]().catch(() => {});
-  }
+    (exchange) => converse(exchange, o.schema ? prompt + schemaInstruction() : prompt, { schemaRetries: o.schemaRetries, check: o.schema ? check : undefined, onEvent }),
+  );
 }
 
 /** Runs the agent on this machine, in the step's cwd. */

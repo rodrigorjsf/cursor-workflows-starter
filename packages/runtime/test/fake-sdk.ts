@@ -15,6 +15,7 @@ export class CursorAgentError extends Error {
 }
 export class RateLimitError extends CursorAgentError {}
 export class AgentBusyError extends CursorAgentError {}
+export class ConfigurationError extends CursorAgentError {}
 // Como a API: inputTokens (100) já inclui cacheRead (60) e cacheWrite (20); totalTokens = input + output.
 const TURN_USAGE = { inputTokens: 100, outputTokens: 10, cacheReadTokens: 60, cacheWriteTokens: 20 };
 /** Deltas padrão de um send(): 2 passos, 1 tool call (read) e o fim do turno com uso. */
@@ -70,6 +71,14 @@ export const Agent = {
   },
   async create(o: any) {
     calls.push(o);
+    if (o.cloud) {
+      // Cloud mode, as the SDK 1.3.1 type declarations say: a cloud agent rejects tool allowlists, a replaced system prompt and
+      // custom tools (they live under `local`). It sees only a repository's remote ref, so `cloud.repos` names where it starts.
+      for (const option of ["tools", "disallowedTools", "systemPrompt"]) {
+        if (o[option] !== undefined) throw new ConfigurationError(`\`${option}\` is not supported on cloud agents`);
+      }
+      if (o.local?.customTools) throw new ConfigurationError("custom tools are not supported on cloud agents");
+    }
     if (costConfig.createHang) return new Promise(() => {}); // a creation that never answers
     if (costConfig.createDelayMs) await new Promise((r) => setTimeout(r, costConfig.createDelayMs)); // a slow one
     await costConfig.createGate?.(o); // a slow one, chosen by agent
@@ -82,7 +91,7 @@ export const Agent = {
     let n = 0;
     const turnUsages: Array<typeof TURN_USAGE> = [];
     return {
-      agentId: `agent-${calls.length}`,
+      agentId: `${o.cloud ? "bc" : "agent"}-${calls.length}`,
       async send(msg: string, options?: any) {
         stats.sends++;
         // `script` is process-local; a test that spawns a CLI or an MCP server steers the fake through the prompt instead.

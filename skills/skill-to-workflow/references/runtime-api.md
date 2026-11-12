@@ -125,6 +125,22 @@ if (!tests.ok) { /* tests.exitCode, tests.timedOut, tests.tail: the last 32768 c
   does not override them.
 - `budget`: `{ maxTokens?, maxCents? }`, the cap when nothing in the config sets one; an explicit `null` turns a cap off.
 
+## Locations: where a role's steps run
+
+- A step runs `local` (the default) or `cloud`. The user chooses per role in the config (`workflows.<name>.roles.<role>.location`),
+  never in workflow code, and only if the global `caps.allowedLocations` lists `cloud` (the default is local only: sending code to a
+  cloud VM is the machine owner's decision). A role the caps do not let into the cloud runs locally and the request is a violation.
+- You declare what each role can do there with `cloud` in `meta.roles`: `ok` (as it is), `read-only` (only when the step cannot
+  write: give it read-only `tools`) or `never` (it needs the local worktree). A config that sends a `never` role to the cloud is
+  rejected before the run starts; a `read-only` role whose step can write fails before it spends anything.
+- A cloud step is a strict subset of a local one. The engine pushes a throwaway snapshot of the step's worktree (uncommitted
+  changes included) to the `cloud.remote` remote (default `origin`) and deletes it when the step ends. The cloud agent gets no custom
+  tools, no `tools` allowlist (the prompt tells it the step is read-only) and no setting sources (it warns), the memo cache is
+  skipped, and a step that writes has no cloud path yet. `schema` still works: the agent ends its answer with a fenced `json`
+  block, validated like a `submit_result` call and corrected by the same `schemaRetries`. Design roles for both places: self-contained
+  prompts, read-only `tools`, a `schema` the model can fill from the repository alone.
+- Tokens and cost come from the cloud usage API and count against the same caps as a local step's.
+
 ## Caps
 
 - The run's limits are layered: code defaults (`budget`, `defaults`, role defaults) < the global file

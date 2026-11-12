@@ -17,6 +17,10 @@
       "$ref": "#/definitions/caps",
       "description": "Tetos rígidos. Só valem no arquivo global: o arquivo do repositório e o chat só podem apertá-los, nunca afrouxar. Um `caps` no arquivo do repositório é registrado como violação e não tem efeito."
     },
+    "cloud": {
+      "$ref": "#/definitions/cloudPrefs",
+      "description": "Preferências das etapas na nuvem (`location: \"cloud\"`). Valem nos dois arquivos; o do repositório vale mais."
+    },
     "dashboard": {
       "$ref": "#/definitions/dashboardPrefs",
       "description": "O dashboard local. Só vale no arquivo global: ele é um só por usuário, para os runs de todos os repositórios. Um `dashboard` no arquivo do repositório é registrado como violação e não tem efeito."
@@ -85,7 +89,7 @@
           "type": ["array", "null"],
           "items": { "enum": ["local", "cloud"] },
           "uniqueItems": true,
-          "description": "Onde as etapas podem rodar. Hoje só `local` existe; `cloud` é reservado. `null` libera todos."
+          "description": "Onde as etapas podem rodar: `local`, `cloud` ou os dois. Sem a chave, só `local`: mandar código para uma VM na nuvem é decisão do dono da máquina, e o arquivo do repositório nunca a toma. Listas: vale a interseção. `null` libera todos. Um papel com `location: \"cloud\"` que a lista não permite roda local, e o pedido vira uma violação."
         },
         "maxConcurrency": { "type": ["integer", "null"], "minimum": 1, "description": "Máximo de agentes simultâneos num run. `null` desliga." },
         "requireSandbox": {
@@ -123,6 +127,10 @@
       "additionalProperties": false,
       "properties": {
         "$comment": { "$ref": "#/definitions/comment" },
+        "location": {
+          "enum": ["local", "cloud"],
+          "description": "Onde as etapas do papel rodam. Padrão: `local`. `cloud` roda a etapa num cloud agent da Cursor, contra um snapshot do worktree empurrado para o remote, e só vale se o teto global `caps.allowedLocations` incluir `cloud` e o workflow declarar o papel como `ok` ou `read-only` (um papel `never` é recusado). Só vale em papéis, não em globs de `labels`."
+        },
         "model": { "$ref": "#/definitions/model", "description": "Modelo da etapa, campo a campo: o que não aparece herda da camada de baixo." },
         "timeoutMs": { "type": "integer", "minimum": 1, "description": "Tempo máximo da etapa, em milissegundos." },
         "retries": { "type": "integer", "minimum": 0, "description": "Tentativas extras quando a etapa termina em erro." },
@@ -180,6 +188,18 @@
         "gcFailedAfterDays": { "type": "integer", "minimum": 0, "description": "`implement-issue`: o `wf gc` remove o worktree e as branches (local e do origin) de um run que falhou há mais dias que isto. Falhou quer dizer terminou com erro ou com um status de falha (`tests-failed`, `baseline-red`…), ou o processo caiu sem terminar; um run cancelado não conta. A branch do origin só sai se o PR não está aberto e o commit nela é de um push do próprio run. Um run cujo PR foi mergeado ou fechado sai antes, sem esperar. Padrão: 14." },
         "testTimeoutSec": { "type": "number", "exclusiveMinimum": 0, "description": "`implement-issue`: tempo máximo, em segundos, de cada rodada de testes (e do `setupCommand`). Passado esse tempo o comando é morto e o run encerra com `tests-timeout`. Padrão: 600." },
         "networkTimeoutSec": { "type": "number", "exclusiveMinimum": 0, "description": "`implement-issue` e `wf gc`: tempo máximo, em segundos, de cada comando de rede (`git push`, `git ls-remote` e todo `gh`): uma credencial pedida ou uma conexão parada falha a etapa em vez de travar o run. O git local usa o `execTimeoutMs` do workflow. Padrão: 120." }
+      }
+    },
+    "cloudPrefs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "$ref": "#/definitions/comment" },
+        "remote": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._][A-Za-z0-9._/-]*$",
+          "description": "Nome do remote do git para onde vão as branches de snapshot do worktree, que o cloud agent lê. Padrão: `origin`. Aponte para um fork se o pipeline de CI do `origin` não deve rodar a cada snapshot (as branches ficam sob `wf/cloud-snapshot/` e são apagadas quando a etapa termina)."
+        }
       }
     },
     "dashboardPrefs": {

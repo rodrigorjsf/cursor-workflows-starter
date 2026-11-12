@@ -18,7 +18,8 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ModelSelection, RunUsage, SettingSource } from "@cursor/sdk";
 import { Ajv } from "ajv";
-import { type AgentBackend, type AttemptEvent, type AttemptResult, type StepOptions, type UsageReading, localBackend } from "./backend.js";
+import { type AgentBackend, type AttemptEvent, type AttemptResult, type StepLocation, type StepOptions, type UsageReading, localBackend } from "./backend.js";
+import { createCloudBackend } from "./backend-cloud.js";
 import { type CommandOutcome, EXEC_FLUSH_MS, EXEC_LOG_MAX_CHARS, outputLog, runCommand, toExecResult } from "./command-runner.js";
 import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedConfig, type StepOverrides, allowedSources, isModelAllowed, loadEffectiveConfig } from "../config/index.js";
 import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type OutputStream, type NewEvent, type RunStatus, type StepRef, type TurnUsage, type WorkflowEvent } from "./events.js";
@@ -159,8 +160,9 @@ export interface RunOptions {
   signal?: AbortSignal;
   onEvent?: (e: WorkflowEvent) => void;
   /**
-   * Where the steps' agents run: every attempt of every step goes through this backend (see `AgentBackend` in
-   * `backend.ts` for the contract). Default: the local backend, the SDK's local agents.
+   * Where the steps' agents run: every attempt of a step goes through a backend (see `AgentBackend` in `backend.ts` for the
+   * contract). This one serves the steps of its own `location`; the steps of the other location use the default backend of
+   * theirs: the local one is the SDK's local agents, the cloud one the SDK's cloud agents on a snapshot of the worktree.
    */
   backend?: AgentBackend;
   /**
@@ -383,13 +385,16 @@ interface AttemptCounters {
 
 /**
  * The `onEvent` of one attempt: counts turns, steps, summaries, re-prompts and tool calls, writes the attempt's content,
- * and hands each ended turn's usage to `onTurn` (which emits the turn event and enforces the live caps).
+ * hands each ended turn's usage to `onTurn` (which emits the turn event and enforces the live caps) and each warning to `onWarning`.
  */
-function attemptEvents(c: AttemptCounters, content: AttemptContent, onTurn: (usage: TurnUsage) => void): (event: AttemptEvent) => void {
+function attemptEvents(c: AttemptCounters, content: AttemptContent, onTurn: (usage: TurnUsage) => void, onWarning: (message: string) => void): (event: AttemptEvent) => void {
   return (event) => {
     switch (event.type) {
       case "agent":
         break; // the engine learns the id from the result
+      case "warning":
+        onWarning(event.message);
+        break;
       case "step":
         c.steps++;
         c.stepsInTurn++;
@@ -578,6 +583,14 @@ async function executeRun<A, R>(
   const sem = new Semaphore(limits.concurrency);
   const settingSources = opts.settingSources ?? ["project", "team", "mdm"];
   const roles = new Map((def.meta.roles ?? []).map((r) => [r.name, r]));
+  // The backend of each location. A backend handed in through the options serves its own location; the cloud one is made on
+  // first use, so a run that never goes to the cloud never touches it.
+  let cloudBackend: AgentBackend | undefined;
+  const backendFor = (location: StepLocation): AgentBackend => {
+    if (opts.backend?.location === location) return opts.backend;
+    if (location === "local") return localBackend;
+    return (cloudBackend ??= createCloudBackend({ remote: resolved.config.cloud.remote, runId }));
+  };
   let currentPhase: string | undefined;
   const flows = new AsyncLocalStorage<Flow>();
   const rootFlow: Flow = { groupId: null, last: null, groups: 0, prefix: "" };
@@ -725,6 +738,8 @@ async function executeRun<A, R>(
     label: string;
     phase: string | undefined;
     sources: SettingSource[];
+    /** Where the step runs: its role's location in the config, once the global `allowedLocations` cap has applied. */
+    location: StepLocation;
     mKey: string | undefined;
     fingerprint: Record<string, unknown>;
     /** Journal key. */
@@ -765,7 +780,7 @@ async function executeRun<A, R>(
     // Chave calculada de forma síncrona, antes de qualquer await.
     const key = journal.keyFor(prompt, fingerprint);
     const ref: StepRef = { stepId: stepIdOf(key), parentId: flow.last, groupId: flow.groupId };
-    const step: StepContext = { o, role, promptHash, label, phase, sources, mKey, fingerprint, key, ref, started: false, tokenCap: overrides.maxTokensPerStep, tokens: 0 };
+    const step: StepContext = { o, role, promptHash, label, phase, sources, location: overrides.location, mKey, fingerprint, key, ref, started: false, tokenCap: overrides.maxTokensPerStep, tokens: 0 };
     return inNode(runStep<T>(prompt, step), flow, ref, () => step.started);
   }
 
@@ -788,7 +803,7 @@ async function executeRun<A, R>(
   }
 
   async function runStep<T>(prompt: string, step: StepContext): Promise<T> {
-    const { o, role, promptHash, label, phase, sources, mKey, fingerprint, key, ref } = step;
+    const { o, role, promptHash, label, phase, sources, location, mKey, fingerprint, key, ref } = step;
     const emitStart = (attemptId: string, attempt: number, cachedFrom: false | "journal" | "memo") => {
       step.started = true;
       emit({
@@ -800,6 +815,7 @@ async function executeRun<A, R>(
         phase,
         cached: cachedFrom,
         role,
+        location: cachedFrom ? undefined : location,
         model: o.model?.id,
         modelKey: mKey,
         modelParams: o.model?.params,
@@ -827,27 +843,43 @@ async function executeRun<A, R>(
       if (!isReadOnly(o.tools)) {
         throw new StepFailedError(`step "${label}": memo requires \`tools\` with read-only tools only (read, grep, glob, ls, semSearch...)`);
       }
-      const state = await repoState(stepCwd);
-      if (state) {
-        memoKey = memo.key({ prompt, ...fingerprint, cwd: undefined }, state);
-        const hit = memo.get(memoKey);
-        if (hit !== undefined) {
-          journal.record({ key, label, model: o.model?.id, result: hit, chargedCents: 0, totalTokens: 0 });
-          servedFrom("memo");
-          return hit as T;
-        }
+      if (location === "cloud") {
+        // A cloud agent's answer depends on its VM and on the snapshot, not only on the repository state the memo key holds.
+        emit({ type: "warning", message: `step "${label}": memo skipped (cloud steps are not memoized)` });
       } else {
-        emit({ type: "warning", message: `step "${label}": memo skipped (cwd is not a git repository with a commit, or git did not answer in time)` });
+        const state = await repoState(stepCwd);
+        if (state) {
+          memoKey = memo.key({ prompt, ...fingerprint, cwd: undefined }, state);
+          const hit = memo.get(memoKey);
+          if (hit !== undefined) {
+            journal.record({ key, label, model: o.model?.id, result: hit, chargedCents: 0, totalTokens: 0 });
+            servedFrom("memo");
+            return hit as T;
+          }
+        } else {
+          emit({ type: "warning", message: `step "${label}": memo skipped (cwd is not a git repository with a commit, or git did not answer in time)` });
+        }
       }
     }
     if (!o.model) throw new StepFailedError(`step "${label}" has no model: set opts.model or defaults.model`);
     if (!isModelAllowed(caps.allowedModels, o.model.id)) {
       throw new StepFailedError(`step "${label}": model ${o.model.id} is not in the global allowedModels cap (${caps.allowedModels!.join(", ")})`);
     }
-    // Every step runs on one backend for now; the cloud spec picks the backend per role (ADR-0005).
-    const backend: AgentBackend = opts.backend ?? localBackend;
+    // A step runs on the backend of its location: the role's `location` in the config, which the global cap already limited.
+    const backend = backendFor(location);
     if (caps.allowedLocations && !caps.allowedLocations.includes(backend.location)) {
-      throw new StepFailedError(`step "${label}": the global allowedLocations cap (${caps.allowedLocations.join(", ") || "empty"}) does not allow ${backend.location === "local" ? "local" : "cloud"} steps`);
+      throw new StepFailedError(`step "${label}": the global allowedLocations cap (${caps.allowedLocations.join(", ") || "empty"}) does not allow ${backend.location} steps`);
+    }
+    // A cloud step is rejected before it spends anything. The workflow's declaration (`read-only`) is checked against what the step
+    // does, which only a step knows; and a step that writes has no cloud path yet.
+    const writes = !isReadOnly(o.tools);
+    if (location === "cloud" && writes) {
+      const declared = roles.get(role!)?.cloud;
+      throw new StepFailedError(
+        declared === "read-only"
+          ? `step "${label}": role "${role}" is declared cloud: read-only by workflow ${def.meta.name}, but this step can write (its tools are not read-only), so it cannot run in the cloud`
+          : `step "${label}": a step that can write cannot run in the cloud yet (role "${role}" is configured for it): give the step read-only \`tools\`, or set the role's location to local`,
+      );
     }
     if (o.schema && o.schema.type !== "object") {
       throw new StepFailedError(`step "${label}": schema must have type "object" at the root (it becomes a tool's inputSchema)`);
@@ -861,12 +893,14 @@ async function executeRun<A, R>(
       tools: o.tools,
       disallowedTools: o.disallowedTools,
       agents: o.agents,
-      // O guarda vem antes: um mcpServers da etapa com o mesmo nome continua podendo substituí-lo de propósito.
-      mcpServers: withGuard(nestedGuard(sources), o.mcpServers),
+      // O guarda vem antes: um mcpServers da etapa com o mesmo nome continua podendo substituí-lo de propósito. Na nuvem não
+      // há guarda: ele é um comando desta máquina, e as camadas de arquivo (onde o servidor do projeto mora) não valem lá.
+      mcpServers: location === "cloud" ? o.mcpServers : withGuard(nestedGuard(sources), o.mcpServers),
       cwd: stepCwd,
       settingSources: sources,
       // The global cap wins over the workflow code: a pull request that edits a workflow cannot turn sandboxing off.
       sandbox: caps.requireSandbox === true || Boolean(o.sandbox),
+      writes,
       schema: o.schema,
       schemaRetries: o.schemaRetries ?? 2,
     };
@@ -875,7 +909,6 @@ async function executeRun<A, R>(
     try {
       // A step that can write is reverted if the run is cancelled in the middle of it, so a resume meets no half-made edits,
       // and, when the call asks (`revertOnRetry`), before each retry, so a retry meets none of the failed attempt's.
-      const writes = !isReadOnly(o.tools);
       const snapshot = writes && !signal?.aborted ? await takeSnapshot(stepCwd) : undefined;
       const reverter = reverts.forStep({ writes, snapshot, stepCwd, label, warn: (message) => emit({ type: "warning", message }) });
       const attempts = 1 + (o.retries ?? 1);
@@ -917,9 +950,9 @@ async function executeRun<A, R>(
           const breach = tokenBreach(step, turnUsage.totalTokens);
           if (breach instanceof BudgetExceededError) for (const active of cutters) active.cut(breach); // the run's cap: every active attempt
           else if (breach) abort.cut(breach);
-        });
+        }, (message) => emit({ type: "warning", message: `step "${label}": ${message}` }));
         const onEvent = (event: AttemptEvent) => {
-          abort.agentReady(); // any event means the agent exists: a cap held back while it was being created applies now
+          if (event.type !== "warning") abort.agentReady(); // any other event means the agent exists: a cap held back while it was being created applies now
           handle(event);
         };
         let charge: Charge | undefined;
@@ -940,6 +973,7 @@ async function executeRun<A, R>(
             attempt,
             ok,
             cached: false,
+            location,
             chargedCents: charge?.charged ?? 0,
             rawCents: charge?.raw,
             costFinal: charge?.costFinal ?? false,

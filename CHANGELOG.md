@@ -4,6 +4,20 @@
 
 ### Adicionado
 
+- **Etapas de leitura em Cursor cloud agents.** Um papel pode rodar na nuvem: `workflows.<nome>.roles.<papel>.location`
+  (`local`, o padrão, ou `cloud`) nos arquivos de configuração. A nuvem só vale se o `caps.allowedLocations` do arquivo
+  global a permitir (sem a chave, só `local`: o pedido de um papel vira uma violação e a etapa roda local) e se o workflow
+  declarar o papel `ok` ou `read-only`; uma configuração que manda um papel `never` para a nuvem é recusada antes do run,
+  e uma etapa `read-only` que pode escrever, ou qualquer etapa que escreve, falha antes de gastar (escrever na nuvem vem
+  depois). Antes da etapa o estado do worktree, o não commitado inclusive, é empurrado como uma branch descartável
+  `wf/cloud-snapshot/<run>/<id>` para o remote `cloud.remote` (padrão `origin`; um fork serve para quem tem CI pesada, ou
+  exclua `wf/**` do pipeline) e apagada quando a etapa termina. O backend de nuvem (`backend-cloud.ts`) implementa o
+  `AgentBackend`: não manda custom tools, allowlists nem camadas de configuração (avisa que elas são ignoradas), pede o
+  resultado estruturado como um bloco `json` final, valida com o Ajv e reenvia na mesma conversa dentro dos
+  `schemaRetries`. O memo não vale na nuvem, e os tokens e o custo vêm do uso do cloud agent e entram nos mesmos tetos. O
+  `step-start` e o `step-end` ganham `location`, e a configuração efetiva ganha `cloud.remote` e a `location` de cada
+  papel. O `AgentBackend` ganhou o evento `warning` e o campo `writes`, e `runAttempt` e `converse` guardam o que os dois
+  backends repartem.
 - **Dashboard: log da etapa, cancelar um run, comando de resume e o cenário 7 da validação.** Clicar num nó do grafo (ou
   Enter nele) abre ao lado dele o log da etapa, ao vivo: por tentativa, o prompt, o que o agente disse, as chamadas de tool
   com a saída de cada uma, ou, num comando de `ctx.exec`, a linha de comando e a saída com `stdout` e `stderr` apartados; a
