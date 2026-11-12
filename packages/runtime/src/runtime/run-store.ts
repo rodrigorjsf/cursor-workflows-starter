@@ -288,6 +288,11 @@ export class RunStore {
     return this.redactor.value(event);
   }
 
+  /** Redacts, from now on, the values of the secret-named variables of `env` too: the environment a command is about to run with. */
+  learnSecrets(env: Record<string, string | undefined>): void {
+    this.redactor.learn(env);
+  }
+
   appendEvent(event: WorkflowEvent): void {
     appendJsonl(this.eventsFile, event);
     if (event.type === "run-end") this.ended = true;
