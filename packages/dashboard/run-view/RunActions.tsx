@@ -42,7 +42,7 @@ export function RunActions({ runId, status, offered, info, argsHash, onChanged }
     const outcome = await cancelRun(runId);
     onChanged();
     if (!outcome.ok) setCancel({ step: "failed", message: sentence(outcome.error) });
-    else if (cloudOnly) setCancel({ step: "done", message: sentence(outcome.note.replace(/^the run is not running \(\w+\); /, "")) });
+    else if (cloudOnly) setCancel({ step: /could not reach cloud agent/.test(outcome.note) ? "failed" : "done", message: sentence(outcome.note.replace(/^the run is not running \(\w+\); /, "")) });
     else setCancel({ step: "done", message: outcome.status === "cancelled" ? "Cancelled." : `Cancelling: ${outcome.note}` });
   };
 

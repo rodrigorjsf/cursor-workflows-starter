@@ -1,7 +1,7 @@
 // How the Run view frames a run on its canvas: all of it when that stays readable, otherwise as many nodes as fit at a readable
 // zoom. Pure: the caller gives it the size of the pane.
 import type { FitViewOptions } from "@xyflow/react";
-import type { RunGraph } from "./run-graph.js";
+import { type RunGraph, isWork } from "./run-graph.js";
 import { type Box, NODE_TEXT_PX, type RunLayout } from "./run-layout.js";
 
 /** Text smaller than this on screen is not readable: a node's label, and the line under it. */
@@ -28,7 +28,7 @@ export function boundsOf(boxes: Box[]): Box {
 /**
  * How to frame the run in a pane of `pane` pixels: all of it when that stays readable; otherwise as many nodes as fit at a
  * readable zoom around a focus, the nearest first. The focus is the node whose log is open; else, in a run that is over, the
- * first node that failed or stopped (what the reader came for), or its first step (to be read from the start); in a live run,
+ * first step or command that failed or stopped (what the reader came for; a fork or join only when no step did), or its first step (to be read from the start); in a live run,
  * the latest node. The user pans to the rest; Fit View shows it all.
  */
 export function frameOf(graph: RunGraph, layout: RunLayout, pane: { width: number; height: number }, selectedId?: string): FitViewOptions {
@@ -39,7 +39,7 @@ export function frameOf(graph: RunGraph, layout: RunLayout, pane: { width: numbe
   const work = placed.filter((n) => n.kind !== "start");
   const focus =
     placed.find((n) => n.id === selectedId) ??
-    (settled ? (work.find((n) => n.state === "failed" || n.state === "interrupted") ?? work[0]) : (work.findLast((n) => n.state === "running") ?? work.at(-1))) ??
+    (settled ? (work.find((n) => isWork(n.kind) && (n.state === "failed" || n.state === "interrupted")) ?? work.find((n) => n.state === "failed" || n.state === "interrupted") ?? work[0]) : (work.findLast((n) => n.state === "running") ?? work.at(-1))) ??
     placed[0]!;
   const centre = (id: string) => layout.nodes[id]!.x + layout.nodes[id]!.width / 2;
   const order = [focus, ...placed.filter((n) => n !== focus).sort((a, b) => Math.abs(centre(a.id) - centre(focus.id)) - Math.abs(centre(b.id) - centre(focus.id)))];

@@ -85,6 +85,21 @@ test("a framed part holds what the reader came for: the step whose log is open, 
   }
 });
 
+test("a run whose process died inside a fan-out is framed on the interrupted step, not on the fork that holds it", async () => {
+  const dead = [
+    runStart,
+    phase("Triage"),
+    ...step("s1", "triage"),
+    phase("Plan"),
+    ...step("s2", "plan", { parentId: "s1" }),
+    phase("Review"),
+    groupStart("g1", "parallel", 2, "s2"),
+    stepStart("r1", "review-a", { parentId: "g1", groupId: "g1" }),
+    stepStart("r2", "review-b", { parentId: "g1", groupId: "g1" }),
+  ];
+  assert.ok((await framedIds(dead, true, PHONE)).includes("r1"), "the first interrupted step is in view");
+});
+
 test("a run that fits a wide screen at a readable zoom is framed whole", async () => {
   const graph = buildRunGraph(stamp(long(false)), { settled: true });
   const layout = await layoutRunGraph(graph);

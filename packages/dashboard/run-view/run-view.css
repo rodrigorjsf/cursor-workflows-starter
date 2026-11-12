@@ -161,4 +161,7 @@ code { font-size: var(--text-xs); }
   .run-banner { padding: var(--space-2) var(--space-4); }
   /* the log covers the canvas, which keeps its size and its frame behind it; × or Escape goes back to the graph */
   .step-panel { position: absolute; inset: 0; z-index: 20; border-left: none; }
+  /* hidden, not only covered: the nodes and zoom buttons under the log leave the Tab order (the log takes the focus) */
+  .workspace:has(.step-panel) .canvas { visibility: hidden; }
+  .workspace:has(.step-panel) .canvas .react-flow__node { visibility: hidden !important; } /* React Flow sets each node's visibility inline */
 }

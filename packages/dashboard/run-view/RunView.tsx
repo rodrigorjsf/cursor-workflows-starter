@@ -57,7 +57,7 @@ function useClock(active: boolean): number {
   return now;
 }
 
-function toFlow(graph: RunGraph, layout: RunLayout, now: number, selectedId: string | undefined, open: (id: string) => void): { nodes: Node[]; edges: Edge[] } {
+export function toFlow(graph: RunGraph, layout: RunLayout, now: number, selectedId: string | undefined, open: (id: string) => void): { nodes: Node[]; edges: Edge[] } {
   const lanes: Node<LaneNodeData, "lane">[] = layout.lanes.map((lane) => ({
     id: `lane-${lane.index}`,
     type: "lane",
@@ -82,7 +82,7 @@ function toFlow(graph: RunGraph, layout: RunLayout, now: number, selectedId: str
   const state = new Map(graph.nodes.map((n) => [n.id, n.state]));
   const edges: Edge[] = graph.edges
     .filter((e) => layout.nodes[e.source] && layout.nodes[e.target])
-    .map((e) => ({ id: e.id, source: e.source, target: e.target, animated: state.get(e.target) === "running", className: `edge-${state.get(e.target)}` }));
+    .map((e) => ({ id: e.id, source: e.source, target: e.target, animated: state.get(e.target) === "running", className: `edge-${state.get(e.target)}`, focusable: false })); // an edge has no action: not a Tab stop
   return { nodes: [...(layout.lanes.some((l) => l.title !== "") ? lanes : []), ...work], edges };
 }
 

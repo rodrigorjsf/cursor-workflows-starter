@@ -3,6 +3,7 @@
 // stood at a replay's position when the run is being replayed. Everything is drawn as text: a log holds what an agent wrote.
 import { type ReactNode, useEffect, useMemo, useRef } from "react";
 import { formatCount } from "../app/format.js";
+import { focusOnClose, focusOnOpen } from "./log-focus.js";
 import { NodeRows } from "./NodeRows.js";
 import { describeFacts } from "./node-details.js";
 import type { GraphNode } from "./run-graph.js";
@@ -96,6 +97,15 @@ export function StepLogPanel({ runId, node, now, live, upTo, onClose }: StepLogP
     if (el && following.current) el.scrollTop = el.scrollHeight;
   }, [log.count]);
 
+  // Over the canvas (a narrow screen), the log takes the focus; when it closes, the node gets it back.
+  const panel = useRef<HTMLElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (panel.current && closeButton.current) focusOnOpen(panel.current, closeButton.current, (el) => getComputedStyle(el));
+    // A passive cleanup runs once the panel is out of the page and the canvas is shown again, so the node can take the focus.
+    return () => focusOnClose(document, node.id);
+  }, []);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
@@ -130,11 +140,11 @@ export function StepLogPanel({ runId, node, now, live, upTo, onClose }: StepLogP
   }
 
   return (
-    <aside className="step-panel" aria-label={`Log of ${node.label}`}>
+    <aside className="step-panel" ref={panel} aria-label={`Log of ${node.label}`}>
       <header>
         <h2 title={node.label}>{node.label}</h2>
         <span className={`tail${live ? " live" : ""}`}>{live ? "tailing" : upTo !== undefined ? "replay" : ""}</span>
-        <button type="button" className="btn close" onClick={onClose} aria-label="Close the log">
+        <button type="button" className="btn close" ref={closeButton} onClick={onClose} aria-label="Close the log">
           <span aria-hidden="true">×</span>
         </button>
       </header>
