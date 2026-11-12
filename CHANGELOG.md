@@ -183,8 +183,9 @@
   a segunda execução do mesmo `runId` (`already running`); todo arquivo de estado é gravado de forma atômica;
   retomar um run cujo workflow mudou grava um aviso; cada run novo entra no índice global
   `~/.cursor-workflows/runs.jsonl` (`WF_HOME` muda o diretório do usuário).
-- **O estado de um job é projetado do log de eventos.** O registro do job (`.workflows/jobs/<jobId>.json`) guarda só id
-  do job, id do run, pid e heartbeat. `wf status`, `wf jobs`, `get_workflow_status` e `wait_workflow` calculam status,
+- **O estado de um job é projetado do log de eventos.** O registro do job (`.workflows/jobs/<jobId>.json`) guarda a
+  identidade (id do job, id do run, pid e heartbeat) e só os fatos que o processo do job não pode pôr no log (`start`,
+  `refused`, `killedByCancel`; [ADR-0008](docs/adr/0008-job-record-keeps-what-the-log-cannot.md)). `wf status`, `wf jobs`, `get_workflow_status` e `wait_workflow` calculam status,
   fase, gasto, resultado e as últimas linhas (`recent`) do log a cada leitura: não há arquivo de estado para ficar pela
   metade, e as linhas são resumos de uma linha, nunca texto de prompt ou de saída. O `run-end` passa a levar o `result`,
   e o `run-start`, o `jobId`. Um processo que cai com exceção não tratada fecha o run no log como `failed`.
@@ -336,8 +337,8 @@
   run na mesma issue, depois do primeiro, abre um PR novo na sua branch. Um run começado antes desta mudança retoma na
   branch e no worktree antigos. Uma issue tem no máximo um run ativo: o segundo run volta
   `status: "issue-locked"` com o `activeRunId` do que está ativo, sem branch, worktree nem agente (o lock é o arquivo
-  `.workflows/locks/issue-<n>.lock`, do mesmo tipo do `run.lock`, com um hash do `--repo` no nome quando o run o
-  passa, porque a issue #5 de outro repositório é outra issue; o de um processo que morreu é retomado). A entrega
+  `.workflows/locks/issue-<n>.lock`, do mesmo tipo do `run.lock`, com um hash do repositório no nome só quando o
+  `repo` do run é outro repositório que não o do cwd, porque a issue #5 de outro repositório é outra issue; o de um processo que morreu é retomado). A entrega
   empurra com `--force-with-lease`, só em branch `wf/`: o resume depois de o PR existir refaz o commit e entrega por
   cima, em vez de falhar com non-fast-forward. Se a branch no origin tem um commit que o run não empurrou (alguém
   empurrou uma correção), o run volta `status: "push-refused"` e não sobrescreve nada; o trabalho fica no worktree. Um run que entregou antes

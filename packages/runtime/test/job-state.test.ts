@@ -32,7 +32,7 @@ async function until(condition: () => boolean, ms = 3000): Promise<void> {
 
 const recordOnDisk = (jobId: string) => JSON.parse(readFileSync(join(jobsDir(cwd), `${jobId}.json`), "utf8")) as Record<string, unknown>;
 
-test("the job record holds only identity; status, phase, recent lines, spend and result are projected from the event log", async () => {
+test("a plain job's record holds only identity (ADR-0008 lists the few facts some jobs add); status, phase, recent lines, spend and result are projected from the event log", async () => {
   const wf = defineWorkflow({
     meta: { name: "projected", description: "projected" },
     defaults: { model: { id: "m" } },
@@ -46,7 +46,7 @@ test("the job record holds only identity; status, phase, recent lines, spend and
   const { job, done } = startJob(wf, {}, { cwd });
   await done;
 
-  assert.deepEqual(Object.keys(recordOnDisk(job.jobId)).sort(), ["heartbeat", "jobId", "pid", "runId"], "the record holds identity only");
+  assert.deepEqual(Object.keys(recordOnDisk(job.jobId)).sort(), ["heartbeat", "jobId", "pid", "runId"], "a plain job's record holds identity only");
 
   const view = readJob(cwd, job.jobId)!;
   assert.equal(view.jobId, job.jobId);
