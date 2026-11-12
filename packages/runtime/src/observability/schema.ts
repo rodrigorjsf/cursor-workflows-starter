@@ -3,7 +3,7 @@
 // Unidades: tokens inteiros; custos em centavos de dólar (float), como o SDK (`UsageCost`).
 // Datas: ISO-8601 UTC (texto), comparáveis com `datetime('now', '-30 days')`.
 //
-// O que cada número significa (ver docs/09-observabilidade.md):
+// O que cada número significa (ver docs/operating/03-observabilidade.md):
 //  - `raw_cents`: custo bruto calculado pelo Cursor (sem descontos), quando `getUsage()` responde. Em contas onde
 //    ele devolve 403 feature_unavailable (agentes locais) fica NULL, e as views usam a estimativa da tabela `pricing`.
 //  - `charged_cents`: o que foi cobrado. É 0 para uso incluído no plano, BYOK e créditos.

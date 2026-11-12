@@ -46,7 +46,7 @@
 //   review ×3        grok-4.7 high          só leitura, sem shell    []               sim (o diff e a rodada no prompt)
 //   refatorar-1      do tier                todas                    default          não
 //   pr-texto         composer-2.5           só leitura, sem shell    []               sim
-// Exceção ao checklist (docs/08 §6): as etapas que escrevem ficam com todas as tools, "task" inclusive, e o default
+// Exceção ao checklist (docs/operating/02-custos-e-cache.md §6): as etapas que escrevem ficam com todas as tools, "task" inclusive, e o default
 // do engine (project, team, mdm). A allowlist de escrita do SDK ainda não foi medida, e os hooks do time e do MDM
 // têm de valer onde o agente escreve.
 // Agentes por caminho, típico (sem retentativas nem achados) e pior caso (2 tentativas por etapa, 2 correções por

@@ -106,8 +106,8 @@ export interface AgentCallOptions {
    * Cada camada aumenta o contexto fixo de TODA chamada: regras, descrições de skills e de subagents
    * (injetadas na descrição da tool Task) e tools dos MCP servers do projeto. Etapas só de leitura usam []
    * (sem AGENTS.md, regras, hooks, MCP nem skills; o prompt lista os arquivos de contexto que importam).
-   * ["team","mdm"] só quando a etapa precisa dos hooks do time ou MDM: ele ainda carrega as skills (docs/08 §4.3).
-   * Regra em docs/08 §6.
+   * ["team","mdm"] só quando a etapa precisa dos hooks do time ou MDM: ele ainda carrega as skills (docs/operating/02-custos-e-cache.md §4.3).
+   * Regra em docs/operating/02-custos-e-cache.md §6.
    */
   settingSources?: SettingSource[];
   /**

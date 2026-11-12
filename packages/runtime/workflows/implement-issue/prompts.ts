@@ -3,7 +3,7 @@
 // Dex Horthy). Créditos em docs/vision/02-a-ideia-e-as-referencias.md.
 //
 // Instruções fixas ficam aqui, como constantes: o prompt de cada etapa é `INSTRUÇÕES + dados`, o que mantém o prefixo
-// estável para o cache do provedor e as chaves do journal e do memo (docs/08).
+// estável para o cache do provedor e as chaves do journal e do memo (docs/operating/02-custos-e-cache.md).
 
 /** Regra de escopo de toda etapa que escreve. É um pedido ao modelo, não uma trava (ver SECURITY.md). */
 export const SCOPE_RULE =

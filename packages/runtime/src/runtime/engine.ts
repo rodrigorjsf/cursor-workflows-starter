@@ -200,7 +200,7 @@ export interface RunOutcome<R> {
   /** Soma de `chargedCents` (o valor cobrado; 0 para uso incluído no plano, BYOK e créditos). */
   chargedCents: number;
   spentTokens: number;
-  /** Tokens por tipo. O input já inclui o cache (medido); cacheHitRatio = cacheRead / input (ver docs/08). */
+  /** Tokens por tipo. O input já inclui o cache (medido); cacheHitRatio = cacheRead / input (ver docs/operating/02-custos-e-cache.md). */
   usage: UsageTotals & { cacheHitRatio: number | null };
 }
 
