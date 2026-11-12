@@ -96,8 +96,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           name: "cancel_workflow",
           description:
             "Cancels a running job: stops the active agents, reverts the step that was writing and marks the job cancelled. " +
-            "A stuck process (a failed job with no heartbeat) is killed. " +
-            "For a job whose process already ended (a crash), it cancels the cloud agents the run left running, and the returned note names them. " +
+            "A stuck process (a failed job with no heartbeat) is killed (SIGKILL) and its cloud agents are left running, so a resume reattaches to them. " +
+            "For a job whose process already ended (a crash, or a second call after that kill), it cancels the cloud agents the run left running, the returned note names them, and the job stays failed. " +
             "The run can be resumed later with start_workflow {resumeRunId}. Call it only when the user asks to stop.",
           inputSchema: { type: "object", required: ["jobId"], properties: { jobId: { type: "string" } } },
         },

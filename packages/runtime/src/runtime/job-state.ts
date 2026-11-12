@@ -221,8 +221,9 @@ export interface CancelResult extends JobState {
  * Asks the job's process to cancel (SIGTERM: the process cancels the active agent runs, reverts the in-flight write step,
  * writes the run's end and exits) and waits up to `timeoutMs` for the job to leave `running`. A process that has stopped
  * answering (its heartbeat is stale, so the job already shows as failed) cannot handle a signal: it is killed, which frees
- * the run for a resume but cannot revert the step. A job that already ended is left alone, and so is a process that is not
- * the job's. Undefined when there is no such job.
+ * the run for a resume but cannot revert the step, and leaves its cloud agents running for the resume to reattach to. A job
+ * whose process already ended gets no signal: the cloud agents its run left running are cancelled through the Cursor API,
+ * and the job stays as it was (`failed`). A process that is not the job's is left alone. Undefined when there is no such job.
  */
 export async function cancelJob(cwd: string, jobId: string, timeoutMs: number): Promise<CancelResult | undefined> {
   const record = readJobRecord(cwd, jobId);
@@ -247,9 +248,14 @@ export async function cancelJob(cwd: string, jobId: string, timeoutMs: number): 
     await new Promise((r) => setTimeout(r, 200));
     state = readJob(cwd, jobId) ?? state;
   }
+  // Killing a frozen process is the way to free its run for a resume, and a resume reattaches to the cloud agents it left
+  // running (spec #5 story 12): cancelling them here would make the resume pay for new ones. A second cancel of the now
+  // dead job cancels them (the branch above), for the user who wants the run stopped.
   if (signal === "SIGKILL") {
-    const left = stopping(state) ? "" : leftAgentsNote(await cancelLeftCloudAgents(cwd, record.runId));
-    return { ...state, note: `process ${record.pid} had no heartbeat and was killed (SIGKILL) without undoing the step in progress; the run stays resumable${left}` };
+    return {
+      ...state,
+      note: `process ${record.pid} had no heartbeat and was killed (SIGKILL) without undoing the step in progress; the run stays resumable; any cloud agents it left running were not cancelled: a resume reattaches to them, and cancelling this job again cancels them`,
+    };
   }
   return { ...state, note: state.status === "running" ? `SIGTERM sent to process ${record.pid}, which is still stopping; check with wait_workflow` : `SIGTERM sent to process ${record.pid}` };
 }
