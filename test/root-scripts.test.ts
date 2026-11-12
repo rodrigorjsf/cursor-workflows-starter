@@ -60,6 +60,25 @@ test("npm run dash: the dashboard runs from the repo root and starts on a machin
   }
 });
 
+test("npm run dash: the dashboard builds its web app as it starts, before any page asks for it", async () => {
+  const port = await freePort();
+  const fresh = join(home, "builds");
+  const env = scriptEnv({ WF_HOME: fresh, WF_METRICS_DB: join(fresh, "metrics.db"), WF_DASH_PORT: String(port) });
+  const dash: ChildProcess = spawn("sh", ["-c", `exec ${scripts.dash}`], { cwd: ROOT, env, stdio: ["ignore", "ignore", "pipe"] });
+  let log = "";
+  dash.stderr!.on("data", (chunk: Buffer) => (log += chunk));
+  try {
+    const deadline = Date.now() + 30_000;
+    while (!/web app built/.test(log)) {
+      assert.ok(Date.now() < deadline, `the dashboard never said its web app was built; it said: ${log}`);
+      await new Promise((r) => setTimeout(r, 100)); // no request is made meanwhile: nothing but the start asked for the build
+    }
+    assert.equal((await fetch(`http://127.0.0.1:${port}/runs/any`)).status, 200);
+  } finally {
+    dash.kill("SIGTERM");
+  }
+});
+
 function freePort(): Promise<number> {
   return new Promise((ok, fail) => {
     const probe = createServer();

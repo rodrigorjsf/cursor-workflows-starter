@@ -14,6 +14,8 @@ import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, type RunTail, defa
 import { type AppBundle, buildApp } from "./app-bundle.js";
 import { buildBoards } from "./board.js";
 import { PrStates } from "./pr-state.js";
+import { RUN_PAGE_POLICY, runPage } from "./run-page.js";
+import { uiBundle } from "./ui-bundle.js";
 
 /** Host names a request may carry: the loopback names. Anything else is a page of another site asking the browser to talk to us. */
 const ALLOWED_HOSTS = new Set(["127.0.0.1", "localhost"]);
@@ -190,10 +192,25 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
         return;
       }
       default: {
-        const asset = assets.get(url.pathname);
+        const appAsset = assets.get(url.pathname);
+        if (appAsset) {
+          res.writeHead(200, { "content-type": appAsset.type, ...ASSET_HEADERS });
+          res.end(appAsset.body);
+          return;
+        }
+        const page = /^\/runs\/([^/]+)$/.exec(url.pathname);
+        if (page) {
+          const html = runPage(decodeSegment(page[1]!), await uiBundle());
+          res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-security-policy": RUN_PAGE_POLICY, "cache-control": "no-store", "x-content-type-options": "nosniff" });
+          res.end(req.method === "HEAD" ? undefined : html);
+          return;
+        }
+        const asset = /^\/assets\/(run-[0-9a-f]{12}\.(?:js|css))$/.exec(url.pathname); // only a name the build can have made starts a build
         if (asset) {
-          res.writeHead(200, { "content-type": asset.type, ...ASSET_HEADERS });
-          res.end(asset.body);
+          const file = (await uiBundle()).assets.get(asset[1]!);
+          if (!file) return send(res, 404, { error: "not found" });
+          res.writeHead(200, { "content-type": file.type, "cache-control": "public, max-age=31536000, immutable", "x-content-type-options": "nosniff" });
+          res.end(req.method === "HEAD" ? undefined : file.body);
           return;
         }
         const match = /^\/api\/runs\/([^/]+)(?:\/(.*))?$/.exec(url.pathname);

@@ -246,6 +246,7 @@ o encerra.
 | `/api/board?limit=` | `{boards}`: um quadro por workflow, com as `columns` e os `cards` (um por run), cada card já na coluna do estado do run: veja [O quadro](#o-quadro-board) |
 | `/api/runs/<runId>` | o mesmo run com `recent` (as últimas linhas de andamento), `result` e `usage` |
 | `/api/runs/<runId>/events` | stream de eventos (SSE) do log do run, ao vivo: veja [Acompanhar um run ao vivo](#acompanhar-um-run-ao-vivo) |
+| `/runs/<runId>` | a página do run: o grafo ao vivo, veja [Ver um run como grafo](#ver-um-run-como-grafo) (HTML, com o script e o estilo em `/assets/…`) |
 | `/api/runs/<runId>/steps/<stepId>/content` | o conteúdo de uma etapa: prompt, mensagens do agente, chamadas de tool e saída de comandos |
 | `/api/summary?days=` | o resumo de métricas dos painéis abaixo |
 | `/api/health` | `{app, pid}`: como quem chama sabe que é o dashboard que responde na porta |
@@ -289,6 +290,41 @@ vazia; um run ou uma etapa que o log não tem é `404`.
 
 Um log que o dashboard não consegue ler ou projetar (danificado, ou com eventos que o código não entende) deixa só aquele
 run como `missing`, com o motivo em `error`; os outros runs e o stream de eventos dele continuam funcionando.
+
+### Ver um run como grafo
+
+`http://127.0.0.1:<porta>/runs/<runId>` desenha o run como um grafo que cresce enquanto os eventos chegam (a mesma tela serve
+para um run em andamento e para um que já terminou):
+
+- **Nós.** O começo do run, cada etapa de agente e cada comando de `ctx.exec`. Um `parallel` ou `pipeline` abre num nó
+  (`parallel ×3`) e fecha num círculo, onde os ramos voltam a se juntar; o que vem depois do grupo continua desse círculo. O
+  grafo sai só dos campos `stepId`, `parentId` e `groupId` dos eventos (veja a [referência de eventos](../reference/events.md)),
+  então um nó aparece quando o `step-start` ou o `exec-start` dele chega.
+- **Raias.** Cada fase (`ctx.phase`) é uma faixa, na ordem em que aparecem. Um nó fica na raia da fase que ele declara, ou
+  numa raia mais adiante quando continua de um nó que já está lá: nenhuma aresta volta para uma raia anterior.
+- **Estado.** Um nó em andamento pisca e a aresta que chega a ele se move; depois vira verde (ok), vermelho (falhou), âmbar
+  (cancelado) ou cinza (servido do journal ou do memo, num resume). Se o run termina, ou o processo cai, com um nó ainda em
+  andamento, o nó vira "interrompido" (tracejado) em vez de piscar para sempre.
+- **Passar o mouse** sobre um nó mostra o modelo (ou o programa, num comando), onde rodou (`local`; os eventos de etapas na
+  nuvem trarão `cloud`), as tentativas, os tokens, o custo, a duração e o tipo do erro (`timeout`, `rate-limit`…; num
+  comando, `exit 2`, `timeout`…). Os números somam todas as tentativas e todas as execuções do run; o custo é o que o teto
+  de custo conta (o maior entre o bruto e o cobrado).
+- **Replay.** Num run que não está em andamento, **Replay** reconstrói o grafo evento a evento, na ordem do log, com
+  velocidade de 1× a 20×, pausa e uma barra para ir a qualquer ponto. O grafo de qualquer trecho do log é o mesmo que o
+  run teria naquele instante.
+- Um run grande (o `implement-issue` passa de 50 comandos) não cabe na tela em tamanho legível: a tela enquadra os últimos
+  nós de um run em andamento, ou os primeiros de um que terminou, e **Fit View** mostra tudo.
+
+A página só lê a API: o stream `?content=false` do run (o conteúdo das etapas é do log de cada etapa, que vem em outra
+tela) e `GET /api/runs/<runId>` para o status, que ela consulta a cada poucos segundos. Ela espera o run aparecer no índice
+(logo depois do `start_workflow` ele ainda pode não estar), fecha o stream quando o run termina e o reabre se um resume o
+põe de volta em andamento. Eventos de outra versão do esquema ou de tipo desconhecido são ignorados, não derrubam a tela.
+
+A página do run tem um app à parte, também empacotado pelo próprio dashboard: o `esbuild` junta React, React Flow e
+elkjs quando o dashboard sobe (cerca de meio segundo; uma página pedida antes disso espera o mesmo build), e os arquivos
+saem da memória com o hash do conteúdo no nome (`/assets/run-<hash>.js`), com cache de um ano. Não há passo de build para o usuário. Se o build falha (por exemplo,
+numa instalação sem as dependências do app), o dashboard registra o motivo em `dashboard.log` e as páginas do run
+respondem `500` com ele; a API e as métricas continuam funcionando.
 
 ### O app
 
@@ -361,9 +397,9 @@ Segurança:
 - recusa `Host` diferente de `127.0.0.1` e `localhost` (proteção contra DNS rebinding);
 - aceita só `GET` e `HEAD`, e não envia cabeçalhos CORS;
 - abre o banco em modo leitura;
-- não carrega nada de fora: sem CDN, sem fontes nem imagens remotas, e a política de conteúdo da página é
-  `default-src 'self'; script-src 'self'; style-src 'self'`, sem código inline: funciona offline e em rede corporativa
-  restrita.
+- não carrega nada de fora: os apps web são empacotados localmente, sem CDN, sem fontes nem imagens remotas. A página
+  inicial vai com a política `default-src 'self'; script-src 'self'; style-src 'self'`, sem código inline, e a página do
+  run com `default-src 'none'` (scripts e conexões só da própria origem): funciona offline e em rede corporativa restrita.
 
 Verificado em 2026-11-11 no WSL2: escuta só em `127.0.0.1`, responde 403 a um `Host` estranho, não envia
 cabeçalhos CORS e não é alcançável pelo IP do WSL.
