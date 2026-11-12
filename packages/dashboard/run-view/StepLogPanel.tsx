@@ -2,6 +2,7 @@
 // output. It follows the step while it runs (the view sticks to the bottom until the reader scrolls up) and shows the log as it
 // stood at a replay's position when the run is being replayed. Everything is drawn as text: a log holds what an agent wrote.
 import { type ReactNode, useEffect, useMemo, useRef } from "react";
+import { formatCount } from "../app/format.js";
 import { NodeRows } from "./NodeRows.js";
 import { describeFacts } from "./node-details.js";
 import type { GraphNode } from "./run-graph.js";
@@ -13,11 +14,11 @@ const FOLLOW_SLACK_PX = 40;
 
 /** The text of a body, or what stands in its place when it was removed or cut. */
 function Text({ body, className }: { body: Body; className?: string }) {
-  if (body.text === undefined) return <p className="gone">The text of this content was removed by retention ({body.chars.toLocaleString("en-US")} characters).</p>;
+  if (body.text === undefined) return <p className="gone">The text of this content was removed by retention ({formatCount(body.chars)} characters).</p>;
   return (
     <>
       <pre className={className}>{body.text}</pre>
-      {body.truncated && <p className="gone">Cut: the log keeps the first {body.text.length.toLocaleString("en-US")} of {body.chars.toLocaleString("en-US")} characters.</p>}
+      {body.truncated && <p className="gone">Cut: the log keeps the first {formatCount(body.text.length)} of {formatCount(body.chars)} characters.</p>}
     </>
   );
 }
@@ -133,8 +134,8 @@ export function StepLogPanel({ runId, node, now, live, upTo, onClose }: StepLogP
       <header>
         <h2 title={node.label}>{node.label}</h2>
         <span className={`tail${live ? " live" : ""}`}>{live ? "tailing" : upTo !== undefined ? "replay" : ""}</span>
-        <button type="button" className="close" onClick={onClose} aria-label="Close the log">
-          ×
+        <button type="button" className="btn close" onClick={onClose} aria-label="Close the log">
+          <span aria-hidden="true">×</span>
         </button>
       </header>
       <NodeRows rows={rows} className="facts" />

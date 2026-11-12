@@ -11,8 +11,8 @@ const TOKENS = join(PACKAGE, "app", "tokens.css");
 
 /** The statuses a pill, a badge, a node or a column shows. Each has a text colour `--s-<name>` and a tint `--s-<name>-bg` to sit on. */
 const STATUSES = ["running", "ok", "failed", "cancelled", "waiting", "neutral", "merged", "cached", "interrupted"];
-/** What text is drawn on: the page, a card or panel, and the muted surface of a column or a table's head. */
-const SURFACES = ["--bg", "--surface", "--surface-muted"];
+/** What text is drawn on: the page, a card or panel, the muted surface of a column or a table's head, and the Run view's lanes. */
+const SURFACES = ["--bg", "--surface", "--surface-muted", "--lane", "--lane-alt"];
 /** Text colours that must read on every surface. */
 const TEXT = ["--fg", "--fg-muted", "--accent", ...STATUSES.map((s) => `--s-${s}`)];
 /** Chart series: graphics, which WCAG 1.4.11 holds to 3:1. */

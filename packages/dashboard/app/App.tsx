@@ -25,11 +25,17 @@ export function App() {
     window.addEventListener("hashchange", follow);
     return () => window.removeEventListener("hashchange", follow);
   }, []);
+  useEffect(() => {
+    document.title = `${MENUS.find((m) => m.id === menu)!.label} · Cursor Workflows`;
+  }, [menu]);
 
   return (
     <>
-      <header className="bar">
-        <h1>Cursor Workflows</h1>
+      <header className="topbar">
+        <a className="brand" href="#/board">
+          <span className="logo" aria-hidden="true" />
+          Cursor Workflows
+        </a>
         <nav aria-label="Menu">
           {MENUS.map(({ id, label }) => (
             <a key={id} href={`#/${id}`} aria-current={id === menu ? "page" : undefined}>
@@ -38,7 +44,7 @@ export function App() {
           ))}
         </nav>
       </header>
-      <main>{menu === "runs" ? <RunsView /> : menu === "board" ? <BoardView /> : <MetricsView />}</main>
+      <main className={`view view-${menu}`}>{menu === "runs" ? <RunsView /> : menu === "board" ? <BoardView /> : <MetricsView />}</main>
     </>
   );
 }
