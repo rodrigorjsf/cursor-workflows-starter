@@ -16,19 +16,9 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  AgentBusyError,
-  RateLimitError,
-  type ModelSelection,
-  type Run,
-  type RunResult,
-  type RunUsage,
-  type SDKAgent,
-  type SendOptions,
-  type SettingSource,
-} from "@cursor/sdk";
+import type { ModelSelection, RunUsage, SettingSource } from "@cursor/sdk";
 import { Ajv } from "ajv";
-import { type AgentBackend, localBackend } from "./backend.js";
+import { type AgentBackend, type AttemptEvent, type AttemptResult, type StepOptions, type UsageReading, localBackend } from "./backend.js";
 import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedConfig, type StepOverrides, allowedSources, isModelAllowed, loadEffectiveConfig } from "../config/index.js";
 import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type NewEvent, type RunStatus, type StepRef, type TurnUsage, type WorkflowEvent } from "./events.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
@@ -37,7 +27,6 @@ import { RunLockedError, RunStore } from "./run-store.js";
 import type { RetentionPolicy } from "./retention.js";
 import { registerRun } from "./runs-index.js";
 import { stateDir as runtimeStateDir } from "./state.js";
-import { type Capture, SUBMIT_TOOL, repromptMessage, schemaInstruction, submitResultTool } from "./structured.js";
 import type { AgentCallOptions, Budget, UsageTotals, WorkflowContext, WorkflowDefinition } from "./workflow.js";
 import { workflowSourceHash } from "./workflow-source.js";
 import { type Snapshot, revertToSnapshot, takeSnapshot } from "./worktree-snapshot.js";
@@ -49,8 +38,6 @@ export class FatalRunError extends Error {}
 export class BudgetExceededError extends FatalRunError {}
 /** A conta não tem acesso ao SDK (ex.: plano Free: `plan_required` já no Agent.create). Tentar de novo não adianta. */
 export class AccountAccessError extends FatalRunError {}
-/** Códigos de erro do SDK que dizem respeito à conta, não à etapa. */
-const ACCOUNT_ERROR_CODES = new Set(["plan_required"]);
 export class StepFailedError extends Error {}
 /** A step crossed its own token cap (`maxTokensPerStep`): the step fails with no retry, the run goes on. */
 export class StepBudgetError extends StepFailedError {}
@@ -58,55 +45,43 @@ export class StepBudgetError extends StepFailedError {}
 const CANCEL_GRACE_MS = 30_000;
 
 /**
- * The "stop this attempt now" switch of one attempt, thrown when a token cap is crossed. `cut(err)` cancels the SDK run
- * in flight and makes `rejected` reject, so the wait on the run fails at once; `throwIfCut()` is for the points where
- * the attempt can notice on its own. A turn can arrive before `send()` hands the run back: the run is then cancelled as
- * soon as it is bound.
+ * The "stop this attempt now" switch of one attempt. Everything that ends an attempt early goes through its signal, which
+ * the backend honours: the run's cancellation, the step's timeout and a crossed token cap. The first cause wins and is the
+ * signal's reason, which the backend reports back. `cut(err)` is the token-cap cause: `isCutBy` tells it from the others.
+ * (`cutters` below is how a turn of one step cuts the other steps' attempts.)
  */
-class AttemptCut {
-  private run: Run | undefined;
-  private reason: Error | undefined;
-  private cancelling: Promise<void> | undefined;
-  private reject!: (err: Error) => void;
-  /** Rejects with the error that cut the attempt. */
-  readonly rejected = new Promise<never>((_, reject) => (this.reject = reject));
+class AttemptAbort {
+  private readonly controller = new AbortController();
+  private cutError: Error | undefined;
+  private agentExists = false;
+  readonly signal = this.controller.signal;
 
-  constructor() {
-    this.rejected.catch(() => {}); // only the race in waitWithTimeout observes it
+  /** Ends the attempt for a reason of the run or the step (cancellation, timeout). A no-op once the attempt is aborted. */
+  abort(reason: Error): void {
+    this.controller.abort(reason);
   }
 
-  /** The SDK run in flight, or undefined between runs (finished runs have nothing left to cancel). */
-  bind(run: Run | undefined): void {
-    this.run = run;
-  }
-
+  /**
+   * Ends the attempt because a token cap was crossed; the first cap wins. A cap never abandons an agent that is still being
+   * created: it waits until the backend reports the agent, so the agent is stopped and its usage counted.
+   */
   cut(err: Error): void {
-    if (this.reason) return;
-    this.reason = err;
-    this.reject(err);
-    this.cancelRun();
+    if (this.signal.aborted || this.cutError) return;
+    this.cutError = err;
+    if (this.agentExists) this.controller.abort(err);
   }
 
-  throwIfCut(): void {
-    if (!this.reason) return;
-    this.cancelRun();
-    throw this.reason;
+  /** The backend has an agent (it said so, or it reported something only an agent does): applies a cut held back until now. */
+  agentReady(): void {
+    this.agentExists = true;
+    if (this.cutError && !this.signal.aborted) this.controller.abort(this.cutError);
   }
 
-  isCutBy(err: unknown): boolean {
-    return this.reason !== undefined && err === this.reason;
-  }
-
-  /** Resolves once the run cancelled by the cut has stopped. */
-  stopped(): Promise<void> {
-    return this.cancelling ?? Promise.resolve();
-  }
-
-  private cancelRun(): void {
-    if (this.run) this.cancelling ??= this.run.cancel().catch(() => {});
+  isCutBy(reason: unknown): boolean {
+    return this.cutError !== undefined && reason === this.cutError;
   }
 }
-/** The step's time ran out (the attempt's creation, send and wait share it). */
+/** The step's time ran out (the attempt's creation, send and wait share it): the abort reason of a timed-out attempt. */
 class StepTimeoutError extends StepFailedError {}
 /**
  * The run was cancelled (`RunOptions.signal` aborted). It ends the whole run, also inside parallel/pipeline: active steps
@@ -182,6 +157,11 @@ export interface RunOptions {
    */
   signal?: AbortSignal;
   onEvent?: (e: WorkflowEvent) => void;
+  /**
+   * Where the steps' agents run: every attempt of every step goes through this backend (see `AgentBackend` in
+   * `backend.ts` for the contract). Default: the local backend, the SDK's local agents.
+   */
+  backend?: AgentBackend;
   /**
    * Banco de métricas (SQLite). Default: ~/.cursor-workflows/metrics.db ($WF_METRICS_DB). `false` desliga;
    * WF_METRICS=off também. Falha ao gravar métricas nunca derruba o workflow.
@@ -380,22 +360,7 @@ async function openEventChannel(store: RunStore, runId: string, opts: RunOptions
   return { emit, attemptContent, recorderWarning, close: () => recorder?.close() };
 }
 
-/** send() com tolerância a AgentBusyError (a run anterior ainda fechando). */
-async function sendWhenFree(agent: SDKAgent, message: string, options?: SendOptions): Promise<Run> {
-  for (let i = 0; ; i++) {
-    try {
-      return await agent.send(message, options);
-    } catch (err) {
-      if (err instanceof AgentBusyError && i < 5) {
-        await sleep(1000 * (i + 1));
-        continue;
-      }
-      throw err;
-    }
-  }
-}
-
-/** What an attempt counts from the SDK's stream of deltas. */
+/** What an attempt counts from the backend's stream of events. */
 interface AttemptCounters {
   turns: number;
   steps: number;
@@ -406,36 +371,38 @@ interface AttemptCounters {
 }
 
 /**
- * The `onDelta` of one attempt: counts turns, steps, summaries and tool calls, writes the attempt's content, and hands
- * each ended turn's usage to `onTurn` (which emits the turn event and enforces the live caps).
+ * The `onEvent` of one attempt: counts turns, steps, summaries, re-prompts and tool calls, writes the attempt's content,
+ * and hands each ended turn's usage to `onTurn` (which emits the turn event and enforces the live caps).
  */
-function attemptDeltas(c: AttemptCounters, content: AttemptContent, onTurn: (usage: TurnUsage) => void): NonNullable<SendOptions["onDelta"]> {
-  return ({ update }) => {
-    switch (update.type) {
-      case "step-completed":
+function attemptEvents(c: AttemptCounters, content: AttemptContent, onTurn: (usage: TurnUsage) => void): (event: AttemptEvent) => void {
+  return (event) => {
+    switch (event.type) {
+      case "agent":
+        break; // the engine learns the id from the result
+      case "step":
         c.steps++;
         c.stepsInTurn++;
         break;
-      case "text-delta":
-        content.say(update.text);
+      case "text":
+        content.say(event.delta);
         break;
-      case "tool-call-started": {
-        const name = update.toolCall?.type ?? "unknown";
-        c.toolCalls[name] = (c.toolCalls[name] ?? 0) + 1;
-        content.write("tool-call", JSON.stringify((update.toolCall as { args?: unknown }).args ?? null), { tool: name, callId: update.callId });
+      case "tool-call":
+        c.toolCalls[event.tool] = (c.toolCalls[event.tool] ?? 0) + 1;
+        content.write("tool-call", JSON.stringify(event.args ?? null), { tool: event.tool, callId: event.callId });
         break;
-      }
-      case "tool-call-completed": {
-        const output = update.toolCall?.type === "shell" ? shellOutput(update.toolCall.result) : undefined;
-        if (output !== undefined) content.write("command-output", output, { tool: "shell", callId: update.callId });
+      case "tool-output":
+        content.write("command-output", event.output, { tool: event.tool, callId: event.callId });
         break;
-      }
-      case "summary-completed":
+      case "summary":
         c.summaries++;
         break;
-      case "turn-ended":
+      case "reprompt":
+        c.reprompts++;
+        content.write("prompt", event.message);
+        break;
+      case "turn":
         content.flush();
-        if (update.usage) onTurn(update.usage);
+        if (event.usage) onTurn(event.usage);
         c.turns++;
         c.stepsInTurn = 0;
         break;
@@ -448,17 +415,6 @@ export function modelKey(m: ModelSelection | undefined): string | undefined {
   if (!m) return undefined;
   const params = [...(m.params ?? [])].sort((a, b) => a.id.localeCompare(b.id)).map((p) => `${p.id}=${p.value}`);
   return params.length || m.maxMode ? `${m.id}[${[...params, ...(m.maxMode ? ["max"] : [])].join(",")}]` : m.id;
-}
-
-/** The output of a finished shell tool call, as one text: exit code, stdout, then stderr. Undefined when the call has no result. */
-function shellOutput(result: unknown): string | undefined {
-  const r = result as { status?: string; value?: { exitCode?: number; stdout?: string; stderr?: string }; error?: unknown } | undefined;
-  if (r?.status === "success" && r.value) {
-    const { exitCode, stdout = "", stderr = "" } = r.value;
-    return `exit ${exitCode}\n${stdout}${stderr ? `\n[stderr]\n${stderr}` : ""}`;
-  }
-  if (r?.status === "error") return `error: ${JSON.stringify(r.error)}`;
-  return undefined;
 }
 
 function repoIdentity(cwd: string): { name: string; hash: string } {
@@ -647,7 +603,7 @@ async function executeRun<A, R>(
   // charged); `cutters` stop those attempts. Once the run's cap is crossed, `runBreach` is the run's budget error: every
   // active attempt is cut with it and no step starts after it. The steps in flight are in `inFlight` (below).
   const live = new Set<UsageTotals>();
-  const cutters = new Set<AttemptCut>();
+  const cutters = new Set<AttemptAbort>();
   let runBreach: BudgetExceededError | undefined;
 
   const stepCapError = (step: StepContext, tokens: number) => new StepBudgetError(`Step token cap reached for step "${step.label}": ${tokens} of ${step.tokenCap}.`);
@@ -713,82 +669,34 @@ async function executeRun<A, R>(
   }
 
   /**
-   * Lê custo e tokens do agente. O custo "pode atrasar um pouco depois do fim da run": tenta de novo se vier vazio.
-   * `turnUsage` é a soma dos eventos `turn-ended` da tentativa: vira a fonte dos tokens quando `getUsage()` falha
-   * (a doc do SDK diz que, para agentes locais, ele pode responder 403 `feature_unavailable` conforme a conta).
+   * Counts what an attempt cost, from the backend's reading of the agent's usage. `turnUsage` is the sum of the attempt's
+   * `turn` events: it becomes the source of the tokens when the reading failed (the SDK doc says a local agent's usage can
+   * answer 403 `feature_unavailable`, depending on the account).
    */
-  async function chargeUsage(agent: SDKAgent, turnUsage: UsageTotals & { reasoningTokens?: number }): Promise<Charge> {
-    let lastErr: unknown;
-    for (let i = 0; i < 3; i++) {
-      const u = await agent.getUsage().catch((err: unknown) => {
-        lastErr = err;
-        return undefined;
+  function chargeUsage(reading: UsageReading, turnUsage: UsageTotals & { reasoningTokens?: number }): Charge {
+    const u = "report" in reading ? reading.report : undefined;
+    const charged = u?.cost?.chargedCents ?? 0;
+    const usage = emptyUsage();
+    addUsage(usage, u ? u.usage : turnUsage);
+    // O cobrado pode ficar acima do bruto (Cursor Token Fee); o bruto, acima do cobrado (uso incluído no plano).
+    spentCents += Math.max(u?.cost?.rawCostCents ?? 0, charged);
+    chargedCents += charged;
+    spentTokens += usage.totalTokens;
+    live.delete(turnUsage); // its tokens are in spentTokens now (here, not in the attempt's finally: a rate-limit backoff sleeps in between)
+    if (!u) {
+      const why = "failed" in reading ? reading.failed : "";
+      emit({
+        type: "warning",
+        message: `getUsage() failed (${why.slice(0, 160)}): tokens counted from the turn-ended events; cost unknown, so the cents cap did not count this attempt. Use --max-tokens.`,
       });
-      const unavailable = (lastErr as { code?: unknown } | undefined)?.code === "feature_unavailable";
-      if (u?.cost || i === 2 || unavailable) {
-        const charged = u?.cost?.chargedCents ?? 0;
-        const usage = emptyUsage();
-        addUsage(usage, u ? u.usage : turnUsage);
-        // O cobrado pode ficar acima do bruto (Cursor Token Fee); o bruto, acima do cobrado (uso incluído no plano).
-        spentCents += Math.max(u?.cost?.rawCostCents ?? 0, charged);
-        chargedCents += charged;
-        spentTokens += usage.totalTokens;
-        live.delete(turnUsage); // its tokens are in spentTokens now (here, not in the attempt's finally: a rate-limit backoff sleeps in between)
-        if (!u) {
-          const why = lastErr instanceof Error ? lastErr.message : String(lastErr);
-          emit({
-            type: "warning",
-            message: `getUsage() failed (${why.slice(0, 160)}): tokens counted from the turn-ended events; cost unknown, so the cents cap did not count this attempt. Use --max-tokens.`,
-          });
-        } else if (!u.cost) {
-          emit({
-            type: "warning",
-            message: "Cursor has not reported the attempt's cost yet: the cents cap did not count it (the token cap did). Use --max-tokens and run `wf metrics reconcile` later.",
-          });
-        }
-        addUsage(totals, usage);
-        return { charged, raw: u?.cost?.rawCostCents, costFinal: Boolean(u?.cost), usage, reasoningTokens: u?.usage.reasoningTokens ?? turnUsage.reasoningTokens, runs: u?.runs ?? [] };
-      }
-      await sleep(1000);
+    } else if (!u.cost) {
+      emit({
+        type: "warning",
+        message: "Cursor has not reported the attempt's cost yet: the cents cap did not count it (the token cap did). Use --max-tokens and run `wf metrics reconcile` later.",
+      });
     }
-    return { charged: 0, costFinal: false, usage: emptyUsage(), runs: [] };
-  }
-
-  /** When an attempt's time runs out: `at` is the instant, `ms` the step's timeout, which the error message reports. */
-  interface Deadline {
-    at: number;
-    ms: number;
-  }
-
-  /**
-   * Races `promise` against the attempt's deadline and the run's cancellation: throws a `StepTimeoutError` when the time
-   * runs out and a `RunCancelledError` when the run is cancelled. A value that arrives after the race was given up goes to
-   * `late`, so an agent created too late is still disposed. `abort` rejects when the attempt is cut (token cap): it wins
-   * over a result that arrives at the same time.
-   */
-  async function within<T>(attempt: Deadline, promise: Promise<T>, late?: (value: T) => void, abort?: Promise<never>): Promise<T> {
-    let timer: NodeJS.Timeout | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new StepTimeoutError(`timeout after ${attempt.ms} ms`)), Math.max(0, attempt.at - Date.now()));
-    });
-    try {
-      return await Promise.race([...(abort ? [abort] : []), promise, timeout, ...(cancelled ? [cancelled] : [])]);
-    } catch (err) {
-      promise.then(late, () => {}); // given up (or failed): whatever it yields later is not ours
-      throw err;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  async function waitWithTimeout(run: Run, attempt: Deadline, abort?: Promise<never>): Promise<RunResult> {
-    try {
-      return await within(attempt, run.wait(), undefined, abort);
-    } catch (err) {
-      // Waits for the cancellation to finish so the next attempt does not edit the same cwd in parallel.
-      if (err instanceof StepTimeoutError || err instanceof RunCancelledError) await run.cancel().catch(() => {});
-      throw err;
-    }
+    addUsage(totals, usage);
+    return { charged, raw: u?.cost?.rawCostCents, costFinal: Boolean(u?.cost), usage, reasoningTokens: u?.usage.reasoningTokens ?? turnUsage.reasoningTokens, runs: u?.runs ?? [] };
   }
 
   /** What `runStep` needs to know about an `agent()` call, computed synchronously before any await. */
@@ -909,8 +817,8 @@ async function executeRun<A, R>(
     if (!isModelAllowed(caps.allowedModels, o.model.id)) {
       throw new StepFailedError(`step "${label}": model ${o.model.id} is not in the global allowedModels cap (${caps.allowedModels!.join(", ")})`);
     }
-    // Every step runs on the local backend today; the cloud spec picks the backend per role (ADR-0005).
-    const backend: AgentBackend = localBackend;
+    // Every step runs on one backend for now; the cloud spec picks the backend per role (ADR-0005).
+    const backend: AgentBackend = opts.backend ?? localBackend;
     if (caps.allowedLocations && !caps.allowedLocations.includes(backend.location)) {
       throw new StepFailedError(`step "${label}": the global allowedLocations cap (${caps.allowedLocations.join(", ") || "empty"}) does not allow ${backend.location === "local" ? "local" : "cloud"} steps`);
     }
@@ -918,6 +826,23 @@ async function executeRun<A, R>(
       throw new StepFailedError(`step "${label}": schema must have type "object" at the root (it becomes a tool's inputSchema)`);
     }
     const model = o.model;
+    // What the backend gets: the step's options, resolved (the config layers and the global caps already applied).
+    const stepOptions: StepOptions = {
+      apiKey: opts.apiKey,
+      name: `${def.meta.name}:${label}`,
+      model,
+      tools: o.tools,
+      disallowedTools: o.disallowedTools,
+      agents: o.agents,
+      // O guarda vem antes: um mcpServers da etapa com o mesmo nome continua podendo substituí-lo de propósito.
+      mcpServers: withGuard(nestedGuard(sources), o.mcpServers),
+      cwd: o.cwd ?? opts.cwd,
+      settingSources: sources,
+      // The global cap wins over the workflow code: a pull request that edits a workflow cannot turn sandboxing off.
+      sandbox: caps.requireSandbox === true || Boolean(o.sandbox),
+      schema: o.schema,
+      schemaRetries: o.schemaRetries ?? 2,
+    };
 
     await sem.acquire();
     try {
@@ -940,36 +865,41 @@ async function executeRun<A, R>(
         const attemptId = randomUUID();
         const startedAt = Date.now();
         const timeoutMs = o.timeoutMs ?? 20 * 60_000;
-        const deadline: Deadline = { at: startedAt + timeoutMs, ms: timeoutMs }; // creation, send, wait and schema re-prompts share it
         emitStart(attemptId, attempt, false);
         const content = attemptContent(ref, attemptId);
         content.write("prompt", prompt);
-        // Contadores alimentados pelo stream de deltas do SDK.
+        // Contadores alimentados pelo stream de eventos do backend.
         const c: AttemptCounters = { turns: 0, steps: 0, stepsInTurn: 0, summaries: 0, reprompts: 0, toolCalls: {} };
-        // Soma dos turn-ended desta tentativa: reserva de tokens quando getUsage() não responde.
+        // Soma dos turnos desta tentativa: reserva de tokens quando o backend não consegue ler o uso.
         const turnUsage: UsageTotals & { reasoningTokens?: number } = emptyUsage();
+        // The attempt's abort switch: the run's cancellation, the step's timeout (creation, send, wait and schema re-prompts
+        // share it) and the live token caps all end the attempt through its signal.
+        const abort = new AttemptAbort();
+        const onRunAbort = () => abort.abort(new RunCancelledError(cancelMessage));
+        signal?.addEventListener("abort", onRunAbort, { once: true });
+        const timer = setTimeout(() => abort.abort(new StepTimeoutError(`timeout after ${timeoutMs} ms`)), timeoutMs);
         // Live caps: a turn that takes the step or the run over its token cap cuts the attempt (its own turn, or another
         // step's turn for the run's cap).
-        const attemptCut = new AttemptCut();
         live.add(turnUsage);
-        cutters.add(attemptCut);
-        const sendOpts: SendOptions = {
-          onDelta: attemptDeltas(c, content, (t) => {
-            emit({ type: "turn", ...ref, attemptId, idx: c.turns, steps: c.stepsInTurn, usage: t });
-            addUsage(turnUsage, { ...t, totalTokens: t.inputTokens + t.outputTokens }); // o cache já está no input
-            if (t.reasoningTokens) turnUsage.reasoningTokens = (turnUsage.reasoningTokens ?? 0) + t.reasoningTokens;
-            // The real SDK may report one turn per send, so this can fire only when a send ends (see #37).
-            const breach = tokenBreach(step, turnUsage.totalTokens);
-            if (breach instanceof BudgetExceededError) for (const active of cutters) active.cut(breach); // the run's cap: every active attempt
-            else if (breach) attemptCut.cut(breach);
-          }),
+        cutters.add(abort);
+        const handle = attemptEvents(c, content, (t) => {
+          emit({ type: "turn", ...ref, attemptId, idx: c.turns, steps: c.stepsInTurn, usage: t });
+          addUsage(turnUsage, { ...t, totalTokens: t.inputTokens + t.outputTokens }); // o cache já está no input
+          if (t.reasoningTokens) turnUsage.reasoningTokens = (turnUsage.reasoningTokens ?? 0) + t.reasoningTokens;
+          // The real SDK may report one turn per send, so this can fire only when a send ends (see #37).
+          const breach = tokenBreach(step, turnUsage.totalTokens);
+          if (breach instanceof BudgetExceededError) for (const active of cutters) active.cut(breach); // the run's cap: every active attempt
+          else if (breach) abort.cut(breach);
+        });
+        const onEvent = (event: AttemptEvent) => {
+          abort.agentReady(); // any event means the agent exists: a cap held back while it was being created applies now
+          handle(event);
         };
-        const capture: Capture = { value: undefined, submitted: false };
-        let agent: SDKAgent | undefined;
         let charge: Charge | undefined;
         let errorKind: ErrorKind | undefined;
         let cancelledBy: RunCancelledError | undefined;
         let reverted = false;
+        let agentId: string | undefined;
         let resolvedModel: string | undefined;
         const endEvent = (ok: boolean) => {
           content.flush();
@@ -999,105 +929,83 @@ async function executeRun<A, R>(
             steps: c.steps,
             toolCalls: c.toolCalls,
             summaries: c.summaries,
-            agentId: agent?.agentId,
+            agentId,
             usageRuns: charge?.runs,
             durationMs: Date.now() - startedAt,
           });
         };
         try {
-          const sdkAgent = await within(deadline, backend.create({
-            apiKey: opts.apiKey,
-            name: `${def.meta.name}:${label}`,
-            model,
-            // Custom tools chegam ao modelo como o MCP server `custom-user-tools`: uma allowlist
-            // sem "mcp" esconderia o submit_result.
-            tools: o.schema && o.tools && !o.tools.includes("mcp") ? [...o.tools, "mcp"] : o.tools,
-            disallowedTools: o.disallowedTools,
-            agents: o.agents,
-            // O guarda vem antes: um mcpServers da etapa com o mesmo nome continua podendo substituí-lo de propósito.
-            mcpServers: withGuard(nestedGuard(sources), o.mcpServers),
-            cwd: stepCwd,
-            settingSources: sources,
-            // The global cap wins over the workflow code: a pull request that edits a workflow cannot turn sandboxing off.
-            sandbox: caps.requireSandbox === true || Boolean(o.sandbox),
-            customTools: o.schema ? { [SUBMIT_TOOL]: submitResultTool(o.schema, capture) } : undefined,
-          }), (late) => void late[Symbol.asyncDispose]().catch(() => {}));
-          agent = sdkAgent;
-          attemptCut.throwIfCut();
-          /** One message and its answer. A cut attempt throws its budget error as soon as it knows, before anything else. */
-          const exchange = async (message: string): Promise<RunResult> => {
-            const run = await within(deadline, sendWhenFree(sdkAgent, message, sendOpts), (late) => void late.cancel().catch(() => {}));
-            attemptCut.bind(run);
-            attemptCut.throwIfCut();
-            try {
-              const answer = await waitWithTimeout(run, deadline, attemptCut.rejected);
-              attemptCut.throwIfCut();
-              return answer;
-            } finally {
-              attemptCut.bind(undefined); // finished or abandoned: a later cut has nothing to cancel until the next send()
+          let result: AttemptResult;
+          try {
+            result = await backend.run(prompt, stepOptions, abort.signal, onEvent);
+          } catch (err) {
+            // A backend reports its failures in the result; one that throws has a bug. The attempt fails, uncharged.
+            result = { outcome: { kind: "error", reason: "other", message: err instanceof Error ? err.message : String(err) } };
+          } finally {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", onRunAbort);
+            cutters.delete(abort);
+          }
+          agentId = result.agentId;
+          resolvedModel = result.model;
+          // Timeout/error also cost. No reading and no turns: no agent existed, so nothing was used.
+          if (result.usage || turnUsage.totalTokens > 0) charge = chargeUsage(result.usage ?? { failed: "the backend reported no usage" }, turnUsage);
+          const { outcome } = result;
+          switch (outcome.kind) {
+            case "finished":
+              journal.record({ key, label, model: model.id, result: outcome.value, chargedCents: charge?.charged ?? 0, totalTokens: charge?.usage.totalTokens ?? 0 });
+              if (memoKey) memo.set(memoKey, outcome.value);
+              endEvent(true);
+              return outcome.value as T;
+            case "run-error":
+              errorKind = "run-error";
+              lastError = outcome.message;
+              break;
+            case "schema":
+              errorKind = "schema";
+              lastError = outcome.message;
+              break;
+            case "aborted": {
+              lastError = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+              if (abort.isCutBy(outcome.reason)) {
+                // Over a token cap: the attempt fails as "budget" and is not retried. The run's cap ends the run, the step's cap only the step.
+                errorKind = "budget";
+                endEvent(false);
+                throw outcome.reason;
+              }
+              if (outcome.reason instanceof RunCancelledError) {
+                errorKind = "cancelled";
+                cancelledBy = outcome.reason;
+              } else {
+                errorKind = /^timeout/.test(lastError) ? "timeout" : "exception";
+              }
+              break;
             }
-          };
-          let result = await exchange(o.schema ? prompt + schemaInstruction() : prompt);
-          resolvedModel = result.model?.id;
-          // Saída estruturada: re-prompt na MESMA conversa até o modelo chamar submit_result com JSON válido.
-          let schemaTries = o.schemaRetries ?? 2;
-          while (o.schema && result.status === "finished" && !capture.submitted && schemaTries-- > 0) {
-            c.reprompts++;
-            const reprompt = repromptMessage(capture);
-            content.write("prompt", reprompt);
-            result = await exchange(reprompt);
-          }
-          charge = await chargeUsage(agent, turnUsage);
-
-          if (result.status !== "finished") {
-            errorKind = "run-error";
-            lastError = `run ${result.status}: ${result.error?.message ?? "no detail"}`;
-          } else if (o.schema && !capture.submitted) {
-            errorKind = "schema";
-            lastError = `the agent did not deliver a valid ${SUBMIT_TOOL} (${capture.lastError ?? "no call"})`;
-          } else {
-            const value = o.schema ? capture.value : (result.result ?? "");
-            journal.record({ key, label, model: model.id, result: value, chargedCents: charge.charged, totalTokens: charge.usage.totalTokens });
-            if (memoKey) memo.set(memoKey, value);
-            endEvent(true);
-            return value as T;
-          }
-        } catch (err) {
-          const overCap = attemptCut.isCutBy(err);
-          if (overCap) await attemptCut.stopped(); // let the cancelled run stop before its usage is read and anything else touches the cwd
-          if (agent && !charge) charge = await chargeUsage(agent, turnUsage); // timeout/erro também custam
-          lastError = err instanceof Error ? err.message : String(err);
-          if (overCap) {
-            // Over a token cap: the attempt fails as "budget" and is not retried. The run's cap ends the run, the step's cap only the step.
-            errorKind = "budget";
-            endEvent(false);
-            throw err;
-          }
-          const code = (err as { code?: unknown } | undefined)?.code;
-          if (err instanceof RunCancelledError) {
-            errorKind = "cancelled";
-            cancelledBy = err;
-          } else if (typeof code === "string" && ACCOUNT_ERROR_CODES.has(code)) {
-            errorKind = "exception";
-            endEvent(false);
-            accountError ??= new AccountAccessError(`The account's plan does not give access to the Cursor SDK (${code}): ${lastError}`);
-            throw accountError;
-          } else if (err instanceof RateLimitError) {
-            errorKind = "rate-limit";
-            // Não retentável = teto de uso do plano ("Usage limit exceeded" na doc do SDK): não adianta tentar de novo.
-            if (!err.isRetryable) {
-              endEvent(false);
-              throw new BudgetExceededError(`Cursor usage limit reached: ${err.message}`);
-            }
-            await sleep(2000 * 2 ** (attempt - 1));
-          } else {
-            errorKind = /^timeout/.test(lastError) ? "timeout" : "exception";
+            case "error":
+              lastError = outcome.message;
+              if (outcome.reason === "account") {
+                errorKind = "exception";
+                endEvent(false);
+                accountError ??= new AccountAccessError(`The account's plan does not give access to the Cursor SDK (${outcome.code}): ${lastError}`);
+                throw accountError;
+              }
+              if (outcome.reason === "usage-limit") {
+                // Not retryable = the plan's usage cap ("Usage limit exceeded" in the SDK doc): trying again does not help.
+                errorKind = "rate-limit";
+                endEvent(false);
+                throw new BudgetExceededError(`Cursor usage limit reached: ${lastError}`);
+              }
+              if (outcome.reason === "rate-limit") {
+                errorKind = "rate-limit";
+                await sleep(2000 * 2 ** (attempt - 1));
+              } else {
+                errorKind = /^timeout/.test(lastError) ? "timeout" : "exception";
+              }
+              break;
           }
         } finally {
-          cutters.delete(attemptCut);
           live.delete(turnUsage); // idempotent: an attempt that never got to be charged must not keep counting
           step.tokens += turnUsage.totalTokens;
-          if (agent) await agent[Symbol.asyncDispose]().catch(() => {});
         }
         if (cancelledBy) reverted = await revert();
         endEvent(false);

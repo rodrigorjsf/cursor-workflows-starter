@@ -109,6 +109,14 @@
 
 ### Mudado
 
+- **A execução do agente fica atrás de uma interface, o `AgentBackend`.** O motor deixa de falar com o SDK: cada
+  tentativa de uma etapa vai a `AgentBackend.run(prompt, opções resolvidas, sinal de aborto, callback de eventos)`, que
+  devolve o resultado da tentativa. A execução local (criar o agente, enviar, esperar, entregar o resultado estruturado,
+  ler o uso, descartar) é o backend local, com o comportamento de antes: os testes do motor, da observabilidade e do
+  `implement-issue` passam sem mudança. Os tetos de tokens ao vivo, o `timeoutMs` e o cancelamento do run chegam ao
+  backend como o aborto do sinal da tentativa, com o motivo em `signal.reason`. `RunOptions.backend` troca o backend
+  (os testes usam). A interface é a de [3.1](docs/internals/01-arquitetura.md#o-agentbackend-quem-roda-a-tentativa) e o
+  backend de nuvem ([ADR-0005](docs/adr/0005-cloud-backend-and-location-cap.md)) entra por ela.
 - **`WF_METRICS_STORE_PROMPTS` foi removida.** O banco de métricas nunca mais guarda o texto de um prompt (só hash e
   tamanho); o texto fica no log de eventos local. O evento `step-start` perdeu o campo `prompt`. A coluna
   `attempts.prompt_text` continua no esquema, sempre vazia, e a migração 3 do banco apaga o texto que versões antigas

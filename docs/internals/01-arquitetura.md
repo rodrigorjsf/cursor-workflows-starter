@@ -19,13 +19,18 @@ flowchart TB
   ENG --> JR[run-store.ts<br/>.workflows/runs/&lt;runId&gt;/<br/>events.jsonl · journal.jsonl · run.lock]
   JOBS -.->|"estado do job: projeção do log"| JR
   ENG -->|1 linha por run| IDX[("~/.cursor-workflows/runs.jsonl")]
-  ENG --> ST[structured.ts<br/>submit_result + Ajv]
-  ENG -->|"Agent.create({model, local:{cwd, settingSources, customTools}})"| SDK["@cursor/sdk<br/>(loop local)"]
+  ENG -->|"1 tentativa: prompt, opções, sinal"| BE[backend.ts<br/>AgentBackend · backend local]
+  BE --> ST[structured.ts<br/>submit_result + Ajv]
+  BE -->|"Agent.create({model, local:{cwd, settingSources, customTools}})"| SDK["@cursor/sdk<br/>(loop local)"]
   SDK -->|inferência + cobrança| CUR[Backend Cursor]
   ENG -->|"execFileSync: git, gh, testes"| REPO[(Repo + worktrees)]
 ```
 
 ## Ciclo de uma etapa (`ctx.agent`)
+
+O motor decide o que roda e quando (journal, tetos, tentativas, tempo, cancelamento, log de eventos). Quem roda cada
+tentativa é um `AgentBackend` ([O `AgentBackend`](#o-agentbackend-quem-roda-a-tentativa)): os passos 4 a 7 e 10 abaixo
+são o que o backend local faz numa tentativa.
 
 0. **Antes do run:** `args` são validados contra `meta.argsSchema` (Ajv), e o ambiente recebe
    `WF_INSIDE_WORKFLOW=1`. O shell das etapas herda a marca (medido em 2026-11-11), e o CLI recusa `run`/`start`
@@ -115,7 +120,7 @@ flowchart TB
      O de service account tem erro próprio, "Service account spend limit reached"
      [DOC](https://cursor.com/docs/account/enterprise/service-accounts).
 10. **Descarte:** o agente é fechado com `await agent[Symbol.asyncDispose]()`, como no cookbook oficial.
-11. **Métricas:** cada tentativa emite `step-start`, `turn` (via `onDelta`) e `step-end` (tokens, `raw_cents`,
+11. **Métricas:** cada tentativa emite `step-start`, `turn` (um por evento de turno do backend) e `step-end` (tokens, `raw_cents`,
     passos, tool calls, tipo de erro e `resolvedModel`, o ID que o Cursor resolveu). O recorder grava no SQLite do usuário. Falha ao gravar vira `warning`,
     nunca falha do workflow (ver [5.3](../operating/03-observabilidade.md)).
 12. **Conteúdo:** o texto do prompt, o que o agente disse (uma mensagem por turno), cada chamada de tool e a saída dos
@@ -124,6 +129,42 @@ flowchart TB
     conhecidos de segredo e o valor de toda variável de ambiente com KEY, TOKEN, SECRET ou PASSWORD no nome; depois corta
     cada texto em 32768 caracteres. Ao iniciar um run, o `text` dos runs do repositório fora da retenção (os últimos 30
     runs ou 14 dias) é apagado; o resto do log fica.
+
+## O `AgentBackend`: quem roda a tentativa
+
+O motor não sabe onde o agente roda: cada tentativa de uma etapa passa por um `AgentBackend`
+(`packages/runtime/src/runtime/backend.ts`). Hoje há um, o local (`Agent.create` com as opções `local` do SDK). O backend
+de nuvem do [ADR-0005](../adr/0005-cloud-backend-and-location-cap.md) entra atrás da mesma interface, sem mexer no
+motor.
+
+```ts
+interface AgentBackend {
+  readonly location: "local" | "cloud";
+  run(prompt: string, options: StepOptions, signal: AbortSignal, onEvent: (e: AttemptEvent) => void): Promise<AttemptResult>;
+}
+```
+
+| Parte | O que carrega |
+|---|---|
+| `prompt` e `options` (`StepOptions`) | O prompt e as opções da etapa já resolvidas: nome, modelo, `cwd`, tools, subagents, MCP servers, camadas de configuração, sandbox (com o teto `requireSandbox` aplicado), `schema` e `schemaRetries` |
+| `signal` | O interruptor da tentativa. O motor o aborta por todo motivo que encerra a tentativa antes da hora e põe o motivo em `signal.reason`: o cancelamento do run (`RunCancelledError`), o `timeoutMs` da etapa e o teto de tokens que passou. O backend cancela o run do agente em andamento, espera ele parar, lê o uso que a tentativa deixou, descarta o agente e devolve `aborted` com esse motivo |
+| `onEvent` | O que acontece durante a tentativa, em ordem: `agent` (o agente existe), `text`, `step`, `tool-call`, `tool-output`, `summary`, `reprompt` e `turn`. O motor conta, grava o conteúdo no log e, a cada `turn`, aplica os tetos de tokens ao vivo: pode abortar o `signal` de dentro do callback, e o backend cancela na hora |
+| `AttemptResult` | `outcome` (`finished` com o valor, `run-error`, `schema`, `aborted`, ou `error` classificado como `account`, `usage-limit`, `rate-limit` ou `other`), o `agentId`, o modelo resolvido e a leitura do uso (o relatório do agente, ou o motivo de não ter conseguido lê-lo) |
+
+O contrato, além da tabela:
+
+- A promise de `run` resolve com um `AttemptResult` em todo fim de tentativa, falha incluída. Rejeitar é bug do backend: o
+  motor trata como falha da tentativa, sem cobrança.
+- O teto de tokens nunca abandona uma criação em andamento: o motor segura o aborto do teto até o backend dizer que o
+  agente existe (`agent`, ou qualquer evento depois dele), e então o aplica. O agente que existe é parado, o uso dele é
+  lido e o custo conta. O cancelamento do run e o `timeoutMs` abortam a criação na hora, e o agente que chega tarde é
+  descartado.
+- A saída estruturada é do backend. O local registra a custom tool `submit_result` (e garante `"mcp"` na allowlist) e
+  reenvia o pedido na mesma conversa até o schema ser satisfeito; o motor só recebe o valor validado e os eventos
+  `reprompt`. O backend de nuvem entrega o mesmo contrato com um bloco JSON final (ADR-0005).
+- Os testes trocam o SDK (`packages/runtime/test/fake-sdk.ts`) ou o próprio backend (`RunOptions.backend`). Os testes do
+  motor com o SDK falso passam pelo backend local, e os de `backend.test.ts` usam um backend de mentira para provar que
+  tetos ao vivo, cancelamento e tempo funcionam pela interface.
 
 ## Ciclo de vida de um job
 
