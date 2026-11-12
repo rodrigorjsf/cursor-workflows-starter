@@ -1,23 +1,23 @@
-// How the views write numbers and durations.
+// How the dashboard's pages write numbers and durations. The Run view (`run-view/`) uses it too.
 
-/** Cents as the Board shows a run's cost: `0.4¢`, `12¢`, `$1.24`. */
-export function money(cents: number): string {
-  if (cents >= 100) return `$${(cents / 100).toFixed(2)}`;
-  return `${cents >= 10 ? Math.round(cents) : Math.round(cents * 10) / 10}¢`;
+/** `0.4¢`, `3.5¢`, `$12.35`: a cost under a dollar stays in cents. The Board, the Runs table and the Run view all write costs with it. */
+export function formatCents(cents: number): string {
+  return cents < 100 ? `${Number(cents.toFixed(2))}¢` : `$${(Math.round(cents) / 100).toFixed(2)}`;
 }
 
-/** A length of time: `42s`, `3m 05s`, `1h 02m`. */
-export function duration(ms: number): string {
-  const seconds = Math.max(0, Math.round(ms / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
-  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
+/** `7ms`, `4.2s`, `1m 9s`, `1h 2m`. The Board, the Runs table and the Run view all write durations with it. */
+export function formatDuration(ms: number): string {
+  ms = Math.max(0, ms);
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(Math.floor(ms / 100) / 10).toFixed(1)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  if (ms < 3_600_000) return `${minutes}m ${Math.floor((ms % 60_000) / 1000)}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
 /** How long a run has taken: up to its end, or up to now while it runs. */
 export function runDuration(startedAt: string, finishedAt?: string): string {
-  return duration((finishedAt ? Date.parse(finishedAt) : Date.now()) - Date.parse(startedAt));
+  return formatDuration((finishedAt ? Date.parse(finishedAt) : Date.now()) - Date.parse(startedAt));
 }
 
 /** The last folder of a repo's path. */

@@ -7,7 +7,7 @@ import { JunctionNode, LaneNode, type LaneNodeData, StartNode, WorkNode, type Wo
 import { RunActions } from "./RunActions.js";
 import { argsHashOf } from "./resume-command.js";
 import { StepLogPanel } from "./StepLogPanel.js";
-import { formatCents, formatDuration } from "./node-details.js";
+import { formatCents, formatDuration } from "../app/format.js";
 import { type ProgressStatus, type RunGraph, buildRunGraph, isWork } from "./run-graph.js";
 import { type RunLayout, layoutRunGraph } from "./run-layout.js";
 import { type Connection, useRunEvents } from "./use-run-events.js";

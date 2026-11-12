@@ -2,7 +2,8 @@
 // attempts, tokens, cost, duration and error kind, written for a person.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { describeNode, formatCents, formatDuration } from "../run-view/node-details.js";
+import { formatCents, formatDuration } from "../app/format.js";
+import { describeNode } from "../run-view/node-details.js";
 import { type GraphNode, buildRunGraph } from "../run-view/run-graph.js";
 import { execEnd, execStart, runStart, stamp, step, stepEnd, stepStart, T0, type Draft } from "./run-log.js";
 
