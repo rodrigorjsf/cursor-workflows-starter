@@ -218,7 +218,7 @@ export function RunView({ runId }: { runId: string }) {
   const upTo = replaying && replayAt < events.length ? (ids[replayAt - 1] ?? 0) : undefined;
   const counts = { steps: graph.nodes.filter((n) => n.kind === "step").length, commands: graph.nodes.filter((n) => n.kind === "command").length };
   const header = headerStatus({ api: { status, error }, run, replaying, settled });
-  const offered = offeredActions(status, graph);
+  const offered = offeredActions(status, graph, error);
   const elapsed = runElapsed(run, settled, now);
 
   if (connection === "not-found") {

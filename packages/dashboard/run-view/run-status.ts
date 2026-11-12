@@ -42,21 +42,30 @@ export function headerStatus({ api, run, replaying, settled }: HeaderInput): Hea
 export interface OfferedActions {
   /** Offer to cancel the run's process. */
   cancelRun: boolean;
-  /** The cloud agents a dead process left working, which the view offers to cancel: the agents of the cloud steps whose attempt never ended. */
+  /** The run's process is there but stopped beating: cancelling it kills the process, then cancels the cloud agents it left. */
+  frozen: boolean;
+  /** The cloud agents a process that is gone left working, which the view offers to cancel: the agents of the cloud steps whose attempt never ended. */
   leftCloudAgents: string[];
 }
 
+/** How the API's error of a frozen run starts (`silenceOf` in the runtime's `job-state.ts`). */
+const FROZEN_ERROR = /^no heartbeat for /;
+
 /**
- * What the header offers for a run in API status `status`, whose events (read to their end) gave `graph`. A running run can be
- * cancelled; a live process cancels its own cloud agents. A run whose process died is `failed` with steps still `interrupted`:
- * the cloud agents of those steps may still be working, and spending, and the server cancels them through the Cursor API.
+ * What the header offers for a run in API status `status`, with the API's `error`, whose events (read to their end) gave
+ * `graph`. A running run can be cancelled; a live process cancels its own cloud agents. A frozen run (its process alive, its
+ * heartbeat stale) is `failed` with the error `no heartbeat for …`, and still holds the run: it can be cancelled too, which
+ * kills the process and then cancels, through the Cursor API, the cloud agents it left (ADR-0007), so it needs no other
+ * button. A run whose process is gone is `failed` with steps still `interrupted`: the cloud agents of those steps may still be
+ * working, and spending, and the server cancels them through the Cursor API.
  */
-export function offeredActions(status: ApiStatus | undefined, graph: RunGraph): OfferedActions {
+export function offeredActions(status: ApiStatus | undefined, graph: RunGraph, error?: string): OfferedActions {
+  const frozen = status === "failed" && error !== undefined && FROZEN_ERROR.test(error);
   const leftCloudAgents =
-    status === "failed"
+    status === "failed" && !frozen
       ? [...new Set(graph.nodes.filter((n) => n.state === "interrupted" && runsInCloud(n) && n.detail.cloudAgentId !== undefined).map((n) => n.detail.cloudAgentId!))]
       : [];
-  return { cancelRun: status === "running", leftCloudAgents };
+  return { cancelRun: status === "running" || frozen, frozen, leftCloudAgents };
 }
 
 /**

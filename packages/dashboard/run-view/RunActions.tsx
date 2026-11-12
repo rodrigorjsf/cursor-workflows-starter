@@ -1,5 +1,5 @@
-// The actions of the Run view's header: cancel a running run, cancel the cloud agents a run whose process died left working,
-// and copy the command that resumes one that stopped.
+// The actions of the Run view's header: cancel a running or frozen run, cancel the cloud agents a run whose process is gone
+// left working, and copy the command that resumes one that stopped.
 import { useEffect, useRef, useState } from "react";
 import { copyText } from "./clipboard.js";
 import { ARGS_PLACEHOLDER, canResume, resumeCommand } from "./resume-command.js";
@@ -58,7 +58,13 @@ export function RunActions({ runId, status, offered, info, argsHash, onChanged }
             <button
               type="button"
               className="btn danger"
-              title={cloudOnly ? `The process of this run died while ${agents.join(", ")} worked in the cloud: ${agents.length > 1 ? "they" : "it"} may still be running, and spending` : undefined}
+              title={
+                cloudOnly
+                  ? `The process of this run stopped while ${agents.join(", ")} worked in the cloud: ${agents.length > 1 ? "they" : "it"} may still be running, and spending`
+                  : offered.frozen
+                    ? "The process of this run stopped beating: cancelling kills it, without undoing the step in progress, and cancels the cloud agents it left; a resume afterwards starts new ones, at new cost"
+                    : undefined
+              }
               onClick={() => setCancel({ step: "confirm" })}
             >
               {cloudOnly ? (agents.length > 1 ? `Cancel ${agents.length} cloud agents` : "Cancel cloud agent") : "Cancel run"}
@@ -80,7 +86,7 @@ export function RunActions({ runId, status, offered, info, argsHash, onChanged }
                 Yes, cancel
               </button>
               <button type="button" className="btn" onClick={() => setCancel({ step: "idle" })}>
-                {cloudOnly ? "Keep" : "Keep running"}
+                {cloudOnly || offered.frozen ? "Keep" : "Keep running"}
               </button>
             </span>
           )}

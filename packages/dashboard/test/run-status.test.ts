@@ -8,6 +8,8 @@ import { headerStatus, offeredActions, runElapsed } from "../run-view/run-status
 import { cloudAgent, phase, runStart, stamp, step, stepEnd, stepStart, type Draft } from "./run-log.js";
 
 const DEAD_ERROR = 'the process executing the run ended without finishing it; relaunch with resumeRunId="wf-aaaa0001"';
+/** What the API says of a run whose process is alive but stopped beating (`silentJobError`): `failed`, with this error. */
+const FROZEN_ERROR = 'no heartbeat for 95s (process 4242); relaunch with resumeRunId="wf-aaaa0001"';
 
 /** A run whose process died while a cloud step was working: its agent is in the log, its attempt never ended, and no run-end follows. */
 const deadInCloud: Draft[] = [runStart, phase("Build"), ...step("s1", "plan"), stepStart("s2", "implement", { parentId: "s1" }, { location: "cloud" }), cloudAgent("s2", "bc-1")];
@@ -50,11 +52,21 @@ test("a replay says replaying while it plays, and at its end names the run as th
 });
 
 test("a run whose process died with a cloud agent still working offers to cancel that agent; nothing else does", () => {
-  assert.deepEqual(offeredActions("failed", graphOf(deadInCloud)), { cancelRun: false, leftCloudAgents: ["bc-1"] });
-  assert.deepEqual(offeredActions("failed", graphOf(endedInCloud)), { cancelRun: false, leftCloudAgents: [] }, "the process ended the run and its agents");
-  assert.deepEqual(offeredActions("failed", graphOf(deadLocal)), { cancelRun: false, leftCloudAgents: [] }, "no agent in the cloud");
-  assert.deepEqual(offeredActions("running", graphOf(deadInCloud, false)), { cancelRun: true, leftCloudAgents: [] }, "a live process cancels its own agents");
-  assert.deepEqual(offeredActions(undefined, graphOf(deadInCloud)), { cancelRun: false, leftCloudAgents: [] }, "nothing before the API answers");
+  assert.deepEqual(offeredActions("failed", graphOf(deadInCloud), DEAD_ERROR), { cancelRun: false, frozen: false, leftCloudAgents: ["bc-1"] });
+  assert.deepEqual(offeredActions("failed", graphOf(endedInCloud), "implement failed"), { cancelRun: false, frozen: false, leftCloudAgents: [] }, "the process ended the run and its agents");
+  assert.deepEqual(offeredActions("failed", graphOf(deadLocal), DEAD_ERROR), { cancelRun: false, frozen: false, leftCloudAgents: [] }, "no agent in the cloud");
+  assert.deepEqual(offeredActions("running", graphOf(deadInCloud, false)), { cancelRun: true, frozen: false, leftCloudAgents: [] }, "a live process cancels its own agents");
+  assert.deepEqual(offeredActions(undefined, graphOf(deadInCloud)), { cancelRun: false, frozen: false, leftCloudAgents: [] }, "nothing before the API answers");
+});
+
+test("a frozen run (process alive, no heartbeat) is failed in the API, and offers Cancel run: the cancel kills the process and cancels its cloud agents", () => {
+  assert.deepEqual(offeredActions("failed", graphOf(deadLocal), FROZEN_ERROR), { cancelRun: true, frozen: true, leftCloudAgents: [] }, "only local steps: still a way to free the run");
+  assert.deepEqual(
+    offeredActions("failed", graphOf(deadInCloud), FROZEN_ERROR),
+    { cancelRun: true, frozen: true, leftCloudAgents: [] },
+    "the same route kills the process and then cancels the agents it left: one button, not Cancel cloud agent",
+  );
+  assert.equal(offeredActions("failed", graphOf(deadLocal), `the run failed: ${FROZEN_ERROR}`).cancelRun, false, "only an error that starts with the runtime's words");
 });
 
 test("the header's duration follows the Runs table's rule: to the run-end, to now while it runs, and none for a run over without a run-end", () => {

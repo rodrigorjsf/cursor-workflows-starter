@@ -467,7 +467,7 @@ export default defineWorkflow<Args>({
     phases: [{ title: "Triage" }, { title: "Plan" }, { title: "Implementation" }, { title: "Review" }, { title: "Delivery" }],
     // Roles: the keys of `workflows.implement-issue.roles` in the config. Each role's model is a code default that the
     // config and WF_MODEL_<ROLE> replace. `fix` and `design` declare no model: it depends on the tier or on the step.
-    // `cloud`: the engine can run a write step in the cloud (its commits come back into the worktree: ADR-0006), but the roles
+    // `cloud`: the engine can run a write step in the cloud (its commits come back into the worktree: ADR-0007), but the roles
     // that write stay `never` here: their prompts forbid git commands, which a cloud agent needs to deliver its work, and no
     // TDD loop has run on a cloud agent yet (see #45). The read-only ones may go (they read the run's worktree, hence `read-only`).
     roles: [
