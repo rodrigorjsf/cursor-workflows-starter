@@ -46,7 +46,7 @@
 //     "push-refused" e não é sobrescrito.
 //
 // Os limites (fatias por tier, fatias extras, rodadas de correção, tentativas de red e green, tamanho do diff, mapa
-// label → tier, limite de quedas) são os `settings` do workflow: os valores abaixo são os padrões, e o repositório os troca em
+// label → tier, limite de quedas, tetos de tempo dos testes e dos comandos de rede) são os `settings` do workflow: os valores abaixo são os padrões, e o repositório os troca em
 // `workflows.implement-issue.settings` (docs/reference/config.md).
 //
 // Custo por etapa (passo 4 da /skill-to-workflow). "[]" = settingSources vazio: sem AGENTS.md, regras, hooks, MCP e
@@ -146,9 +146,9 @@ type Settings = {
   maxStepCrashes: number;
   /** `wf gc`: o run que falhou há mais dias que isto perde o worktree e as branches. Quem o lê é o `wf gc`, não o run. */
   gcFailedAfterDays: number;
-  /** Teto de tempo de cada rodada de testes, em segundos. O arg `testTimeoutSec` do run vence. */
+  /** Teto de tempo de cada rodada de testes (e do `setupCommand`), em segundos. */
   testTimeoutSec: number;
-  /** Teto de tempo de cada comando de rede (`git push` e `gh`), em segundos. O arg `networkTimeoutSec` do run vence. */
+  /** Teto de tempo de cada comando de rede (`git push` e `gh`), em segundos: uma credencial pedida ou uma conexão parada falha a etapa. */
   networkTimeoutSec: number;
 };
 const SETTINGS: Settings = {
@@ -183,10 +183,6 @@ interface Args {
   repo?: string;
   /** Comando de teste; default: o que o plano sugerir, ou `npm test`. */
   testCommand?: string;
-  /** Teto de tempo de cada rodada de testes, em segundos (default: o ajuste `testTimeoutSec`, 600). */
-  testTimeoutSec?: number;
-  /** Teto de tempo de cada comando de rede (`git push` e `gh`), em segundos (default: o ajuste `networkTimeoutSec`, 120): uma credencial pedida ou uma conexão parada falha a etapa. */
-  networkTimeoutSec?: number;
   /** Roda uma vez no worktree novo antes da suíte de base (ex.: `npm ci`). */
   setupCommand?: string;
   openPr?: boolean;
@@ -427,8 +423,6 @@ export default defineWorkflow<Args>({
         issue: { type: "number" },
         repo: { type: "string" },
         testCommand: { type: "string" },
-        testTimeoutSec: { type: "number" },
-        networkTimeoutSec: { type: "number" },
         setupCommand: { type: "string" },
         openPr: { type: "boolean" },
         approveSeams: { type: "boolean" },
@@ -463,11 +457,12 @@ export default defineWorkflow<Args>({
       const settings = ctx.settings as unknown as Settings; // o esquema da configuração valida os tipos; os padrões vêm de `meta.settings`
       const globs = ctx.args.testGlobs?.length ? ctx.args.testGlobs : DEFAULT_TEST_GLOBS;
       const protectedGlobs = ctx.args.protectedGlobs ?? DEFAULT_PROTECTED_GLOBS;
-      const testTimeout = (ctx.args.testTimeoutSec ?? settings.testTimeoutSec) * 1000;
+      // Os tetos de tempo são ajustes, não args: só os arquivos de configuração os trocam (ADR-0001).
+      const testTimeout = settings.testTimeoutSec * 1000;
       // Todo comando do workflow (testes, git, gh) passa por ctx.exec: assíncrono, com teto de tempo e visível no log do run.
       // O git local não passa teto: vale o `execTimeoutMs` da configuração do workflow.
       const cmd = new Commands((command, args, opts) => ctx.exec(command, args, opts), {
-        networkMs: (ctx.args.networkTimeoutSec ?? settings.networkTimeoutSec) * 1000,
+        networkMs: settings.networkTimeoutSec * 1000,
       });
       const isTest = (f: string) => isTestFile(f, globs);
       const progress = new ProgressStore(ctx.cwd, ctx.runId);

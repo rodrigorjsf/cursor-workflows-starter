@@ -51,12 +51,13 @@ test("the test runs of the TDD loop are command nodes in the event log, each wit
 
 test("a test run that outlives its limit is killed: tests-timeout, and the run goes no further", async () => {
   issue(["complexity:low"]);
+  writeRepoConfig(fx.repo, { workflows: { "implement-issue": { settings: { testTimeoutSec: 1 } } } });
   const startedAt = Date.now();
-  const r = await run({ testCommand: "sleep 60", testTimeoutSec: 1 });
+  const r = await run({ testCommand: "sleep 60" });
   assert.equal(res(r).status, "tests-timeout", JSON.stringify(res(r)));
   assert.ok(Date.now() - startedAt < 30_000, "the run did not wait for the command");
   const suite = execStarts(eventsOf(r.runId)).find((s) => s.label === "suite:baseline");
-  assert.equal(suite?.timeoutMs, 1000, "the limit the run was asked for is the command's limit");
+  assert.equal(suite?.timeoutMs, 1000, "the configured limit is the command's limit");
 });
 
 test("the command limits come from the repo config when the run passes none: tests and network from the settings, local git from execTimeoutMs", async () => {
@@ -72,14 +73,13 @@ test("the command limits come from the repo config when the run passes none: tes
   for (const s of localGit) assert.equal(s.timeoutMs, 123_456, `${s.label}: local git takes the workflow's execTimeoutMs`);
 });
 
-test("a run's own limits win over the config's", async () => {
+test("a run cannot set the command limits through its args: they are workflow settings, which only the config files tune (ADR-0001)", async () => {
   issue(["complexity:low"]);
-  writeRepoConfig(fx.repo, { workflows: { "implement-issue": { settings: { testTimeoutSec: 600, networkTimeoutSec: 7 } } } });
-  const r = await run({ testCommand: "sleep 60", testTimeoutSec: 1, networkTimeoutSec: 9 });
-  assert.equal(res(r).status, "tests-timeout", JSON.stringify(res(r)));
-  const starts = execStarts(eventsOf(r.runId));
-  assert.equal(starts.find((s) => s.label === "suite:baseline")?.timeoutMs, 1000);
-  assert.equal(starts.find((s) => s.label === "gh issue view")?.timeoutMs, 9000);
+  for (const args of [{ testTimeoutSec: 1 }, { networkTimeoutSec: 9 }]) {
+    const r = await run(args);
+    assert.equal(r.status, "failed", JSON.stringify(r));
+    assert.match(r.error!, /invalid args: .*additional properties/, JSON.stringify(args));
+  }
 });
 
 test("a suite that writes far more than the log keeps is not a failure", async () => {
@@ -199,8 +199,9 @@ test("a git push that hangs fails the step at its limit instead of hanging the r
   const hook = join(fx.repo, ".git", "hooks", "pre-push");
   writeFileSync(hook, "#!/bin/sh\nexec sleep 60\n"); // a push waiting for a credential, a stalled connection
   chmodSync(hook, 0o755);
+  writeRepoConfig(fx.repo, { workflows: { "implement-issue": { settings: { networkTimeoutSec: 2 } } } });
   const startedAt = Date.now();
-  const first = await run({ openPr: true, networkTimeoutSec: 2 });
+  const first = await run({ openPr: true });
   assert.equal(first.status, "failed", JSON.stringify(first.result));
   assert.match(first.error!, /git push .*timed out after 2s/);
   assert.ok(Date.now() - startedAt < 40_000, "the run did not wait for the push");

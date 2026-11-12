@@ -144,6 +144,10 @@
 
 ### Mudado
 
+- **O teto de tempo dos testes do `implement-issue` sai dos args do run.** `testTimeoutSec` passa a ser só um ajuste
+  (`workflows.implement-issue.settings.testTimeoutSec`, padrão 600), como os outros limites: um run que ainda o passe
+  como arg é recusado com `invalid args`. Os ajustes de um workflow só vêm dos arquivos de configuração (ADR-0001).
+
 - **Um resume não refaz, vazios, o worktree e a branch que alguém removeu.** Se nem o worktree nem a branch do run
   existem mais (o `wf gc`, ou a mão, os removeu) e o run já tinha fatias, o resume falha dizendo isso e mandando começar um
   run novo. Antes ele criava o worktree de novo a partir do commit-base, dava as fatias por prontas, entregava uma árvore
@@ -169,7 +173,7 @@
 - **O `implement-issue` roda `git`, `gh` e os testes por `ctx.exec`.** Nenhum comando dele trava mais o processo: o
   status e o cancelamento respondem durante uma suíte, e cancelar mata o comando na hora. Cada suíte do laço TDD
   (`suite:baseline`, `suite:red:1`, `suite:green:1`, `suite:final`…) e cada chamada de `git` e `gh` é um nó de comando
-  no log do run, com a saída da suíte ao lado. O `git push` e todo `gh` têm teto de tempo (ajuste ou argumento
+  no log do run, com a saída da suíte ao lado. O `git push` e todo `gh` têm teto de tempo (ajuste
   `networkTimeoutSec`, 120 s): um push que espera credencial, ou uma conexão parada, falha a etapa com
   `git push … timed out after Ns`, e o resume entrega. O `git` local segue o `execTimeoutMs` do workflow (10 minutos
   por padrão); o `wf gc` pergunta o estado do PR no `--repo` em que o run entregou. Um erro do `gh` na busca
