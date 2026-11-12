@@ -52,10 +52,14 @@ test("the Runs table and the Board write a cost and a count the same way", () =>
   assert.match(board, /\$12\.35/);
 });
 
-/** A window where the agents' attempts cover 4 runs, and 2 more runs only ran commands (`ctx.exec`): no attempt, still runs. */
+/**
+ * A window where the agents' attempts cover 4 runs, and 2 more runs only ran commands (`ctx.exec`): no attempt, still runs.
+ * `/api/summary` counts `totals.runs` from every run of the window, as it counts `workflows[].runs`: 6. That the two counts
+ * agree is the query's to keep (packages/runtime/test/observability.test.ts); the page shows `totals.runs` as it is served.
+ */
 const WITH_EXEC_ONLY = {
   ...SUMMARY,
-  totals: [{ ...SUMMARY.totals[0], runs: 4 }],
+  totals: [{ ...SUMMARY.totals[0], runs: 6 }],
   workflows: [
     { workflow: "ship-feature", runs: 4, delivered: 2, delivery_rate: 0.5, cost_cents: 198, cost_per_delivery_cents: 99, human_rejected: 0 },
     { workflow: "sleeper", runs: 2, delivered: 2, delivery_rate: 1, cost_cents: 0, cost_per_delivery_cents: 0, human_rejected: 0 },
@@ -71,7 +75,7 @@ test("the Runs KPI counts what the Runs column under it counts: every run in the
 });
 
 test("a window whose only runs ran commands is not empty: its runs are counted", () => {
-  const data = { ...WITH_EXEC_ONLY, totals: [{}], models: [], contextBuckets: [], daily: [], workflows: [WITH_EXEC_ONLY.workflows[1]!] };
+  const data = { ...WITH_EXEC_ONLY, totals: [{ runs: 2 }], models: [], contextBuckets: [], daily: [], workflows: [WITH_EXEC_ONLY.workflows[1]!] };
   const page = textOf(render(Panels, { data, width: 600 }));
   assert.doesNotMatch(page, /No metrics in this window/);
   assert.match(page, /sleeper/);

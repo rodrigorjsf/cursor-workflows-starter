@@ -36,8 +36,23 @@ test("cancelling a frozen run says what the kill did, and keeps the button when 
 test("a run still stopping after SIGTERM says it is cancelling", () => {
   assert.deepEqual(cancelResult({ ok: true, status: "running", note: "SIGTERM sent to process 7, which is still stopping; check with wait_workflow" }, false), {
     step: "done",
-    message: "Cancelling: SIGTERM sent to process 7, which is still stopping; check with wait_workflow",
+    message: "Cancelling: SIGTERM sent to process 7, which is still stopping; this page shows when it has stopped",
   });
+});
+
+test("a note written for an agent or a terminal reads as a sentence for the page: no MCP tool, no job to name", () => {
+  const notGone =
+    "process 4242 had no heartbeat and was killed (SIGKILL) without undoing the step in progress; the run stays resumable; process 4242 has not exited yet, so the cloud agents its run left running were not cancelled: cancel this job again once it is gone";
+  const stopping = "SIGTERM sent to process 7, which is still stopping; check with wait_workflow";
+  for (const [status, note] of [["failed", notGone], ["running", stopping]] as const) {
+    for (const cloudOnly of [false, true]) {
+      const { message } = cancelResult({ ok: true, status, note }, cloudOnly);
+      assert.doesNotMatch(message, /wait_workflow|this job/, message);
+    }
+  }
+  const left = cancelResult({ ok: true, status: "failed", note: notGone }, false);
+  assert.equal(left.step, "failed", "the button stays: the user cancels again");
+  assert.match(left.message, /cancel again once it is gone\.$/);
 });
 
 test("a cancel that worked says what it did", () => {

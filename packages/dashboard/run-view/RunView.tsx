@@ -16,6 +16,8 @@ import { type Connection, useRunEvents } from "./use-run-events.js";
 
 // `group` is a node type of React Flow's own (a grey box): the fork and the join are `junction`s.
 const NODE_TYPES = { work: WorkNode, junction: JunctionNode, start: StartNode, lane: LaneNode };
+/** The Fit View button's name and tooltip say it also hands the view back to the run, which panning (or Tab) takes from it. */
+const FLOW_LABELS = { "controls.fitView.ariaLabel": "Fit View (follow the run again)" };
 
 /** Event types that change what the graph shows: a replay jumps from one of these to the next. */
 const VISIBLE = new Set(["run-start", "run-end", "step-start", "step-end", "exec-start", "exec-end", "group-start", "group-end"]);
@@ -157,6 +159,7 @@ function Canvas({ graph, layout, now, selectedId, onOpen }: { graph: RunGraph; l
       onMoveStart={(event) => {
         if (event) userMoved.current = true; // a gesture of the user; the null event is our own fitView
       }}
+      ariaLabelConfig={FLOW_LABELS}
     >
       <Background gap={20} size={1.2} />
       <Controls

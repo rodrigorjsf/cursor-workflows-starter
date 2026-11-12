@@ -10,6 +10,13 @@ const sentence = (text: string): string => `${text.charAt(0).toUpperCase()}${tex
 /** A note that says something is still left to cancel: an agent the Cursor API did not reach, or a killed process not gone yet. */
 const LEFT_TO_CANCEL = /could not reach cloud agent|has not exited yet/;
 
+/** The runtime's notes also reach an agent (MCP) and a terminal; on the page, its live status and its button take their place. */
+const ON_PAGE: Array<[RegExp, string]> = [
+  [/; check with wait_workflow\b/, "; this page shows when it has stopped"],
+  [/cancel this job again once it is gone/, "cancel again once it is gone"],
+];
+const forPage = (note: string): string => ON_PAGE.reduce((text, [from, to]) => text.replace(from, to), note);
+
 /**
  * What the header says after a cancel: of the run (`cloudOnly` false), or of the cloud agents a dead run left (`cloudOnly`).
  * A refusal that says there is nothing to cancel (the run ended, or its agents were cancelled already) is a done outcome. A
@@ -19,10 +26,11 @@ const LEFT_TO_CANCEL = /could not reach cloud agent|has not exited yet/;
 export function cancelResult(outcome: CancelOutcome, cloudOnly: boolean): { step: "done" | "failed"; message: string } {
   if (!outcome.ok) return { step: /nothing to cancel/.test(outcome.error) ? "done" : "failed", message: sentence(outcome.error) };
   const step = LEFT_TO_CANCEL.test(outcome.note) ? "failed" : "done";
-  if (cloudOnly) return { step, message: sentence(outcome.note.replace(/^the run is not running \(\w+\); /, "")) };
+  const note = forPage(outcome.note);
+  if (cloudOnly) return { step, message: sentence(note.replace(/^the run is not running \(\w+\); /, "")) };
   if (outcome.status === "cancelled") return { step: "done", message: "Cancelled." };
-  if (outcome.status === "running") return { step: "done", message: `Cancelling: ${outcome.note}` };
-  return { step, message: sentence(outcome.note) };
+  if (outcome.status === "running") return { step: "done", message: `Cancelling: ${note}` };
+  return { step, message: sentence(note) };
 }
 
 /**

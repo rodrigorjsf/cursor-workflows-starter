@@ -69,7 +69,8 @@ code { font-size: var(--text-xs); }
 .react-flow__attribution { color: var(--fg-muted); }
 .react-flow__attribution a { color: var(--fg-muted); }
 .react-flow__node { transition: transform 0.25s ease; }
-.react-flow__node:hover { z-index: 10000 !important; }
+/* a step or command with its tooltip open is drawn over its neighbours; never a lane, which would cover its own steps */
+.react-flow__node-work:hover, .react-flow__node-work:focus-within { z-index: 10000 !important; }
 .react-flow__handle { opacity: 0; pointer-events: none; }
 .react-flow__edge-path { stroke: var(--border-strong); stroke-width: 1.5; }
 .react-flow__edge.edge-ok .react-flow__edge-path { stroke: var(--fg-muted); }
