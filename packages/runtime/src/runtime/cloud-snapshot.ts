@@ -6,6 +6,9 @@
 // staged, no branch moves, HEAD stays and the working files are only read. The snapshot holds what `git add -A` would
 // stage (tracked files as they are on disk, and untracked files git does not ignore); the run's own state (`.workflows/`)
 // never goes. The commit's parent is HEAD, so the remote only needs to send the difference.
+//
+// Limit: a branch left behind (the process died between the push and the deletion, or the remote refused the deletion) is not
+// swept by `wf gc` yet: see #44.
 
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
