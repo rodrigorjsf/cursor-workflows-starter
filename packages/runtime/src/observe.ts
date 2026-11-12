@@ -16,6 +16,7 @@ export {
   HEALTH_PATH,
   dashboardCacheDir,
   dashboardPort,
+  dashboardUrl,
   probeDashboard,
   removeInstance,
   writeInstance,
