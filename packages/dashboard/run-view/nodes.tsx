@@ -1,7 +1,7 @@
 // The node components of the Run view: a step or command (with its tooltip), the start, a fork or join, and a lane's band.
 import { Handle, type Node, type NodeProps, Position } from "@xyflow/react";
-import { describeNode } from "./node-details.js";
-import { RowValue } from "./RowValue.js";
+import { NodeRows } from "./NodeRows.js";
+import { describeNode, runsInCloud } from "./node-details.js";
 import { NODE_SIZE } from "./run-layout.js";
 import type { GraphNode, NodeState } from "./run-graph.js";
 
@@ -41,7 +41,7 @@ export function WorkNode({ data, selected }: NodeProps<Node<WorkNodeData, "work"
   const { node, now, onOpen } = data;
   const rows = describeNode(node, now);
   const what = node.kind === "command" ? node.detail.command : node.detail.model;
-  const cloud = node.detail.location === "cloud";
+  const cloud = runsInCloud(node);
   return (
     <div
       className={`work ${node.kind} state-${node.state}${selected ? " selected" : ""}`}
@@ -68,17 +68,7 @@ export function WorkNode({ data, selected }: NodeProps<Node<WorkNodeData, "work"
         )}
       </div>
       {what !== undefined && <div className="sub">{what}</div>}
-      {/* A tooltip with a link in it has to be reachable by the pointer, so it takes the pointer (the others let it through to what is below). */}
-      <dl className={`tip${rows.some((row) => row.href !== undefined) ? " linked" : ""}`} role="tooltip">
-        {rows.map((row) => (
-          <div key={row.name}>
-            <dt>{row.name}</dt>
-            <dd>
-              <RowValue row={row} tabbable={false} />
-            </dd>
-          </div>
-        ))}
-      </dl>
+      <NodeRows rows={rows} className="tip" role="tooltip" tabbable={false} />
     </div>
   );
 }
