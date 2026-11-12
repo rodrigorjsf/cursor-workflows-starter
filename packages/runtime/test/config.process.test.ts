@@ -110,7 +110,7 @@ test("wf config show with an unusable config exits 1 and names the file and the 
   rmSync(repoConfig(), { force: true });
   const unknown = wf("config", "show", "nope");
   assert.equal(unknown.status, 1);
-  assert.match(unknown.stderr, /workflow desconhecido: nope/);
+  assert.ok(unknown.stderr.includes("unknown workflow: nope. Use `wf list`."), unknown.stderr); // the MCP server's wording
 });
 
 async function withServer<T>(use: (client: Client) => Promise<T>): Promise<T> {

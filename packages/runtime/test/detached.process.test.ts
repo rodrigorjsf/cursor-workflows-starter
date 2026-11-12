@@ -160,7 +160,9 @@ test("cancelling a job that already ended changes nothing and says so; an unknow
   const again = wf("cancel", started.jobId);
   assert.equal(again.status, "finished");
   assert.match(again.note, /already ended/);
-  assert.deepEqual(wf("cancel", "nope"), { error: "job não encontrado" });
+  assert.deepEqual(wf("cancel", "nope"), { error: "job not found" }, "the MCP server's wording");
+  assert.deepEqual(wf("wait", "nope", "--timeout", "0"), { error: "job not found" });
+  assert.deepEqual(wf("status", "nope"), { error: "job not found" });
 });
 
 test("cancel does not signal a process that is not the job's (a recycled pid)", async () => {

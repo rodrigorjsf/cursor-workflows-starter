@@ -424,22 +424,30 @@ test("wf init in a directory that does not exist is an error, not a new director
   assert.ok(!existsSync(missing));
 });
 
-test("wf init tells a Claude Code user that CLAUDE.md, not AGENTS.md, is what Claude Code reads, unless one imports the other", () => {
-  const hint = /CLAUDE\.md.*@AGENTS\.md/s;
-
-  const withClaudeMd = emptyRepo();
-  put(join(withClaudeMd, "CLAUDE.md"), "# Guide\n");
-  const a = init(withClaudeMd);
-  assert.equal(a.status, 0, a.stderr);
-  assert.match(a.stderr, hint);
-  assert.equal(read(withClaudeMd, "CLAUDE.md"), "# Guide\n", "init only says it, it does not edit CLAUDE.md");
+test("wf init tells a Claude Code user to import AGENTS.md only when the repo has a Claude Code memory file that does not: without one, Claude Code reads AGENTS.md itself", () => {
+  const hint = /Claude Code reads .*@AGENTS\.md/s;
 
   const withoutClaudeMd = emptyRepo();
-  assert.match(init(withoutClaudeMd).stderr, hint);
+  assert.doesNotMatch(init(withoutClaudeMd).stderr, hint, "no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md: Claude Code reads AGENTS.md");
+
+  for (const file of ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"]) {
+    const repo = emptyRepo();
+    put(join(repo, file), "# Guide\n");
+    const r = init(repo);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, hint, file);
+    assert.ok(r.stderr.includes(file), `the note names ${file}`);
+    assert.equal(read(repo, file), "# Guide\n", "init only says it, it does not edit the file");
+  }
 
   const importing = emptyRepo();
   put(join(importing, "CLAUDE.md"), "@AGENTS.md\n");
   assert.doesNotMatch(init(importing).stderr, hint);
+
+  const importingElsewhere = emptyRepo();
+  put(join(importingElsewhere, "CLAUDE.md"), "# Guide\n");
+  put(join(importingElsewhere, "CLAUDE.local.md"), "@AGENTS.md\n");
+  assert.doesNotMatch(init(importingElsewhere).stderr, hint, "one memory file that imports AGENTS.md is enough");
 
   const linked = emptyRepo();
   put(join(linked, "CLAUDE.md"), "# Guide\n");
