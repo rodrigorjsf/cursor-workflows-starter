@@ -1,16 +1,20 @@
-// The dashboard's HTTP server: a read-only JSON API over the runs of every repo and the metrics database, plus the web app
-// that draws them (built at start, see app-bundle.ts).
+// The dashboard's HTTP server: a JSON API over the runs of every repo and the metrics database, plus the web app that draws
+// them (built at start, see app-bundle.ts). It reads, with one action: cancelling a run.
 //
 // - It listens on 127.0.0.1 only and refuses any `Host` that is not a loopback name (DNS rebinding protection). It sends
 //   no CORS headers, so another site's script cannot read it.
+// - The one POST is `/api/runs/<runId>/cancel`. It needs the CSRF token (`/api/csrf`, one random value per dashboard process)
+//   in the `X-CSRF-Token` header, which only a script that can read an answer of this origin has, and it refuses a request
+//   that says it comes from another origin. It ends in `cancelRun`, which is `wf cancel`'s path (`cancelJob`).
 // - It reads: the global runs index and each run's event log (`@cursor-workflows/runtime/observe`), and the metrics
 //   database, opened read-only the first time it exists. A machine with no history gets empty states, not an error.
 // - A run's event log is also served live: `/api/runs/<runId>/events` is a Server-Sent Events stream that replays the log and
 //   then follows it as the run appends, and `/api/runs/<runId>/steps/<stepId>/content` is one step's content.
 // - The Board is `/api/board`: the runs placed in the columns of their workflow, with the state of the pull requests their cards link to.
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
-import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, type RunTail, defaultDbPath, listRuns, openDb, readRun, readStepContent, summary, tailRun } from "@cursor-workflows/runtime/observe";
+import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, type RunTail, cancelRun, defaultDbPath, listRuns, openDb, readRun, readStepContent, summary, tailRun } from "@cursor-workflows/runtime/observe";
 import { type AppBundle, buildApp } from "./app-bundle.js";
 import { buildBoards } from "./board.js";
 import { PrStates } from "./pr-state.js";
@@ -35,9 +39,12 @@ export interface DashboardOptions {
   port: number;
   /** How long the state of an open pull request is kept before `gh` is asked again, in milliseconds (a merged or closed one is kept 120 times as long). Default 30 seconds. */
   prStateCacheMs?: number;
+  /** How long a cancel waits for the job to stop before it answers that the job is still stopping, in milliseconds. Default 20 seconds, what `cancel_workflow` waits. */
+  cancelTimeoutMs?: number;
 }
 
 const DEFAULT_PR_STATE_CACHE_MS = 30_000;
+const DEFAULT_CANCEL_TIMEOUT_MS = 20_000;
 
 /** The page the app runs in. Everything it loads is on this server, so the policy allows only this origin and no inline code. */
 const PAGE_POLICY = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -148,6 +155,28 @@ function stream(req: IncomingMessage, res: ServerResponse, tail: RunTail): void 
   res.once("close", () => clearInterval(timer));
 }
 
+/** Whether `candidate` is the CSRF token, compared in constant time. */
+function sameToken(candidate: string | string[] | undefined, token: string): boolean {
+  if (typeof candidate !== "string") return false;
+  const a = Buffer.from(candidate);
+  const b = Buffer.from(token);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/** Whether a request that carries `Origin` or `Sec-Fetch-Site` comes from a page of this dashboard (a request with neither is a script or a tool, which the token covers). */
+function sameOrigin(req: IncomingMessage): boolean {
+  const site = req.headers["sec-fetch-site"];
+  if (site !== undefined && site !== "same-origin" && site !== "none") return false;
+  const origin = req.headers.origin;
+  if (origin === undefined) return true;
+  try {
+    const { protocol, hostname, port } = new URL(origin);
+    return protocol === "http:" && ALLOWED_HOSTS.has(hostname) && port === String(req.socket.localPort);
+  } catch {
+    return false; // `null`, or not an origin
+  }
+}
+
 export async function startDashboard(options: DashboardOptions): Promise<DashboardServer> {
   const app = await buildApp();
   const page = appPage(app);
@@ -157,18 +186,44 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
   ]);
   const metrics = new MetricsSource();
   const prStates = new PrStates(options.prStateCacheMs ?? DEFAULT_PR_STATE_CACHE_MS);
+  const csrfToken = randomBytes(32).toString("hex");
+  const cancelTimeoutMs = options.cancelTimeoutMs ?? DEFAULT_CANCEL_TIMEOUT_MS;
+
+  /** The cancel action: the token and the origin first, then `cancelRun`, and an answer that says what it did. */
+  async function cancel(req: IncomingMessage, res: ServerResponse, runId: string): Promise<void> {
+    if (!sameOrigin(req) || !sameToken(req.headers["x-csrf-token"], csrfToken)) {
+      return send(res, 403, { error: "csrf token missing or wrong: reload the page" });
+    }
+    const outcome = await cancelRun(runId, cancelTimeoutMs);
+    switch (outcome.kind) {
+      case "unknown-run":
+        return send(res, 404, { error: "run not found" });
+      case "not-running":
+        return send(res, 409, { error: `the run is not running (${outcome.status}); nothing to cancel` });
+      case "no-job":
+        return send(res, 409, { error: "the run was not started as a job (wf run in a terminal), so the dashboard cannot stop it: press Ctrl-C in that terminal" });
+      case "cancelled": {
+        const { jobId, runId: id, status, note } = outcome.result;
+        return send(res, 200, { jobId, runId: id, status, note });
+      }
+    }
+  }
 
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!hostAllowed(req.headers.host)) {
       res.writeHead(403, { "content-type": "text/plain; charset=utf-8" }).end("host not allowed");
       return;
     }
+    const url = new URL(req.url ?? "/", `http://${DASHBOARD_HOST}`);
+    if (req.method === "POST") {
+      const target = /^\/api\/runs\/([^/]+)\/cancel$/.exec(url.pathname);
+      if (target) return cancel(req, res, decodeSegment(target[1]!));
+    }
     if (req.method !== "GET" && req.method !== "HEAD") {
       res.setHeader("allow", "GET, HEAD");
       send(res, 405, { error: "method not allowed" });
       return;
     }
-    const url = new URL(req.url ?? "/", `http://${DASHBOARD_HOST}`);
     switch (url.pathname) {
       case "/":
         res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-security-policy": PAGE_POLICY, "cache-control": "no-cache" });
@@ -176,6 +231,9 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
         return;
       case HEALTH_PATH:
         send(res, 200, { app: DASHBOARD_APP, pid: process.pid });
+        return;
+      case "/api/csrf":
+        send(res, 200, { csrfToken });
         return;
       case "/api/runs":
         send(res, 200, { runs: listRuns(clamped(url.searchParams.get("limit"), 200, 1, 1000)) });
@@ -231,6 +289,10 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
         if (step) {
           const content = readStepContent(runId, decodeSegment(step[1]!));
           return content ? send(res, 200, content) : send(res, 404, { error: "run or step not found" });
+        }
+        if (rest === "cancel") {
+          res.setHeader("allow", "POST");
+          return send(res, 405, { error: "method not allowed" });
         }
         send(res, 404, { error: "not found" });
       }

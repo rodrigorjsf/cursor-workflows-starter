@@ -47,6 +47,8 @@ export interface FixtureRun {
   events?: Array<{ type: string } & Record<string, unknown>>;
   /** Write the run's lock as held by this pid: a process is executing the run. */
   lockedBy?: number;
+  /** The job (`wf start`, `start_workflow`) the `run-start` names as the one that started this execution. */
+  jobId?: string;
   /** Register the run in the global index but leave its directory out. */
   withoutLog?: boolean;
 }
@@ -74,7 +76,7 @@ export function writeRun(home: string, repo: string, run: FixtureRun): void {
   const file = logPath(repo, run.runId);
   const dir = join(file, "..");
   mkdirSync(dir, { recursive: true });
-  const events = [{ type: "run-start", workflow: run.workflow, ...(run.phases ? { phases: run.phases } : {}) }, ...(run.events ?? [])];
+  const events = [{ type: "run-start", workflow: run.workflow, ...(run.phases ? { phases: run.phases } : {}), ...(run.jobId ? { jobId: run.jobId } : {}) }, ...(run.events ?? [])];
   writeFileSync(file, events.map((e, i) => eventLine(run.runId, at(i), e)).join("\n") + "\n");
   if (run.lockedBy !== undefined) writeFileSync(join(dir, "run.lock"), JSON.stringify({ pid: run.lockedBy, token: "fixture", startedAt: run.startedAt, runId: run.runId }));
 }
@@ -87,11 +89,11 @@ export interface Reply {
   json: any;
 }
 
-/** One request to `url` (the server's origin); `host` replaces the Host header, `method` the verb. */
-export function http(url: string, path: string, opts: { host?: string; method?: string } = {}): Promise<Reply> {
+/** One request to `url` (the server's origin); `host` replaces the Host header, `method` the verb, `headers` adds request headers. */
+export function http(url: string, path: string, opts: { host?: string; method?: string; headers?: Record<string, string> } = {}): Promise<Reply> {
   const target = new URL(path, url);
   return new Promise((resolve, reject) => {
-    const req = request({ hostname: target.hostname, port: target.port, path: target.pathname + target.search, method: opts.method ?? "GET", headers: opts.host === undefined ? {} : { host: opts.host } }, (res) => {
+    const req = request({ hostname: target.hostname, port: target.port, path: target.pathname + target.search, method: opts.method ?? "GET", headers: { ...(opts.host === undefined ? {} : { host: opts.host }), ...opts.headers } }, (res) => {
       const chunks: Buffer[] = [];
       res.on("data", (c: Buffer) => chunks.push(c));
       res.on("end", () => {
