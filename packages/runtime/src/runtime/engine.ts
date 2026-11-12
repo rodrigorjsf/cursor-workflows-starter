@@ -930,6 +930,9 @@ async function executeRun<A, R>(
         cached: false,
         location,
         chargedCents: 0,
+        // Taken over, the agent's whole cost is the new attempt's: a reconcile must not charge it here again. Replaced, the
+        // dead agent's cost is still owed to this attempt, and a reconcile fills it in.
+        costFinal: sameAgent,
         model: o.model?.id,
         modelKey: mKey,
         usage: sameAgent || counted.totalTokens === 0 ? undefined : counted,

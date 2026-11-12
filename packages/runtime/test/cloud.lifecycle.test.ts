@@ -11,6 +11,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { calls, cloudRunsOf, costConfig, finishCloudRun, forgetCloudAgent, killCloudClients, lookups, resetCloud, resumes, script, stats } from "@cursor/sdk";
 import { createCloudBackend } from "../src/runtime/backend-cloud.js";
+import { openDb } from "../src/observability/db.js";
+import { reconcile } from "../src/observability/queries.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import type { WorkflowEvent } from "../src/runtime/events.js";
 import { abortOpenRuns, eventLogPath, readEventLog, runDirIn } from "../src/runtime/run-store.js";
@@ -120,6 +122,31 @@ test("a resume after a crash reattaches to the cloud agent that is still running
     assert.deepEqual([ended!.ok, ended!.agentId, ended!.attemptId === crashed.agent.attemptId], [true, "bc-1", false]);
     assert.ok(second.some((e) => e.type === "warning" && /reattached to cloud agent bc-1/.test(e.message)), "and the user is told");
   } finally {
+    await crashed.end();
+  }
+});
+
+test("a reattached cloud agent is charged once in the metrics database, also after a reconcile: the dead attempt it closed is final at no cost", async () => {
+  const crashed = await crashWhileTheAgentRuns("life-cost");
+  const dbPath = join(root, "metrics.db");
+  try {
+    setTimeout(() => finishCloudRun("bc-1", { result: "from the survivor" }), 60);
+    process.env.WF_METRICS = "on";
+    const r = await runWorkflow(reviewStep(), {}, { cwd, runId: "life-cost", metricsDb: dbPath });
+    process.env.WF_METRICS = "off";
+    assert.equal(r.status, "finished", r.error);
+
+    const db = await openDb(dbPath);
+    try {
+      const charged = () => (db.prepare("SELECT SUM(charged_cents) AS cents FROM attempts WHERE agent_id = 'bc-1'").get() as { cents: number }).cents;
+      assert.equal(charged(), 7, "the attempt that took the agent over pays for its whole usage");
+      assert.deepEqual(await reconcile(db), { updated: 0, failed: 0 }, "nothing is left for a reconcile to charge");
+      assert.equal(charged(), 7, "so the agent is still paid once");
+    } finally {
+      db.close();
+    }
+  } finally {
+    process.env.WF_METRICS = "off";
     await crashed.end();
   }
 });
