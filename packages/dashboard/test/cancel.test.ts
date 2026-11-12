@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { type DashboardServer, startDashboard } from "../src/server.js";
+import { cloudRunsOf, resetCloud, seedCloudAgent } from "../../runtime/test/fake-sdk.js";
 import { type Reply, type Sandbox, http, logPath, sandbox, writeRun } from "./support.js";
 
 let box: Sandbox;
@@ -234,6 +235,33 @@ test("cancel does not bring back the state folder of a repo that is gone", async
   const reply = await cancel("smoke-aaaa0007", await withToken());
   assert.ok(reply.status === 404 || reply.status === 409, `${reply.status} ${reply.text}`);
   assert.equal(existsSync(join(gone, ".workflows")), false);
+});
+
+test("the Run view's cancel of a run whose process died reaches the cloud agents it left: the API says failed with the resume hint, the cancel answers with what it cancelled, then that nothing is left", async () => {
+  resetCloud();
+  const repo = box.repo("repo");
+  seedCloudAgent("bc-dead1", [{ status: "running" }]);
+  const ref = { stepId: "s1", parentId: null, groupId: null, attemptId: "s1#1" };
+  writeRun(box.home, repo, {
+    runId: "ship-dead0001",
+    workflow: "ship",
+    startedAt: START,
+    events: [{ type: "phase", title: "Build" }, { type: "step-start", ...ref, stepKey: "s1:k", label: "implement", cached: false, attempt: 1, model: "composer-2.5", location: "cloud" }, { type: "cloud-agent", ...ref, agentId: "bc-dead1" }],
+  });
+
+  const detail = (await http(dash.url, "/api/runs/ship-dead0001")).json;
+  assert.equal(detail.status, "failed", "no process holds the run: it is failed, as the Board and the Runs table say");
+  assert.match(detail.error, /resumeRunId="ship-dead0001"/);
+
+  const first = await cancel("ship-dead0001", await withToken());
+  assert.equal(first.status, 200, first.text);
+  assert.match(first.json.note, /bc-dead1/);
+  assert.deepEqual(cloudRunsOf("bc-dead1").map((r) => r.status), ["cancelled"]);
+
+  const again = await cancel("ship-dead0001", await withToken());
+  assert.equal(again.status, 409);
+  assert.match(again.json.error, /nothing to cancel/);
+  resetCloud();
 });
 
 test("only the cancel route accepts a POST; the cancel route accepts nothing else", async () => {
