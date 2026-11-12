@@ -1,5 +1,6 @@
 // Testes offline da observabilidade (banco SQLite temporário, fake SDK): `npm test`.
 import assert from "node:assert/strict";
+import "./isolate-home.js";
 import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

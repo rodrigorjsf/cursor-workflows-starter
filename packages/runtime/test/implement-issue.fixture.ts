@@ -3,6 +3,7 @@
 // verdade como comando de teste. Cada arquivo de teste chama `beforeEach(setup)` e `afterEach(teardown)`.
 process.env.WF_METRICS = "off";
 import { execFileSync } from "node:child_process";
+import "./isolate-home.js";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

@@ -7,7 +7,7 @@
 //  - Nada de conteúdo: prompts só como hash e tamanho (texto só com WF_METRICS_STORE_PROMPTS=1).
 
 import { randomUUID } from "node:crypto";
-import type { WorkflowEvent } from "../runtime/engine.js";
+import type { WorkflowEvent } from "../runtime/events.js";
 import { type Db, openDb, write } from "./db.js";
 
 const DELIVERED = new Set(["done", "delivered", "ok", "success", "succeeded"]);

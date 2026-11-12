@@ -11,9 +11,10 @@
 //
 // STATUS: verificado contra a API real num plano Premium em 2026-11-11 (docs/research/verificacoes-locais.md).
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   Agent,
@@ -28,11 +29,15 @@ import {
   type SettingSource,
 } from "@cursor/sdk";
 import { Ajv } from "ajv";
-import { Journal } from "./journal.js";
+import { EVENT_SCHEMA_VERSION, type ErrorKind, type NewEvent, type StepRef, type WorkflowEvent } from "./events.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
+import { RunLockedError, RunStore } from "./run-store.js";
+import { registerRun } from "./runs-index.js";
 import { stateDir as runtimeStateDir } from "./state.js";
 import { type Capture, SUBMIT_TOOL, repromptMessage, schemaInstruction, submitResultTool } from "./structured.js";
 import type { AgentCallOptions, Budget, UsageTotals, WorkflowContext, WorkflowDefinition } from "./workflow.js";
+
+export type { ErrorKind, TurnUsage, WorkflowEvent } from "./events.js";
 
 /** Erro que encerra o run inteiro, inclusive dentro de parallel/pipeline (não vira null). */
 export class FatalRunError extends Error {}
@@ -94,83 +99,6 @@ export interface RunOptions {
    */
   metricsDb?: string | false;
 }
-
-/** Tokens de um turno do agente (evento `turn-ended` do SDK: soma de todos os passos do turno). */
-export interface TurnUsage {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  reasoningTokens?: number;
-}
-
-export type ErrorKind = "timeout" | "run-error" | "schema" | "rate-limit" | "exception";
-
-export type WorkflowEvent =
-  | { type: "log"; message: string }
-  | { type: "phase"; title: string }
-  | {
-      type: "run-start";
-      runId: string;
-      workflow: string;
-      /** Hash do código e da meta do workflow: compare métricas só entre versões iguais. */
-      workflowHash: string;
-      argsHash: string;
-      repo: { name: string; hash: string };
-    }
-  | { type: "run-end"; runId: string; status: "finished" | "failed"; outcomeStatus?: string; error?: string }
-  | {
-      type: "step-start";
-      attemptId: string;
-      stepKey: string;
-      label: string;
-      phase?: string;
-      model?: string;
-      modelKey?: string;
-      modelParams?: ModelSelection["params"];
-      attempt: number;
-      tools?: string[];
-      settingSources: SettingSource[];
-      promptHash: string;
-      promptChars: number;
-      /** Só quando WF_METRICS_STORE_PROMPTS=1. */
-      prompt?: string;
-    }
-  /** Um turno do agente terminou (pode ter vários passos/chamadas ao modelo). */
-  | { type: "turn"; attemptId: string; idx: number; steps: number; usage: TurnUsage }
-  | {
-      type: "step-end";
-      attemptId: string;
-      stepKey: string;
-      label: string;
-      phase?: string;
-      attempt?: number;
-      ok: boolean;
-      /** De onde veio o resultado sem chamar a API: journal do run (resume) ou memo entre runs. */
-      cached: false | "journal" | "memo";
-      chargedCents: number;
-      rawCents?: number;
-      /** false = o Cursor ainda não tinha reportado custo; `wf metrics reconcile` completa depois. */
-      costFinal?: boolean;
-      model?: string;
-      /** `RunResult.model.id`: o ID que o Cursor resolveu (alias → ID do catálogo). Com `default` (Auto), continua `default`. */
-      resolvedModel?: string;
-      modelKey?: string;
-      usage?: UsageTotals;
-      reasoningTokens?: number;
-      errorKind?: ErrorKind;
-      error?: string;
-      schemaReprompts?: number;
-      turns?: number;
-      steps?: number;
-      toolCalls?: Record<string, number>;
-      summaries?: number;
-      agentId?: string;
-      usageRuns?: RunUsage[];
-      durationMs?: number;
-    }
-  | { type: "metric"; name: string; value: number | string }
-  | { type: "warning"; message: string };
 
 export interface RunOutcome<R> {
   runId: string;
@@ -250,12 +178,62 @@ class Semaphore {
   }
 }
 
+/** Id curto e estável de uma etapa: vem da chave do journal (hash do prompt e das opções + nº da ocorrência). */
+function stepIdOf(journalKey: string): string {
+  const [hash = "", occurrence = "0"] = journalKey.split(":");
+  return `s-${hash.slice(0, 12)}.${occurrence}`;
+}
+
+/**
+ * Onde o código do workflow está na estrutura do run. Cada ramo de um `parallel`/`pipeline` tem o seu `Flow`, ligado
+ * ao código que o executa por AsyncLocalStorage; assim `agent()` sabe de que nó continua sem o workflow dizer.
+ */
+interface Flow {
+  /** O grupo mais interno que contém este fluxo. */
+  groupId: string | null;
+  /** O último nó (etapa ou grupo) que terminou neste fluxo: de onde o próximo continua. */
+  last: string | null;
+  /** Grupos já abertos neste fluxo: numera os ids (`g1`, `g2`, …), que não dependem do tempo. */
+  groups: number;
+  /** Prefixo dos ids dos grupos abertos aqui: o caminho até este ramo (`g1.0.`). */
+  prefix: string;
+}
+
 export async function runWorkflow<A, R>(
   def: WorkflowDefinition<A, R>,
   args: A,
   opts: RunOptions,
 ): Promise<RunOutcome<R>> {
   const runId = opts.runId ?? newRunId(def.meta.name);
+  const refused = (error: string): RunOutcome<R> => ({ runId, status: "failed", error, spentCents: 0, chargedCents: 0, spentTokens: 0, usage: withRatio(emptyUsage()) });
+
+  if (def.meta.argsSchema) {
+    const validate = ajv.compile(def.meta.argsSchema);
+    if (!validate(args)) return refused(`args inválidos: ${ajv.errorsText(validate.errors)}`);
+  }
+
+  let store: RunStore;
+  try {
+    store = RunStore.open(join(opts.stateDir ?? runtimeStateDir(opts.cwd, "runs"), runId), runId);
+  } catch (err) {
+    if (err instanceof RunLockedError) return refused(err.message); // nothing is written: the run belongs to the other execution
+    throw err;
+  }
+  try {
+    return await executeRun(def, args, opts, runId, store);
+  } finally {
+    store.close();
+  }
+}
+
+/** O run em si, com o estado do run (`store`) já aberto. */
+async function executeRun<A, R>(
+  def: WorkflowDefinition<A, R>,
+  args: A,
+  opts: RunOptions,
+  runId: string,
+  store: RunStore,
+): Promise<RunOutcome<R>> {
   // spentCents = Σ max(bruto, cobrado). O cobrado sozinho é 0 para uso incluído no plano e não protegeria nada.
   let spentCents = 0;
   let chargedCents = 0;
@@ -271,48 +249,89 @@ export async function runWorkflow<A, R>(
     usage: withRatio(totals),
   });
 
-  if (def.meta.argsSchema) {
-    const validate = ajv.compile(def.meta.argsSchema);
-    if (!validate(args)) {
-      return outcome("failed", { error: `args inválidos: ${ajv.errorsText(validate.errors)}` });
-    }
-  }
-
   // Métricas: o recorder é carregado só se ligado (importa node:sqlite sob demanda).
   let recorder: { record(e: WorkflowEvent): void; close(): void } | undefined;
+  const stamp = (e: NewEvent): WorkflowEvent => ({ v: EVENT_SCHEMA_VERSION, ts: new Date().toISOString(), runId, ...e }) as WorkflowEvent;
+  let logFailed = false;
+  const append = (event: WorkflowEvent) => {
+    try {
+      store.appendEvent(event);
+    } catch (err) {
+      if (logFailed) return;
+      logFailed = true; // um aviso só: o log é a fonte de verdade, mas um disco cheio não deve derrubar o run
+      opts.onEvent?.(stamp({ type: "warning", message: `falha ao gravar o log de eventos: ${err instanceof Error ? err.message : String(err)}` }));
+    }
+  };
+  const emit = (e: NewEvent) => {
+    const event = stamp(e);
+    append(event);
+    try {
+      recorder?.record(event);
+    } catch (err) {
+      const warning = stamp({ type: "warning", message: `falha ao gravar métrica: ${err instanceof Error ? err.message : String(err)}` });
+      append(warning);
+      opts.onEvent?.(warning);
+    }
+    opts.onEvent?.(event);
+  };
   if (opts.metricsDb !== false && process.env.WF_METRICS !== "off") {
     try {
       const { createRecorder } = await import("../observability/recorder.js");
       recorder = await createRecorder(opts.metricsDb || undefined);
     } catch (err) {
-      opts.onEvent?.({ type: "warning", message: `métricas desligadas: ${err instanceof Error ? err.message : String(err)}` });
+      emit({ type: "warning", message: `métricas desligadas: ${err instanceof Error ? err.message : String(err)}` });
     }
   }
-  const emit = (e: WorkflowEvent) => {
-    try {
-      recorder?.record(e);
-    } catch (err) {
-      opts.onEvent?.({ type: "warning", message: `falha ao gravar métrica: ${err instanceof Error ? err.message : String(err)}` });
-    }
-    opts.onEvent?.(e);
-  };
   const storePrompts = process.env.WF_METRICS_STORE_PROMPTS === "1";
+  const workflowHash = sha(JSON.stringify(def.meta) + JSON.stringify(def.defaults ?? {}) + def.run.toString()).slice(0, 16);
+  const startedAt = new Date().toISOString();
   emit({
     type: "run-start",
-    runId,
     workflow: def.meta.name,
-    workflowHash: sha(JSON.stringify(def.meta) + JSON.stringify(def.defaults ?? {}) + def.run.toString()).slice(0, 16),
+    workflowHash,
     argsHash: sha(JSON.stringify(args ?? null)).slice(0, 16),
     repo: repoIdentity(opts.cwd),
   });
+  if (store.previousStart && store.previousStart.workflowHash !== workflowHash) {
+    emit({
+      type: "warning",
+      message: `o código do workflow mudou desde a execução anterior deste run (${store.previousStart.workflowHash} → ${workflowHash}): o run retomado mistura versões`,
+    });
+  }
+  if (!store.previousStart) {
+    // First execution of this run: register it where tools outside the repo can find it. A resume is the same run.
+    try {
+      registerRun({ runId, repo: resolve(opts.cwd), workflow: def.meta.name, startedAt });
+    } catch (err) {
+      emit({ type: "warning", message: `não foi possível registrar o run no índice global: ${err instanceof Error ? err.message : String(err)}` });
+    }
+  }
+  if (store.tornTail.events) emit({ type: "warning", message: "a última linha do log de eventos estava incompleta (queda no meio de uma gravação): ignorada" });
+  if (store.tornTail.journal) emit({ type: "warning", message: "a última linha do journal estava incompleta (queda no meio de uma gravação): a etapa dela roda de novo" });
 
   process.env[INSIDE_WORKFLOW_ENV] = "1";
-  const runsDir = opts.stateDir ?? runtimeStateDir(opts.cwd, "runs");
-  const journal = new Journal(join(runsDir, runId, "journal.jsonl"));
+  const journal = store.journal;
   const memo = new MemoStore(opts.cwd);
   const sem = new Semaphore(opts.concurrency ?? 4);
   const settingSources = opts.settingSources ?? ["project", "team", "mdm"];
   let currentPhase: string | undefined;
+  const flows = new AsyncLocalStorage<Flow>();
+  const rootFlow: Flow = { groupId: null, last: null, groups: 0, prefix: "" };
+  const currentFlow = () => flows.getStore() ?? rootFlow;
+
+  /** Abre um parallel/pipeline: emite o group-start e devolve o fluxo de cada ramo e o fechamento do grupo. */
+  function openGroup(kind: "parallel" | "pipeline", size: number): { branch(index: number): Flow; close(ok: boolean): void } {
+    const outer = currentFlow();
+    const groupId = `${outer.prefix}g${++outer.groups}`;
+    emit({ type: "group-start", groupId, kind, size, parentId: outer.last, parentGroupId: outer.groupId });
+    return {
+      branch: (index) => ({ groupId, last: groupId, groups: 0, prefix: `${groupId}.${index}.` }),
+      close(ok) {
+        emit({ type: "group-end", groupId, ok });
+        outer.last = groupId; // o que vem depois do grupo continua dele
+      },
+    };
+  }
 
   const budget: Budget = {
     maxCents: (opts.maxCents === undefined ? def.budget?.maxCents : opts.maxCents) ?? null,
@@ -420,7 +439,24 @@ export async function runWorkflow<A, R>(
     }
   }
 
+  /** O que `runStep` precisa saber da chamada de `agent()`, calculado de forma síncrona antes de qualquer await. */
+  interface StepContext {
+    o: AgentCallOptions;
+    promptHash: string;
+    label: string;
+    phase: string | undefined;
+    sources: SettingSource[];
+    mKey: string | undefined;
+    fingerprint: Record<string, unknown>;
+    /** Chave do journal. */
+    key: string;
+    ref: StepRef;
+    /** Algum step-start já saiu: só então a etapa vira o "último nó" do fluxo. */
+    started: boolean;
+  }
+
   async function agentCall<T>(prompt: string, callOpts: AgentCallOptions = {}): Promise<T> {
+    const flow = currentFlow();
     const o: AgentCallOptions = { ...def.defaults, ...callOpts };
     const promptHash = sha(prompt).slice(0, 16);
     // Label padrão é um hash, não o começo do prompt: nada de conteúdo de issue/código nas métricas e logs.
@@ -439,11 +475,44 @@ export async function runWorkflow<A, R>(
     };
     // Chave calculada de forma síncrona, antes de qualquer await.
     const key = journal.keyFor(prompt, fingerprint);
-    const cachedEnd = (from: "journal" | "memo") =>
-      emit({ type: "step-end", attemptId: randomUUID(), stepKey: key, label, phase, ok: true, cached: from, chargedCents: 0, model: o.model?.id, modelKey: mKey });
+    const ref: StepRef = { stepId: stepIdOf(key), parentId: flow.last, groupId: flow.groupId };
+    const step: StepContext = { o, promptHash, label, phase, sources, mKey, fingerprint, key, ref, started: false };
+    try {
+      return await runStep<T>(prompt, step);
+    } finally {
+      if (step.started) flow.last = ref.stepId; // o que vier depois, neste fluxo, continua desta etapa
+    }
+  }
+
+  async function runStep<T>(prompt: string, step: StepContext): Promise<T> {
+    const { o, promptHash, label, phase, sources, mKey, fingerprint, key, ref } = step;
+    /** Etapa servida sem chamar a API: o step-start também sai, para a etapa existir no log como qualquer outra. */
+    const servedFrom = (from: "journal" | "memo") => {
+      const attemptId = randomUUID();
+      step.started = true;
+      emit({
+        type: "step-start",
+        ...ref,
+        attemptId,
+        stepKey: key,
+        label,
+        phase,
+        cached: from,
+        model: o.model?.id,
+        modelKey: mKey,
+        modelParams: o.model?.params,
+        attempt: 1,
+        tools: o.tools,
+        settingSources: sources,
+        promptHash,
+        promptChars: prompt.length,
+        prompt: storePrompts ? prompt : undefined,
+      });
+      emit({ type: "step-end", ...ref, attemptId, stepKey: key, label, phase, ok: true, cached: from, chargedCents: 0, model: o.model?.id, modelKey: mKey });
+    };
     const cached = journal.get(key);
     if (cached) {
-      cachedEnd("journal");
+      servedFrom("journal");
       return cached.result as T;
     }
     let memoKey: string | undefined;
@@ -457,7 +526,7 @@ export async function runWorkflow<A, R>(
         const hit = memo.get(memoKey);
         if (hit !== undefined) {
           journal.record({ key, label, model: o.model?.id, result: hit, chargedCents: 0, totalTokens: 0 });
-          cachedEnd("memo");
+          servedFrom("memo");
           return hit as T;
         }
       } else {
@@ -478,12 +547,15 @@ export async function runWorkflow<A, R>(
         assertBudget();
         const attemptId = randomUUID();
         const startedAt = Date.now();
+        step.started = true;
         emit({
           type: "step-start",
+          ...ref,
           attemptId,
           stepKey: key,
           label,
           phase,
+          cached: false,
           model: model.id,
           modelKey: mKey,
           modelParams: model.params,
@@ -515,7 +587,7 @@ export async function runWorkflow<A, R>(
                 break;
               case "turn-ended":
                 if (update.usage) {
-                  emit({ type: "turn", attemptId, idx: c.turns, steps: c.stepsInTurn, usage: update.usage });
+                  emit({ type: "turn", ...ref, attemptId, idx: c.turns, steps: c.stepsInTurn, usage: update.usage });
                   const t = update.usage;
                   addUsage(turnUsage, { ...t, totalTokens: t.inputTokens + t.outputTokens }); // o cache já está no input
                   if (t.reasoningTokens) turnUsage.reasoningTokens = (turnUsage.reasoningTokens ?? 0) + t.reasoningTokens;
@@ -534,6 +606,7 @@ export async function runWorkflow<A, R>(
         const endEvent = (ok: boolean) =>
           emit({
             type: "step-end",
+            ...ref,
             attemptId,
             stepKey: key,
             label,
@@ -641,30 +714,50 @@ export async function runWorkflow<A, R>(
     budget,
     agent: agentCall,
     async parallel(thunks) {
-      return Promise.all(
-        thunks.map((t) =>
-          t().catch((err: unknown) => {
-            if (err instanceof FatalRunError) throw err; // teto de custo ou conta sem acesso aborta o workflow inteiro
-            emit({ type: "warning", message: `parallel: ${err instanceof Error ? err.message : String(err)}` });
-            return null;
-          }),
-        ),
-      );
+      const group = openGroup("parallel", thunks.length);
+      let ok = false;
+      try {
+        const results = await Promise.all(
+          thunks.map((t, i) =>
+            flows
+              .run(group.branch(i), t)
+              .catch((err: unknown) => {
+                if (err instanceof FatalRunError) throw err; // teto de custo ou conta sem acesso aborta o workflow inteiro
+                emit({ type: "warning", message: `parallel: ${err instanceof Error ? err.message : String(err)}` });
+                return null;
+              }),
+          ),
+        );
+        ok = true;
+        return results;
+      } finally {
+        group.close(ok);
+      }
     },
     async pipeline(items, ...stages) {
-      return Promise.all(
-        items.map(async (item, index) => {
-          let prev: unknown = item;
-          try {
-            for (const stage of stages) prev = await stage(prev, item, index);
-            return prev;
-          } catch (err) {
-            if (err instanceof FatalRunError) throw err;
-            emit({ type: "warning", message: `pipeline item ${index}: ${err instanceof Error ? err.message : String(err)}` });
-            return null;
-          }
-        }),
-      );
+      const group = openGroup("pipeline", items.length);
+      let ok = false;
+      try {
+        const results = await Promise.all(
+          items.map((item, index) =>
+            flows.run(group.branch(index), async () => {
+              let prev: unknown = item;
+              try {
+                for (const stage of stages) prev = await stage(prev, item, index);
+                return prev;
+              } catch (err) {
+                if (err instanceof FatalRunError) throw err;
+                emit({ type: "warning", message: `pipeline item ${index}: ${err instanceof Error ? err.message : String(err)}` });
+                return null;
+              }
+            }),
+          ),
+        );
+        ok = true;
+        return results;
+      } finally {
+        group.close(ok);
+      }
     },
     phase(title) {
       currentPhase = title;
@@ -680,14 +773,13 @@ export async function runWorkflow<A, R>(
 
   let final: RunOutcome<R>;
   try {
-    final = outcome("finished", { result: await def.run(ctx) });
+    final = outcome("finished", { result: await flows.run(rootFlow, () => def.run(ctx)) });
   } catch (err) {
     final = outcome("failed", { error: err instanceof Error ? err.message : String(err) });
   }
   const r = final.result as { status?: unknown } | undefined;
   emit({
     type: "run-end",
-    runId,
     status: final.status,
     outcomeStatus: r && typeof r === "object" && typeof r.status === "string" ? r.status : undefined,
     error: final.error,

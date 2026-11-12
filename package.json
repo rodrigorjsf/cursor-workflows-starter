@@ -18,7 +18,8 @@
     "models": "tsx packages/runtime/src/cli.ts models",
     "test": "npm run test --workspaces --if-present && tsx --test test/*.test.ts",
     "dash": "tsx packages/runtime/src/observability/dashboard.ts",
-    "stats": "tsx packages/runtime/src/cli.ts stats"
+    "stats": "tsx packages/runtime/src/cli.ts stats",
+    "docs:events": "tsx scripts/events-reference.ts"
   },
   "devDependencies": {
     "@types/node": "^22.13.0",

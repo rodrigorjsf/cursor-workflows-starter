@@ -34,6 +34,22 @@ a failure there.
   leaking prompt content and also makes per-step analysis unreadable.
 - To validate delivery later (the PR accepted or rejected): `wf metrics mark <runId> accepted|rejected`.
 
+## The run's event log
+
+Every event of a run is appended to `<repo>/.workflows/runs/<runId>/events.jsonl`, one JSON object per line. The log is
+the run's source of truth, and a resume appends to the same file. The first run of a repo also registers itself, once, in
+the global index `~/.cursor-workflows/runs.jsonl` (run id, repo path, workflow, start time).
+
+- Every event has `v` (schema version), `ts` and `runId`. Step events (`step-start`, `turn`, `step-end`) add `stepId`,
+  `parentId` and `groupId`; `parallel` and `pipeline` calls emit a `group-start` and `group-end` pair. A reader can
+  rebuild the run's structure from the log alone.
+- A step served from the journal or the memo emits `step-start` and `step-end` with `cached` set to `"journal"` or
+  `"memo"`. Its `stepId` is the same on every execution of the run.
+- Prompts are in the log only with `WF_METRICS_STORE_PROMPTS=1`.
+- Warnings to relay on a resume: `o código do workflow mudou` (the resumed run mixes two versions of the workflow) and
+  `linha incompleta` (a crash tore the last line of the log or the journal; the affected step runs again).
+- One process executes a run id at a time: starting it again while it runs fails with `já está em execução`.
+
 ## Reading the numbers
 
 The metrics database is `~/.cursor-workflows/metrics.db` (SQLite). Useful views: `v_attempts` (one row per step

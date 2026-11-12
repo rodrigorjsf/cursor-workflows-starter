@@ -4,10 +4,12 @@
 // pode ser consultado pelo outro.
 
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { stateDir } from "./state.js";
-import { type RunOptions, type RunOutcome, type WorkflowEvent, newRunId, runWorkflow } from "./engine.js";
+import { writeFileAtomic } from "./state-files.js";
+import { type RunOptions, type RunOutcome, newRunId, runWorkflow } from "./engine.js";
+import type { WorkflowEvent } from "./events.js";
 import type { WorkflowDefinition } from "./workflow.js";
 
 export interface JobState {
@@ -71,7 +73,7 @@ export function listJobs(cwd: string): JobState[] {
 }
 
 export function writeJob(cwd: string, job: JobState): void {
-  writeFileSync(join(jobsDir(cwd), `${job.jobId}.json`), JSON.stringify(job, null, 2));
+  writeFileAtomic(join(jobsDir(cwd), `${job.jobId}.json`), JSON.stringify(job, null, 2));
 }
 
 /** Cria o registro do job antes de rodar (CLI `start` grava no pai, antes do spawn). */
@@ -97,6 +99,7 @@ function describe(e: WorkflowEvent): string | undefined {
     case "phase":
       return `== ${e.title}`;
     case "step-start":
+      if (e.cached) return undefined; // servida do journal/memo: o step-end seguinte já a mostra
       return `▶ ${e.label} [${e.model ?? "?"}]${e.attempt > 1 ? ` tentativa ${e.attempt}` : ""}`;
     case "step-end": {
       const cache = e.usage && e.usage.cacheReadTokens > 0 ? ` cache-read ${e.usage.cacheReadTokens}` : "";
@@ -110,6 +113,8 @@ function describe(e: WorkflowEvent): string | undefined {
       return `· ${e.name} = ${e.value}`;
     case "run-start":
     case "run-end":
+    case "group-start":
+    case "group-end":
     case "turn":
       return undefined;
   }
