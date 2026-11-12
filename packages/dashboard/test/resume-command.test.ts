@@ -3,8 +3,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { test } from "node:test";
-import { ARGS_PLACEHOLDER, EMPTY_ARGS_HASH, argsHashOf, canResume, resumeCommand } from "../src/ui/resume-command.js";
-import { shellQuote } from "../src/ui/shell.js";
+import { ARGS_PLACEHOLDER, EMPTY_ARGS_HASH, argsHashOf, canResume, resumeCommand } from "../run-view/resume-command.js";
+import { shellQuote } from "../run-view/shell.js";
 
 test("the resume command restarts the same workflow over the same run, in the repo the run lives in", () => {
   assert.equal(

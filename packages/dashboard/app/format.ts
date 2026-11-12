@@ -29,5 +29,5 @@ export function startedLabel(startedAt: string): string {
   return date.toDateString() === new Date().toDateString() ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : date.toLocaleString([], { dateStyle: "short", timeStyle: "short" });
 }
 
-/** The link to the Run view of a run: the page `/runs/<runId>` (read back by `runIdOf` in `src/ui/location.ts`). */
+/** The link to the Run view of a run: the page `/runs/<runId>` (read back by `runIdOf` in `run-view/location.ts`). */
 export const runHref = (runId: string): string => `/runs/${encodeURIComponent(runId)}`;

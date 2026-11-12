@@ -1,6 +1,6 @@
 // Events written the way the runtime writes them, for the tests of the run graph and its layout. `engine-log.test.ts` checks
 // against a real run that these shapes are what the engine emits.
-import type { RunEvent } from "../src/ui/run-graph.js";
+import type { RunEvent } from "../run-view/run-graph.js";
 
 export const T0 = Date.parse("2026-01-10T10:00:00.000Z");
 export const RUN = "wf-aaaa0001";

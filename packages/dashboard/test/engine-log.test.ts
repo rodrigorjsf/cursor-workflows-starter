@@ -12,8 +12,8 @@ import { afterEach, beforeEach, test } from "node:test";
 import { calls, script } from "@cursor/sdk";
 import { runWorkflow } from "../../runtime/src/runtime/engine.js";
 import { defineWorkflow } from "../../runtime/src/runtime/workflow.js";
-import { EMPTY_ARGS_HASH, argsHashOf } from "../src/ui/resume-command.js";
-import { type GraphNode, type RunEvent, buildRunGraph, joinIdOf } from "../src/ui/run-graph.js";
+import { EMPTY_ARGS_HASH, argsHashOf } from "../run-view/resume-command.js";
+import { type GraphNode, type RunEvent, buildRunGraph, joinIdOf } from "../run-view/run-graph.js";
 import { type Sandbox, logPath, sandbox } from "./support.js";
 
 let box: Sandbox;

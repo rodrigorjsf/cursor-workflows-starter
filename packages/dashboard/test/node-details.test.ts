@@ -2,8 +2,8 @@
 // attempts, tokens, cost, duration and error kind, written for a person.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { describeNode, formatCents, formatDuration } from "../src/ui/node-details.js";
-import { type GraphNode, buildRunGraph } from "../src/ui/run-graph.js";
+import { describeNode, formatCents, formatDuration } from "../run-view/node-details.js";
+import { type GraphNode, buildRunGraph } from "../run-view/run-graph.js";
 import { execEnd, execStart, runStart, stamp, step, stepEnd, stepStart, T0, type Draft } from "./run-log.js";
 
 const nodeOf = (drafts: Draft[], id: string, settled = false): GraphNode => buildRunGraph(stamp(drafts), { settled }).nodes.find((n) => n.id === id)!;

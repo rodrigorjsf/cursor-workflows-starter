@@ -3,8 +3,8 @@
 // stack, lanes tile the width in phase order and hold their nodes, and a node keeps its place as the run grows.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildRunGraph, joinIdOf } from "../src/ui/run-graph.js";
-import { layoutRunGraph } from "../src/ui/run-layout.js";
+import { buildRunGraph, joinIdOf } from "../run-view/run-graph.js";
+import { layoutRunGraph } from "../run-view/run-layout.js";
 import { groupEnd, groupStart, phase, runStart, stamp, step, type Draft } from "./run-log.js";
 
 const inG1 = { groupId: "g1" };

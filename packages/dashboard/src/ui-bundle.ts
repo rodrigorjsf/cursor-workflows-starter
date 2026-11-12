@@ -1,4 +1,4 @@
-// The dashboard's web app, built by the dashboard itself: esbuild bundles `ui/run-page.tsx` (React, React Flow and elkjs
+// The Run view page (`/runs/<runId>`), built by the dashboard itself: esbuild bundles `run-view/run-page.tsx` (React, React Flow and elkjs
 // included) the first time a page asks for it, and the files are served from memory, named by the hash of their content.
 // There is no build step for the user and nothing is fetched from another site, so the page works offline under a strict
 // content security policy.
@@ -25,7 +25,7 @@ const TYPES: Record<string, string> = { ".js": "text/javascript; charset=utf-8",
 async function buildBundle(): Promise<UiBundle> {
   try {
     const built = await build({
-      entryPoints: { run: join(import.meta.dirname, "ui", "run-page.tsx") },
+      entryPoints: { run: join(import.meta.dirname, "..", "run-view", "run-page.tsx") },
       bundle: true,
       write: false,
       outdir: "out",

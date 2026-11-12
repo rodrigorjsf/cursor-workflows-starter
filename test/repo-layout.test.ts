@@ -214,7 +214,7 @@ test("the dashboard is its own workspace package: its dependencies never enter t
   const reaching = readdirSync(join(ROOT, "packages", "dashboard", "test")).filter((f) => /from "(\.\.\/)+runtime\/src\//.test(read("packages", "dashboard", "test", f)));
   assert.deepEqual(reaching, ["engine-log.test.ts"], "a dashboard test reaches into the runtime's sources: only the engine contract test may");
   // The web app runs in the browser: it reads the API, never the runtime.
-  const ui = join("packages", "dashboard", "src", "ui");
+  const ui = join("packages", "dashboard", "run-view");
   const uiSources = readdirSync(join(ROOT, ui)).filter((f) => /\.tsx?$/.test(f));
   assert.ok(uiSources.length >= 5);
   for (const file of uiSources) assert.doesNotMatch(read(ui, file), /@cursor-workflows\/runtime|from "(\.\.\/)+runtime\/|from "node:/, `${file} runs in the browser and must not import the runtime or Node`);

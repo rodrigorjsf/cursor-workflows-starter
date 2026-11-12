@@ -1,8 +1,8 @@
-// The dashboard's web app, built when the dashboard starts: `ui/main.tsx` (React) and its styles are bundled with esbuild
+// The dashboard's app page (`/`: the Runs, Board and Metrics menus), built when the dashboard starts: `app/main.tsx` (React) and its styles are bundled with esbuild
 // into one script and one stylesheet, which the server serves itself. Nothing is fetched from a CDN and users run no build step.
 //
 // The build is cached on disk by content hash (`<cache>/<hash>/app.js` and `app.css`, in the per-user directory): the hash
-// covers every file of `ui/` and the versions of React, ReactDOM and esbuild, so a start with the same sources and the same
+// covers every file of `app/` and the versions of React, ReactDOM and esbuild, so a start with the same sources and the same
 // packages reads two files instead of building, and any change makes a new hash. A build is written to a temporary folder and
 // moved into place whole, so a start that dies halfway, or two that overlap, never leave a half-built entry to be served.
 // Only the current hash is kept.
@@ -14,8 +14,8 @@ import { fileURLToPath } from "node:url";
 import { build, version as esbuildVersion } from "esbuild";
 import { dashboardCacheDir } from "@cursor-workflows/runtime/observe";
 
-/** The web app's sources, next to `src/`. */
-const UI_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "ui");
+/** The app page's sources, next to `src/`. */
+const UI_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "app");
 
 /** Change when the build options below change in a way the sources do not show. */
 const BUILD_RECIPE = "1";
@@ -28,7 +28,7 @@ export interface AppBundle {
 }
 
 export interface BuildOptions {
-  /** The folder holding `main.tsx`. Default: the dashboard's own `ui/`. */
+  /** The folder holding `main.tsx`. Default: the dashboard's own `app/`. */
   srcDir?: string;
   /** Where builds are kept, by hash. Default: the per-user directory's `dashboard-cache`. */
   cacheDir?: string;
@@ -74,7 +74,7 @@ async function bundle(srcDir: string): Promise<Pick<AppBundle, "js" | "css">> {
     minify: true,
     legalComments: "none",
     define: { "process.env.NODE_ENV": '"production"' },
-    // React comes from this package's install, wherever the sources are (a copy of `ui/` elsewhere builds the same way).
+    // React comes from this package's install, wherever the sources are (a copy of `app/` elsewhere builds the same way).
     nodePaths: [dirname(dirname(require.resolve("react/package.json")))],
     logLevel: "silent",
   });

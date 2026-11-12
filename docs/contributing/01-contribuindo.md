@@ -19,10 +19,10 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 ├── packages/
 │   ├── dashboard/          # o dashboard local (workspace npm @cursor-workflows/dashboard): servidor HTTP sobre os runs e as métricas, que só lê, a não ser para cancelar um run
 │   │   ├── src/            # server.ts (API JSON, stream SSE e páginas), main.ts (o processo), board.ts (as colunas do quadro), pr-state.ts (estado das PRs, pelo `gh`),
-│   │   │   │               # app-bundle.ts (empacota o app com esbuild), ui-bundle.ts (o esbuild que empacota a página do run quando o dashboard sobe), run-page.ts (o HTML da página do run)
-│   │   │   └── ui/         # a página do run, que roda no navegador (React, React Flow, elkjs; tsconfig próprio, sem Node nem runtime):
+│   │   │                   # app-bundle.ts (empacota o app com esbuild), ui-bundle.ts (o esbuild que empacota a página do run quando o dashboard sobe), run-page.ts (o HTML da página do run)
+│   │   ├── app/            # a página `/`, em React (menus Runs, Board e Metrics); o esbuild a empacota quando o dashboard sobe
+│   │   ├── run-view/       # a página do run, `/runs/<runId>` (React, React Flow, elkjs; tsconfig próprio, sem Node nem runtime):
 │   │   │                   # run-graph.ts (eventos → nós, arestas e raias), run-layout.ts (posições, elkjs), RunView.tsx (a tela)
-│   │   ├── ui/             # o app web em React (menus Runs, Board e Metrics); o esbuild o empacota quando o dashboard sobe
 │   │   └── test/           # testes do servidor por HTTP, do grafo e do layout (puros) e um contrato com o engine de verdade
 │   └── runtime/            # o produto (workspace npm @cursor-workflows/runtime)
 │       ├── src/

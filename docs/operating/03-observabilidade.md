@@ -385,7 +385,7 @@ A página inicial (`/`) é um só app, em React, com três menus (o menu é o `#
 
 O app é empacotado com o esbuild **quando o dashboard sobe** (nenhum passo de build para quem usa o kit), e o resultado
 fica guardado por hash do conteúdo em `~/.cursor-workflows/dashboard-cache/<hash>/`: o hash cobre os arquivos de
-`packages/dashboard/ui/` e as versões do React e do esbuild, então uma subida com os mesmos fontes só lê dois arquivos, e
+`packages/dashboard/app/` e as versões do React e do esbuild, então uma subida com os mesmos fontes só lê dois arquivos, e
 qualquer mudança gera um build novo (só o atual é mantido). O dashboard serve o script e a folha de estilo ele mesmo
 (`/assets/app.<hash>.js` e `.css`, com cache de um ano, porque o nome muda com o conteúdo). Se os fontes não compilam, o
 dashboard não sobe e diz o motivo.

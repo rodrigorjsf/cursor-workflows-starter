@@ -4,7 +4,7 @@
 // `engine-log.test.ts` checks that against a real run).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type GraphNode, type RunEvent, buildRunGraph, joinIdOf } from "../src/ui/run-graph.js";
+import { type GraphNode, type RunEvent, buildRunGraph, joinIdOf } from "../run-view/run-graph.js";
 import { type Draft, execEnd, execStart, groupEnd, groupStart, phase, ref, RUN, runStart, stamp, step, stepEnd, stepStart, T0 } from "./run-log.js";
 
 const idsOf = (nodes: GraphNode[]) => nodes.map((n) => n.id);

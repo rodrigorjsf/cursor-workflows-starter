@@ -4,7 +4,7 @@
 // have, so the log of a step that is still running and that of a finished one are built the same way.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type ContentItem, buildStepLog } from "../src/ui/step-log.js";
+import { type ContentItem, buildStepLog } from "../run-view/step-log.js";
 
 let next = 0;
 /** A `content` event the way the API gives it: ids count up, `chars` follows the text. */

@@ -1,8 +1,8 @@
 // Seam: the address of the Run view page. `runHref(runId)` is the link the Board and the Runs table put on a run; `runIdOf(pathname)` is how the page learns which run it shows from `/runs/<runId>`.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { runIdOf } from "../src/ui/location.js";
-import { runHref } from "../ui/format.js";
+import { runIdOf } from "../run-view/location.js";
+import { runHref } from "../app/format.js";
 
 test("the run id is the second segment of /runs/<runId>, percent-decoded", () => {
   assert.equal(runIdOf("/runs/smoke-47b80529"), "smoke-47b80529");

@@ -10,7 +10,7 @@ import { buildApp } from "../src/app-bundle.js";
 import { type DashboardServer, startDashboard } from "../src/server.js";
 import { type Sandbox, http, sandbox } from "./support.js";
 
-const UI = join(dirname(fileURLToPath(import.meta.url)), "..", "ui");
+const UI = join(dirname(fileURLToPath(import.meta.url)), "..", "app");
 
 let box: Sandbox;
 let dash: DashboardServer | undefined;

@@ -2,7 +2,7 @@
 // over together, so a burst is one render and not one per item.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { batcher } from "../src/ui/batch.js";
+import { batcher } from "../run-view/batch.js";
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
