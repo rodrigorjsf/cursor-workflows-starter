@@ -4,12 +4,12 @@ process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
 import "./isolate-home.js";
 import { type ChildProcess, spawn } from "node:child_process";
-import { rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { calls, script } from "@cursor/sdk";
+import { calls, costConfig, script, stats } from "@cursor/sdk";
 import { runWorkflow } from "../src/runtime/engine.js";
-import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
+import { eventLogPath, processIdentity, readEventLog, runDirPath } from "../src/runtime/run-store.js";
 import { defineWorkflow } from "../src/runtime/workflow.js";
 
 const cwd = join(import.meta.dirname, ".tmp", `run-lock-${process.pid}`);
@@ -20,6 +20,8 @@ afterEach(() => {
   rmSync(cwd, { recursive: true, force: true });
   script.length = 0;
   calls.length = 0;
+  Object.assign(stats, { active: 0, maxActive: 0, disposed: 0, usageReads: 0 });
+  Object.assign(costConfig, { raw: 9, charged: 7, getUsageError: undefined, createErrorCode: undefined });
 });
 
 /** Starts hold-run.ts and resolves once its run is executing a step. */
@@ -73,4 +75,27 @@ test("two executions of the same run id in one process cannot overlap either, an
 
   const after = await runWorkflow(quick, {}, { cwd, runId: "same-process" });
   assert.equal(after.status, "finished", "the finished run released its lock");
+});
+
+/** Writes a lock file the way a process of an earlier boot would have left it, for a pid that is alive now. */
+function leftoverLock(runId: string, lock: Record<string, unknown>): void {
+  const dir = join(runDirPath(cwd, runId));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "run.lock"), JSON.stringify({ pid: process.ppid, token: "left-over", startedAt: "2020-01-01T00:00:00.000Z", ...lock }));
+}
+
+const hasProc = existsSync("/proc/self/stat");
+
+test("a lock whose pid now belongs to another process (recycled after a crash or reboot) is stale", { skip: !hasProc && "needs /proc" }, async () => {
+  leftoverLock("recycled", { identity: "a-boot-that-is-gone:1" });
+  const r = await runWorkflow(quick, {}, { cwd, runId: "recycled" });
+  assert.equal(r.status, "finished", r.error);
+});
+
+test("a lock held by a live process with the same identity is respected, and the message says how to clear a stale one", { skip: !hasProc && "needs /proc" }, async () => {
+  leftoverLock("alive-holder", { identity: processIdentity(process.ppid) });
+  const r = await runWorkflow(quick, {}, { cwd, runId: "alive-holder" });
+  assert.equal(r.status, "failed");
+  assert.match(r.error!, /^já está em execução: o run alive-holder pertence ao processo \d+ /);
+  assert.match(r.error!, /run\.lock/, "names the file to delete when the process is gone");
 });

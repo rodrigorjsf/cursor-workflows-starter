@@ -37,8 +37,8 @@ a failure there.
 ## The run's event log
 
 Every event of a run is appended to `<repo>/.workflows/runs/<runId>/events.jsonl`, one JSON object per line. The log is
-the run's source of truth, and a resume appends to the same file. The first run of a repo also registers itself, once, in
-the global index `~/.cursor-workflows/runs.jsonl` (run id, repo path, workflow, start time).
+the run's source of truth, and a resume appends to the same file. Each new run also registers itself, once, in the
+global index `~/.cursor-workflows/runs.jsonl` (run id, repo path, workflow, start time); a resume adds no line.
 
 - Every event has `v` (schema version), `ts` and `runId`. Step events (`step-start`, `turn`, `step-end`) add `stepId`,
   `parentId` and `groupId`; `parallel` and `pipeline` calls emit a `group-start` and `group-end` pair. A reader can

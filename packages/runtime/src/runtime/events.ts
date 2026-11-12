@@ -112,7 +112,10 @@ export interface GroupEndEvent extends EventBase {
   type: "group-end";
   /** O grupo que fecha: o `groupId` do `group-start`. */
   groupId: string;
-  /** false quando um erro fatal (teto, conta) abortou o grupo. Ramos que falharam sem ser fatais viram `null` e avisos. */
+  /**
+   * false quando um erro fatal (teto, conta) abortou o grupo: os ramos que ainda rodavam podem emitir eventos depois
+   * deste, e o `groupId` deles continua valendo. Ramos que falharam sem ser fatais viram `null` e avisos.
+   */
   ok: boolean;
 }
 

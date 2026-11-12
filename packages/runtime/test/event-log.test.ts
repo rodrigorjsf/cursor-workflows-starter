@@ -3,6 +3,7 @@
 process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
 import "./isolate-home.js";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -171,8 +172,6 @@ test("a step served from the journal emits a start event as well as an end event
 });
 
 test("a step served from the memo emits a start event as well as an end event", async () => {
-  const { execFileSync } = await import("node:child_process");
-  const { mkdirSync, writeFileSync } = await import("node:fs");
   mkdirSync(cwd, { recursive: true });
   const git = (...a: string[]) => execFileSync("git", a, { cwd, stdio: "ignore" });
   git("init", "-q");
@@ -320,4 +319,36 @@ test("resuming a run whose workflow changed records a warning event; resuming it
 
   await runWorkflow(v2, {}, { cwd, runId: failed.runId });
   assert.equal(changeWarnings(logOf(failed.runId).events).length, 1, "the same code as the previous execution: no new warning");
+});
+
+test("a group that a fatal error aborts is closed with ok=false, and the run fails", async () => {
+  const wf = defineWorkflow({
+    meta: { name: "aborted", description: "aborted" },
+    defaults: { model: { id: "m" } },
+    run: (ctx) => ctx.parallel([() => ctx.agent("a", { label: "a" }), () => ctx.agent("b", { label: "b" }), () => ctx.agent("c", { label: "c" })]),
+  });
+  const r = await runWorkflow(wf, {}, { cwd, concurrency: 1, maxCents: 5 }); // the fake charges 9¢ per step: the second step hits the cap
+  assert.equal(r.status, "failed");
+  assert.match(r.error!, /Teto de custo/);
+  const { events } = logOf(r.runId);
+  const [group] = ofType(events, "group-start");
+  const closing = ofType(events, "group-end").filter((e) => e.groupId === group!.groupId);
+  assert.deepEqual(closing.map((e) => e.ok), [false]);
+});
+
+test("a metrics recorder that cannot start is reported after the run-start, not before it", async () => {
+  const previous = process.env.WF_METRICS;
+  delete process.env.WF_METRICS;
+  mkdirSync(cwd, { recursive: true });
+  const blocker = join(cwd, "not-a-directory");
+  writeFileSync(blocker, "x");
+  try {
+    const r = await runWorkflow(oneStep, {}, { cwd, metricsDb: join(blocker, "metrics.db") });
+    assert.equal(r.status, "finished", r.error);
+    const { events } = logOf(r.runId);
+    assert.equal(events[0]!.type, "run-start", "every execution of the log opens with its run-start");
+    assert.ok(ofType(events, "warning").some((w) => /métricas desligadas/.test(w.message)));
+  } finally {
+    process.env.WF_METRICS = previous;
+  }
 });

@@ -24,6 +24,8 @@ interface LockContent {
   pid: number;
   token: string;
   startedAt: string;
+  /** Who the pid was when it took the lock (see `processIdentity`). Absent where the platform cannot tell. */
+  identity?: string;
 }
 
 /**
@@ -42,6 +44,30 @@ function isAlive(pid: number): boolean {
   }
 }
 
+/**
+ * What makes a pid this process and not another one that got the same number later: the boot id plus the process start
+ * time (Linux). A lock left by a crash or a reboot can name a pid that now belongs to an unrelated process; without
+ * this the run would stay locked for as long as that process lives. Undefined where /proc is not available.
+ */
+export function processIdentity(pid: number): string | undefined {
+  try {
+    const boot = readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" "); // after "pid (comm) ": field 3 (state) comes first
+    return fields[19] ? `${boot}:${fields[19]}` : undefined; // field 22: start time, in ticks since boot
+  } catch {
+    return undefined;
+  }
+}
+
+/** Is the process that wrote this lock still the one executing the run? */
+function isHeld(holder: LockContent, file: string): boolean {
+  if (!isAlive(holder.pid)) return false;
+  if (holder.pid === process.pid && !heldLocks.has(file)) return false; // our own pid, but not a lock this process took
+  const now = holder.identity ? processIdentity(holder.pid) : undefined;
+  return now === undefined || now === holder.identity; // unknown identity: assume it is the same process
+}
+
 function readLock(file: string): LockContent | undefined {
   try {
     const lock = JSON.parse(readFileSync(file, "utf8")) as Partial<LockContent>;
@@ -56,11 +82,13 @@ function readLock(file: string): LockContent | undefined {
  * and atomically (written aside, then hard-linked into place: `link` fails when the target exists), so nobody ever reads
  * a half-written lock. A lock whose process is gone is stale and is taken over. Returns the release function.
  *
- * Known limit: two processes that find the same stale lock at the same instant can both take it over.
+ * Known limit: two processes that find the same stale lock at the same instant can both take it over. Where the
+ * platform cannot tell a recycled pid from the original process (no /proc), a leftover lock whose pid is alive again
+ * keeps the run locked until that process ends or the lock file is deleted (the refusal message says so).
  */
 function acquireLock(dir: string, runId: string): () => void {
   const file = join(dir, LOCK_FILE);
-  const content: LockContent = { pid: process.pid, token: randomUUID(), startedAt: new Date().toISOString() };
+  const content: LockContent = { pid: process.pid, token: randomUUID(), startedAt: new Date().toISOString(), identity: processIdentity(process.pid) };
   const aside = `${file}.${process.pid}.${content.token.slice(0, 8)}.tmp`;
   writeFileSync(aside, JSON.stringify(content));
   try {
@@ -81,10 +109,9 @@ function acquireLock(dir: string, runId: string): () => void {
         if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
       }
       const holder = readLock(file);
-      const live = holder && isAlive(holder.pid) && (holder.pid !== process.pid || heldLocks.has(file));
-      if (holder && live) {
+      if (holder && isHeld(holder, file)) {
         throw new RunLockedError(
-          `já está em execução: o run ${runId} pertence ao processo ${holder.pid} (desde ${holder.startedAt}); espere terminar ou cancele-o antes de executá-lo de novo`,
+          `já está em execução: o run ${runId} pertence ao processo ${holder.pid} (desde ${holder.startedAt}); espere terminar, ou apague ${file} se esse processo não existe mais`,
         );
       }
       rmSync(file, { force: true }); // stale (dead holder) or unreadable: take it over

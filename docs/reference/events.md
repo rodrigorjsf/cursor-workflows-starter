@@ -100,7 +100,7 @@ Inclui os campos de [`EventBase`](#eventbase).
 | Campo | Tipo | Obrigatório | Descrição |
 | --- | --- | --- | --- |
 | `groupId` | `string` | sim | O grupo que fecha: o `groupId` do `group-start`. |
-| `ok` | `boolean` | sim | false quando um erro fatal (teto, conta) abortou o grupo. Ramos que falharam sem ser fatais viram `null` e avisos. |
+| `ok` | `boolean` | sim | false quando um erro fatal (teto, conta) abortou o grupo: os ramos que ainda rodavam podem emitir eventos depois deste, e o `groupId` deles continua valendo. Ramos que falharam sem ser fatais viram `null` e avisos. |
 
 ### `step-start`
 

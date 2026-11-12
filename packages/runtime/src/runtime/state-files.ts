@@ -39,15 +39,18 @@ export function appendJsonl(file: string, record: unknown): void {
   }
 }
 
-/** True when the file ends in an unterminated line that is not valid JSON: the sign of a crash in the middle of an append. */
-export function hasTornTail(file: string): boolean {
-  let text: string;
+function readIfExists(file: string): string | undefined {
   try {
-    text = readFileSync(file, "utf8");
+    return readFileSync(file, "utf8");
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw err;
   }
+}
+
+/** True when the file ends in an unterminated line that is not valid JSON: the sign of a crash in the middle of an append. */
+export function hasTornTail(file: string): boolean {
+  const text = readIfExists(file);
   if (!text || text.endsWith("\n")) return false;
   try {
     JSON.parse(text.slice(text.lastIndexOf("\n") + 1));
@@ -65,13 +68,8 @@ export interface JsonlRead<T> {
 
 /** Reads a JSON Lines file, skipping blank lines and anything that does not parse or fails `isRecord`. A missing file is empty. */
 export function readJsonl<T>(file: string, isRecord: (value: unknown) => value is T): JsonlRead<T> {
-  let text: string;
-  try {
-    text = readFileSync(file, "utf8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { records: [], skipped: 0 };
-    throw err;
-  }
+  const text = readIfExists(file);
+  if (text === undefined) return { records: [], skipped: 0 };
   const records: T[] = [];
   let skipped = 0;
   for (const line of text.split("\n")) {

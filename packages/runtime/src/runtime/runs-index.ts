@@ -3,18 +3,20 @@
 // names the repo, and the run's own state lives in `<repo>/.workflows/runs/<runId>/`.
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { EVENT_SCHEMA_VERSION } from "./events.js";
 import { userDir } from "./state.js";
 import { appendJsonl, readJsonl } from "./state-files.js";
 
+/** Schema version of an index line. Independent of the events' version: they change for different reasons. */
+export const RUNS_INDEX_VERSION = 1;
+
 export interface RunsIndexEntry {
-  /** Schema version of this line (same counter as the events). */
+  /** Schema version of this line. */
   v: number;
   runId: string;
   /** Absolute path of the repo the run executes in (the directory that holds `.workflows/`). */
   repo: string;
   workflow: string;
-  /** When the run first started, ISO 8601 UTC. A resume does not add a line. */
+  /** When the run first started, ISO 8601 UTC. A resume does not add a line. Readers that need one line per run dedupe by `runId`. */
   startedAt: string;
 }
 
@@ -24,7 +26,7 @@ export function runsIndexPath(): string {
 
 export function registerRun(entry: Omit<RunsIndexEntry, "v">): void {
   mkdirSync(userDir(), { recursive: true, mode: 0o700 });
-  appendJsonl(runsIndexPath(), { v: EVENT_SCHEMA_VERSION, ...entry } satisfies RunsIndexEntry);
+  appendJsonl(runsIndexPath(), { v: RUNS_INDEX_VERSION, ...entry } satisfies RunsIndexEntry);
 }
 
 const isEntry = (v: unknown): v is RunsIndexEntry =>

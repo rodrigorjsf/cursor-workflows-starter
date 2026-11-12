@@ -178,24 +178,25 @@ class Semaphore {
   }
 }
 
-/** Id curto e estável de uma etapa: vem da chave do journal (hash do prompt e das opções + nº da ocorrência). */
+/** Short, stable id of a step: derived from its journal key (hash of the prompt and options + occurrence number). */
 function stepIdOf(journalKey: string): string {
   const [hash = "", occurrence = "0"] = journalKey.split(":");
   return `s-${hash.slice(0, 12)}.${occurrence}`;
 }
 
 /**
- * Onde o código do workflow está na estrutura do run. Cada ramo de um `parallel`/`pipeline` tem o seu `Flow`, ligado
- * ao código que o executa por AsyncLocalStorage; assim `agent()` sabe de que nó continua sem o workflow dizer.
+ * Where the workflow code is in the run's structure. Each branch of a `parallel`/`pipeline` has its own `Flow`, tied to
+ * the code running it through AsyncLocalStorage, so `agent()` knows which node it continues from without the workflow
+ * saying so.
  */
 interface Flow {
-  /** O grupo mais interno que contém este fluxo. */
+  /** The innermost group this flow is inside. */
   groupId: string | null;
-  /** O último nó (etapa ou grupo) que terminou neste fluxo: de onde o próximo continua. */
+  /** The last node (step or group) that finished in this flow: where the next one continues from. */
   last: string | null;
-  /** Grupos já abertos neste fluxo: numera os ids (`g1`, `g2`, …), que não dependem do tempo. */
+  /** Groups opened so far in this flow. Numbers their ids (`g1`, `g2`, ...), which therefore do not depend on timing. */
   groups: number;
-  /** Prefixo dos ids dos grupos abertos aqui: o caminho até este ramo (`g1.0.`). */
+  /** Prefix of the ids of the groups opened here: the path down to this branch (`g1.0.`). */
   prefix: string;
 }
 
@@ -226,7 +227,7 @@ export async function runWorkflow<A, R>(
   }
 }
 
-/** O run em si, com o estado do run (`store`) já aberto. */
+/** The run itself, with the run's state (`store`) already open and locked. */
 async function executeRun<A, R>(
   def: WorkflowDefinition<A, R>,
   args: A,
@@ -258,7 +259,7 @@ async function executeRun<A, R>(
       store.appendEvent(event);
     } catch (err) {
       if (logFailed) return;
-      logFailed = true; // um aviso só: o log é a fonte de verdade, mas um disco cheio não deve derrubar o run
+      logFailed = true; // one warning only: the log is the source of truth, but a full disk must not take the run down
       opts.onEvent?.(stamp({ type: "warning", message: `falha ao gravar o log de eventos: ${err instanceof Error ? err.message : String(err)}` }));
     }
   };
@@ -274,12 +275,13 @@ async function executeRun<A, R>(
     }
     opts.onEvent?.(event);
   };
+  let recorderWarning: string | undefined; // reported after run-start: every execution in the log opens with it
   if (opts.metricsDb !== false && process.env.WF_METRICS !== "off") {
     try {
       const { createRecorder } = await import("../observability/recorder.js");
       recorder = await createRecorder(opts.metricsDb || undefined);
     } catch (err) {
-      emit({ type: "warning", message: `métricas desligadas: ${err instanceof Error ? err.message : String(err)}` });
+      recorderWarning = `métricas desligadas: ${err instanceof Error ? err.message : String(err)}`;
     }
   }
   const storePrompts = process.env.WF_METRICS_STORE_PROMPTS === "1";
@@ -292,6 +294,7 @@ async function executeRun<A, R>(
     argsHash: sha(JSON.stringify(args ?? null)).slice(0, 16),
     repo: repoIdentity(opts.cwd),
   });
+  if (recorderWarning) emit({ type: "warning", message: recorderWarning });
   if (store.previousStart && store.previousStart.workflowHash !== workflowHash) {
     emit({
       type: "warning",
@@ -319,18 +322,25 @@ async function executeRun<A, R>(
   const rootFlow: Flow = { groupId: null, last: null, groups: 0, prefix: "" };
   const currentFlow = () => flows.getStore() ?? rootFlow;
 
-  /** Abre um parallel/pipeline: emite o group-start e devolve o fluxo de cada ramo e o fechamento do grupo. */
-  function openGroup(kind: "parallel" | "pipeline", size: number): { branch(index: number): Flow; close(ok: boolean): void } {
+  /**
+   * Runs the branches of a `parallel` or `pipeline` as one group: emits group-start, gives each branch its own flow and
+   * emits group-end (ok=false when a fatal error aborts the group; branches still running then may emit events after it).
+   */
+  async function runGroup<I, O>(kind: "parallel" | "pipeline", items: I[], branch: (item: I, index: number) => Promise<O>): Promise<O[]> {
     const outer = currentFlow();
     const groupId = `${outer.prefix}g${++outer.groups}`;
-    emit({ type: "group-start", groupId, kind, size, parentId: outer.last, parentGroupId: outer.groupId });
-    return {
-      branch: (index) => ({ groupId, last: groupId, groups: 0, prefix: `${groupId}.${index}.` }),
-      close(ok) {
-        emit({ type: "group-end", groupId, ok });
-        outer.last = groupId; // o que vem depois do grupo continua dele
-      },
-    };
+    emit({ type: "group-start", groupId, kind, size: items.length, parentId: outer.last, parentGroupId: outer.groupId });
+    let ok = false;
+    try {
+      const results = await Promise.all(
+        items.map((item, index) => flows.run({ groupId, last: groupId, groups: 0, prefix: `${groupId}.${index}.` }, () => branch(item, index))),
+      );
+      ok = true;
+      return results;
+    } finally {
+      emit({ type: "group-end", groupId, ok });
+      outer.last = groupId; // what follows the group continues from its join
+    }
   }
 
   const budget: Budget = {
@@ -439,7 +449,7 @@ async function executeRun<A, R>(
     }
   }
 
-  /** O que `runStep` precisa saber da chamada de `agent()`, calculado de forma síncrona antes de qualquer await. */
+  /** What `runStep` needs to know about an `agent()` call, computed synchronously before any await. */
   interface StepContext {
     o: AgentCallOptions;
     promptHash: string;
@@ -448,10 +458,10 @@ async function executeRun<A, R>(
     sources: SettingSource[];
     mKey: string | undefined;
     fingerprint: Record<string, unknown>;
-    /** Chave do journal. */
+    /** Journal key. */
     key: string;
     ref: StepRef;
-    /** Algum step-start já saiu: só então a etapa vira o "último nó" do fluxo. */
+    /** A step-start has been emitted: only then does the step become the flow's "last node". */
     started: boolean;
   }
 
@@ -480,15 +490,13 @@ async function executeRun<A, R>(
     try {
       return await runStep<T>(prompt, step);
     } finally {
-      if (step.started) flow.last = ref.stepId; // o que vier depois, neste fluxo, continua desta etapa
+      if (step.started) flow.last = ref.stepId; // whatever comes next in this flow continues from this step
     }
   }
 
   async function runStep<T>(prompt: string, step: StepContext): Promise<T> {
     const { o, promptHash, label, phase, sources, mKey, fingerprint, key, ref } = step;
-    /** Etapa servida sem chamar a API: o step-start também sai, para a etapa existir no log como qualquer outra. */
-    const servedFrom = (from: "journal" | "memo") => {
-      const attemptId = randomUUID();
+    const emitStart = (attemptId: string, attempt: number, cachedFrom: false | "journal" | "memo") => {
       step.started = true;
       emit({
         type: "step-start",
@@ -497,17 +505,22 @@ async function executeRun<A, R>(
         stepKey: key,
         label,
         phase,
-        cached: from,
+        cached: cachedFrom,
         model: o.model?.id,
         modelKey: mKey,
         modelParams: o.model?.params,
-        attempt: 1,
+        attempt,
         tools: o.tools,
         settingSources: sources,
         promptHash,
         promptChars: prompt.length,
         prompt: storePrompts ? prompt : undefined,
       });
+    };
+    /** A step served without calling the API still emits its step-start, so it exists in the log like any other. */
+    const servedFrom = (from: "journal" | "memo") => {
+      const attemptId = randomUUID();
+      emitStart(attemptId, 1, from);
       emit({ type: "step-end", ...ref, attemptId, stepKey: key, label, phase, ok: true, cached: from, chargedCents: 0, model: o.model?.id, modelKey: mKey });
     };
     const cached = journal.get(key);
@@ -547,25 +560,7 @@ async function executeRun<A, R>(
         assertBudget();
         const attemptId = randomUUID();
         const startedAt = Date.now();
-        step.started = true;
-        emit({
-          type: "step-start",
-          ...ref,
-          attemptId,
-          stepKey: key,
-          label,
-          phase,
-          cached: false,
-          model: model.id,
-          modelKey: mKey,
-          modelParams: model.params,
-          attempt,
-          tools: o.tools,
-          settingSources: sources,
-          promptHash,
-          promptChars: prompt.length,
-          prompt: storePrompts ? prompt : undefined,
-        });
+        emitStart(attemptId, attempt, false);
         // Contadores alimentados pelo stream de deltas do SDK.
         const c = { turns: 0, steps: 0, stepsInTurn: 0, summaries: 0, reprompts: 0, toolCalls: {} as Record<string, number> };
         // Soma dos turn-ended desta tentativa: reserva de tokens quando getUsage() não responde.
@@ -713,52 +708,26 @@ async function executeRun<A, R>(
     cwd: opts.cwd,
     budget,
     agent: agentCall,
-    async parallel(thunks) {
-      const group = openGroup("parallel", thunks.length);
-      let ok = false;
-      try {
-        const results = await Promise.all(
-          thunks.map((t, i) =>
-            flows
-              .run(group.branch(i), t)
-              .catch((err: unknown) => {
-                if (err instanceof FatalRunError) throw err; // teto de custo ou conta sem acesso aborta o workflow inteiro
-                emit({ type: "warning", message: `parallel: ${err instanceof Error ? err.message : String(err)}` });
-                return null;
-              }),
-          ),
-        );
-        ok = true;
-        return results;
-      } finally {
-        group.close(ok);
-      }
-    },
-    async pipeline(items, ...stages) {
-      const group = openGroup("pipeline", items.length);
-      let ok = false;
-      try {
-        const results = await Promise.all(
-          items.map((item, index) =>
-            flows.run(group.branch(index), async () => {
-              let prev: unknown = item;
-              try {
-                for (const stage of stages) prev = await stage(prev, item, index);
-                return prev;
-              } catch (err) {
-                if (err instanceof FatalRunError) throw err;
-                emit({ type: "warning", message: `pipeline item ${index}: ${err instanceof Error ? err.message : String(err)}` });
-                return null;
-              }
-            }),
-          ),
-        );
-        ok = true;
-        return results;
-      } finally {
-        group.close(ok);
-      }
-    },
+    parallel: (thunks) =>
+      runGroup("parallel", thunks, (thunk) =>
+        thunk().catch((err: unknown) => {
+          if (err instanceof FatalRunError) throw err; // teto de custo ou conta sem acesso aborta o workflow inteiro
+          emit({ type: "warning", message: `parallel: ${err instanceof Error ? err.message : String(err)}` });
+          return null;
+        }),
+      ),
+    pipeline: (items, ...stages) =>
+      runGroup("pipeline", items, async (item, index) => {
+        let prev: unknown = item;
+        try {
+          for (const stage of stages) prev = await stage(prev, item, index);
+          return prev;
+        } catch (err) {
+          if (err instanceof FatalRunError) throw err;
+          emit({ type: "warning", message: `pipeline item ${index}: ${err instanceof Error ? err.message : String(err)}` });
+          return null;
+        }
+      }),
     phase(title) {
       currentPhase = title;
       emit({ type: "phase", title });
