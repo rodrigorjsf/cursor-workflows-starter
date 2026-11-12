@@ -24,7 +24,7 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   │   ├── engine.ts       # agent/parallel/pipeline/phase, retries, modelo, teto de custo
 │       │   │   ├── backend.ts      # AgentBackend: onde cada tentativa roda (hoje só o backend local, que fala com o SDK)
 │       │   │   ├── events.ts       # o tipo dos eventos (a referência 6.1 é gerada dele)
-│       │   │   ├── run-store.ts    # log de eventos, journal e lock de cada run
+│       │   │   ├── run-store.ts    # log de eventos, journal, lock de cada run e locks nomeados do repositório (`.workflows/locks/`)
 │       │   │   ├── structured.ts   # saída estruturada via custom tool submit_result + Ajv
 │       │   │   ├── journal.ts      # resume sem repetir etapas concluídas
 │       │   │   ├── jobs.ts         # jobs: processo destacado, heartbeat, cancelamento e estado projetado do log

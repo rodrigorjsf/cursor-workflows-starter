@@ -156,8 +156,6 @@ half-made edits. So:
   commit;
 - give every run its own branch and worktree (the run id in the name), recorded in the progress; a worktree is reused
   only by the run that recorded it, and a fresh run starts from the current head of the default branch;
-- take a lock on the resource the run works on (`implement-issue` locks the issue, in `.workflows/locks/`) and return a
-  status that names the holder's run id when it is taken;
 - deliver with `git push --force-with-lease=<branch>:<commit the origin has>`, only on a branch with the workflow's
   prefix and only when that commit came from this run's own push, so a resume can redeliver and a person's commit stays.
 

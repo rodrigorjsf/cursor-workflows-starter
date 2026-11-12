@@ -4,10 +4,12 @@
 // with the fake SDK and the environment of implement-issue.fixture.ts (fake gh, temp repo with a bare origin, real git).
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { calls } from "@cursor/sdk";
+import type { ContentEvent, ExecStartEvent } from "../src/runtime/events.js";
+import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import { SUB_CODE, branchOf, failGh, fx, gh, git, issue, names, run, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
 
@@ -33,6 +35,7 @@ test("a fresh run never reuses the worktree of an earlier run, and starts from t
 
   const second = await run({});
   assert.equal(res(second).status, "done", JSON.stringify(res(second)));
+  assert.match(res(second).branch, /^wf\/issue-7-[0-9a-f]{8}$/, "wf/issue-<n>-<run>, the run id without the workflow's name");
   assert.equal(res(second).worktree, worktreeOf(second.runId));
   assert.equal(res(second).branch, branchOf(second.runId));
   assert.notEqual(res(second).worktree, res(first).worktree);
@@ -65,6 +68,32 @@ test("a worktree that is in the run's place but that the run did not create is r
   assert.match(r.error!, /was not created by this run/);
   assert.deepEqual(names(), [], "no agent works in a worktree that is not the run's");
   assert.equal(calls.length, 0);
+});
+
+test("a recorded worktree path that is not a worktree (an interrupted `git worktree add`) is made again, and git never acts on the repository around it", async () => {
+  issue(["complexity:low"]);
+  const runId = "interrupted";
+  const state = join(fx.repo, ".workflows", "runs", runId);
+  mkdirSync(state, { recursive: true });
+  writeFileSync(join(state, "tdd-progress.json"), JSON.stringify({ slices: [], branch: branchOf(runId), worktree: worktreeOf(runId) })); // the run had recorded its place
+  mkdirSync(worktreeOf(runId), { recursive: true }); // and `git worktree add` had made the directory when the process died
+  const mainBefore = git(fx.repo, "rev-parse", "HEAD").trim();
+
+  const r = await run({}, runId);
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  assert.equal(git(worktreeOf(runId), "rev-parse", "--show-toplevel").trim(), realpathSync(worktreeOf(runId)), "the run works in a worktree of its own");
+  assert.equal(git(fx.repo, "rev-parse", "HEAD").trim(), mainBefore, "the branch checked out in the repository has no new commit");
+  assert.equal(git(fx.repo, "status", "--porcelain").trim(), "", "and no change in its files");
+});
+
+test("run ids that a branch name cannot hold still get a branch each, and two such ids never get the same one", async () => {
+  issue(["complexity:low"]);
+  const a = await run({}, "release 1.0");
+  const b = await run({}, "release-1-0"); // what the first id looks like once cleaned
+  assert.equal(res(a).status, "done", JSON.stringify(res(a)));
+  assert.equal(res(b).status, "done", JSON.stringify(res(b)));
+  assert.notEqual(res(a).branch, res(b).branch);
+  for (const branch of [res(a).branch, res(b).branch]) git(fx.repo, "check-ref-format", "--branch", branch);
 });
 
 // ── One active run per issue ──────────────────────────────────────────────────────────
@@ -186,6 +215,13 @@ test("a resume after the PR exists redelivers over the rewritten history with a 
   assert.equal(onOriginAt(branch), git(worktreeOf(first.runId), "rev-parse", "HEAD").trim());
   assert.equal(git(origin(), "rev-list", "--count", `${git(fx.repo, "rev-parse", "main").trim()}..${branch}`).trim(), "1", "one commit above the base, as the first delivery had");
   assert.match(git(origin(), "show", `${branch}:extra.txt`), /made by an agent/);
+
+  // the push the run made, as the run's log shows it: a force that holds only while the origin still has what the first delivery pushed
+  const events = readEventLog(eventLogPath(fx.repo, second.runId)).events;
+  const pushes = events.filter((e): e is ExecStartEvent => e.type === "exec-start" && e.label === "git push");
+  assert.equal(pushes.length, 2, "the first delivery and the redelivery");
+  const commandLine = events.find((e): e is ContentEvent => e.type === "content" && e.kind === "tool-call" && e.attemptId === pushes[1]!.attemptId)!;
+  assert.deepEqual(JSON.parse(commandLine.text!).args, ["push", `--force-with-lease=${branch}:${delivered}`, "-u", "origin", branch]);
 });
 
 test("the push is refused when the remote branch has commits the workflow did not make; nothing on the origin is overwritten", async () => {

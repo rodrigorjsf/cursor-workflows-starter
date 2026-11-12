@@ -76,14 +76,15 @@
 // STATUS: LOW e MED verificados contra a API real em 2026-11-11 (docs/research/verificacoes-locais.md §13). HIGH, o
 // review que bloqueia e o alreadySatisfied só têm testes offline.
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import { NamedLockedError, acquireNamedLock } from "../src/runtime/run-store.js";
 import { defineWorkflow, type AgentCallOptions } from "../src/runtime/workflow.js";
 import { buildPrBody, type PrText } from "./implement-issue/pr-body.js";
-import { Commands, WORKFLOW_BRANCH_PREFIX } from "./implement-issue/commands.js";
+import { CommandError, Commands, WORKFLOW_BRANCH_PREFIX } from "./implement-issue/commands.js";
 import * as P from "./implement-issue/prompts.js";
 import { AXES, AXIS_SCHEMAS, blockingAxes, blockingOf, type Axis, type ReviewReports } from "./implement-issue/review.js";
 import {
@@ -226,8 +227,27 @@ async function existingPr(cmd: Commands, branch: string, repoFlag: string[], cwd
 
 const branchExists = (cmd: Commands, cwd: string, branch: string) => cmd.gitIs(cwd, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`);
 
-/** The branch of a run: one per run, named after the issue and the run id, so two runs on an issue never share one. */
-const runBranch = (issue: number, runId: string) => `${WORKFLOW_BRANCH_PREFIX}issue-${issue}-${runId.replace(/^implement-issue-/, "").replace(/[^\w-]+/g, "-")}`;
+const issueBranch = (issue: number) => `${WORKFLOW_BRANCH_PREFIX}issue-${issue}`;
+
+/**
+ * The branch of a run: one per run, named after the issue and the run id, so two runs on an issue never share one. A run id
+ * with characters a branch name cannot hold is cleaned, and a short hash of the whole id keeps two such ids apart.
+ */
+function runBranch(issue: number, runId: string): string {
+  const id = runId.replace(/^implement-issue-/, "");
+  const clean = id.replace(/[^\w-]+/g, "-");
+  return `${issueBranch(issue)}-${clean === id ? clean : `${clean}-${createHash("sha256").update(runId).digest("hex").slice(0, 6)}`}`;
+}
+
+/** Is `dir` the root of a worktree, and not a directory inside some other repository (where git would act on that repository)? */
+async function isWorktreeRoot(cmd: Commands, dir: string): Promise<boolean> {
+  try {
+    return realpathSync((await cmd.gitRead(dir, "rev-parse", "--show-toplevel")).trim()) === realpathSync(dir);
+  } catch (err) {
+    if (err instanceof CommandError && err.result.exitCode !== null) return false; // git answered that this is not a repository
+    throw err;
+  }
+}
 
 /**
  * The commit a fresh run starts from: the head of the repository's default branch, as it is now. That is the branch
@@ -526,7 +546,7 @@ export default defineWorkflow<Args>({
       ctx.phase("Implementation");
       // Cada run tem a sua branch e o seu worktree, com o id do run no nome. O worktree só é reaproveitado pelo run que o registrou.
       const legacy = !progress.data.worktree && progress.data.baseCommit !== undefined; // run começado quando a branch era `wf/issue-<n>`, fixa
-      const branch = progress.data.branch ?? (legacy ? `${WORKFLOW_BRANCH_PREFIX}issue-${issue.number}` : runBranch(issue.number, ctx.runId));
+      const branch = progress.data.branch ?? (legacy ? issueBranch(issue.number) : runBranch(issue.number, ctx.runId));
       const worktree = progress.data.worktree ?? join(ctx.cwd, ".workflows", "worktrees", branch.replaceAll("/", "-"));
       if (!progress.data.worktree) {
         // Nada deste run ainda. O que estiver no lugar dele não foi criado por ele (com o id do run no nome, só sobra um run apagado ou um engano): não se reaproveita.
@@ -536,6 +556,12 @@ export default defineWorkflow<Args>({
         progress.data.branch = branch; // registrado antes de criar: uma queda no meio do `worktree add` ainda é deste run
         progress.data.worktree = worktree;
         progress.save();
+      }
+      if (existsSync(worktree) && !(await isWorktreeRoot(cmd, worktree))) {
+        // O run registrou este caminho, mas ele não é um worktree: o `git worktree add` caiu no meio. Um git rodado ali agiria no repositório em volta.
+        ctx.log(`${worktree} is the run's, but is not a worktree (an interrupted \`git worktree add\`); removing it to create it again`);
+        rmSync(worktree, { recursive: true, force: true });
+        await cmd.git(ctx.cwd, "worktree", "prune");
       }
       if (existsSync(worktree)) ctx.log(`worktree ${worktree} is this run's; reusing it`);
       else if (await branchExists(cmd, ctx.cwd, branch)) await cmd.git(ctx.cwd, "worktree", "add", worktree, branch); // resume: mantém os commits

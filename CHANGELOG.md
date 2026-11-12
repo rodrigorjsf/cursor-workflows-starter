@@ -135,8 +135,10 @@
   (`wf/issue-<n>-<run>`, antes a fixa `wf/issue-<n>`) e o seu worktree (`.workflows/worktrees/wf-issue-<n>-<run>`),
   registrados no progresso do run; um run novo parte da cabeça atual da branch padrão (a que o `origin/HEAD` aponta, ou
   a branch em uso; a cópia local, não a do origin: rode `git pull` antes para partir do que está lá) e nunca reaproveita
-  o worktree de outro run. Um worktree no lugar do run que ele não criou falha o run, sem apagar nada. Um run começado
-  antes desta mudança retoma na branch e no worktree antigos. Uma issue tem no máximo um run ativo: o segundo run volta
+  o worktree de outro run. Um worktree no lugar do run que ele não criou falha o run, sem apagar nada; um caminho que o próprio run
+  registrou e que não é um worktree (um `git worktree add` interrompido) é refeito. Como a branch é do run, um segundo
+  run na mesma issue, depois do primeiro, abre um PR novo na sua branch. Um run começado antes desta mudança retoma na
+  branch e no worktree antigos. Uma issue tem no máximo um run ativo: o segundo run volta
   `status: "issue-locked"` com o `activeRunId` do que está ativo, sem branch, worktree nem agente (o lock é o arquivo
   `.workflows/locks/issue-<n>.lock`, do mesmo tipo do `run.lock`; o de um processo que morreu é retomado). A entrega
   empurra com `--force-with-lease`, só em branch `wf/`: o resume depois de o PR existir refaz o commit e entrega por

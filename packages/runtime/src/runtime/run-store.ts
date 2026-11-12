@@ -147,6 +147,7 @@ function acquireLock(dir: string, runId: string): () => void {
  * returned function is called or the process ends; the lock of a process that died is stale and is taken over.
  */
 export function acquireNamedLock(cwd: string, name: string, runId: string): () => void {
+  if (!/^[\w-]+$/.test(name)) throw new Error(`invalid lock name ${JSON.stringify(name)}: letters, digits, "_" and "-" only (it becomes a file name)`);
   const file = join(stateDir(cwd, "locks"), `${name}.lock`);
   return takeLock(file, runId, (holder) =>
     new NamedLockedError(
