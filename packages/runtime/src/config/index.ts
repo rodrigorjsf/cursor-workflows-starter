@@ -6,7 +6,7 @@ import { ConfigError, type ConfigIssue, type LoadedConfig, globalConfigPath, loa
 import { LIMIT_FIELDS, type FlagLimits, type LimitOverrides, type ResolvedConfig, resolveConfig } from "./resolve.js";
 
 export { ConfigError, CONFIG_SCHEMA_PATH, REPO_CONFIG_FILE, globalConfigPath, repoConfigPath } from "./file.js";
-export { LIMIT_FIELDS, STEP_OVERRIDE_FIELDS, allowedSources, isModelAllowed, type FlagLimits, type LimitOverrides, type ResolvedConfig, type StepOverrides } from "./resolve.js";
+export { LIMITS, LIMIT_FIELDS, type LimitField, STEP_OVERRIDE_FIELDS, limitOverridesSchema, allowedSources, isModelAllowed, type FlagLimits, type LimitOverrides, type ResolvedConfig, type StepOverrides } from "./resolve.js";
 
 export interface LoadOptions {
   cwd: string;

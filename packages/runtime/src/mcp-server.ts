@@ -25,7 +25,7 @@ import "./node-check.js"; // before anything else: @cursor/sdk requires Node 22.
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { type LimitOverrides, loadEffectiveConfig, parseLimitOverrides } from "./config/index.js";
+import { type LimitOverrides, limitOverridesSchema, loadEffectiveConfig, parseLimitOverrides } from "./config/index.js";
 import { assertKitCompatible, readKitPackage } from "./kit-version.js";
 import { INSIDE_WORKFLOW_ENV } from "./runtime/engine.js";
 import { cancelJob, installCrashHandlers, readJob, spawnJob, waitJob } from "./runtime/jobs.js";
@@ -69,18 +69,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
               name: { type: "string", enum: [...workflows.keys()] },
               args: { type: "object" },
               resumeRunId: { type: "string", description: "runId of an earlier run (one that failed, or stopped at a checkpoint and returned `next`), to resume it without repeating finished steps" },
-              overrides: {
-                type: "object",
-                description:
-                  "Tighter limits for this run only (for example a lower token cap for an experiment). Tighten-only: a value looser than the config, or than the global caps, has no effect and comes back in `violations`.",
-                additionalProperties: false,
-                properties: {
-                  maxTokens: { type: "integer", minimum: 0, description: "Token cap for the run." },
-                  maxTokensPerStep: { type: "integer", minimum: 0, description: "Token cap for each step." },
-                  maxCents: { type: "number", minimum: 0, description: "Cost cap for the run, in cents." },
-                  concurrency: { type: "integer", minimum: 1, description: "Concurrent agents." },
-                },
-              },
+              overrides: limitOverridesSchema(),
             },
           },
         },

@@ -74,7 +74,32 @@ interface Cell {
 }
 
 const DEFAULT_CONCURRENCY = 4;
-export const LIMIT_FIELDS = ["maxTokens", "maxTokensPerStep", "maxCents", "concurrency"] as const;
+/**
+ * The per-run limits, one row each: the global cap that clamps it, its bounds, whether `null` (no limit) is allowed, its
+ * code default and how a chat override describes it. The resolver and the MCP override schema read them from here;
+ * test/limits.test.ts keeps the shipped JSON Schema in step.
+ */
+export const LIMITS = {
+  maxTokens: { cap: "maxTokens", min: 0, integer: true, nullable: true, description: "Token cap for the run." },
+  maxTokensPerStep: { cap: "maxTokensPerStep", min: 0, integer: true, nullable: true, description: "Token cap for each step." },
+  maxCents: { cap: "maxCents", min: 0, integer: false, nullable: true, description: "Cost cap for the run, in cents." },
+  concurrency: { cap: "maxConcurrency", min: 1, integer: true, nullable: false, description: "Concurrent agents." },
+} as const satisfies Record<string, { cap: keyof EffectiveCaps; min: number; integer: boolean; nullable: boolean; description: string }>;
+export type LimitField = keyof typeof LIMITS;
+export const LIMIT_FIELDS = Object.keys(LIMITS) as LimitField[];
+
+/** The JSON Schema of the chat's `overrides` (MCP `start_workflow`), built from LIMITS. */
+export function limitOverridesSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    description:
+      "Tighter limits for this run only (for example a lower token cap for an experiment). Tighten-only: a value looser than the config, or than the global caps, has no effect and comes back in `violations`.",
+    additionalProperties: false,
+    properties: Object.fromEntries(
+      LIMIT_FIELDS.map((f) => [f, { type: LIMITS[f].integer ? "integer" : "number", minimum: LIMITS[f].min, description: LIMITS[f].description }]),
+    ),
+  };
+}
 const MODEL_FIELDS = ["id", "params", "maxMode"] as const;
 /** The step settings the config layers override on top of a call's own options. */
 export const STEP_OVERRIDE_FIELDS = ["timeoutMs", "retries", "schemaRetries", "settingSources"] as const;
@@ -82,12 +107,12 @@ const ROLE_FIELDS = [...STEP_OVERRIDE_FIELDS, "maxTokensPerStep"] as const;
 const lastSegment = (pointer: Pointer): string => pointer.slice(pointer.lastIndexOf("/") + 1);
 
 /** Why a value is not a valid limit, or undefined when it is. `null` means no limit, which concurrency cannot have. */
-function limitProblem(field: (typeof LIMIT_FIELDS)[number], value: unknown): string | undefined {
-  if (value === null) return field === "concurrency" ? "concurrency não pode ser null" : undefined;
+function limitProblem(field: LimitField, value: unknown): string | undefined {
+  const { min, integer, nullable } = LIMITS[field];
+  if (value === null) return nullable ? undefined : `${field} não pode ser null`;
   if (typeof value !== "number" || !Number.isFinite(value)) return "esperava um número";
-  const min = field === "concurrency" ? 1 : 0;
   if (value < min) return `esperava um número maior ou igual a ${min}`;
-  if (field !== "maxCents" && !Number.isInteger(value)) return "esperava um número inteiro";
+  if (integer && !Number.isInteger(value)) return "esperava um número inteiro";
   return undefined;
 }
 
@@ -245,12 +270,7 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
     maxConcurrency: rawCaps.maxConcurrency ?? null,
   };
   /** The numeric cap of each limit field; `settingSources` and model ids have their own checks. */
-  const capOf = new Map<string, number | null>([
-    ["maxTokens", caps.maxTokens],
-    ["maxTokensPerStep", caps.maxTokensPerStep],
-    ["maxCents", caps.maxCents],
-    ["concurrency", caps.maxConcurrency],
-  ]);
+  const capOf = new Map<string, number | null>(LIMIT_FIELDS.map((f) => [f, caps[LIMITS[f].cap]]));
   const capRef = input.global?.path;
 
   const violations: ConfigViolation[] = [];
@@ -259,10 +279,13 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
 
   // Code defaults: the engine's, the workflow's, then each role's own.
   const fromCode: ConfigSource = { layer: "default" };
-  set(pointerOf("limits", "maxTokens"), budget?.maxTokens ?? null, fromCode);
-  set(pointerOf("limits", "maxTokensPerStep"), null, fromCode);
-  set(pointerOf("limits", "maxCents"), budget?.maxCents ?? null, fromCode);
-  set(pointerOf("limits", "concurrency"), DEFAULT_CONCURRENCY, fromCode);
+  const codeDefault: Record<LimitField, number | null> = {
+    maxTokens: budget?.maxTokens ?? null,
+    maxTokensPerStep: null,
+    maxCents: budget?.maxCents ?? null,
+    concurrency: DEFAULT_CONCURRENCY,
+  };
+  for (const field of LIMIT_FIELDS) set(pointerOf("limits", field), codeDefault[field], fromCode);
   for (const role of roles) {
     const code = { ...defaults, ...role.defaults };
     for (const field of MODEL_FIELDS) {
@@ -382,7 +405,7 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
       });
     }
   }
-  const limit = (field: (typeof LIMIT_FIELDS)[number]) => cells.get(pointerOf("limits", field))!.value;
+  const limit = (field: LimitField) => cells.get(pointerOf("limits", field))!.value;
   const config: EffectiveConfig = {
     workflow: meta.name,
     limits: {
