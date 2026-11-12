@@ -60,7 +60,9 @@
 //
 // IDs de modelo: confirme os seus com `npm run models`. Os defaults são modelos do Cursor (Composer e Grok), que os
 // planos pagos da The X Subscription incluem na franquia semanal; modelos de terceiros exigem crédito pré-pago
-// (medido). Em planos legados e no Enterprise, troque por WF_MODEL_* (só o ID; os params ficam de fora).
+// (medido). Em planos legados e no Enterprise, troque o modelo de um papel pela config
+// (`workflows.implement-issue.roles.<papel>.model`) ou por WF_MODEL_<PAPEL> (por exemplo WF_MODEL_REVIEW, ou o nome
+// antigo WF_MODEL_HIGH): o ID sozinho mantém os params do papel, `id[param=valor]` os troca (docs/reference/config.md).
 //
 // STATUS: LOW e MED verificados contra a API real em 2026-11-11 (docs/research/verificacoes-locais.md §13). HIGH, o
 // review que bloqueia e o alreadySatisfied só têm testes offline.
@@ -98,14 +100,11 @@ export { runTests } from "./implement-issue/tdd.js";
 type Tier = "LOW" | "MED" | "HIGH";
 
 const HIGH_EFFORT = [{ id: "reasoning_effort", value: "high" }];
-const pick = (env: string | undefined, fallback: ModelSelection): ModelSelection => (env ? { id: env } : fallback);
-const MODELS: Record<Tier | "REVIEW" | "CLASSIFY", ModelSelection> = {
-  CLASSIFY: pick(process.env.WF_MODEL_CLASSIFY, { id: "composer-2.5" }),
-  LOW: pick(process.env.WF_MODEL_LOW, { id: "composer-2.5" }),
-  MED: pick(process.env.WF_MODEL_MED, { id: "grok-4.7" }),
-  HIGH: pick(process.env.WF_MODEL_HIGH, { id: "grok-4.7", params: HIGH_EFFORT }),
-  REVIEW: pick(process.env.WF_MODEL_REVIEW, { id: "grok-4.7", params: HIGH_EFFORT }),
-};
+const COMPOSER: ModelSelection = { id: "composer-2.5" };
+const GROK: ModelSelection = { id: "grok-4.7" };
+const GROK_HIGH: ModelSelection = { id: "grok-4.7", params: HIGH_EFFORT };
+/** The role of the steps that write code at a tier: `implement.low`, `implement.med`, `implement.high`. */
+const implementRole = (tier: Tier) => `implement.${tier.toLowerCase()}`;
 
 /** Labels da issue → tier. Ajuste ao vocabulário do seu time. */
 const LABEL_TIERS: Record<string, Tier> = {
@@ -303,6 +302,20 @@ export default defineWorkflow<Args>({
       "Implementa uma issue do GitHub com TDD fatia a fatia (red → green conferido pelo código), review em três eixos (Standards, Spec, Segurança) e PR no template Summary/Evidence/Merge Danger.",
     whenToUse: "Quando o usuário pedir para implementar/resolver uma issue específica pelo número.",
     phases: [{ title: "Triagem" }, { title: "Plano" }, { title: "Implementação" }, { title: "Review" }, { title: "Entrega" }],
+    // Papéis: as chaves de `workflows.implement-issue.roles` na config. O modelo de cada um é o default de código; a
+    // config e WF_MODEL_<PAPEL> o trocam. `fix` e `design` não declaram modelo: ele depende do tier ou do passo.
+    // `cloud`: etapas que escrevem no worktree local nunca vão para um agente na nuvem; as de leitura podem, quando
+    // a spec da nuvem chegar (elas leem o worktree do run, por isso `read-only`).
+    roles: [
+      { name: "classify", description: "Classifica a complexidade quando a issue não tem label.", cloud: "ok", defaults: { model: COMPOSER, settingSources: NO_SETTINGS } },
+      { name: "implement.low", description: "Escreve teste e código no tier LOW (e o refactor).", cloud: "never", envAliases: ["LOW"], defaults: { model: COMPOSER } },
+      { name: "implement.med", description: "Escreve teste e código no tier MED (e o refactor).", cloud: "never", envAliases: ["MED"], defaults: { model: GROK } },
+      { name: "implement.high", description: "Escreve teste e código no tier HIGH (e o refactor).", cloud: "never", envAliases: ["HIGH"], defaults: { model: GROK_HIGH } },
+      { name: "review", description: "Revisa o diff em três eixos (Standards, Spec, Segurança).", cloud: "read-only", defaults: { model: GROK_HIGH, settingSources: NO_SETTINGS } },
+      { name: "fix", description: "Corrige a suíte vermelha de uma fatia; o modelo sobe de nível com o tier.", cloud: "never" },
+      { name: "design", description: "Planeja as fatias (MED) ou desenha e julga a interface (HIGH).", cloud: "read-only", defaults: { settingSources: NO_SETTINGS } },
+      { name: "pr-text", description: "Escreve o texto do corpo do PR.", cloud: "read-only", defaults: { model: COMPOSER, settingSources: NO_SETTINGS } },
+    ],
     argsSchema: {
       type: "object",
       required: ["issue"],
@@ -341,16 +354,15 @@ export default defineWorkflow<Args>({
     if (!tier) {
       const c = await ctx.agent<{ tier: Tier; reason: string }>(`${CLASSIFY_INSTRUCTIONS}\n\n${issueBlock(issue)}`, {
         label: "classificar",
-        model: MODELS.CLASSIFY,
+        role: "classify", // settingSources vazio no papel: sem AGENTS.md, hooks, MCP nem as skills que qualquer outra camada carrega (medido)
         tools: [], // só texto: classificar não precisa ler o repositório
-        settingSources: NO_SETTINGS, // sem AGENTS.md, hooks, MCP nem as skills que qualquer outra camada carrega (medido)
         memo: true,
         schema: CLASSIFY_SCHEMA,
       });
       tier = c.tier;
     }
     const base = { issue: issue.number, tier };
-    ctx.log(`Issue #${issue.number} → tier ${tier} (modelo ${MODELS[tier].id})`);
+    ctx.log(`Issue #${issue.number} → tier ${tier} (papel ${implementRole(tier)})`);
     ctx.metric("tier", tier); // covariável de dificuldade: compare modelos dentro do mesmo tier
     ctx.metric("tier_source", issue.labels.some((l) => LABEL_TIERS[l.name.toLowerCase()]) ? "label" : "classifier");
     const ctxFiles = CONTEXT_FILES.filter((f) => existsSync(join(ctx.cwd, f)));
@@ -382,9 +394,9 @@ export default defineWorkflow<Args>({
       if (tier === "MED") {
         plan = await ctx.agent<Plan>(`${P.PLAN_INSTRUCTIONS}\n\n${planData}`, {
           label: "planejar",
-          model: MODELS.MED,
+          role: "design",
+          model: GROK,
           tools: READ_ONLY,
-          settingSources: NO_SETTINGS,
           schema: PLAN_SCHEMA,
           memo: true,
         });
@@ -395,9 +407,9 @@ export default defineWorkflow<Args>({
             ctx.agent<Record<string, string>>(`${P.DESIGN_INSTRUCTIONS}\n\n## Restrição\n${P.DESIGN_CONSTRAINTS[k]}\n\n${issueBlock(issue)}\n\n${contextBlock}`, {
               label: `desenhar:${k}`,
               phase: "Plano",
-              model: MODELS.CLASSIFY,
+              role: "design",
+              model: COMPOSER,
               tools: READ_ONLY,
-              settingSources: NO_SETTINGS,
               schema: DESIGN_SCHEMA,
               memo: true,
             }),
@@ -407,9 +419,9 @@ export default defineWorkflow<Args>({
         if (done.length < 2) return { ...base, status: "design-failed", designs: done.length };
         plan = await ctx.agent<Plan>(`${P.JUDGE_INSTRUCTIONS}\n\n${planData}\n\n## Desenhos\n${JSON.stringify(done, null, 2)}`, {
           label: "julgar",
-          model: MODELS.HIGH,
+          role: "design",
+          model: GROK_HIGH,
           tools: READ_ONLY,
-          settingSources: NO_SETTINGS,
           schema: PLAN_SCHEMA,
           memo: true,
         });
@@ -550,7 +562,7 @@ export default defineWorkflow<Args>({
           const { value: t, before } = await writeStep<TestOut>(
             `red:${key}:${attempt}`,
             `${P.TEST_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Comando de teste\n\`${testCommand}\`${problem ? `\n\n## Corrija\n${problem}` : ""}`,
-            { label: attempt === 1 ? `teste-${sfx}` : `teste-${sfx}:${attempt}`, model: MODELS[tier], schema: TEST_SCHEMA },
+            { label: attempt === 1 ? `teste-${sfx}` : `teste-${sfx}:${attempt}`, role: implementRole(tier), schema: TEST_SCHEMA },
           );
           let after = snapshotTree(worktree);
           const changes = changesBetween(worktree, before, after);
@@ -617,7 +629,7 @@ export default defineWorkflow<Args>({
           const { before } = await writeStep<Impl>(
             `green:${key}:${attempt}`,
             `${P.CODE_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Teste que falha\n\`${rec.testName}\` em \`${rec.testFile}\`\n\n## Saída da suíte\n${tail(rec.red)}${problem ? `\n\n## Corrija\n${problem}` : ""}`,
-            { label: attempt === 1 ? `codigo-${sfx}` : `codigo-${sfx}:${attempt}`, model: MODELS[tier], schema: IMPL_SCHEMA },
+            { label: attempt === 1 ? `codigo-${sfx}` : `codigo-${sfx}:${attempt}`, role: implementRole(tier), schema: IMPL_SCHEMA },
           );
           problem = codeViolation(before, snapshotTree(worktree), rec);
           if (problem) {
@@ -640,7 +652,8 @@ export default defineWorkflow<Args>({
         progress.upsert(rec);
         const { before } = await writeStep<Impl>(`fix:${key}:${round}`, `${P.FIX_INSTRUCTIONS}\n\n${sliceBlock(sl)}\n\n## Saída dos testes\n${res.output}`, {
           label: `corrigir-${sfx}-${round}`,
-          model: MODELS[tier === "LOW" ? "MED" : "HIGH"], // escala o modelo na correção
+          role: "fix",
+          model: tier === "LOW" ? GROK : GROK_HIGH, // escala o modelo na correção
           schema: IMPL_SCHEMA,
         });
         lastProblem = codeViolation(before, snapshotTree(worktree), rec);
@@ -700,10 +713,9 @@ export default defineWorkflow<Args>({
           ctx.agent<any>(`${AXIS_INSTRUCTIONS[axis]}\n\n${extra[axis]}\n\n${issueBlock(issue)}\n\n${roundBlock}\n\n## Diff desde a base\n${diff}`, {
             label: `review:${axis}:${round}`,
             phase: "Review",
-            model: MODELS.REVIEW,
+            role: "review",
             cwd: worktree,
             tools: REVIEW_TOOLS,
-            settingSources: NO_SETTINGS,
             schema: AXIS_SCHEMAS[axis],
             memo: true, // o mesmo diff na mesma rodada não paga de novo
           }),
@@ -745,7 +757,7 @@ export default defineWorkflow<Args>({
         const { value: fix, before } = await writeStep<Impl>(
           "refactor",
           `${P.REFACTOR_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n## Achados\n${JSON.stringify(toRefactor, null, 2)}`,
-          { label: "refatorar-1", model: MODELS[tier], schema: IMPL_SCHEMA },
+          { label: "refatorar-1", role: implementRole(tier), schema: IMPL_SCHEMA },
         );
         const refactorProblem = codeViolation(before, snapshotTree(worktree));
         if (refactorProblem) {
@@ -799,7 +811,7 @@ export default defineWorkflow<Args>({
       if (!prUrl) {
         const text = await ctx.agent<PrText>(
           `${P.PR_INSTRUCTIONS}\n\n${contextBlock}\n\n${issueBlock(issue)}\n\n## Diff\n${diffSinceBase(worktree, baseCommit)}`,
-          { label: "pr-texto", model: MODELS.CLASSIFY, cwd: worktree, tools: REVIEW_TOOLS, settingSources: NO_SETTINGS, schema: PR_SCHEMA, memo: true },
+          { label: "pr-texto", role: "pr-text", cwd: worktree, tools: REVIEW_TOOLS, schema: PR_SCHEMA, memo: true },
         );
         const body = buildPrBody({
           issueNumber: issue.number,

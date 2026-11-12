@@ -42,6 +42,7 @@ _Em preparação._
 ### Parte 6 · Referência
 
 - [6.1 · Referência de eventos](reference/events.md): os campos de cada evento do log de eventos do run (`events.jsonl`), gerada do tipo
+- [6.2 · Referência de configuração](reference/config.md): os arquivos global e do repositório, precedência, tetos, papéis e cada campo, gerada do esquema JSON
 
 ### Parte 7 · Decisões (ADRs)
 

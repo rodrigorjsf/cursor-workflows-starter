@@ -13,11 +13,27 @@
   a segunda execução do mesmo `runId` (`já está em execução`); todo arquivo de estado é gravado de forma atômica;
   retomar um run cujo workflow mudou grava um aviso; cada run novo entra no índice global
   `~/.cursor-workflows/runs.jsonl` (`WF_HOME` muda o diretório do usuário).
+- **Configuração em camadas, com tetos globais e papéis.** Dois arquivos JSON, validados por um esquema que vai com o
+  kit (`packages/runtime/schema/config.schema.json`): o global (`~/.cursor-workflows/config.json`, com os tetos
+  rígidos `caps`) e o do repositório (`.agents/workflows/config.json`). Precedência: código < global < repositório <
+  ambiente < flag < override do chat; depois os tetos globais limitam tudo (números: o menor; listas: a interseção), e
+  o repositório e o chat só podem apertá-los (o que tenta afrouxar vira violação e não tem efeito). Os workflows
+  declaram **papéis** em `meta.roles` (`implement-issue`: `classify`, `implement.low|med|high`, `review`, `fix`,
+  `design`, `pr-text`), e a configuração define por papel o modelo (com `params`), o tempo, as tentativas e as camadas
+  de configuração, com globs de label como alternativa. `null` desliga um limite, chave ausente herda. A configuração
+  é lida de novo a cada run; o `run-start` grava a configuração efetiva, a origem de cada valor e as violações;
+  `wf config show [workflow]` imprime os três. `start_workflow` aceita `overrides` que só apertam. A referência
+  (`docs/reference/config.md`) é gerada do esquema (`npm run docs:config`), e o `npm test` falha se ela divergir.
 - **O estado do runtime funciona em worktree ligado e submódulo**, onde `.git` é um arquivo: antes, qualquer acesso a
   `.workflows/` falhava com `ENOTDIR`.
 
 ### Mudado
 
+- **`WF_MODEL_*` agora é por papel e mantém os `params`.** `WF_MODEL_REVIEW=grok-5` troca só o ID; `id[param=valor]`
+  troca também os `params`. `WF_MODEL_LOW`, `MED` e `HIGH` seguem valendo como apelidos de `implement.low|med|high`. As
+  etapas de correção e de plano/desenho são os papéis `fix` e `design`: não seguem mais `WF_MODEL_MED` nem
+  `WF_MODEL_HIGH`. `WF_MAX_CENTS` e `WF_MAX_TOKENS` passam a ser a camada de ambiente da configuração (um valor inválido
+  é erro, em vez de ignorado), e o servidor MCP não os lê mais no início.
 - **O repositório vira npm workspaces.** O runtime (engine, CLI, servidor MCP, workflows embutidos e seus testes
   offline) fica no pacote `packages/runtime/` (`@cursor-workflows/runtime`) e resolve seus assets pelo local de
   instalação, nunca pela raiz do repositório. As skills distribuídas (`run-workflow`, `cursor-workflow-authoring`,

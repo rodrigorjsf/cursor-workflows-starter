@@ -68,6 +68,94 @@ export interface PhaseEvent extends EventBase {
   title: string;
 }
 
+/** De onde veio um valor da configuração efetiva. */
+export interface ConfigSource {
+  /**
+   * A camada que decidiu o valor: `default` (o código do workflow e do motor), `global` (`~/.cursor-workflows/config.json`),
+   * `repo` (`.agents/workflows/config.json`), `env` (variável de ambiente), `flag` (flag do CLI ou opção de quem chama o
+   * motor), `mcp` (override do chat em `start_workflow`) ou `cap` (o valor pedido passava do teto global e foi reduzido a ele).
+   */
+  layer: "default" | "global" | "repo" | "env" | "flag" | "mcp" | "cap";
+  /** O arquivo, a variável de ambiente ou a flag que trouxe o valor. Ausente em `default`. */
+  ref?: string;
+}
+
+/** Uma tentativa de afrouxar um teto, ou um valor inválido que a camada trouxe. O teto vale e o pedido não tem efeito. */
+export interface ConfigViolation {
+  /** A camada que fez o pedido. */
+  layer: "global" | "repo" | "env" | "flag" | "mcp";
+  /** O arquivo, a variável de ambiente ou a flag do pedido. */
+  ref?: string;
+  /** Onde o valor está: ponteiro JSON dentro do arquivo (`/workflows/implement-issue/maxTokens`), ou o nome da variável ou da opção. */
+  path: string;
+  /** O que a camada pediu. */
+  requested: unknown;
+  /** O que passou a valer: o teto, ou o valor que já valia antes do pedido. */
+  applied: unknown;
+  /** A explicação, em uma linha. */
+  message: string;
+}
+
+/** Limites do run depois de aplicar as camadas e os tetos globais. `null` = sem limite. */
+export interface EffectiveLimits {
+  /** Tokens totais do run. */
+  maxTokens: number | null;
+  /** Tokens de uma etapa, para as etapas sem teto próprio no papel. */
+  maxTokensPerStep: number | null;
+  /** Custo do run, em centavos. */
+  maxCents: number | null;
+  /** Agentes simultâneos. */
+  concurrency: number;
+}
+
+/** Os tetos globais em vigor (o `caps` do arquivo global). `null` = sem teto. */
+export interface EffectiveCaps {
+  /** Teto de tokens por run. */
+  maxTokens: number | null;
+  /** Teto de tokens por etapa. */
+  maxTokensPerStep: number | null;
+  /** Teto de custo por run, em centavos. */
+  maxCents: number | null;
+  /** Modelos permitidos (IDs ou globs com `*`); `null` libera todos. */
+  allowedModels: string[] | null;
+  /** Camadas de configuração que uma etapa pode carregar; `null` libera todas. */
+  allowedSettingSources: SettingSource[] | null;
+  /** Onde uma etapa pode rodar; `null` libera todos. */
+  allowedLocations: Array<"local" | "cloud"> | null;
+  /** Agentes simultâneos; `null` = sem teto. */
+  maxConcurrency: number | null;
+}
+
+/** As configurações de uma etapa por papel (ou por glob de label). Só aparece o que alguma camada definiu. */
+export interface EffectiveRole {
+  /** Modelo: o ID, os parâmetros e o max mode, cada um com a sua origem em `provenance`. Um glob de label pode trazer só parte deles. */
+  model?: Partial<ModelSelection>;
+  /** Tempo máximo da etapa, em milissegundos. */
+  timeoutMs?: number;
+  /** Tentativas extras quando a etapa termina em erro. */
+  retries?: number;
+  /** Re-prompts quando o agente não entrega o JSON do schema. */
+  schemaRetries?: number;
+  /** Teto de tokens da etapa. Ausente: vale o do workflow (`limits`). */
+  maxTokensPerStep?: number | null;
+  /** Camadas de configuração que a etapa carrega, já reduzidas pelo teto `allowedSettingSources`. */
+  settingSources?: SettingSource[];
+}
+
+/** A configuração efetiva de um run: o que as camadas e os tetos globais decidiram para este workflow. */
+export interface EffectiveConfig {
+  /** `meta.name` do workflow. */
+  workflow: string;
+  /** Limites do run. */
+  limits: EffectiveLimits;
+  /** Tetos globais em vigor. */
+  caps: EffectiveCaps;
+  /** Um item por papel que o workflow declara (`meta.roles`). */
+  roles: Record<string, EffectiveRole>;
+  /** Preferências por glob de label, para etapas sem papel. */
+  labels: Record<string, EffectiveRole>;
+}
+
 /** O run começou (ou foi retomado: cada execução emite o seu). */
 export interface RunStartEvent extends EventBase {
   type: "run-start";
@@ -79,6 +167,12 @@ export interface RunStartEvent extends EventBase {
   argsHash: string;
   /** O repositório do run: nome da pasta raiz do git e um hash curto do remote `origin` (ou do caminho). */
   repo: { name: string; hash: string };
+  /** A configuração efetiva desta execução, lida dos arquivos e do ambiente no início. Um resume lê de novo. */
+  config: EffectiveConfig;
+  /** De onde veio cada valor de `config`: ponteiro JSON em `config` (`/limits/maxTokens`, `/roles/review/model/id`) → origem. */
+  provenance: Record<string, ConfigSource>;
+  /** Pedidos que tentaram afrouxar um teto e não tiveram efeito. Vazio quando não houve nenhum. */
+  violations: ConfigViolation[];
 }
 
 /** O run terminou. */
@@ -132,6 +226,8 @@ export interface StepStartEvent extends EventBase, StepRef {
   phase?: string;
   /** De onde vem o resultado sem chamar a API: journal do run (resume) ou memo entre runs. `false` = tentativa real. */
   cached: false | "journal" | "memo";
+  /** O papel da etapa (`role` da chamada), quando ela declara um. */
+  role?: string;
   /** O ID do modelo pedido. */
   model?: string;
   /** Modelo + parâmetros ordenados, como `composer-2[reasoning_effort=low]`: esforço e contexto contam como modelos distintos. */

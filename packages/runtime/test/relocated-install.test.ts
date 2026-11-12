@@ -28,7 +28,7 @@ before(() => {
   kit = join(sandbox, "kit");
   targetRepo = join(sandbox, "target-repo");
   mkdirSync(kit);
-  for (const entry of ["src", "workflows", "tsconfig.json", "tsconfig.test.json"]) cpSync(join(PACKAGE, entry), join(kit, entry), { recursive: true });
+  for (const entry of ["src", "workflows", "schema", "tsconfig.json", "tsconfig.test.json"]) cpSync(join(PACKAGE, entry), join(kit, entry), { recursive: true });
   mkdirSync(join(kit, "test"));
   cpSync(join(PACKAGE, "test", "fake-sdk.ts"), join(kit, "test", "fake-sdk.ts"));
   const manifest = JSON.parse(readFileSync(join(PACKAGE, "package.json"), "utf8"));
@@ -39,6 +39,10 @@ before(() => {
 
   mkdirSync(join(targetRepo, ".agents", "workflows"), { recursive: true });
   writeFileSync(join(targetRepo, ".agents", "workflows", "repo-local.mjs"), 'export default { meta: { name: "repo-local", description: "workflow of the target repo" } };\n');
+  writeFileSync(
+    join(targetRepo, ".agents", "workflows", "repo-runner.mjs"),
+    'export default { meta: { name: "repo-runner", description: "finishes at once" }, async run() { return "ok"; } };\n',
+  );
 });
 after(() => rmSync(sandbox, { recursive: true, force: true }));
 
@@ -62,6 +66,32 @@ test("a relocated install serves its own built-in workflows and version, plus th
     assert.ok(names.includes("kit-marker"), `built-in workflow of the relocated copy missing from ${names}`);
     assert.ok(names.includes("implement-issue"), `built-in workflow missing from ${names}`);
     assert.ok(names.includes("repo-local"), `target repo workflow missing from ${names}`);
+  } finally {
+    await client.close();
+  }
+});
+
+test("a relocated install validates the config with the JSON Schema of its own install location", async () => {
+  writeFileSync(join(targetRepo, ".agents", "workflows", "config.json"), JSON.stringify({ workflows: { "repo-runner": { maxTokens: 1000 } } }));
+  const client = new Client({ name: "relocated-test", version: "0.0.0" });
+  const transport = new StdioClientTransport({
+    command: join(kit, "node_modules", ".bin", "tsx"),
+    args: [join(kit, "src", "mcp-server.ts")],
+    cwd: targetRepo,
+    env: { ...getDefaultEnvironment(), TSX_TSCONFIG_PATH: join(kit, "tsconfig.test.json"), WF_METRICS: "off", WF_HOME: join(sandbox, "home") },
+  });
+  try {
+    await client.connect(transport);
+    const call = async (name: string, args: Record<string, unknown>) => JSON.parse(((await client.callTool({ name, arguments: args })) as { content: Array<{ text: string }> }).content[0]!.text);
+    const started = await call("start_workflow", { name: "repo-runner" });
+    assert.ok(started.jobId, JSON.stringify(started));
+    let state = started;
+    for (let i = 0; i < 20 && state.status !== "finished" && state.status !== "failed"; i++) state = await call("wait_workflow", { jobId: started.jobId, timeoutSec: 5 });
+    assert.equal(state.status, "finished", JSON.stringify(state));
+
+    writeFileSync(join(targetRepo, ".agents", "workflows", "config.json"), JSON.stringify({ workflows: { "repo-runner": { maxTokens: "lots" } } }));
+    const refused = await call("start_workflow", { name: "repo-runner" });
+    assert.match(refused.error, /\/workflows\/repo-runner\/maxTokens/, JSON.stringify(refused));
   } finally {
     await client.close();
   }

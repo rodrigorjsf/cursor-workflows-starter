@@ -64,6 +64,9 @@ Inclui os campos de [`EventBase`](#eventbase).
 | `workflowHash` | `string` | sim | Hash do código e da meta do workflow: compare métricas só entre versões iguais. |
 | `argsHash` | `string` | sim | Hash dos args: dá para ver que dois runs tiveram a mesma entrada sem guardar a entrada. |
 | `repo` | `{ name: string; hash: string }` | sim | O repositório do run: nome da pasta raiz do git e um hash curto do remote `origin` (ou do caminho). |
+| `config` | `EffectiveConfig` | sim | A configuração efetiva desta execução, lida dos arquivos e do ambiente no início. Um resume lê de novo. |
+| `provenance` | `Record<string, ConfigSource>` | sim | De onde veio cada valor de `config`: ponteiro JSON em `config` (`/limits/maxTokens`, `/roles/review/model/id`) → origem. |
+| `violations` | `ConfigViolation[]` | sim | Pedidos que tentaram afrouxar um teto e não tiveram efeito. Vazio quando não houve nenhum. |
 
 ### `run-end`
 
@@ -115,6 +118,7 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 | `label` | `string` | sim | O `label` da etapa; sem ele, `etapa-` e um hash do prompt (nunca o começo do prompt). |
 | `phase` | `string` | não | A fase em que a etapa começou (`phase` da chamada ou o último `ctx.phase`). |
 | `cached` | `false \| "journal" \| "memo"` | sim | De onde vem o resultado sem chamar a API: journal do run (resume) ou memo entre runs. `false` = tentativa real. |
+| `role` | `string` | não | O papel da etapa (`role` da chamada), quando ela declara um. |
 | `model` | `string` | não | O ID do modelo pedido. |
 | `modelKey` | `string` | não | Modelo + parâmetros ordenados, como `composer-2[reasoning_effort=low]`: esforço e contexto contam como modelos distintos. |
 | `modelParams` | `ModelSelection["params"]` | não | Os parâmetros do modelo pedidos (esforço de raciocínio, contexto…). |
@@ -195,6 +199,78 @@ Inclui os campos de [`EventBase`](#eventbase).
 
 ## Tipos auxiliares
 
+### EffectiveConfig
+
+A configuração efetiva de um run: o que as camadas e os tetos globais decidiram para este workflow.
+
+| Campo | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `workflow` | `string` | sim | `meta.name` do workflow. |
+| `limits` | `EffectiveLimits` | sim | Limites do run. |
+| `caps` | `EffectiveCaps` | sim | Tetos globais em vigor. |
+| `roles` | `Record<string, EffectiveRole>` | sim | Um item por papel que o workflow declara (`meta.roles`). |
+| `labels` | `Record<string, EffectiveRole>` | sim | Preferências por glob de label, para etapas sem papel. |
+
+### EffectiveLimits
+
+Limites do run depois de aplicar as camadas e os tetos globais. `null` = sem limite.
+
+| Campo | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `maxTokens` | `number \| null` | sim | Tokens totais do run. |
+| `maxTokensPerStep` | `number \| null` | sim | Tokens de uma etapa, para as etapas sem teto próprio no papel. |
+| `maxCents` | `number \| null` | sim | Custo do run, em centavos. |
+| `concurrency` | `number` | sim | Agentes simultâneos. |
+
+### EffectiveCaps
+
+Os tetos globais em vigor (o `caps` do arquivo global). `null` = sem teto.
+
+| Campo | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `maxTokens` | `number \| null` | sim | Teto de tokens por run. |
+| `maxTokensPerStep` | `number \| null` | sim | Teto de tokens por etapa. |
+| `maxCents` | `number \| null` | sim | Teto de custo por run, em centavos. |
+| `allowedModels` | `string[] \| null` | sim | Modelos permitidos (IDs ou globs com `*`); `null` libera todos. |
+| `allowedSettingSources` | `SettingSource[] \| null` | sim | Camadas de configuração que uma etapa pode carregar; `null` libera todas. |
+| `allowedLocations` | `Array<"local" \| "cloud"> \| null` | sim | Onde uma etapa pode rodar; `null` libera todos. |
+| `maxConcurrency` | `number \| null` | sim | Agentes simultâneos; `null` = sem teto. |
+
+### EffectiveRole
+
+As configurações de uma etapa por papel (ou por glob de label). Só aparece o que alguma camada definiu.
+
+| Campo | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `model` | `Partial<ModelSelection>` | não | Modelo: o ID, os parâmetros e o max mode, cada um com a sua origem em `provenance`. Um glob de label pode trazer só parte deles. |
+| `timeoutMs` | `number` | não | Tempo máximo da etapa, em milissegundos. |
+| `retries` | `number` | não | Tentativas extras quando a etapa termina em erro. |
+| `schemaRetries` | `number` | não | Re-prompts quando o agente não entrega o JSON do schema. |
+| `maxTokensPerStep` | `number \| null` | não | Teto de tokens da etapa. Ausente: vale o do workflow (`limits`). |
+| `settingSources` | `SettingSource[]` | não | Camadas de configuração que a etapa carrega, já reduzidas pelo teto `allowedSettingSources`. |
+
+### ConfigSource
+
+De onde veio um valor da configuração efetiva.
+
+| Campo | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `layer` | `"default" \| "global" \| "repo" \| "env" \| "flag" \| "mcp" \| "cap"` | sim | A camada que decidiu o valor: `default` (o código do workflow e do motor), `global` (`~/.cursor-workflows/config.json`), `repo` (`.agents/workflows/config.json`), `env` (variável de ambiente), `flag` (flag do CLI ou opção de quem chama o motor), `mcp` (override do chat em `start_workflow`) ou `cap` (o valor pedido passava do teto global e foi reduzido a ele). |
+| `ref` | `string` | não | O arquivo, a variável de ambiente ou a flag que trouxe o valor. Ausente em `default`. |
+
+### ConfigViolation
+
+Uma tentativa de afrouxar um teto, ou um valor inválido que a camada trouxe. O teto vale e o pedido não tem efeito.
+
+| Campo | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `layer` | `"global" \| "repo" \| "env" \| "flag" \| "mcp"` | sim | A camada que fez o pedido. |
+| `ref` | `string` | não | O arquivo, a variável de ambiente ou a flag do pedido. |
+| `path` | `string` | sim | Onde o valor está: ponteiro JSON dentro do arquivo (`/workflows/implement-issue/maxTokens`), ou o nome da variável ou da opção. |
+| `requested` | `unknown` | sim | O que a camada pediu. |
+| `applied` | `unknown` | sim | O que passou a valer: o teto, ou o valor que já valia antes do pedido. |
+| `message` | `string` | sim | A explicação, em uma linha. |
+
 ### TurnUsage
 
 Tokens de um turno do agente (evento `turn-ended` do SDK: soma de todos os passos do turno).
@@ -217,4 +293,4 @@ type ErrorKind = "timeout" | "run-error" | "schema" | "rate-limit" | "exception"
 
 ---
 
-[← Anterior: 5.3 · Observabilidade: custo, tokens, contexto e eficiência](../operating/03-observabilidade.md) · [Índice](../README.md) · [Próximo: 8.1 · Cursor SDK como motor de workflows determinísticos: relatório de pesquisa →](../research/relatorio-pesquisa.md)
+[← Anterior: 5.3 · Observabilidade: custo, tokens, contexto e eficiência](../operating/03-observabilidade.md) · [Índice](../README.md) · [Próximo: 6.2 · Referência de configuração →](config.md)

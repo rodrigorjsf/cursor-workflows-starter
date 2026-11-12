@@ -17,7 +17,7 @@ export const EVENTS_PAGE = join(ROOT, "docs", "reference", "events.md");
 const BOOK_LABEL = "6.1 · Referência de eventos";
 /** The footer `npm run docs:check` expects: previous and next chapter in index order. Update it when they change. */
 const BOOK_FOOTER =
-  "[← Anterior: 5.3 · Observabilidade: custo, tokens, contexto e eficiência](../operating/03-observabilidade.md) · [Índice](../README.md) · [Próximo: 8.1 · Cursor SDK como motor de workflows determinísticos: relatório de pesquisa →](../research/relatorio-pesquisa.md)";
+  "[← Anterior: 5.3 · Observabilidade: custo, tokens, contexto e eficiência](../operating/03-observabilidade.md) · [Índice](../README.md) · [Próximo: 6.2 · Referência de configuração →](config.md)";
 
 interface Field {
   name: string;

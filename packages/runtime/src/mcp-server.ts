@@ -5,7 +5,8 @@
 //
 // Tools:
 //   list_workflows                                  → nome, descrição, quando usar, schema dos args
-//   start_workflow {name, args, resumeRunId?}       → {jobId, runId}
+//   start_workflow {name, args, resumeRunId?, overrides?} → {jobId, runId, violations?}
+//                                                   overrides: limites só mais apertados para este run
 //   wait_workflow  {jobId, timeoutSec}              → estado (status, fase, últimos eventos, resultado)
 //   get_workflow_status {jobId}                     → estado sem esperar
 //
@@ -21,6 +22,7 @@ import { readFileSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { type LimitOverrides, loadEffectiveConfig } from "./config/index.js";
 import { INSIDE_WORKFLOW_ENV } from "./runtime/engine.js";
 import { installCrashHandlers, readJob, startJob, waitJob } from "./runtime/jobs.js";
 import { loadWorkflows } from "./runtime/registry.js";
@@ -33,8 +35,6 @@ installCrashHandlers();
 const nested = process.env[INSIDE_WORKFLOW_ENV] === "1";
 
 const cwd = process.env.WF_CWD ?? process.cwd();
-const maxCents = Number(process.env.WF_MAX_CENTS) || undefined; // sem valor: vale o teto padrão do workflow
-const maxTokens = Number(process.env.WF_MAX_TOKENS) || undefined;
 const workflows = nested ? new Map() : await loadWorkflows(cwd);
 
 const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
@@ -62,6 +62,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
               name: { type: "string", enum: [...workflows.keys()] },
               args: { type: "object" },
               resumeRunId: { type: "string", description: "runId de um run anterior (que falhou, ou que parou num checkpoint e devolveu `next`), para retomar sem repetir etapas concluídas" },
+              overrides: {
+                type: "object",
+                description:
+                  "Limites mais apertados só para este run (por exemplo um teto de tokens menor para um experimento). Só aperta: um valor mais frouxo que o da configuração, ou os tetos globais, não tem efeito e volta em `violations`.",
+                additionalProperties: false,
+                properties: {
+                  maxTokens: { type: "integer", minimum: 0, description: "Teto de tokens do run." },
+                  maxTokensPerStep: { type: "integer", minimum: 0, description: "Teto de tokens de cada etapa." },
+                  maxCents: { type: "number", minimum: 0, description: "Teto de custo do run, em centavos." },
+                  concurrency: { type: "integer", minimum: 1, description: "Agentes simultâneos." },
+                },
+              },
             },
           },
         },
@@ -82,6 +94,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       ],
 }));
 
+const OVERRIDE_KEYS = ["maxTokens", "maxTokensPerStep", "maxCents", "concurrency"] as const;
+
+/** The `overrides` argument as limit overrides. A non-number is an error; `null` is accepted and counts as a loosening attempt. */
+function parseOverrides(raw: unknown): LimitOverrides {
+  if (raw === undefined) return {};
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new Error("overrides precisa ser um objeto");
+  const tighten: Record<string, number | null> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!(OVERRIDE_KEYS as readonly string[]).includes(key)) throw new Error(`override desconhecido: ${key} (use ${OVERRIDE_KEYS.join(", ")})`);
+    if (value !== null && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) throw new Error(`override ${key} precisa ser um número maior ou igual a 0`);
+    tighten[key] = value as number | null;
+  }
+  return tighten;
+}
+
 const text = (v: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(v, null, 2) }] });
 const fail = (v: unknown) => ({ ...text(v), isError: true });
 
@@ -95,8 +122,18 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       const def = workflows.get(String(a.name));
       if (!def) return fail({ error: `workflow desconhecido: ${String(a.name)}` });
       const runId = typeof a.resumeRunId === "string" ? a.resumeRunId : undefined;
-      const { job } = startJob(def, a.args ?? {}, { cwd, maxCents, maxTokens, runId });
-      return text({ jobId: job.jobId, runId: job.runId, next: "chame wait_workflow com este jobId" });
+      // The config is read afresh here, so an unusable one is refused before a job exists, and a looser override is reported now.
+      let tighten: LimitOverrides;
+      let violations;
+      try {
+        tighten = parseOverrides(a.overrides);
+        violations = loadEffectiveConfig(def, { cwd, tighten }).violations;
+      } catch (err) {
+        if (err instanceof Error) return fail({ error: err.message });
+        throw err;
+      }
+      const { job } = startJob(def, a.args ?? {}, { cwd, tighten, runId });
+      return text({ jobId: job.jobId, runId: job.runId, next: "chame wait_workflow com este jobId", ...(violations.length ? { violations } : {}) });
     }
     case "wait_workflow": {
       const secs = Math.min(Number(a.timeoutSec ?? 45), 50);

@@ -29,6 +29,7 @@ import {
   type SettingSource,
 } from "@cursor/sdk";
 import { Ajv } from "ajv";
+import { ConfigError, type LimitOverrides, type ResolvedConfig, type StepOverrides, allowedSources, isModelAllowed, loadEffectiveConfig } from "../config/index.js";
 import { EVENT_SCHEMA_VERSION, type ErrorKind, type NewEvent, type StepRef, type WorkflowEvent } from "./events.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
 import { RunLockedError, RunStore } from "./run-store.js";
@@ -80,10 +81,16 @@ export interface RunOptions {
   apiKey?: string;
   /** Id do run. Para retomar, passe o id de um run anterior (o journal evita repetir etapas concluídas). */
   runId?: string;
+  /**
+   * `maxCents`, `maxTokens` and `concurrency` are the flag layer of the config (CLI flags, or whoever embeds the engine):
+   * above the env and the config files, below the global caps. `null` turns the limit off (the caps still apply).
+   */
   maxCents?: number | null;
   maxTokens?: number | null;
   /** Agentes simultâneos. Default 4 (o Cursor não documenta limite numérico; seja conservador). */
   concurrency?: number;
+  /** The chat's overrides (`start_workflow`): they can only tighten the resolved limits; a looser one is a violation and has no effect. */
+  tighten?: LimitOverrides;
   /**
    * Camadas de configuração carregadas pelos agentes das etapas. Default ["project","team","mdm"]:
    * AGENTS.md, .cursor/rules, skills (.agents/skills, .cursor/skills, ...), hooks e MCP do projeto,
@@ -178,6 +185,19 @@ class Semaphore {
   }
 }
 
+/** The config layers' choices for a step on top of its options. A model is merged field by field (an absent `params` inherits). */
+function applyOverrides(o: AgentCallOptions, overrides: StepOverrides): AgentCallOptions {
+  const merged: AgentCallOptions = { ...o };
+  if (overrides.model) {
+    const model = { ...o.model, ...overrides.model };
+    if (model.id) merged.model = model as ModelSelection;
+  }
+  for (const field of ["timeoutMs", "retries", "schemaRetries", "settingSources"] as const) {
+    if (overrides[field] !== undefined) Object.assign(merged, { [field]: overrides[field] });
+  }
+  return merged;
+}
+
 /** Short, stable id of a step: derived from its journal key (hash of the prompt and options + occurrence number). */
 function stepIdOf(journalKey: string): string {
   const [hash = "", occurrence = "0"] = journalKey.split(":");
@@ -213,6 +233,15 @@ export async function runWorkflow<A, R>(
     if (!validate(args)) return refused(`args inválidos: ${ajv.errorsText(validate.errors)}`);
   }
 
+  // The config is read afresh at the start of every execution (also a resume): an edit takes effect on the next run.
+  let resolved: ResolvedConfig;
+  try {
+    resolved = loadEffectiveConfig(def, { cwd: opts.cwd, flags: { maxTokens: opts.maxTokens, maxCents: opts.maxCents, concurrency: opts.concurrency }, tighten: opts.tighten });
+  } catch (err) {
+    if (err instanceof ConfigError) return refused(err.message); // nothing is written: a run with an unusable config never starts
+    throw err;
+  }
+
   let store: RunStore;
   try {
     store = RunStore.open(join(opts.stateDir ?? runtimeStateDir(opts.cwd, "runs"), runId), runId);
@@ -221,7 +250,7 @@ export async function runWorkflow<A, R>(
     throw err;
   }
   try {
-    return await executeRun(def, args, opts, runId, store);
+    return await executeRun(def, args, opts, runId, store, resolved);
   } finally {
     store.close();
   }
@@ -234,7 +263,9 @@ async function executeRun<A, R>(
   opts: RunOptions,
   runId: string,
   store: RunStore,
+  resolved: ResolvedConfig,
 ): Promise<RunOutcome<R>> {
+  const { caps, limits } = resolved.config;
   // spentCents = Σ max(bruto, cobrado). O cobrado sozinho é 0 para uso incluído no plano e não protegeria nada.
   let spentCents = 0;
   let chargedCents = 0;
@@ -293,7 +324,11 @@ async function executeRun<A, R>(
     workflowHash,
     argsHash: sha(JSON.stringify(args ?? null)).slice(0, 16),
     repo: repoIdentity(opts.cwd),
+    config: resolved.config,
+    provenance: resolved.provenance,
+    violations: resolved.violations,
   });
+  for (const v of resolved.violations) emit({ type: "warning", message: `config: ${v.message} (${v.ref ?? v.layer}${v.path ? ` ${v.path}` : ""})` });
   if (recorderWarning) emit({ type: "warning", message: recorderWarning });
   if (store.previousStart && store.previousStart.workflowHash !== workflowHash) {
     emit({
@@ -315,8 +350,9 @@ async function executeRun<A, R>(
   process.env[INSIDE_WORKFLOW_ENV] = "1";
   const journal = store.journal;
   const memo = new MemoStore(opts.cwd);
-  const sem = new Semaphore(opts.concurrency ?? 4);
+  const sem = new Semaphore(limits.concurrency);
   const settingSources = opts.settingSources ?? ["project", "team", "mdm"];
+  const roles = new Map((def.meta.roles ?? []).map((r) => [r.name, r]));
   let currentPhase: string | undefined;
   const flows = new AsyncLocalStorage<Flow>();
   const rootFlow: Flow = { groupId: null, last: null, groups: 0, prefix: "" };
@@ -344,8 +380,8 @@ async function executeRun<A, R>(
   }
 
   const budget: Budget = {
-    maxCents: (opts.maxCents === undefined ? def.budget?.maxCents : opts.maxCents) ?? null,
-    maxTokens: (opts.maxTokens === undefined ? def.budget?.maxTokens : opts.maxTokens) ?? null,
+    maxCents: limits.maxCents,
+    maxTokens: limits.maxTokens,
     spentCents: () => spentCents,
     chargedCents: () => chargedCents,
     spentTokens: () => spentTokens,
@@ -452,6 +488,7 @@ async function executeRun<A, R>(
   /** What `runStep` needs to know about an `agent()` call, computed synchronously before any await. */
   interface StepContext {
     o: AgentCallOptions;
+    role: string | undefined;
     promptHash: string;
     label: string;
     phase: string | undefined;
@@ -467,12 +504,17 @@ async function executeRun<A, R>(
 
   async function agentCall<T>(prompt: string, callOpts: AgentCallOptions = {}): Promise<T> {
     const flow = currentFlow();
-    const o: AgentCallOptions = { ...def.defaults, ...callOpts };
     const promptHash = sha(prompt).slice(0, 16);
     // Label padrão é um hash, não o começo do prompt: nada de conteúdo de issue/código nas métricas e logs.
-    const label = o.label ?? `etapa-${promptHash.slice(0, 8)}`;
+    const label = callOpts.label ?? `etapa-${promptHash.slice(0, 8)}`;
+    const role = callOpts.role;
+    if (role !== undefined && !roles.has(role)) {
+      throw new StepFailedError(`etapa "${label}": papel desconhecido "${role}" (o workflow declara: ${[...roles.keys()].join(", ") || "nenhum"})`);
+    }
+    // Workflow defaults < the role's defaults < this call < the config layers: what the user configured wins over the code.
+    const o = applyOverrides({ ...def.defaults, ...(role === undefined ? undefined : roles.get(role)!.defaults), ...callOpts }, resolved.stepOverrides(role, label));
     const phase = o.phase ?? currentPhase;
-    const sources = o.settingSources ?? settingSources;
+    const sources = allowedSources(caps.allowedSettingSources, o.settingSources ?? settingSources);
     const mKey = modelKey(o.model);
     const fingerprint = {
       model: o.model,
@@ -486,7 +528,7 @@ async function executeRun<A, R>(
     // Chave calculada de forma síncrona, antes de qualquer await.
     const key = journal.keyFor(prompt, fingerprint);
     const ref: StepRef = { stepId: stepIdOf(key), parentId: flow.last, groupId: flow.groupId };
-    const step: StepContext = { o, promptHash, label, phase, sources, mKey, fingerprint, key, ref, started: false };
+    const step: StepContext = { o, role, promptHash, label, phase, sources, mKey, fingerprint, key, ref, started: false };
     try {
       return await runStep<T>(prompt, step);
     } finally {
@@ -495,7 +537,7 @@ async function executeRun<A, R>(
   }
 
   async function runStep<T>(prompt: string, step: StepContext): Promise<T> {
-    const { o, promptHash, label, phase, sources, mKey, fingerprint, key, ref } = step;
+    const { o, role, promptHash, label, phase, sources, mKey, fingerprint, key, ref } = step;
     const emitStart = (attemptId: string, attempt: number, cachedFrom: false | "journal" | "memo") => {
       step.started = true;
       emit({
@@ -506,6 +548,7 @@ async function executeRun<A, R>(
         label,
         phase,
         cached: cachedFrom,
+        role,
         model: o.model?.id,
         modelKey: mKey,
         modelParams: o.model?.params,
@@ -547,6 +590,12 @@ async function executeRun<A, R>(
       }
     }
     if (!o.model) throw new StepFailedError(`etapa "${label}" sem modelo: defina opts.model ou defaults.model`);
+    if (!isModelAllowed(caps.allowedModels, o.model.id)) {
+      throw new StepFailedError(`etapa "${label}": o modelo ${o.model.id} não está no teto global allowedModels (${caps.allowedModels!.join(", ")})`);
+    }
+    if (caps.allowedLocations && !caps.allowedLocations.includes("local")) {
+      throw new StepFailedError(`etapa "${label}": o teto global allowedLocations (${caps.allowedLocations.join(", ") || "vazio"}) não permite etapas locais`);
+    }
     if (o.schema && o.schema.type !== "object") {
       throw new StepFailedError(`etapa "${label}": schema precisa ter type "object" na raiz (vira o inputSchema de uma tool)`);
     }
