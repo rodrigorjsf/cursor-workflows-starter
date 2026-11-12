@@ -31,6 +31,7 @@ import {
   runAttempt,
   within,
 } from "./backend.js";
+import { errorText } from "./error-text.js";
 import { BringBackError, type PushedSnapshot, bringBack, cloudRepoUrl, deleteSnapshot, pushSnapshot, snapshotBranch } from "./cloud-snapshot.js";
 import type { JsonSchema } from "./workflow.js";
 import { RESULT_ARTIFACT, artifactInstruction, artifactReprompt, jsonBlockInstruction, jsonBlockReprompt, resultFromArtifact, resultFromJsonBlock } from "./structured.js";
@@ -58,7 +59,6 @@ export interface CloudBackendOptions {
 const WAIT_FLOOR_MS = 1000;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /** Did the cloud answer that it has no such agent (or run)? The SDK reports a 404 as a configuration error with the status. */
 function isGone(err: unknown): boolean {

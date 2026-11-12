@@ -22,6 +22,7 @@
 import { existsSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { SNAPSHOT_BRANCH_PREFIX, snapshotBranchSegment, snapshotRunSegment } from "../../src/runtime/cloud-snapshot.js";
+import { errorText } from "../../src/runtime/error-text.js";
 import { runCommand, toExecResult } from "../../src/runtime/command-runner.js";
 import type { WorkflowEvent } from "../../src/runtime/events.js";
 import { outcomeClass } from "../../src/runtime/outcome.js";
@@ -95,7 +96,6 @@ const normal = (path: string) => {
   }
 };
 
-const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /** The ids of the repo's runs: the directories of `.workflows/runs/`. */
 function runIdsOf(cwd: string): string[] {
@@ -118,7 +118,7 @@ function implementIssueRuns(cwd: string, errors: string[]): Array<{ runId: strin
       const store = new ProgressStore(cwd, runId);
       if (existsSync(store.file)) runs.push({ runId, progress: store.data });
     } catch (err) {
-      errors.push(`run ${runId}: its progress file cannot be read: ${message(err)}`);
+      errors.push(`run ${runId}: its progress file cannot be read: ${errorText(err)}`);
     }
   }
   return runs;
@@ -163,7 +163,7 @@ async function unsavedWork(commands: Commands, cwd: string, run: { worktree?: st
       if (unpushed > 0) notes.push(`${plural(unpushed, "commit")} on ${run.branch} ${unpushed === 1 ? "is" : "are"} on no remote, and go with the branch`);
     }
   } catch (err) {
-    notes.push(`could not tell whether anything unsaved goes with it: ${message(err)}`);
+    notes.push(`could not tell whether anything unsaved goes with it: ${errorText(err)}`);
   }
   return notes;
 }
@@ -193,7 +193,7 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
   try {
     remote = await commands.remoteOwnedHeads(cwd);
   } catch (err) {
-    plan.errors.push(`the origin's branches cannot be listed, so no origin branch is removed: ${message(err)}`);
+    plan.errors.push(`the origin's branches cannot be listed, so no origin branch is removed: ${errorText(err)}`);
   }
 
   for (const { runId, progress } of runs) {
@@ -219,7 +219,7 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
     try {
       state = (progress.pushed?.length ?? 0) > 0 ? await commands.prState(cwd, branch, progress.repo) : undefined;
     } catch (err) {
-      plan.errors.push(`run ${runId}: the state of its PR cannot be read, so it is kept: ${message(err)}`);
+      plan.errors.push(`run ${runId}: the state of its PR cannot be read, so it is kept: ${errorText(err)}`);
       continue;
     }
     const end = lastEnd(runEvents(cwd, runId));
@@ -262,7 +262,7 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
       if (done) plan.remove.push({ reason: done, actions: [{ kind: "remote-branch", target: branch, head }], notes: [] });
       else plan.kept.push({ branch, why: state === "OPEN" ? "its PR is open, and no run of this repo owns it" : "no run of this repo owns it, and it has no PR" });
     } catch (err) {
-      plan.errors.push(`origin branch ${branch}: the state of its PR cannot be read, so it is kept: ${message(err)}`);
+      plan.errors.push(`origin branch ${branch}: the state of its PR cannot be read, so it is kept: ${errorText(err)}`);
     }
   }
   return plan;
@@ -298,7 +298,7 @@ async function planSnapshots(plan: GcPlan, commands: Commands, snapshots: Snapsh
   try {
     heads = await commands.remoteOwnedHeads(cwd, remote, SNAPSHOT_BRANCH_PREFIX);
   } catch (err) {
-    plan.errors.push(`the cloud snapshot branches of ${remote} cannot be listed, so none is removed: ${message(err)}`);
+    plan.errors.push(`the cloud snapshot branches of ${remote} cannot be listed, so none is removed: ${errorText(err)}`);
     return;
   }
   const runs = runsBySegment(cwd);
@@ -377,7 +377,7 @@ async function planShared(
     try {
       state = await commands.prState(cwd, branch);
     } catch (err) {
-      plan.errors.push(`shared branch ${branch}: the state of its PR cannot be read, so it is kept: ${message(err)}`);
+      plan.errors.push(`shared branch ${branch}: the state of its PR cannot be read, so it is kept: ${errorText(err)}`);
       continue;
     }
     const reason = state && DONE_PR[state];
@@ -415,7 +415,7 @@ export async function applyGc(plan: GcPlan, commands: Commands): Promise<void> {
           action.result = "removed";
         } catch (err) {
           action.result = "failed";
-          action.error = message(err);
+          action.error = errorText(err);
           const what = cleanup.runId !== undefined ? `run ${cleanup.runId}` : cleanup.sharedBy ? "shared branch" : "origin branch";
           plan.errors.push(`${what}: ${action.kind} ${action.target}: ${action.error}`);
         }
@@ -446,7 +446,7 @@ async function removeWorktree(commands: Commands, cwd: string, worktree: string)
     await commands.git(cwd, "worktree", "remove", "--force", worktree);
   } catch (err) {
     // A directory git does not know (an interrupted `git worktree add` left it) is the run's own all the same.
-    if (!/is not a working tree/i.test(message(err))) throw err;
+    if (!/is not a working tree/i.test(errorText(err))) throw err;
     rmSync(worktree, { recursive: true, force: true });
   }
   await commands.git(cwd, "worktree", "prune"); // a registration whose directory is gone would keep its branch from being deleted

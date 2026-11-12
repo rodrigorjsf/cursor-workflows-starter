@@ -36,6 +36,7 @@ import {
   type SettingSource,
 } from "@cursor/sdk";
 import type { CloudAgentEvent, TurnUsage } from "./events.js";
+import { errorText } from "./error-text.js";
 import { type Capture, SUBMIT_TOOL, repromptMessage, schemaInstruction, submitResultTool } from "./structured.js";
 import type { AgentCallOptions } from "./workflow.js";
 
@@ -163,7 +164,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const ACCOUNT_ERROR_CODES = new Set(["plan_required"]);
 
 export function classifyError(err: unknown): Extract<AttemptOutcome, { kind: "error" }> {
-  const message = err instanceof Error ? err.message : String(err);
+  const message = errorText(err);
   const code = (err as { code?: unknown } | undefined)?.code;
   if (typeof code === "string" && ACCOUNT_ERROR_CODES.has(code)) return { kind: "error", reason: "account", message, code };
   // A rate limit that is not retryable is the plan's usage cap (the SDK doc: "Usage limit exceeded"): trying again does not help.

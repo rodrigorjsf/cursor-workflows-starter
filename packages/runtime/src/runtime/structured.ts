@@ -10,6 +10,7 @@
 import { Ajv } from "ajv";
 import type { SDKCustomTool, SDKJsonValue } from "@cursor/sdk";
 import type { JsonSchema } from "./workflow.js";
+import { errorText } from "./error-text.js";
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 
@@ -96,7 +97,7 @@ function resultFromJson(text: string, schema: JsonSchema, what: string): { ok: t
   try {
     value = JSON.parse(text);
   } catch (err) {
-    return { ok: false, error: `${what} does not parse (${err instanceof Error ? err.message : String(err)})` };
+    return { ok: false, error: `${what} does not parse (${errorText(err)})` };
   }
   const validate = ajv.compile(schema);
   if (!validate(value)) return { ok: false, error: ajv.errorsText(validate.errors) };

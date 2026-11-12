@@ -18,6 +18,7 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ModelSelection, RunUsage, SettingSource } from "@cursor/sdk";
 import { Ajv } from "ajv";
+import { errorText } from "./error-text.js";
 import { type AgentBackend, type AttemptEvent, type AttemptResult, type ResultVia, type StepLocation, type StepOptions, type UsageReading, localBackend } from "./backend.js";
 import { createCloudBackend } from "./backend-cloud.js";
 import { type CommandOutcome, EXEC_FLUSH_MS, EXEC_LOG_MAX_CHARS, outputLog, runCommand, toExecResult } from "./command-runner.js";
@@ -1058,7 +1059,7 @@ async function executeRun<A, R>(
             result = await backend.run(prompt, reattach ? { ...stepOptions, reattach: { agentId: reattach.agentId, snapshot: reattach.snapshot } } : stepOptions, abort.signal, onEvent);
           } catch (err) {
             // A backend reports its failures in the result; one that throws has a bug. The attempt fails, uncharged.
-            result = { outcome: { kind: "error", reason: "other", message: err instanceof Error ? err.message : String(err) } };
+            result = { outcome: { kind: "error", reason: "other", message: errorText(err) } };
           } finally {
             clearTimeout(timer);
             signal?.removeEventListener("abort", onRunAbort);
