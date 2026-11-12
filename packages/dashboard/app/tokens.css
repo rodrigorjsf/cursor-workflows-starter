@@ -1,0 +1,151 @@
+/* The dashboard's design tokens, shared by both pages (the app at `/` and the Run view): the one place a colour, a size or a
+   font is written. Light by default, dark under prefers-color-scheme. `test/tokens.test.ts` checks that every text colour
+   (status colours included) meets WCAG AA (4.5:1) on every surface and on its own tint, in both schemes, and that no other
+   file of either page writes a colour of its own. System fonts only: nothing is fetched. */
+:root {
+  color-scheme: light dark;
+
+  /* surfaces: the page, a card or panel, a sunken area (a column, a table's head, a chip), the Run view's lanes */
+  --bg: #f6f8fa;
+  --surface: #ffffff;
+  --surface-muted: #eef1f4;
+  --lane: #eef1f4;
+  --lane-alt: #e9edf1;
+  --border: #d8dee4;
+  --border-strong: #bfc7d0;
+
+  /* text */
+  --fg: #1f2328;
+  --fg-muted: #59636e;
+  --accent: #0757c2;
+
+  /* status: `--s-<name>` is the text and the line, `--s-<name>-bg` the tint a pill or a badge sits on */
+  --s-running: #0757c2;
+  --s-running-bg: #ddf4ff;
+  --s-ok: #16702e;
+  --s-ok-bg: #dafbe1;
+  --s-failed: #c11f2a;
+  --s-failed-bg: #ffebe9;
+  --s-cancelled: #9a3c00;
+  --s-cancelled-bg: #fff1e5;
+  --s-waiting: #7d5600;
+  --s-waiting-bg: #fff8c5;
+  --s-neutral: #59636e;
+  --s-neutral-bg: #eef1f4;
+  --s-merged: #7543c9;
+  --s-merged-bg: #f3eefc;
+  --s-cached: #57606a;
+  --s-cached-bg: #eef1f4;
+  --s-interrupted: #953800;
+  --s-interrupted-bg: #fff1e5;
+
+  /* chart series (graphics: 3:1 on a surface) */
+  --chart-1: #0969da;
+  --chart-2: #bc4c00;
+  --chart-3: #1a7f37;
+  --chart-4: #8250df;
+  --chart-5: #0e7c86;
+  --chart-6: #7d6608;
+
+  --shadow-color: #1f232814;
+  --shadow-strong: #1f23282e;
+  --shadow-sm: 0 1px 2px var(--shadow-color);
+  --shadow-md: 0 1px 3px var(--shadow-color), 0 8px 24px var(--shadow-color);
+  --shadow-lg: 0 12px 32px var(--shadow-strong);
+
+  /* spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* type scale */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+
+  /* shapes */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --surface: #151b23;
+    --surface-muted: #1b222b;
+    --lane: #11161d;
+    --lane-alt: #161c24;
+    --border: #2f3742;
+    --border-strong: #3d4652;
+
+    --fg: #e6edf3;
+    --fg-muted: #9198a1;
+    --accent: #4493f8;
+
+    --s-running: #4493f8;
+    --s-running-bg: #0a2440;
+    --s-ok: #3fb950;
+    --s-ok-bg: #0f2e1a;
+    --s-failed: #f85149;
+    --s-failed-bg: #3a1618;
+    --s-cancelled: #f0883e;
+    --s-cancelled-bg: #3a2010;
+    --s-waiting: #d29922;
+    --s-waiting-bg: #33280a;
+    --s-neutral: #9198a1;
+    --s-neutral-bg: #222a33;
+    --s-merged: #ab7df8;
+    --s-merged-bg: #2a1f45;
+    --s-cached: #9198a1;
+    --s-cached-bg: #222a33;
+    --s-interrupted: #f0883e;
+    --s-interrupted-bg: #3a2010;
+
+    --chart-1: #4493f8;
+    --chart-2: #f0883e;
+    --chart-3: #3fb950;
+    --chart-4: #ab7df8;
+    --chart-5: #39c5cf;
+    --chart-6: #d29922;
+
+    --shadow-color: #01040966;
+    --shadow-strong: #010409cc;
+  }
+}
+
+/* the base every page shares */
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: var(--text-md) / 1.5 var(--font-sans); -webkit-font-smoothing: antialiased; }
+a { color: var(--accent); text-underline-offset: 2px; }
+code, kbd, pre { font-family: var(--font-mono); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button, select, input { font: inherit; color: inherit; }
+button, select { cursor: pointer; }
+.btn, select { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 32px; padding: 0 var(--space-3); color: var(--fg); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: var(--text-sm); font-weight: 500; line-height: 1; white-space: nowrap; box-shadow: var(--shadow-sm); }
+.btn:hover:not(:disabled), select:hover { background: var(--surface-muted); }
+.btn:disabled { opacity: 0.6; cursor: default; }
+.btn.danger { color: var(--s-failed); }
+.btn.danger:hover:not(:disabled) { background: var(--s-failed-bg); border-color: var(--s-failed); }
+
+/* a status as a pill: a tint, the status's colour, a dot */
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 2px 8px; border-radius: var(--radius-pill); font-size: var(--text-xs); font-weight: 600; line-height: 18px; white-space: nowrap; color: var(--s-neutral); background: var(--s-neutral-bg); }
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.pill.status-running, .pill.status-replaying { color: var(--s-running); background: var(--s-running-bg); }
+.pill.status-finished, .pill.pr-open { color: var(--s-ok); background: var(--s-ok-bg); }
+.pill.status-failed, .pill.pr-closed { color: var(--s-failed); background: var(--s-failed-bg); }
+.pill.status-cancelled { color: var(--s-cancelled); background: var(--s-cancelled-bg); }
+.pill.pr-merged { color: var(--s-merged); background: var(--s-merged-bg); }
+.pill.status-running::before { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .pill.status-running::before { animation: none; } }

@@ -1,14 +1,16 @@
 // The Run view: a run drawn as a graph that grows as its events arrive, with the phases as lanes, and a replay of a finished
 // run. The data comes from `useRunEvents`, the graph from `buildRunGraph` and the positions from `layoutRunGraph`; this file
 // puts them on a React Flow canvas.
-import { Background, Controls, type Edge, type FitViewOptions, type Node, ReactFlow, ReactFlowProvider, useReactFlow, useStore } from "@xyflow/react";
+import { Background, Controls, type Edge, type Node, ReactFlow, ReactFlowProvider, useReactFlow, useStore } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { JunctionNode, LaneNode, type LaneNodeData, StartNode, WorkNode, type WorkNodeData } from "./nodes.js";
 import { RunActions } from "./RunActions.js";
 import { argsHashOf } from "./resume-command.js";
 import { StepLogPanel } from "./StepLogPanel.js";
-import { formatCents, formatDuration } from "../app/format.js";
-import { type ProgressStatus, type RunGraph, buildRunGraph, isWork } from "./run-graph.js";
+import { frameOf } from "./framing.js";
+import { formatCents, formatCount, formatDuration } from "../app/format.js";
+import { type RunGraph, buildRunGraph, isWork } from "./run-graph.js";
+import { headerStatus, offeredActions } from "./run-status.js";
 import { type RunLayout, layoutRunGraph } from "./run-layout.js";
 import { type Connection, useRunEvents } from "./use-run-events.js";
 
@@ -84,22 +86,11 @@ function toFlow(graph: RunGraph, layout: RunLayout, now: number, selectedId: str
   return { nodes: [...(layout.lanes.some((l) => l.title !== "") ? lanes : []), ...work], edges };
 }
 
-/** The smallest zoom at which a node's text can still be read. A run that would need less to fit on screen is framed in part. */
-const READABLE_ZOOM = 0.45;
-/** How many nodes a partial frame holds. */
-const FRAME_NODES = 5;
 /** The height the page's header takes, to guess the size of the canvas before it is measured. */
-const HEADER_PX = 70;
+const HEADER_PX = 160;
 
-/** How to frame the run: all of it when that stays readable, otherwise the latest nodes of a live run, or the first ones of a run that is over (to be read from the start). */
-function frameOf(graph: RunGraph, layout: RunLayout, pane: { width: number; height: number }): FitViewOptions {
-  const size = pane.width > 0 && pane.height > 0 ? pane : { width: window.innerWidth, height: window.innerHeight - HEADER_PX };
-  const options: FitViewOptions = { padding: 0.15, maxZoom: 1, minZoom: READABLE_ZOOM };
-  if (Math.min(size.width / layout.width, size.height / layout.height) >= READABLE_ZOOM) return options;
-  const settled = graph.nodes.every((n) => n.state !== "running");
-  const work = graph.nodes.filter((n) => n.kind !== "start");
-  return { ...options, nodes: (settled ? work.slice(0, FRAME_NODES) : work.slice(-FRAME_NODES)).map((n) => ({ id: n.id })) };
-}
+/** The pane's size, or a guess from the window's before React Flow has measured it. */
+const paneOrWindow = (pane: { width: number; height: number }) => (pane.width > 0 && pane.height > 0 ? pane : { width: window.innerWidth, height: window.innerHeight - HEADER_PX });
 
 /**
  * The canvas. It keeps the run in view as it grows, until the user moves the view themselves. The first drawing is framed
@@ -111,7 +102,7 @@ function Canvas({ graph, layout, now, selectedId, onOpen }: { graph: RunGraph; l
   const { fitView } = useReactFlow();
   const pane = useStore((s) => ({ width: s.width, height: s.height }), (a, b) => a.width === b.width && a.height === b.height);
   const userMoved = useRef(false);
-  const firstFrame = useRef(frameOf(graph, layout, pane));
+  const firstFrame = useRef(frameOf(graph, layout, paneOrWindow(pane), selectedId));
   const settled = graph.nodes.every((n) => n.state !== "running");
   const drawn = useRef(false);
   useEffect(() => {
@@ -123,7 +114,7 @@ function Canvas({ graph, layout, now, selectedId, onOpen }: { graph: RunGraph; l
     let cancelled = false;
     const attempt = async (tries: number) => {
       if (cancelled) return;
-      if (!(await fitView({ ...frameOf(graph, layout, pane), duration: 250 })) && tries < 10) setTimeout(() => void attempt(tries + 1), 60);
+      if (!(await fitView({ ...frameOf(graph, layout, paneOrWindow(pane), selectedId), duration: 250 })) && tries < 10) setTimeout(() => void attempt(tries + 1), 60);
     };
     const timer = setTimeout(() => void attempt(0), 80); // the new nodes are measured by the browser after this render
     return () => {
@@ -153,7 +144,7 @@ function Canvas({ graph, layout, now, selectedId, onOpen }: { graph: RunGraph; l
         if (event) userMoved.current = true; // a gesture of the user; the null event is our own fitView
       }}
     >
-      <Background />
+      <Background gap={20} size={1.2} />
       <Controls
         showInteractive={false}
         onFitView={() => {
@@ -164,18 +155,10 @@ function Canvas({ graph, layout, now, selectedId, onOpen }: { graph: RunGraph; l
   );
 }
 
-const STATUS_TEXT: Record<ProgressStatus, string> = {
-  running: "running",
-  finished: "finished",
-  failed: "failed",
-  cancelled: "cancelled",
-  interrupted: "stopped without finishing",
-};
-
-const CONNECTION_TEXT: Record<Connection, string> = { waiting: "waiting for the run", live: "live", reconnecting: "reconnecting…", closed: "", "not-found": "" };
+const CONNECTION_TEXT: Record<Connection, string> = { waiting: "", live: "live", reconnecting: "reconnecting…", closed: "", "not-found": "" };
 
 export function RunView({ runId }: { runId: string }) {
-  const { events, ids, status, info, connection, refresh } = useRunEvents(runId);
+  const { events, ids, status, error, unreachable, info, connection, refresh } = useRunEvents(runId);
   /** null: the view follows the run (live, or the end of a finished one). A number: a replay, showing that many events. */
   const [replayAt, setReplayAt] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -220,51 +203,91 @@ export function RunView({ runId }: { runId: string }) {
   /** In a replay, the log line it has reached; at its end, and outside a replay, the whole log. */
   const upTo = replaying && replayAt < events.length ? (ids[replayAt - 1] ?? 0) : undefined;
   const counts = { steps: graph.nodes.filter((n) => n.kind === "step").length, commands: graph.nodes.filter((n) => n.kind === "command").length };
-  const shownStatus = replaying && !settled ? "replaying" : STATUS_TEXT[run.status];
-  const elapsed = run.startedAt === undefined ? undefined : Math.max(0, (run.endedAt !== undefined ? Date.parse(run.endedAt) : now) - Date.parse(run.startedAt));
+  const header = headerStatus({ api: { status, error }, run, replaying, settled });
+  const offered = offeredActions(status, graph);
+  // A run that is over ends at its run-end, or (its process died) at its last event; a live one at the clock.
+  const endedAt = run.endedAt !== undefined ? Date.parse(run.endedAt) : settled ? Date.parse(String(shown.at(-1)?.ts ?? "")) || now : now;
+  const elapsed = run.startedAt === undefined ? undefined : Math.max(0, endedAt - Date.parse(run.startedAt));
 
   if (connection === "not-found") {
     return (
       <main className="page">
-        <p className="notice">
-          Run <code>{runId}</code> was not found. <a href="/">Back to the dashboard</a>
-        </p>
+        <div className="not-found">
+          <p className="empty-title">Run not found</p>
+          <p>
+            No run <code>{runId}</code> is in the runs index, or its log cannot be read.
+          </p>
+          <a className="btn" href="/#/runs">
+            ← All runs
+          </a>
+        </div>
       </main>
     );
   }
   return (
     <main className="page">
-      <header className="bar">
-        <a className="back" href="/">
-          ← Dashboard
-        </a>
-        <h1>
-          <span className="workflow">{run.workflow ?? "…"}</span> <code>{runId}</code>
-        </h1>
-        <span className={`badge status-${replaying && !settled ? "replaying" : run.status}`}>{shownStatus}</span>
-        <span className="totals">
-          {counts.steps} steps · {counts.commands} commands · {run.tokens.toLocaleString("en-US")} tokens · {formatCents(run.costCents)}
-          {elapsed !== undefined && ` · ${formatDuration(elapsed)}`}
-          {run.executions > 1 && ` · ${run.executions} executions`}
-        </span>
-        <span className={`conn conn-${connection}`} title="connection to the dashboard">
-          {CONNECTION_TEXT[connection]}
-        </span>
+      <header className="run-header">
+        <nav className="crumbs" aria-label="Breadcrumb">
+          <a href="/#/runs">Runs</a>
+          <span aria-hidden="true">/</span>
+          <span>{run.workflow ?? info?.workflow ?? "…"}</span>
+        </nav>
+        <div className="title-row">
+          <h1>
+            <span className="workflow">{run.workflow ?? info?.workflow ?? "…"}</span> <code>{runId}</code>
+          </h1>
+          <span className={`pill status-${header.key}`}>{header.label}</span>
+          {CONNECTION_TEXT[connection] !== "" && (
+            <span className={`conn conn-${connection}`} title="Connection to the dashboard">
+              {CONNECTION_TEXT[connection]}
+            </span>
+          )}
+        </div>
+        <dl className="run-stats">
+          <div>
+            <dt>Duration</dt>
+            <dd>{elapsed === undefined ? "–" : formatDuration(elapsed)}</dd>
+          </div>
+          <div>
+            <dt>Cost</dt>
+            <dd>{formatCents(run.costCents)}</dd>
+          </div>
+          <div>
+            <dt>Tokens</dt>
+            <dd>{formatCount(run.tokens)}</dd>
+          </div>
+          <div>
+            <dt>Steps</dt>
+            <dd>{formatCount(counts.steps)}</dd>
+          </div>
+          <div>
+            <dt>Commands</dt>
+            <dd>{formatCount(counts.commands)}</dd>
+          </div>
+          {run.executions > 1 && (
+            <div>
+              <dt>Executions</dt>
+              <dd>{formatCount(run.executions)}</dd>
+            </div>
+          )}
+        </dl>
+        <div className="toolbar">
         <div className="replay">
           {!replaying && status !== undefined && status !== "running" && events.length > 0 && (
             <button
               type="button"
+              className="btn"
               onClick={() => {
                 setReplayAt(FIRST_FRAME);
                 setPlaying(true);
               }}
             >
-              ▶ Replay
+              <span aria-hidden="true">▶</span> Replay
             </button>
           )}
           {replaying && (
             <>
-              <button type="button" onClick={togglePlay}>
+              <button type="button" className="btn" onClick={togglePlay}>
                 {playing ? "⏸ Pause" : replayAt >= events.length ? "↻ Again" : "▶ Play"}
               </button>
               <input
@@ -287,6 +310,7 @@ export function RunView({ runId }: { runId: string }) {
               </select>
               <button
                 type="button"
+                className="btn"
                 onClick={() => {
                   setPlaying(false);
                   setReplayAt(null);
@@ -297,11 +321,17 @@ export function RunView({ runId }: { runId: string }) {
             </>
           )}
         </div>
-        {!replaying && <RunActions runId={runId} status={status} info={info} argsHash={argsHashOf(events)} onChanged={refresh} />}
+        {!replaying && <RunActions runId={runId} status={status} offered={offered} info={info} argsHash={argsHashOf(events)} onChanged={refresh} />}
+        </div>
       </header>
-      {run.error !== undefined && (
-        <p className="run-error" role="alert">
-          {run.error}
+      {unreachable !== undefined && (
+        <p className="run-banner warn" role="alert">
+          The dashboard is not answering ({unreachable}): what this page shows may be out of date.
+        </p>
+      )}
+      {header.error !== undefined && (
+        <p className="run-banner error" role="alert">
+          {header.error}
         </p>
       )}
       <div className="workspace">

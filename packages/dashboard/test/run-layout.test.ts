@@ -4,8 +4,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildRunGraph, joinIdOf } from "../run-view/run-graph.js";
-import { layoutRunGraph } from "../run-view/run-layout.js";
-import { groupEnd, groupStart, phase, runStart, stamp, step, type Draft } from "./run-log.js";
+import { type Box, laneTitleBox, layoutRunGraph } from "../run-view/run-layout.js";
+import { execEnd, execStart, groupEnd, groupStart, phase, runStart, stamp, step, type Draft } from "./run-log.js";
 
 const inG1 = { groupId: "g1" };
 /** plan, then two parallel branches (two steps on the left, one on the right), then a merge step: three phases. */
@@ -63,4 +63,31 @@ test("a node keeps its row as the run grows: the branches do not swap places whe
 test("an empty graph has an empty layout", async () => {
   const layout = await layoutRunGraph(buildRunGraph([]));
   assert.deepEqual(layout, { nodes: {}, lanes: [], width: 0, height: 0 });
+});
+
+const overlaps = (a: Box, b: Box): boolean => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
+/** Shapes whose lanes start with a node on the top row: the fan-out, two phases of one command each (a setup, then a wait), a lane that holds only a fork, and a long single file. */
+const titledRuns: Array<[name: string, drafts: Draft[]]> = [
+  ["fan-out", fanOut()],
+  ["setup then wait", [runStart, phase("Setup"), execStart("e1", "prepare"), execEnd("e1", "prepare"), phase("Wait"), execStart("e2", "sleep 600", { parentId: "e1" })]],
+  [
+    "a fork alone in its lane",
+    [runStart, phase("Plan"), ...step("s-a", "plan"), phase("Fan out"), groupStart("g1", "parallel", 2, "s-a"), phase("Build"), ...step("s-b", "left", { parentId: "g1", ...inG1 }), ...step("s-c", "right", { parentId: "g1", ...inG1 }), groupEnd("g1")],
+  ],
+  ["one phase per step", [runStart, ...["Triage", "Plan", "Build", "Review", "Deliver"].flatMap((title, i) => [phase(title), ...step(`s${i}`, title.toLowerCase(), { parentId: i === 0 ? null : `s${i - 1}` })])]],
+];
+
+test("no node covers a lane's title: every title box is clear of every node, whatever node starts the lane", async () => {
+  for (const [name, drafts] of titledRuns) {
+    const graph = buildRunGraph(stamp(drafts), { settled: true });
+    const layout = await layoutRunGraph(graph);
+    assert.ok(layout.lanes.length > 1, `${name}: several lanes`);
+    for (const lane of layout.lanes) {
+      const title = laneTitleBox(lane);
+      assert.ok(title.width >= 40, `${name}: the title of ${lane.title} has room (${title.width}px)`);
+      for (const [id, box] of Object.entries(layout.nodes)) assert.ok(!overlaps(title, box), `${name}: node ${id} covers the title of lane ${lane.title}`);
+    }
+    for (const box of Object.values(layout.nodes)) assert.ok(box.y + box.height <= layout.height, `${name}: the lanes are as tall as the nodes`);
+  }
 });

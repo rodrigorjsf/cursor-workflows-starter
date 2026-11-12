@@ -1,8 +1,6 @@
 // What hovering a node says, as rows of text. Pure: the caller gives it the clock.
-import { formatCents, formatDuration } from "../app/format.js";
+import { formatCents, formatCount, formatDuration } from "../app/format.js";
 import { type GraphNode, isWork } from "./run-graph.js";
-
-const tokens = new Intl.NumberFormat("en-US");
 
 /** One line of a node's details. `href` makes the value a link. */
 export interface NodeRow {
@@ -35,7 +33,7 @@ export function describeNode(node: GraphNode, now: number): NodeRow[] {
   }
   rows.push({ name: "Attempts", value: d.cached && d.attempts === 0 ? `0 (from the ${d.cached === "memo" ? "memo" : "journal"})` : String(d.attempts) });
   if (node.kind === "step") {
-    rows.push({ name: "Tokens", value: tokens.format(d.tokens) });
+    rows.push({ name: "Tokens", value: formatCount(d.tokens) });
     rows.push({ name: "Cost", value: `${formatCents(d.costCents)}${d.costFinal ? "" : " (not final)"}` });
   }
   rows.push({ name: "Duration", value: formatDuration(d.durationMs + elapsed) });
