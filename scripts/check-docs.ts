@@ -93,17 +93,34 @@ function indexEntries(index: ParsedMarkdown, problems: string[]): Entry[] {
   return entries;
 }
 
-/** A chapter ends with a `---` rule and one line: previous chapter, index, next chapter, in index order. */
-function checkFooter(root: string, chapter: Entry, previous: Entry | undefined, next: Entry | undefined, problems: string[]): void {
+/** The one line a chapter ends with: previous chapter, index, next chapter, in index order. */
+function expectedFooter(chapter: Entry, previous: Entry | undefined, next: Entry | undefined): string {
   const from = posix.dirname(chapter.file);
   const link = (text: string, target: string) => `[${text}](${posix.relative(from, target)})`;
-  const expected = [
+  return [
     previous ? link(`← Anterior: ${previous.label}`, previous.file) : undefined,
     link("Índice", INDEX),
     next ? link(`Próximo: ${next.label} →`, next.file) : undefined,
   ]
     .filter((part) => part !== undefined)
     .join(" · ");
+}
+
+/**
+ * What the index says about `file` (a posix path from the repo root): its label (the H1 it must carry) and the footer it
+ * must end with. A generator that writes a chapter calls this instead of keeping a copy that goes stale when a neighbour
+ * is added. Undefined when the index does not list the file.
+ */
+export function bookPlace(root: string, file: string): { label: string; footer: string } | undefined {
+  if (!existsSync(join(root, INDEX))) return undefined;
+  const listed = indexEntries(parseMarkdown(readFileSync(join(root, INDEX), "utf8")), []).filter((e) => existsSync(join(root, e.file)) || e.file === file);
+  const at = listed.findIndex((e) => e.file === file);
+  return at === -1 ? undefined : { label: listed[at]!.label, footer: expectedFooter(listed[at]!, listed[at - 1], listed[at + 1]) };
+}
+
+/** A chapter ends with a `---` rule and one line: previous chapter, index, next chapter, in index order. */
+function checkFooter(root: string, chapter: Entry, previous: Entry | undefined, next: Entry | undefined, problems: string[]): void {
+  const expected = expectedFooter(chapter, previous, next);
 
   const lines = readFileSync(join(root, chapter.file), "utf8").split("\n");
   while (lines.length > 0 && lines.at(-1)!.trim() === "") lines.pop();

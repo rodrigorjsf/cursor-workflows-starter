@@ -1,6 +1,6 @@
 // Workflow de referência: implementar uma issue do GitHub de ponta a ponta, seguindo em código os fluxos das skills
 // tdd e codebase-design (implementação), code-review (review) e pr (corpo do PR) de mattpocock/skills (MIT). As
-// instruções estão em workflows/implement-issue/prompts.ts; créditos em CREDITS.md.
+// instruções estão em workflows/implement-issue/prompts.ts; créditos em docs/vision/02-a-ideia-e-as-referencias.md.
 //
 // O que é decidido em CÓDIGO (não pelo modelo):
 //   - o tier (LOW/MED/HIGH) vem das labels da issue; só sem label um classificador barato decide;

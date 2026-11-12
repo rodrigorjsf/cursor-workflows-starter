@@ -44,7 +44,7 @@ constraints) fire sub-agents in parallel. In the workflow:
 
 - Check the skill's license and that of whoever it credits (its credits file or `metadata`; the `pr` skill credits `show-me`).
 - Paraphrase the instructions into the constants and cite origin, version, author and license in the header of the
-  prompts module and in `CREDITS.md`.
+  prompts module and in the credits table of the kit's book chapter on the idea and its references (vision part, chapter 1.2).
 - The original skill stays as it is: in a plugin cache, the next update would undo any edit.
 
 ## Origin subagent

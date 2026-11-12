@@ -8,15 +8,55 @@ um link quebrado, um rodapé errado ou um capítulo fora do índice reprova o PR
 
 ## Onde fica cada coisa
 
-O repositório é um produto (`packages/runtime/`, `skills/`, `templates/`) mais um espaço de desenvolvimento (a raiz). A
-estrutura está na seção [Estrutura do README](../../README.md#estrutura), e o `CLAUDE.md` (guia canônico do mantenedor;
-`AGENTS.md` é um link para ele) tem as regras para quem edita o código. Ele é carregado no contexto de todo agente e por
-isso tem limite de linhas: guarda o essencial, e o detalhe fica neste livro.
+O repositório é um produto (`packages/runtime/`, `skills/`, `templates/`) mais um espaço de desenvolvimento (a raiz). O
+`CLAUDE.md` (guia canônico do mantenedor; `AGENTS.md` é um link para ele) tem as regras para quem edita o código. Ele é
+carregado no contexto de todo agente e por isso tem limite de linhas: guarda o essencial, e o detalhe fica neste livro. A
+decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-claude-md-symlink.md).
+
+```
+.
+├── CLAUDE.md               # guia canônico do mantenedor, em inglês (AGENTS.md é um link simbólico para ele)
+├── packages/
+│   └── runtime/            # o produto (workspace npm @cursor-workflows/runtime)
+│       ├── src/
+│       │   ├── runtime/
+│       │   │   ├── workflow.ts     # tipos públicos + defineWorkflow()
+│       │   │   ├── engine.ts       # agent/parallel/pipeline/phase, retries, modelo, teto de custo
+│       │   │   ├── events.ts       # o tipo dos eventos (a referência 6.1 é gerada dele)
+│       │   │   ├── run-store.ts    # log de eventos, journal e lock de cada run
+│       │   │   ├── structured.ts   # saída estruturada via custom tool submit_result + Ajv
+│       │   │   ├── journal.ts      # resume sem repetir etapas concluídas
+│       │   │   ├── jobs.ts         # execução assíncrona com estado em disco (start/wait)
+│       │   │   ├── registry.ts     # descobre workflows/*.ts
+│       │   │   └── nested-mcp-guard.mjs  # servidor MCP sem tools que barra workflow dentro de etapa
+│       │   ├── observability/      # banco SQLite de métricas, recorder, consultas, dashboard localhost
+│       │   ├── cli.ts              # wf login | whoami | models | list | run | start | wait | status | jobs | stats | metrics
+│       │   └── mcp-server.ts       # tools MCP: list_workflows, start_workflow, wait_workflow, get_workflow_status
+│       ├── workflows/
+│       │   ├── implement-issue.ts  # exemplo: TDD fatia a fatia conferido pelo código → review em 3 eixos → PR com evidência
+│       │   └── implement-issue/    # prompts (paráfrases das skills de mattpocock/skills), laço TDD, review, corpo do PR
+│       └── test/                   # testes offline (fake SDK)
+├── skills/                 # skills distribuídas (autossuficientes: SKILL.md + references/)
+│   ├── run-workflow/       # /run-workflow <nome> <args>: dispara e acompanha
+│   ├── cursor-workflow-authoring/ # referência para escrever workflows
+│   └── skill-to-workflow/  # /skill-to-workflow: converte skills e subagents em workflow
+├── templates/              # arquivos que o setup do kit grava no repositório alvo (bloco do AGENTS.md)
+├── test/                   # testes do repositório (layout, MCP dogfood, scripts da raiz, docs)
+├── .agents/                # local neutro (Cursor e Codex leem nativamente)
+│   ├── skills/             # links simbólicos para skills/ (dogfood)
+│   └── workflows/          # workflows do repositório (carregados junto com os de packages/runtime/workflows/)
+├── .claude/rules/          # regras do Claude Code com escopo por caminho
+├── .cursor/mcp.json        # MCP server no Cursor
+├── .mcp.json               # o mesmo MCP server no Claude Code
+├── scripts/                # procedimentos do mantenedor (tabela em 9.4)
+├── SECURITY.md · CHANGELOG.md · README.md · README.en.md
+└── docs/                   # o livro: README.md é o índice; uma pasta por parte (vision/, usage/, internals/, ..., adr/)
+```
 
 ## Idioma
 
 - **Inglês:** o `CLAUDE.md`, as skills distribuídas, os templates, os ADRs e qualquer texto escrito para agentes.
-- **pt-BR:** este livro e o `README.md`. O `README.en.md` é o resumo em inglês.
+- **pt-BR:** este livro e o `README.md`. O `README.en.md` é o hub em inglês, com a mesma estrutura.
 
 ## Skills distribuídas
 

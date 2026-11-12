@@ -217,4 +217,4 @@ type ErrorKind = "timeout" | "run-error" | "schema" | "rate-limit" | "exception"
 
 ---
 
-[← Anterior: 5.3 · Observabilidade: custo, tokens, contexto e eficiência](../operating/03-observabilidade.md) · [Índice](../README.md) · [Próximo: 8.1 · Cursor SDK como motor de workflows determinísticos: relatório de pesquisa →](../research/relatorio-pesquisa.md)
+[← Anterior: 5.3 · Observabilidade: custo, tokens, contexto e eficiência](../operating/03-observabilidade.md) · [Índice](../README.md) · [Próximo: 7.1 · ADR-0001: Layered config with hard caps →](../adr/0001-layered-config-with-hard-caps.md)

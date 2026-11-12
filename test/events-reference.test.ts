@@ -1,7 +1,9 @@
 // Seam 3, the docs: the events reference page is generated from the event interfaces, and `npm test` fails when the
 // committed page drifts from them. Regenerate with `npm run docs:events`.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { EVENTS_PAGE, EVENTS_SOURCE, generateEventsReference } from "../scripts/events-reference.js";
 
@@ -28,4 +30,60 @@ test("a change to the event type makes the committed page stale", () => {
   const page = generateEventsReference(changed);
   assert.match(page, /\| `level` \| `"info" \\\| "warn"` \| não \| Gravidade\. \|/);
   assert.notEqual(page, readFileSync(EVENTS_PAGE, "utf8"), "the committed page no longer matches: the docs check would fail");
+});
+
+test("the page's footer comes from the book index: moving the page in the index changes its number and footer, no constant to update", () => {
+  const root = mkdtempSync(join(tmpdir(), "wf-events-footer-"));
+  try {
+    const book: Record<string, string> = {
+      "docs/README.md": [
+        "# Book",
+        "",
+        "### Parte 1 · Um",
+        "",
+        "- [1.1 · Primeiro](one/01-primeiro.md): x",
+        "",
+        "### Parte 2 · Dois",
+        "",
+        "- [2.1 · Referência de eventos](reference/events.md): x",
+        "- [2.2 · Terceiro](reference/02-terceiro.md): x",
+        "",
+      ].join("\n"),
+      "docs/one/01-primeiro.md": "# 1.1 · Primeiro\n",
+      "docs/reference/events.md": "# 2.1 · Referência de eventos\n",
+      "docs/reference/02-terceiro.md": "# 2.2 · Terceiro\n",
+    };
+    for (const [path, content] of Object.entries(book)) {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), content);
+    }
+    const lastLine = (page: string) => page.trimEnd().split("\n").at(-1);
+    const first = generateEventsReference(source, root);
+    assert.equal(first.split("\n")[0], "# 2.1 · Referência de eventos", "the H1 is the index label");
+    assert.equal(lastLine(first), "[← Anterior: 1.1 · Primeiro](../one/01-primeiro.md) · [Índice](../README.md) · [Próximo: 2.2 · Terceiro →](02-terceiro.md)");
+
+    // the page moves to the end of the part: the footer follows without touching the generator
+    writeFileSync(
+      join(root, "docs/README.md"),
+      book["docs/README.md"]!.replace("- [2.1 · Referência de eventos](reference/events.md): x\n- [2.2 · Terceiro](reference/02-terceiro.md): x", "- [2.1 · Terceiro](reference/02-terceiro.md): x\n- [2.2 · Referência de eventos](reference/events.md): x"),
+    );
+    const moved = generateEventsReference(source, root);
+    assert.equal(moved.split("\n")[0], "# 2.2 · Referência de eventos");
+    assert.equal(lastLine(moved), "[← Anterior: 2.1 · Terceiro](02-terceiro.md) · [Índice](../README.md)");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the page refuses to be generated when the book index does not list it", () => {
+  const root = mkdtempSync(join(tmpdir(), "wf-events-footer-"));
+  try {
+    mkdirSync(join(root, "docs"), { recursive: true });
+    writeFileSync(join(root, "docs/README.md"), "# Book\n\n### Parte 1 · Um\n\n- [1.1 · Primeiro](one/01-primeiro.md): x\n");
+    mkdirSync(join(root, "docs/one"), { recursive: true });
+    writeFileSync(join(root, "docs/one/01-primeiro.md"), "# 1.1 · Primeiro\n");
+    assert.throws(() => generateEventsReference(source, root), /docs\/reference\/events\.md.*not listed/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
