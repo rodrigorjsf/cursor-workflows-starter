@@ -75,7 +75,7 @@ export default defineWorkflow<{ target: string }>({
 | `timeoutMs` | Time limit of each send (the request and each schema re-prompt get their own). Default 20 min. |
 | `retries` | Extra attempts when the run ends in error or is cancelled. Default 1. |
 | `schemaRetries` | Re-prompts when the agent skips `submit_result` or sends invalid JSON. Default 2. |
-| `settingSources` | Which config layers the step loads: `"project"` (AGENTS.md, rules, skills, hooks, project MCP), `"team"`, `"mdm"`, `"user"`. Default when omitted: `["project","team","mdm"]`. Every layer adds fixed context to every call (cost.md). |
+| `settingSources` | Which config layers the step loads: `"project"` (AGENTS.md, rules, skills, hooks, project MCP), `"team"`, `"mdm"`, `"user"`, `"plugins"`, `"all"` (the global cap `allowedSettingSources` leaves `"all"` out by default). Default when omitted: `["project","team","mdm"]`. Every layer adds fixed context to every call (cost.md). |
 | `memo` | Result cache across runs, keyed by prompt, model, schema, tools, context and repository state. Accepted only with read-only `tools`. |
 | `revertOnRetry` | Before each retry of a step that can write, puts `cwd` back as it was when the step started (files created are deleted, files changed are restored, the index is unstaged). Default off. Use it only when no other step writes in that directory at the same time (a worktree of the step's own): the undo restores the whole directory. In a directory that is not a git repository the retry runs anyway, with a warning. |
 | `sandbox` | Turns on the SDK's local sandbox for shell calls (Linux needs `bubblewrap`). Untested here; leave it off. |

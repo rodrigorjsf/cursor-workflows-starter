@@ -57,7 +57,7 @@ valores padrão, que você ajusta: [2.2 §3](docs/usage/02-configuracao-inicial.
 |---|---|---|
 | Runtime | `ctx.agent`, `parallel`, `pipeline` e `phase`; modelo e retries por etapa; saída validada por schema; teto de custo | [3.1 · Arquitetura](docs/internals/01-arquitetura.md) |
 | Resume e log de eventos | O journal evita refazer etapas prontas; cada fato do run fica em um log por run | [6.1 · Referência de eventos](docs/reference/events.md) |
-| MCP server e CLI `wf` | `start_workflow`, `wait_workflow` e companhia; `wf init`, `doctor`, `upgrade`, `run`, `start`, `status`, `jobs`, `stats` | [2.3 · Invocação](docs/usage/03-invocacao-no-cursor-ide.md) |
+| MCP server e CLI `wf` | `start_workflow`, `wait_workflow` e companhia; `wf init`, `doctor`, `upgrade`, `config show`, `run`, `start`, `status`, `wait`, `cancel`, `jobs`, `gc`, `stats` | [2.3 · Invocação](docs/usage/03-invocacao-no-cursor-ide.md) |
 | Skills | `run-workflow`, `cursor-workflow-authoring`, `skill-to-workflow` e `cursor-workflows-setup` | [4.1](docs/authoring/01-escrevendo-workflows.md) e [4.2](docs/authoring/02-convertendo-skills-e-subagents.md) |
 | `implement-issue` | Workflow de exemplo: TDD fatia a fatia, review em três eixos, PR com evidência | [4.2](docs/authoring/02-convertendo-skills-e-subagents.md) |
 | Métricas e dashboard | Custo, tokens e eficiência num SQLite local; dashboard em localhost | [5.3 · Observabilidade](docs/operating/03-observabilidade.md) |
