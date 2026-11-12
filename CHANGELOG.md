@@ -8,8 +8,7 @@
   (`local`, o padrão, ou `cloud`) nos arquivos de configuração. A nuvem só vale se o `caps.allowedLocations` do arquivo
   global a permitir (sem a chave, só `local`: o pedido de um papel vira uma violação e a etapa roda local) e se o workflow
   declarar o papel `ok` ou `read-only`; uma configuração que manda um papel `never` para a nuvem é recusada antes do run,
-  e uma etapa `read-only` que pode escrever, ou qualquer etapa que escreve, falha antes de gastar (escrever na nuvem vem
-  depois). Antes da etapa o estado do worktree, o não commitado inclusive, é empurrado como uma branch descartável
+  e uma etapa `read-only` que pode escrever falha antes de gastar. Antes da etapa o estado do worktree, o não commitado inclusive, é empurrado como uma branch descartável
   `wf/cloud-snapshot/<run>/<id>` para o remote `cloud.remote` (padrão `origin`; um fork serve para quem tem CI pesada, ou
   exclua `wf/**` do pipeline) e apagada quando a etapa termina. O backend de nuvem (`backend-cloud.ts`) implementa o
   `AgentBackend`: não manda custom tools, allowlists nem camadas de configuração (avisa que elas são ignoradas), pede o
@@ -18,6 +17,22 @@
   `step-start` e o `step-end` ganham `location`, e a configuração efetiva ganha `cloud.remote` e a `location` de cada
   papel. O `AgentBackend` ganhou o evento `warning` e o campo `writes`, e `runAttempt` e `converse` guardam o que os dois
   backends repartem.
+- **Etapas que escrevem em Cursor cloud agents.** Uma etapa que pode escrever roda na nuvem num papel declarado `ok` (a
+  `read-only` continua falhando antes de gastar). O cloud agent trabalha na própria branch de snapshot
+  (`workOnCurrentBranch`, sem PR) e é instruído a commitar nela, mesmo que o prompt do workflow mande não rodar git. Quando o
+  run termina, o motor busca a branch e avança o worktree até ela (fast-forward de arquivos, índice e branch) antes de apagar
+  o snapshot, e os comandos que o workflow roda depois com `ctx.exec` (a suíte do TDD) enxergam o trabalho. É um fast-forward
+  ou nada: a etapa falha, sem mudar o worktree, quando o agente reescreveu o histórico, quando a branch local andou ou quando
+  os arquivos mudaram enquanto o agente trabalhava ou o agente adiciona um arquivo onde o worktree tem um que o git
+  ignora (o `revertOnRetry` e o cancelamento não desfazem uma etapa na nuvem recusada, para não apagar o que a pessoa
+  mudou nesse meio tempo); se o avanço falha depois de mexer no índice e nos arquivos, o motor
+  devolve o worktree ao que era antes da etapa (`AttemptResult.touchedWorktree`). O snapshot de um worktree sem mudanças é o
+  próprio `HEAD` (o histórico ganha só os commits do agente); o de um com mudanças fica no histórico local, e o `cloud-agent`
+  grava o commit dele em `snapshot.commit`, para o resume conferir o worktree. Um papel ganha a preferência `resultVia`
+  (`json-block`, o padrão, ou `artifact`): com `artifact` o agente salva o resultado estruturado em `result.json` nos
+  artefatos dele e o motor o baixa depois do run (`listArtifacts`, `downloadArtifact`), validando com o mesmo Ajv e os
+  mesmos follow-ups. As funções de escrita do `implement-issue` continuam `cloud: never`. `converse` aceita um `check`
+  assíncrono.
 - **Ciclo de vida das etapas na nuvem: reanexar, cancelar e o limite de espera.** O motor grava o id do cloud agent no log
   (evento novo `cloud-agent`, com a branch de snapshot de que o agente parte) assim que o agente existe. Um resume depois de
   um crash reanexa ao agente que ainda roda (`Agent.resume`, `Agent.listRuns`) em vez de criar outro: espera o run que ele já

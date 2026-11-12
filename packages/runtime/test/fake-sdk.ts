@@ -45,6 +45,8 @@ export const costConfig: {
   listRunsDelayMs?: number;
   /** The next this many `Agent.listRuns` calls fail like a server that is down (503): a lookup that does not say "not found". */
   lookupFailures?: number;
+  /** `Agent.listArtifacts` fails with this message, like an API that is down: a call nobody should make for a run that failed. */
+  listArtifactsError?: string;
   /** Holds the creation of the agents it answers for (it gets the create options) until the promise settles; `undefined` = not held. */
   createGate?: (options: any) => Promise<unknown> | undefined;
 } = { raw: 9, charged: 7 };
@@ -97,6 +99,8 @@ interface AgentState {
   n: number;
   turnUsages: Array<typeof TURN_USAGE>;
   runs: ServerRun[];
+  /** The files the agent saved in its artifacts directory, by name: agent-scoped, so they outlive the run that wrote them. */
+  artifacts?: Record<string, string>;
 }
 /**
  * The cloud agents the server knows. Like the real SDK, `Agent.create` mints an id and the server learns the agent when
@@ -136,6 +140,19 @@ export function seedCloudAgent(agentId: string, runs: Array<{ status?: ServerRun
   }
   cloudServer.set(agentId, state);
 }
+
+/**
+ * Where a cloud run says it pushed, as the SDK's `RunResult.git` does. An agent that works on the current branch pushes to its
+ * starting ref (the snapshot branch); any other pushes to a branch of its own, as the real one does with `workOnCurrentBranch` off.
+ * A script's own `git` wins.
+ */
+function pushedBranches(o: any, agentId: string) {
+  if (!o.cloud) return {};
+  const [repo] = o.cloud.repos ?? [];
+  return { git: { branches: [{ repoUrl: repo?.url, branch: o.cloud.workOnCurrentBranch ? repo?.startingRef : `cursor/${agentId}` }] } };
+}
+
+const artifactPath = (key: string) => (key.startsWith("artifacts/") || key.startsWith("/") ? key : `artifacts/${key}`);
 
 function notFound(what: string) {
   return Object.assign(new ConfigurationError(`${what} not found`), { status: 404 });
@@ -215,6 +232,7 @@ function agentOf(state: AgentState) {
           return { status: "finished", result: "ok" };
         });
       const r = await behave(o, msg, state.n++);
+      if (r?.artifacts) state.artifacts = { ...state.artifacts, ...r.artifacts }; // the run saved files in the agent's artifacts directory
       /** A cloud run is on the server: the client gets a handle on it. */
       const out = (raw: any) => {
         if (!o.cloud) return raw;
@@ -256,7 +274,7 @@ function agentOf(state: AgentState) {
             await streamed;
             if (r.rejectWait) throw r.rejectWait; // the run fails after its turns, e.g. with a RateLimitError
             if (cancelled && r.stuckAfterCancel) await new Promise(() => {}); // a wait() that never settles once cancelled
-            return { id: "r", status: "finished", model: o.model, ...r, ...(cancelled ? { status: "cancelled" } : {}) };
+            return { id: "r", status: "finished", model: o.model, ...pushedBranches(o, state.agentId), ...r, ...(cancelled ? { status: "cancelled" } : {}) };
           },
         });
       }
@@ -274,7 +292,17 @@ function agentOf(state: AgentState) {
           wait: () => ended,
         });
       }
-      return out({ cancel: async () => void stats.cancels++, wait: async () => ({ id: "r", status: "finished", model: o.model, ...r }) });
+      return out({ cancel: async () => void stats.cancels++, wait: async () => ({ id: "r", status: "finished", model: o.model, ...pushedBranches(o, state.agentId), ...r }) });
+    },
+    /** Like the cloud API: paths are relative to the workspace and start with `artifacts/`. A key that already starts with `artifacts/` or `/` is the path as it is. */
+    async listArtifacts() {
+      if (costConfig.listArtifactsError) throw new CursorAgentError(costConfig.listArtifactsError);
+      return Object.entries(state.artifacts ?? {}).map(([key, content]) => ({ path: artifactPath(key), sizeBytes: Buffer.byteLength(content), updatedAt: new Date().toISOString() }));
+    },
+    async downloadArtifact(path: string) {
+      const found = Object.entries(state.artifacts ?? {}).find(([key]) => artifactPath(key) === path);
+      if (!found) throw notFound(`artifact ${path}`);
+      return Buffer.from(found[1]);
     },
     async getUsage() {
       stats.usageReads++;

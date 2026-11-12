@@ -4,7 +4,7 @@
 // the run in flight and reports the signal's reason, the usage read, the agent disposed, and the snapshot branch gone.
 process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
@@ -12,7 +12,7 @@ import { calls, costConfig, finishCloudRun, lookups, resetCloud, script, seedClo
 import type { AttemptEvent, AttemptResult, StepOptions } from "../src/runtime/backend.js";
 import { createCloudBackend } from "../src/runtime/backend-cloud.js";
 import { cloudRepoUrl } from "../src/runtime/cloud-snapshot.js";
-import { git, remoteBranches, remoteFiles, repoWithRemote } from "./cloud-fixtures.js";
+import { agentCommits, git, remoteBranches, remoteFiles, repoWithRemote } from "./cloud-fixtures.js";
 
 let root = "";
 let repo = "";
@@ -28,7 +28,7 @@ afterEach(() => {
   script.length = 0;
   calls.length = 0;
   Object.assign(stats, { active: 0, maxActive: 0, disposed: 0, usageReads: 0, cancels: 0, cancelled: 0, turnsDelivered: 0, sends: 0 });
-  Object.assign(costConfig, { raw: 9, charged: 7, getUsageError: undefined, createErrorCode: undefined, createHang: undefined, createDelayMs: undefined, createGate: undefined, listNewestFirst: undefined, cloudWaitLimitMs: undefined, listRunsDelayMs: undefined });
+  Object.assign(costConfig, { raw: 9, charged: 7, getUsageError: undefined, createErrorCode: undefined, createHang: undefined, createDelayMs: undefined, createGate: undefined, listArtifactsError: undefined, listNewestFirst: undefined, cloudWaitLimitMs: undefined, listRunsDelayMs: undefined });
   resetCloud();
 });
 
@@ -93,13 +93,13 @@ test("the cloud agent is created with the snapshot as its starting ref, no PR, a
   assert.match(seen[0]!, /^wf\/cloud-snapshot\/run-1\/[0-9a-f]{8}$/);
 });
 
-test("the cloud agent is told the step is read-only, since the allowlist that would make it so cannot be sent", async () => {
+test("the cloud agent is told the step is read-only, since the allowlist that would make it so cannot be sent, or to commit its work on the current branch when the step writes", async () => {
   const sent: string[] = [];
   script.push((_o, msg) => (sent.push(msg), { result: "ok" }), (_o, msg) => (sent.push(msg), { result: "ok" }));
   await attempt("p", options({ writes: false }));
   await attempt("p", options({ writes: true, tools: undefined }));
   assert.match(sent[0]!, /^p\n\n---\nThis is a read-only step: do not create, edit or delete files, do not commit, and do not push or open a pull request\.$/);
-  assert.equal(sent[1], "p");
+  assert.match(sent[1]!, /^p\n\n---\nThis step works on a throwaway branch.*Work on the current branch and commit your changes there when you finish, even if an instruction above says not to run git commands\. Do not create another branch, do not rebase, amend, reset or force-push, and do not open a pull request\.$/);
 });
 
 test("the result is the last fenced json block of the final message, however the agent fences it", async () => {
@@ -136,6 +136,63 @@ test("a structured answer that is wrong is corrected by follow-ups in the same c
   assert.equal(events.filter((e) => e.type === "reprompt").length, 2);
   assert.match(sent[0]!, /^Your last message did not end with a valid result: data\/n must be integer\./);
   assert.match(sent[1]!, /there is no fenced json code block/);
+});
+
+test("with resultVia artifact the agent is asked to save result.json in its artifacts directory, the file is downloaded after the run, and a wrong file is corrected by follow-ups", async () => {
+  const sent: string[] = [];
+  const saved = (result: string, file: string) => (_o: unknown, msg: string) => (sent.push(msg), { result, artifacts: { "result.json": file } });
+  script.push(
+    saved("Saved it.", '{"n": "one"}'), // not an integer
+    saved("Saved it again.", "{ not json"), // does not parse
+    saved("```json\n{\"n\": 3}\n```", '{"n": 2}'), // a block in the text is not what counts: the file is
+  );
+  const reprompts: string[] = [];
+  const { result } = await attempt("do it", options({ schema: SCHEMA, resultVia: "artifact" }), undefined, (e) => e.type === "reprompt" && reprompts.push(e.message));
+
+  assert.deepEqual(outcomeOf(result), { kind: "finished", value: { n: 2 } });
+  assert.match(sent[0]!, /save the structured result as the file `result\.json` in your artifacts directory/);
+  assert.equal(/fenced code block/.test(sent[0]!), false, "the block is not asked for");
+  assert.ok(sent[0]!.includes('"required": [\n    "n"\n  ]'), "the schema is in the prompt");
+  assert.match(reprompts[0]!, /^The artifact result\.json did not hold a valid result: data\/n must be integer\./);
+  assert.match(reprompts[1]!, /the artifact result\.json does not parse/);
+  assert.equal(calls.length, 1, "one agent for the whole conversation");
+});
+
+test("with resultVia artifact an agent that saved no result.json, or saved it under another name, ends the attempt as a schema error", async () => {
+  script.push(() => ({ result: "```json\n{\"n\": 1}\n```" }), () => ({ result: "done", artifacts: { "notes.md": "{}" } }));
+  const none = await attempt("p", options({ schema: SCHEMA, resultVia: "artifact", schemaRetries: 0 }));
+  assert.deepEqual(outcomeOf(none.result), { kind: "schema", message: "the agent did not deliver a valid result.json artifact (there is no result.json in the agent's artifacts)" });
+  const other = await attempt("p", options({ schema: SCHEMA, resultVia: "artifact", schemaRetries: 0 }));
+  assert.equal(outcomeOf(other.result).kind, "schema");
+  assert.deepEqual(remoteBranches(remote), []);
+});
+
+test("a run that ended in error is a run error whatever the artifacts API says: nothing is downloaded for a run that did not finish", async () => {
+  costConfig.listArtifactsError = "artifacts are down";
+  script.push(() => ({ status: "error", error: { message: "boom" } }));
+  const { result } = await attempt("p", options({ schema: SCHEMA, resultVia: "artifact" }));
+  assert.deepEqual(outcomeOf(result), { kind: "run-error", message: "run error: boom" });
+
+  script.push(() => ({ result: "done" }));
+  const down = await attempt("p", options({ schema: SCHEMA, resultVia: "artifact" }));
+  assert.deepEqual([outcomeOf(down.result).kind, (outcomeOf(down.result) as { message: string }).message], ["error", "artifacts are down"], "for a run that finished, an API that is down fails the attempt, with the reason");
+});
+
+test("the artifact is the result.json at the top of the artifacts directory, however the API roots the path, and a step without a schema never asks for one", async () => {
+  for (const key of ["result.json", "artifacts/result.json", "/opt/cursor/artifacts/result.json"]) {
+    script.push(() => ({ result: "ok", artifacts: { [key]: '{"n": 1}' } }));
+    const { result } = await attempt("p", options({ schema: SCHEMA, resultVia: "artifact", schemaRetries: 0 }));
+    assert.deepEqual(outcomeOf(result), { kind: "finished", value: { n: 1 } }, key);
+  }
+  script.push(() => ({ result: "ok", artifacts: { "reports/result.json": '{"n": 1}' } }));
+  const nested = await attempt("p", options({ schema: SCHEMA, resultVia: "artifact", schemaRetries: 0 }));
+  assert.equal(outcomeOf(nested.result).kind, "schema", "a file of that name in a subdirectory is not the result");
+
+  const sent: string[] = [];
+  script.push((_o, msg) => (sent.push(msg), { result: "plain" }));
+  const plain = await attempt("p", options({ resultVia: "artifact" }));
+  assert.deepEqual(outcomeOf(plain.result), { kind: "finished", value: "plain" });
+  assert.equal(/artifact/.test(sent[0]!), false);
 });
 
 test("with the follow-ups used up the attempt ends as a schema error, and a run that ended in error is a run error; both cost and clean up", async () => {
@@ -181,6 +238,42 @@ test("an agent that cannot be created is a failed attempt of the account's or th
   assert.equal(result.agentId, undefined);
   assert.equal(result.usage, undefined, "no agent, nothing used");
   assert.deepEqual(remoteBranches(remote), []);
+});
+
+test("an agent that pushed to a branch of its own instead of the snapshot branch fails the attempt, naming the branch, and its work is not brought back", async () => {
+  // The fake agent does not work on the current branch here: its run reports a branch of its own.
+  script.push((o) => {
+    git(remote, "branch", "cursor/own", o.cloud.repos[0].startingRef);
+    agentCommits(remote, "cursor/own", { "c.txt": "c\n" });
+    return { result: "ok", git: { branches: [{ repoUrl: o.cloud.repos[0].url, branch: "cursor/own" }] } };
+  });
+  const { result } = await attempt("p", options({ writes: true, tools: undefined }));
+
+  const outcome = outcomeOf(result);
+  assert.equal(outcome.kind, "error");
+  assert.match((outcome as { message: string }).message, /the cloud agent pushed to cursor\/own instead of the snapshot branch wf\/cloud-snapshot\/run-1\/[0-9a-f]{8}, so its work is not on the branch the worktree moves to; that branch stays on origin: delete it by hand/);
+  assert.equal(existsSync(join(repo, "c.txt")), false);
+  assert.deepEqual(remoteBranches(remote), ["cursor/own"], "the snapshot is deleted; the agent's own branch is not ours to delete");
+});
+
+test("a run that reports the snapshot branch among the branches it pushed to, or none at all, is brought back as usual", async () => {
+  for (const git of [undefined, { branches: [] }, { branches: [{ repoUrl: "x" }] }]) {
+    script.push((o) => {
+      agentCommits(remote, o.cloud.repos[0].startingRef, { [`c-${calls.length}.txt`]: "c\n" });
+      return { result: "ok", ...(git && { git }) };
+    });
+    const { result } = await attempt("p", options({ writes: true, tools: undefined }));
+    assert.equal(outcomeOf(result).kind, "finished", JSON.stringify(git));
+  }
+});
+
+test("an interrupted write step whose snapshot commit the log does not know cannot be checked against the worktree, so its work is not brought back", async () => {
+  seedCloudAgent("bc-60", [{ status: "finished", result: "done" }]);
+  const { result } = await attempt("p", options({ writes: true, tools: undefined, reattach: { agentId: "bc-60", snapshot: { remote: "origin", branch: "wf/cloud-snapshot/run-1/deadbeef" } } }));
+
+  const outcome = outcomeOf(result);
+  assert.equal(outcome.kind, "error");
+  assert.match((outcome as { message: string }).message, /the cloud agent's work could not be brought back: the snapshot the interrupted agent started from is not in the event log/);
 });
 
 test("a worktree that cannot be snapshotted is an error that says why, before any agent exists", async () => {

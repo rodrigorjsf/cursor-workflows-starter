@@ -135,10 +135,17 @@ if (!tests.ok) { /* tests.exitCode, tests.timedOut, tests.tail: the last 32768 c
   rejected before the run starts; a `read-only` role whose step can write fails before it spends anything.
 - A cloud step is a strict subset of a local one. The engine pushes a throwaway snapshot of the step's worktree (uncommitted
   changes included) to the `cloud.remote` remote (default `origin`) and deletes it when the step ends. The cloud agent gets no custom
-  tools, no `tools` allowlist (the prompt tells it the step is read-only) and no setting sources (it warns), the memo cache is
-  skipped, and a step that writes has no cloud path yet. `schema` still works: the agent ends its answer with a fenced `json`
-  block, validated like a `submit_result` call and corrected by the same `schemaRetries`. Design roles for both places: self-contained
-  prompts, read-only `tools`, a `schema` the model can fill from the repository alone.
+  tools, no `tools` allowlist (the prompt tells it the step is read-only) and no setting sources (it warns), and the memo cache is
+  skipped. `schema` still works: the agent ends its answer with a fenced `json` block, validated like a `submit_result` call and
+  corrected by the same `schemaRetries`; a role whose config sets `resultVia: "artifact"` has it save a `result.json` artifact
+  instead, which the engine downloads after the run. Design roles for both places: self-contained prompts, a `schema` the model
+  can fill from the repository alone.
+- A step that can write runs in the cloud too, on a role declared `ok`. The cloud agent commits on the snapshot branch (it is told
+  to, even if your prompt says not to run git commands), and when it finishes the engine fetches the branch and fast-forwards the
+  worktree to it, so commands you run afterwards with `ctx.exec` (the tests) see its work. It is a fast-forward or nothing: if the
+  agent rewrote the history, the local branch moved, or the working files changed while it ran, the step fails and the worktree is
+  left as it was. An agent that commits nothing changes nothing. Uncommitted changes the worktree had are committed in a snapshot
+  commit that stays in the local history.
 - Tokens and cost come from the cloud usage API and count against the same caps as a local step's.
 - A cloud step outlives the process. The engine writes the cloud agent's id to the event log (`cloud-agent`) the moment the agent
   exists; if the process dies and the run is resumed, the step reattaches to that agent and takes the answer of the run it already

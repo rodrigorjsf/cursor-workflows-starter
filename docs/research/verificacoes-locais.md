@@ -359,6 +359,8 @@ Lido no código do `@cursor/sdk` 1.3.1 (`dist/esm/448.js` e `index.js`), sem cha
 | Cancelar um run reanexado | leitura de `Run.cancel` | ✅ cancela pelos ids (`cancelRun({ agentId, runId })`), então vale para o handle de `listRuns`/`getRun` como para o do `send` | `async cancel(){…await this.client.cancelRun({agentId:this.agentId,runId:this.id})…}` | — |
 | Stream de um run achado depois | leitura de `Run` e de `listCloudRuns` | ◐ um handle de `listRuns`/`getRun` nasce **sem** `onDelta`: um run reanexado não emite eventos `turn` nem `text`, e os tetos de tokens ao vivo só atuam quando ele termina | `new E(client, run)` sem `sendOptions` | Documentado em [6.2](../reference/config.md#etapas-na-nuvem) e no aviso do log (`reattaching to cloud agent …`) |
 | Ordem de `listRuns` | doc e leitura | ❔ a ordem não é documentada | `GET /v1/agents/{id}/runs` | O backend não depende dela: o run que ainda roda, senão o mais novo por `createdAt` |
+| Onde o cloud agent empurra com `workOnCurrentBranch` | doc ao vivo ([cloud-agent/api/endpoints](https://cursor.com/docs/cloud-agent/api/endpoints), 2026-11-12) | ✅ `false`: o Cursor empurra para uma branch nova `cursor/...`; `true`: empurra direto para o `startingRef`; as branches empurradas aparecem em `git.branches[]` do run | seção `startingRef` / `workOnCurrentBranch` da doc | A etapa que escreve cria o agente com `workOnCurrentBranch: true` e `startingRef` = o snapshot; se o run diz ter empurrado só para outra branch, o backend falha a tentativa dizendo qual |
+| Artefatos de um cloud agent | doc ao vivo (mesma página) e leitura de `Agent.listArtifacts` | ◐ os caminhos que a API lista são relativos ao diretório `artifacts/` do workspace (`artifacts/screenshot.png`); o caminho absoluto da v0 (`/opt/cursor/artifacts/...`) a v1 não aceita; os artefatos são do agente, não do run; a doc não diz em que pasta da VM o agente grava | `GET /v1/agents/{id}/artifacts` | O prompt pede `/opt/cursor/artifacts/result.json` e o backend aceita `result.json`, `artifacts/result.json` e `/opt/cursor/artifacts/result.json` (nunca um `result.json` mais fundo) |
 
 Para a API real (`verify-cloud` e a conferência manual do ciclo de vida, descritos no
 [README](../../scripts/verify/README.md)):
@@ -374,6 +376,9 @@ Para a API real (`verify-cloud` e a conferência manual do ciclo de vida, descri
 | `Agent.resume(bc-…)` + `Agent.listRuns` acham o run que estava em andamento depois de um `kill -9` | matar o `wf` depois do `cloud-agent` e rodar com `--resume` | ⏭ não executado | — | — |
 | Um id que o cliente sorteou e o servidor nunca viu dá 404 no `listRuns` (o que o backend trata como "agente sumiu") | `Agent.listRuns` num id sorteado e nunca enviado | ⏭ não executado | — | — |
 | Cancelar o run da nuvem pelo `wf cancel` e pelo Ctrl-C | cancelar com a etapa rodando e olhar o run na Cursor | ⏭ não executado | — | — |
+| Uma etapa que escreve: o cloud agent commita e empurra para a branch de snapshot, mesmo com um prompt que manda não rodar git | uma etapa de escrita num papel `ok` na `sandbox-repo`; olhar `git log` depois e o aviso "made no commit" | ⏭ não executado | — | — |
+| O trabalho volta: o `git fetch` da branch de snapshot traz os commits do agente e o worktree avança sem aviso de não fast-forward | o mesmo run | ⏭ não executado | — | — |
+| `resultVia: "artifact"`: onde o agente grava o `result.json` e que caminho `listArtifacts` devolve | uma etapa de leitura com schema e `resultVia: "artifact"` | ⏭ não executado | — | — |
 
 ---
 

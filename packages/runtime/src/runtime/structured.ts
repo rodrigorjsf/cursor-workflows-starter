@@ -90,17 +90,45 @@ function lastJsonBlock(text: string): string | undefined {
   return last;
 }
 
-/** What a cloud agent's final message holds: the result object the schema accepts, or why it holds none. */
-export function resultFromJsonBlock(text: string, schema: JsonSchema): { ok: true; value: unknown } | { ok: false; error: string } {
-  const block = lastJsonBlock(text);
-  if (block === undefined) return { ok: false, error: "there is no fenced json code block" };
+/** What `text` holds as a result for `schema`: the object, or why it is not one. `what` names where the text came from. */
+function resultFromJson(text: string, schema: JsonSchema, what: string): { ok: true; value: unknown } | { ok: false; error: string } {
   let value: unknown;
   try {
-    value = JSON.parse(block);
+    value = JSON.parse(text);
   } catch (err) {
-    return { ok: false, error: `the json code block does not parse (${err instanceof Error ? err.message : String(err)})` };
+    return { ok: false, error: `${what} does not parse (${err instanceof Error ? err.message : String(err)})` };
   }
   const validate = ajv.compile(schema);
   if (!validate(value)) return { ok: false, error: ajv.errorsText(validate.errors) };
   return { ok: true, value };
+}
+
+/** What a cloud agent's final message holds: the result object the schema accepts, or why it holds none. */
+export function resultFromJsonBlock(text: string, schema: JsonSchema): { ok: true; value: unknown } | { ok: false; error: string } {
+  const block = lastJsonBlock(text);
+  if (block === undefined) return { ok: false, error: "there is no fenced json code block" };
+  return resultFromJson(block, schema, "the json code block");
+}
+
+/** The name of the file a cloud agent saves its result in when the role's `resultVia` is `artifact`. */
+export const RESULT_ARTIFACT = "result.json";
+
+/** The prompt's request for a cloud step whose role delivers the result as a file: the agent saves it in its artifacts directory, and the engine downloads it after the run. */
+export function artifactInstruction(schema: JsonSchema): string {
+  return (
+    `\n\n---\nWhen you finish, save the structured result as the file \`${RESULT_ARTIFACT}\` in your artifacts directory ` +
+    `(\`/opt/cursor/artifacts/${RESULT_ARTIFACT}\`): a JSON object that satisfies this JSON Schema, and nothing else in the file. ` +
+    `Only that file counts: do not answer with the result as text.\n\nJSON Schema:\n${JSON.stringify(schema, null, 2)}`
+  );
+}
+
+/** The follow-up that asks a cloud agent to save the result file again, with the reason the last one was refused. */
+export function artifactReprompt(error: string): string {
+  return `The artifact ${RESULT_ARTIFACT} did not hold a valid result: ${error}. Save it again in your artifacts directory: a JSON object that satisfies the schema, and nothing else in the file.`;
+}
+
+/** What a result artifact holds: the object the schema accepts, or why it holds none. Undefined `text` is an agent that saved no such file. */
+export function resultFromArtifact(text: string | undefined, schema: JsonSchema): { ok: true; value: unknown } | { ok: false; error: string } {
+  if (text === undefined) return { ok: false, error: `there is no ${RESULT_ARTIFACT} in the agent's artifacts` };
+  return resultFromJson(text, schema, `the artifact ${RESULT_ARTIFACT}`);
 }

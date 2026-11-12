@@ -7,7 +7,7 @@
 // which is also how the provenance is keyed.
 
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
-import type { StepLocation } from "../runtime/backend.js";
+import type { ResultVia, StepLocation } from "../runtime/backend.js";
 import type { ConfigSource, ConfigViolation, EffectiveCaps, EffectiveConfig, EffectiveLimits, EffectiveRole } from "../runtime/events.js";
 import type { WorkflowDefinition, WorkflowRole } from "../runtime/workflow.js";
 import { globMatches, literalLength } from "./glob.js";
@@ -39,6 +39,8 @@ export interface ResolveInput {
 export interface StepOverrides {
   /** Where the step runs: its role's location, once the global `allowedLocations` cap has been applied. Always `local` for a step without a role. */
   location: StepLocation;
+  /** How a cloud step delivers a structured result: its role's `resultVia`. Absent: the code default (`json-block`). */
+  resultVia?: ResultVia;
   model?: Partial<ModelSelection>;
   timeoutMs?: number;
   retries?: number;
@@ -115,7 +117,7 @@ export function limitOverridesSchema(): Record<string, unknown> {
 const MODEL_FIELDS = ["id", "params", "maxMode"] as const;
 /** The step settings the config layers override on top of a call's own options. */
 export const STEP_OVERRIDE_FIELDS = ["timeoutMs", "retries", "schemaRetries", "settingSources"] as const;
-const ROLE_FIELDS = [...STEP_OVERRIDE_FIELDS, "maxTokensPerStep", "location"] as const;
+const ROLE_FIELDS = [...STEP_OVERRIDE_FIELDS, "maxTokensPerStep", "location", "resultVia"] as const;
 const lastSegment = (pointer: Pointer): string => pointer.slice(pointer.lastIndexOf("/") + 1);
 
 /** Why a value is not a valid limit, or undefined when it is. `null` means no limit, which concurrency cannot have. */
@@ -272,8 +274,9 @@ function checkLocations(input: ResolveInput, roles: WorkflowRole[], issues: Conf
   const prefsOf = (file: LoadedConfig) => file.data.workflows?.[name];
   for (const file of files) {
     for (const [glob, prefs] of Object.entries(prefsOf(file)?.labels ?? {})) {
-      if (prefs.location !== undefined) {
-        issues.push({ ref: file.path, path: pointerOf("workflows", name, "labels", glob, "location"), message: "location is set per role: a label has no cloud capability declared by the workflow" });
+      for (const field of ["location", "resultVia"] as const) {
+        if (prefs[field] === undefined) continue;
+        issues.push({ ref: file.path, path: pointerOf("workflows", name, "labels", glob, field), message: `${field} is set per role: a label has no cloud capability declared by the workflow, so its steps never run in the cloud` });
       }
     }
   }

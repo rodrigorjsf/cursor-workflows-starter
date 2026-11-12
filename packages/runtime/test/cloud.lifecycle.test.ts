@@ -6,7 +6,7 @@
 process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
 import "./isolate-home.js";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { calls, cloudRunsOf, costConfig, finishCloudRun, forgetCloudAgent, killCloudClients, lookups, resetCloud, resumes, script, stats } from "@cursor/sdk";
@@ -15,7 +15,7 @@ import { runWorkflow } from "../src/runtime/engine.js";
 import type { WorkflowEvent } from "../src/runtime/events.js";
 import { eventLogPath, readEventLog, runDirIn } from "../src/runtime/run-store.js";
 import { clearConfig, configWorkflow, writeGlobalConfig } from "./config-fixtures.js";
-import { remoteBranches, repoWithRemote } from "./cloud-fixtures.js";
+import { agentCommits, git, remoteBranches, repoWithRemote } from "./cloud-fixtures.js";
 
 const root = join(import.meta.dirname, ".tmp", `cloud-lifecycle-${process.pid}`);
 const cwd = join(root, "repo");
@@ -132,6 +132,27 @@ test("a resume finds the answer of a cloud agent that finished while no process 
     assert.equal(r.result, "done while away");
     assert.deepEqual([calls.length, stats.sends, resumes], [1, 1, ["bc-1"]]);
     assert.deepEqual(remoteBranches(remote), []);
+  } finally {
+    await crashed.end();
+  }
+});
+
+test("a write step that crashed and is resumed takes its agent over and brings the commits the agent made while no process was watching into the worktree", async () => {
+  writeGlobalConfig({ caps: { allowedLocations: ["local", "cloud"] }, workflows: { cfg: { roles: { classify: { location: "cloud" } } } } });
+  const writeStep = () => configWorkflow((ctx) => ctx.agent<string>("write it", { role: "classify", label: "write", retries: 0 }));
+  const crashed = await crashWhileTheAgentRuns("life-w", writeStep());
+  try {
+    assert.ok(crashed.agent.snapshot!.commit, "the log keeps the commit the agent started from: what the resume checks the worktree against");
+    agentCommits(remote, crashed.agent.snapshot!.branch, { "c.txt": "c\n" }, "agent: add c"); // the agent kept working in the cloud
+    finishCloudRun("bc-1", { result: "done while away" });
+
+    const r = await runWorkflow(writeStep(), {}, { cwd, runId: "life-w" });
+
+    assert.equal(r.status, "finished", r.error);
+    assert.deepEqual([calls.length, stats.sends, resumes], [1, 1, ["bc-1"]], "the same agent, and nothing sent again");
+    assert.equal(readFileSync(join(cwd, "c.txt"), "utf8"), "c\n");
+    assert.deepEqual(git(cwd, "log", "--format=%s").trim().split("\n"), ["agent: add c", "init"]);
+    assert.deepEqual(remoteBranches(remote), [], "the branch the dead process left goes after the work is fetched");
   } finally {
     await crashed.end();
   }
