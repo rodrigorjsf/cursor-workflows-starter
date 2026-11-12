@@ -7,7 +7,7 @@
 // which is also how the provenance is keyed.
 
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
-import type { ConfigSource, ConfigViolation, EffectiveCaps, EffectiveConfig, EffectiveRole } from "../runtime/events.js";
+import type { ConfigSource, ConfigViolation, EffectiveCaps, EffectiveConfig, EffectiveLimits, EffectiveRole } from "../runtime/events.js";
 import type { WorkflowDefinition, WorkflowRole } from "../runtime/workflow.js";
 import { globMatches, literalLength } from "./glob.js";
 import { ConfigError, type ConfigIssue, type LoadedConfig, type Pointer, type RolePrefs, type WorkflowPrefs, pointerOf } from "./file.js";
@@ -74,17 +74,22 @@ interface Cell {
 }
 
 const DEFAULT_CONCURRENCY = 4;
+type WorkflowBudget = WorkflowDefinition["budget"];
 /**
  * The per-run limits, one row each: the global cap that clamps it, its bounds, whether `null` (no limit) is allowed, its
- * code default and how a chat override describes it. The resolver and the MCP override schema read them from here;
- * test/limits.test.ts keeps the shipped JSON Schema in step.
+ * code default (from the workflow's `budget`, when it has one) and how a chat override describes it. The resolver and
+ * the MCP override schema read them from here; test/limits.test.ts keeps the shipped JSON Schema in step. The rows must
+ * match the fields of `EffectiveLimits` (the typed, documented shape of the result): the compiler checks both ways.
  */
 export const LIMITS = {
-  maxTokens: { cap: "maxTokens", min: 0, integer: true, nullable: true, description: "Token cap for the run." },
-  maxTokensPerStep: { cap: "maxTokensPerStep", min: 0, integer: true, nullable: true, description: "Token cap for each step." },
-  maxCents: { cap: "maxCents", min: 0, integer: false, nullable: true, description: "Cost cap for the run, in cents." },
-  concurrency: { cap: "maxConcurrency", min: 1, integer: true, nullable: false, description: "Concurrent agents." },
-} as const satisfies Record<string, { cap: keyof EffectiveCaps; min: number; integer: boolean; nullable: boolean; description: string }>;
+  maxTokens: { cap: "maxTokens", min: 0, integer: true, nullable: true, codeDefault: (b: WorkflowBudget) => b?.maxTokens ?? null, description: "Token cap for the run." },
+  maxTokensPerStep: { cap: "maxTokensPerStep", min: 0, integer: true, nullable: true, codeDefault: () => null, description: "Token cap for each step." },
+  maxCents: { cap: "maxCents", min: 0, integer: false, nullable: true, codeDefault: (b: WorkflowBudget) => b?.maxCents ?? null, description: "Cost cap for the run, in cents." },
+  concurrency: { cap: "maxConcurrency", min: 1, integer: true, nullable: false, codeDefault: () => DEFAULT_CONCURRENCY, description: "Concurrent agents." },
+} as const satisfies Record<
+  keyof EffectiveLimits,
+  { cap: keyof EffectiveCaps; min: number; integer: boolean; nullable: boolean; codeDefault: (b: WorkflowBudget) => number | null; description: string }
+>;
 export type LimitField = keyof typeof LIMITS;
 export const LIMIT_FIELDS = Object.keys(LIMITS) as LimitField[];
 
@@ -280,13 +285,7 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
 
   // Code defaults: the engine's, the workflow's, then each role's own.
   const fromCode: ConfigSource = { layer: "default" };
-  const codeDefault: Record<LimitField, number | null> = {
-    maxTokens: budget?.maxTokens ?? null,
-    maxTokensPerStep: null,
-    maxCents: budget?.maxCents ?? null,
-    concurrency: DEFAULT_CONCURRENCY,
-  };
-  for (const field of LIMIT_FIELDS) set(pointerOf("limits", field), codeDefault[field], fromCode);
+  for (const field of LIMIT_FIELDS) set(pointerOf("limits", field), LIMITS[field].codeDefault(budget), fromCode);
   for (const role of roles) {
     const code = { ...defaults, ...role.defaults };
     for (const field of MODEL_FIELDS) {
@@ -409,12 +408,8 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
   const limit = (field: LimitField) => cells.get(pointerOf("limits", field))!.value;
   const config: EffectiveConfig = {
     workflow: meta.name,
-    limits: {
-      maxTokens: limit("maxTokens") as number | null,
-      maxTokensPerStep: limit("maxTokensPerStep") as number | null,
-      maxCents: limit("maxCents") as number | null,
-      concurrency: limit("concurrency") as number,
-    },
+    // Every field comes from a LIMITS row, validated by limitProblem (concurrency is never null).
+    limits: Object.fromEntries(LIMIT_FIELDS.map((f) => [f, limit(f)])) as unknown as EffectiveLimits,
     caps,
     roles: Object.fromEntries(roles.map((r) => [r.name, settingsOf(pointerOf("roles", r.name))])),
     labels: Object.fromEntries([...labels].map((glob) => [glob, settingsOf(pointerOf("labels", glob))])),
