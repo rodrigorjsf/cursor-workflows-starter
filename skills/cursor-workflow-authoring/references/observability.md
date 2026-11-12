@@ -8,6 +8,7 @@ to **deliver**.
 Return `{ status: "done", ... }` when the run delivered and another explicit status when it did not (`"tests-failed"`,
 `"review-blocking"`…). The runtime derives `outcome_class` from it:
 
+- a run that was cancelled (`cancel_workflow`, `wf cancel`, Ctrl-C) → `cancelled`;
 - a run that threw or hit a cap → `error`;
 - `status` in `done`, `delivered`, `ok`, `success`, `succeeded` → `delivered`;
 - a pending status (`pending`, or one added to `PENDING` in the metrics recorder), returned by a checkpoint that waits

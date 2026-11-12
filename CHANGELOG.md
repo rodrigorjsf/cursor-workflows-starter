@@ -38,6 +38,22 @@
   é lida de novo a cada run; o `run-start` grava a configuração efetiva, a origem de cada valor e as violações;
   `wf config show [workflow]` imprime os três. `start_workflow` aceita `overrides` que só apertam. A referência
   (`docs/reference/config.md`) é gerada do esquema (`npm run docs:config`), e o `npm test` falha se ela divergir.
+- **Jobs destacados, com heartbeat.** `start_workflow` passa a iniciar cada run em um processo destacado (o mesmo que
+  `wf start` já usava): reiniciar o Cursor ou o servidor MCP não o interrompe, e o servidor novo o encontra pelos
+  arquivos do job. O processo do job atualiza um heartbeat no registro a cada 5 s, por uma thread própria, então uma
+  chamada síncrona longa (uma suíte de testes) não o atrasa. Um job cujo processo morreu, ou cujo heartbeat está parado
+  há mais de 30 s, aparece como `failed` com o `runId` para retomar. `overrides` do chat chegam ao processo pela flag
+  `--overrides` de `wf run`/`wf start` (só apertam).
+- **Cancelamento.** A nova tool MCP `cancel_workflow` e o comando `wf cancel <jobId>` mandam `SIGTERM` ao processo do
+  job (só se a linha de comando dele leva o id do job); `SIGINT` e `SIGTERM` no processo do run fazem o mesmo, e um
+  segundo sinal sai na hora. O motor cancela os agentes ativos, **desfaz a etapa que estava escrevendo** (os arquivos que
+  o git não ignora e o índice voltam, byte a byte, ao estado de antes da etapa; commits e arquivos fora do diretório
+  dela não), grava `run-end` com `status: cancelled` e solta o lock. O job passa a ter o status `cancelled`, o run
+  continua retomável (`resumeRunId`) e o gasto da tentativa cancelada fica no orçamento. `wf run` sai com 130 quando o
+  run é cancelado. A skill `run-workflow` documenta o cancelamento e só o usa a pedido do usuário. Em `outcome_class`
+  do banco de métricas, o run cancelado é `cancelled`.
+- **Tempo das etapas.** A criação do agente e o envio passam a ter o `timeoutMs` da tentativa (antes só a espera pelo
+  resultado tinha), e os re-prompts de schema dividem o tempo da tentativa em vez de reiniciá-lo.
 - **O estado do runtime funciona em worktree ligado e submódulo**, onde `.git` é um arquivo: antes, qualquer acesso a
   `.workflows/` falhava com `ENOTDIR`.
 

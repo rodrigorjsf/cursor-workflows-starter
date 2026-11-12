@@ -39,6 +39,7 @@ import { registerRun } from "./runs-index.js";
 import { stateDir as runtimeStateDir } from "./state.js";
 import { type Capture, SUBMIT_TOOL, repromptMessage, schemaInstruction, submitResultTool } from "./structured.js";
 import type { AgentCallOptions, Budget, UsageTotals, WorkflowContext, WorkflowDefinition } from "./workflow.js";
+import { revertToSnapshot, takeSnapshot } from "./worktree-snapshot.js";
 
 export type { ErrorKind, TurnUsage, WorkflowEvent } from "./events.js";
 
@@ -50,6 +51,13 @@ export class AccountAccessError extends FatalRunError {}
 /** Códigos de erro do SDK que dizem respeito à conta, não à etapa. */
 const ACCOUNT_ERROR_CODES = new Set(["plan_required"]);
 export class StepFailedError extends Error {}
+/** The step's time ran out (the attempt's creation, send and wait share it). */
+class StepTimeoutError extends StepFailedError {}
+/**
+ * The run was cancelled (`RunOptions.signal` aborted). It ends the whole run, also inside parallel/pipeline: active steps
+ * stop and no step starts. The run is resumable with the same id.
+ */
+export class RunCancelledError extends FatalRunError {}
 
 /**
  * Marca o ambiente do processo: o shell das etapas herda (o CLI recusa `wf run/start`). Os servidores MCP do
@@ -112,6 +120,12 @@ export interface RunOptions {
    * turns that limit off.
    */
   retention?: RetentionPolicy;
+  /**
+   * Aborting it cancels the run (`wf cancel`, `cancel_workflow`, SIGINT and SIGTERM all end up here): the active agent runs
+   * are cancelled, the in-flight write step is reverted to its state before the step, no new step starts, and the run ends
+   * with status `cancelled`. The run stays resumable: its completed steps are in the journal.
+   */
+  signal?: AbortSignal;
   onEvent?: (e: WorkflowEvent) => void;
   /**
    * Banco de métricas (SQLite). Default: ~/.cursor-workflows/metrics.db ($WF_METRICS_DB). `false` desliga;
@@ -122,7 +136,7 @@ export interface RunOptions {
 
 export interface RunOutcome<R> {
   runId: string;
-  status: "finished" | "failed";
+  status: "finished" | "failed" | "cancelled";
   result?: R;
   error?: string;
   /** true when the runtime refused the run before it started (invalid args, run already executing): nothing was written to the log. */
@@ -283,7 +297,7 @@ async function executeRun<A, R>(
   let chargedCents = store.ledger.chargedCents;
   let spentTokens = store.ledger.spentTokens;
   const totals = { ...store.ledger.usage };
-  const outcome = (status: "finished" | "failed", extra: { result?: R; error?: string }): RunOutcome<R> => ({
+  const outcome = (status: "finished" | "failed" | "cancelled", extra: { result?: R; error?: string }): RunOutcome<R> => ({
     runId,
     status,
     ...extra,
@@ -432,6 +446,35 @@ async function executeRun<A, R>(
   // Erro de conta (ex.: plan_required): registrado aqui para nenhuma etapa enfileirada começar depois dele.
   let accountError: AccountAccessError | undefined;
 
+  // Cancellation. `cancelled` rejects when the signal aborts; it is only ever raced against something, never awaited alone.
+  const signal = opts.signal;
+  const cancelMessage = `run cancelado; relance com resumeRunId="${runId}" para continuar de onde parou`;
+  const cancelled = signal
+    ? new Promise<never>((_, reject) => {
+        const fire = () => reject(new RunCancelledError(cancelMessage));
+        if (signal.aborted) fire();
+        else signal.addEventListener("abort", fire, { once: true });
+      })
+    : undefined;
+  cancelled?.catch(() => {});
+  /** A step was cut short by the cancellation: whatever the workflow returns, the run did not run to its end. */
+  let interrupted = false;
+  /** The steps being executed. A cancelled run waits for them to stop before it ends. */
+  const inFlight = new Set<Promise<unknown>>();
+  /** After the cancellation, ends when every step in flight has stopped; then rejects. Lets a workflow stuck outside a step still end. */
+  const abandoned = cancelled?.catch(async (err: unknown) => {
+    await Promise.allSettled([...inFlight]);
+    throw err;
+  });
+  abandoned?.catch(() => {});
+
+  /** Reverts run one at a time: two steps writing in the same directory must not restore it at once. */
+  let revertQueue: Promise<unknown> = Promise.resolve();
+
+  function assertNotCancelled(): void {
+    if (signal?.aborted) throw new RunCancelledError(cancelMessage);
+  }
+
   function assertBudget(): void {
     if (accountError) throw accountError;
     if (budget.maxCents != null && spentCents >= budget.maxCents) {
@@ -507,21 +550,39 @@ async function executeRun<A, R>(
     }
   }
 
-  async function waitWithTimeout(run: Run, ms: number): Promise<RunResult> {
+  /** When an attempt's time runs out: `at` is the instant, `ms` the step's timeout, which the error message reports. */
+  interface Deadline {
+    at: number;
+    ms: number;
+  }
+
+  /**
+   * Races `promise` against the attempt's deadline and the run's cancellation: throws a `StepTimeoutError` when the time
+   * runs out and a `RunCancelledError` when the run is cancelled. A value that arrives after the race was given up goes to
+   * `late`, so an agent created too late is still disposed.
+   */
+  async function within<T>(attempt: Deadline, promise: Promise<T>, late?: (value: T) => void): Promise<T> {
     let timer: NodeJS.Timeout | undefined;
-    let timedOut = false;
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        timedOut = true;
-        reject(new StepFailedError(`timeout após ${ms} ms`));
-      }, ms);
+      timer = setTimeout(() => reject(new StepTimeoutError(`timeout após ${attempt.ms} ms`)), Math.max(0, attempt.at - Date.now()));
     });
     try {
-      return await Promise.race([run.wait(), timeout]);
+      return await Promise.race(cancelled ? [promise, timeout, cancelled] : [promise, timeout]);
+    } catch (err) {
+      promise.then(late, () => {}); // given up (or failed): whatever it yields later is not ours
+      throw err;
     } finally {
       clearTimeout(timer);
-      // Espera o cancelamento terminar para a próxima tentativa não editar o mesmo cwd em paralelo.
-      if (timedOut) await run.cancel().catch(() => {});
+    }
+  }
+
+  async function waitWithTimeout(run: Run, attempt: Deadline): Promise<RunResult> {
+    try {
+      return await within(attempt, run.wait());
+    } catch (err) {
+      // Waits for the cancellation to finish so the next attempt does not edit the same cwd in parallel.
+      if (err instanceof StepTimeoutError || err instanceof RunCancelledError) await run.cancel().catch(() => {});
+      throw err;
     }
   }
 
@@ -569,9 +630,15 @@ async function executeRun<A, R>(
     const key = journal.keyFor(prompt, fingerprint);
     const ref: StepRef = { stepId: stepIdOf(key), parentId: flow.last, groupId: flow.groupId };
     const step: StepContext = { o, role, promptHash, label, phase, sources, mKey, fingerprint, key, ref, started: false };
+    const running = runStep<T>(prompt, step);
+    inFlight.add(running);
     try {
-      return await runStep<T>(prompt, step);
+      return await running;
+    } catch (err) {
+      if (err instanceof RunCancelledError) interrupted = true;
+      throw err;
     } finally {
+      inFlight.delete(running);
       if (step.started) flow.last = ref.stepId; // whatever comes next in this flow continues from this step
     }
   }
@@ -642,12 +709,38 @@ async function executeRun<A, R>(
 
     await sem.acquire();
     try {
+      // A step that can write is reverted if the run is cancelled in the middle of it, so a resume meets no half-made edits.
+      const stepCwd = o.cwd ?? opts.cwd;
+      const writes = !isReadOnly(o.tools);
+      const snapshot = writes && !signal?.aborted ? await takeSnapshot(stepCwd) : undefined;
+      let reverting: Promise<boolean> | undefined;
+      /** Puts the step's directory back as it was before the step (once). Never throws. True when it did. */
+      const revert = (): Promise<boolean> => {
+        if (!writes) return Promise.resolve(false);
+        const run = revertQueue.then(async () => {
+          if (!snapshot) {
+            emit({ type: "warning", message: `etapa "${label}" cancelada: ${stepCwd} não é um repositório git (ou o git falhou), então as alterações da etapa não foram desfeitas` });
+            return false;
+          }
+          try {
+            await revertToSnapshot(snapshot);
+            return true;
+          } catch (err) {
+            emit({ type: "warning", message: `etapa "${label}" cancelada: não foi possível desfazer as alterações em ${stepCwd}: ${err instanceof Error ? err.message : String(err)}` });
+            return false;
+          }
+        });
+        revertQueue = run;
+        return (reverting ??= run);
+      };
       const attempts = 1 + (o.retries ?? 1);
       let lastError = "";
       for (let attempt = 1; attempt <= attempts; attempt++) {
         assertBudget();
         const attemptId = randomUUID();
         const startedAt = Date.now();
+        const timeoutMs = o.timeoutMs ?? 20 * 60_000;
+        const deadline: Deadline = { at: startedAt + timeoutMs, ms: timeoutMs }; // creation, send, wait and schema re-prompts share it
         emitStart(attemptId, attempt, false);
         const content = attemptContent(ref, attemptId);
         content.write("prompt", prompt);
@@ -697,6 +790,8 @@ async function executeRun<A, R>(
         let agent: SDKAgent | undefined;
         let charge: Charge | undefined;
         let errorKind: ErrorKind | undefined;
+        let cancelledBy: RunCancelledError | undefined;
+        let reverted = false;
         let resolvedModel: string | undefined;
         const endEvent = (ok: boolean) => {
           content.flush();
@@ -719,6 +814,7 @@ async function executeRun<A, R>(
             usage: charge?.usage,
             reasoningTokens: charge?.reasoningTokens,
             errorKind: ok ? undefined : errorKind,
+            reverted: reverted || undefined,
             error: ok ? undefined : lastError,
             schemaReprompts: c.reprompts,
             turns: c.turns,
@@ -731,7 +827,8 @@ async function executeRun<A, R>(
           });
         };
         try {
-          agent = await Agent.create({
+          assertNotCancelled();
+          agent = await within(deadline, Agent.create({
             apiKey: opts.apiKey,
             name: `${def.meta.name}:${label}`,
             model,
@@ -748,8 +845,9 @@ async function executeRun<A, R>(
               sandboxOptions: o.sandbox ? { enabled: true } : undefined,
               customTools: o.schema ? { [SUBMIT_TOOL]: submitResultTool(o.schema, capture) } : undefined,
             },
-          });
-          let result = await waitWithTimeout(await send(agent, o.schema ? prompt + schemaInstruction() : prompt, sendOpts), o.timeoutMs ?? 20 * 60_000);
+          }), (late) => void late[Symbol.asyncDispose]().catch(() => {}));
+          const sendWithin = (message: string) => within(deadline, send(agent!, message, sendOpts), (late) => void late.cancel().catch(() => {}));
+          let result = await waitWithTimeout(await sendWithin(o.schema ? prompt + schemaInstruction() : prompt), deadline);
           resolvedModel = result.model?.id;
           // Saída estruturada: re-prompt na MESMA conversa até o modelo chamar submit_result com JSON válido.
           let schemaTries = o.schemaRetries ?? 2;
@@ -757,7 +855,7 @@ async function executeRun<A, R>(
             c.reprompts++;
             const reprompt = repromptMessage(capture);
             content.write("prompt", reprompt);
-            result = await waitWithTimeout(await send(agent, reprompt, sendOpts), o.timeoutMs ?? 20 * 60_000);
+            result = await waitWithTimeout(await sendWithin(reprompt), deadline);
           }
           charge = await chargeUsage(agent, turnUsage);
 
@@ -778,13 +876,15 @@ async function executeRun<A, R>(
           if (agent && !charge) charge = await chargeUsage(agent, turnUsage); // timeout/erro também custam
           lastError = err instanceof Error ? err.message : String(err);
           const code = (err as { code?: unknown } | undefined)?.code;
-          if (typeof code === "string" && ACCOUNT_ERROR_CODES.has(code)) {
+          if (err instanceof RunCancelledError) {
+            errorKind = "cancelled";
+            cancelledBy = err;
+          } else if (typeof code === "string" && ACCOUNT_ERROR_CODES.has(code)) {
             errorKind = "exception";
             endEvent(false);
             accountError ??= new AccountAccessError(`O plano da conta não dá acesso ao Cursor SDK (${code}): ${lastError}`);
             throw accountError;
-          }
-          if (err instanceof RateLimitError) {
+          } else if (err instanceof RateLimitError) {
             errorKind = "rate-limit";
             // Não retentável = teto de uso do plano ("Usage limit exceeded" na doc do SDK): não adianta tentar de novo.
             if (!err.isRetryable) {
@@ -798,7 +898,9 @@ async function executeRun<A, R>(
         } finally {
           if (agent) await agent[Symbol.asyncDispose]().catch(() => {});
         }
+        if (cancelledBy) reverted = await revert();
         endEvent(false);
+        if (cancelledBy) throw cancelledBy;
       }
       throw new StepFailedError(`etapa "${label}" falhou após ${attempts} tentativa(s): ${lastError}`);
     } finally {
@@ -846,9 +948,16 @@ async function executeRun<A, R>(
 
   let final: RunOutcome<R>;
   try {
-    final = outcome("finished", { result: await flows.run(rootFlow, () => def.run(ctx)) });
+    const workflow = flows.run(rootFlow, () => def.run(ctx));
+    final = outcome("finished", { result: await (abandoned ? Promise.race([workflow, abandoned]) : workflow) });
   } catch (err) {
+    if (err instanceof RunCancelledError) interrupted = true;
     final = outcome("failed", { error: err instanceof Error ? err.message : String(err) });
+  }
+  if (interrupted) {
+    // The other branches of a parallel may still be stopping (and reverting): the run ends after the last of them.
+    await Promise.allSettled([...inFlight]);
+    final = outcome("cancelled", { error: cancelMessage });
   }
   const r = final.result as { status?: unknown } | undefined;
   emit({

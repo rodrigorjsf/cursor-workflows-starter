@@ -153,12 +153,12 @@ export function readEventLog(file: string, options: { content?: boolean } = {}):
 const openStores = new Set<RunStore>();
 
 /**
- * Ends every run this process is executing, in its event log: a `run-end` with status `failed` and this error. For a
- * crash handler (`uncaughtException`): the process is about to exit, and the log must say why, since a job's state is read
- * from it. A run that already wrote its `run-end` is left as it is.
+ * Ends every run this process is executing, in its event log: a `run-end` with this status (`failed` by default) and this
+ * error. For a crash handler (`uncaughtException`) and for a second SIGINT/SIGTERM: the process is about to exit, and the
+ * log must say why, since a job's state is read from it. A run that already wrote its `run-end` is left as it is.
  */
-export function abortOpenRuns(error: (runId: string) => string): void {
-  for (const store of [...openStores]) store.abort(error(store.runId));
+export function abortOpenRuns(error: (runId: string) => string, status: "failed" | "cancelled" = "failed"): void {
+  for (const store of [...openStores]) store.abort(error(store.runId), status);
 }
 
 export interface RunStoreOptions {
@@ -222,11 +222,11 @@ export class RunStore {
     if (event.type === "run-end") this.ended = true;
   }
 
-  /** Writes the failed `run-end` of an execution that cannot finish (see `abortOpenRuns`). Never throws. */
-  abort(error: string): void {
+  /** Writes the `run-end` of an execution that cannot finish (see `abortOpenRuns`). Never throws. */
+  abort(error: string, status: "failed" | "cancelled" = "failed"): void {
     if (this.ended) return;
     try {
-      this.appendEvent(this.redact({ v: EVENT_SCHEMA_VERSION, ts: new Date().toISOString(), runId: this.runId, type: "run-end", status: "failed", error }));
+      this.appendEvent(this.redact({ v: EVENT_SCHEMA_VERSION, ts: new Date().toISOString(), runId: this.runId, type: "run-end", status, error }));
     } catch {
       /* the process is going down and the disk refused: nothing else to do */
     }

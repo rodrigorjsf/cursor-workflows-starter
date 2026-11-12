@@ -45,7 +45,7 @@ Configuração por variáveis de ambiente:
 | Turnos, passos, tool calls por nome, compactações | `onDelta`: `turn-ended`, `step-completed`, `tool-call-started`, `summary-completed` [PKG] | `turn-ended` cobre **um turno inteiro do agente**, com vários passos. Um `step-completed` pode agrupar várias tools e várias chamadas ao modelo: 1 `send` que leu 4 arquivos gerou 4 tool calls, 2 `thinking-completed` e **1** `step-completed` [TESTE](../research/verificacoes-locais.md) |
 | Re-prompts de schema, tentativas, tipo de erro, duração | runtime | `error_kind`: timeout, run-error, schema, rate-limit, exception |
 | Modelo e parâmetros | `ModelSelection` [DOC](https://cursor.com/docs/sdk/typescript#modelselection) | `model_key` = id + params ordenados, mais `max` quando há `maxMode` (ex.: `grok-4.7[reasoning_effort=high]`), então esforço e contexto viram "braços" distintos. O `maxMode` aparece nas [notas de versão do SDK](https://cursor.com/docs/release-notes/sdk), não na referência do `ModelSelection`. O banco grava o modelo **pedido**. O ID resolvido (`RunResult.model`: alias `composer` → `composer-2.5`; com `default`, o Auto, volta `default` [TESTE](../research/verificacoes-locais.md)) só sai no evento `step-end`, como `resolvedModel`, e não vai para o banco |
-| Resultado do run | `result.status` do workflow + `ctx.metric()` | `outcome_class`: delivered, failed, error, unknown |
+| Resultado do run | `result.status` do workflow + `ctx.metric()` | `outcome_class`: delivered, failed, error, cancelled, unknown |
 | Versão do workflow | hash de `meta` + `defaults` + código de `run` | Compare só runs da mesma versão |
 
 O teto de custo usa os dois campos: soma, por tentativa, o maior entre `rawCostCents` e `chargedCents` (ver
@@ -260,6 +260,7 @@ return { status: "tests-failed", ... };      // qualquer outro status = o workfl
 
 `outcome_class` é derivado assim:
 
+- run cancelado (`wf cancel`, `cancel_workflow`, Ctrl-C) → `cancelled`;
 - run que lançou erro ou estourou o teto → `error`;
 - `status` em `done/delivered/ok/success/succeeded` → `delivered`;
 - outro `status` → `failed`;

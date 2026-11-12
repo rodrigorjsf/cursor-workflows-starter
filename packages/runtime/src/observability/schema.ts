@@ -58,7 +58,7 @@ CREATE TABLE runs (
   finished_at    TEXT,
   status         TEXT,                      -- finished | failed (do runtime)
   outcome_status TEXT,                      -- result.status devolvido pelo workflow (ex.: done, tests-failed)
-  outcome_class  TEXT,                      -- delivered | failed | error | unknown
+  outcome_class  TEXT,                      -- delivered | failed | error | cancelled | unknown
   human_verdict  TEXT,                      -- accepted | rejected (wf metrics mark)
   error          TEXT
 );

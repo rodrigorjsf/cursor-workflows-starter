@@ -126,8 +126,12 @@ flowchart TB
 | Etapa concluída tem saída no formato esperado | `submit_result` + Ajv + re-prompt; senão a etapa falha |
 | Falha é explícita | `agent()` lança erro. `parallel`/`pipeline` transformam a falha de um item em `null` e registram `warning`, mas o teto de custo e o erro de conta (`plan_required`) sempre abortam |
 | O modelo de cada etapa é o do código ou o que a configuração pôs no papel dela, e um ID não liberado falha | Validação do SDK contra o catálogo da conta. A configuração em camadas (código < arquivo global < arquivo do repositório < ambiente < flag < override do chat) troca modelo, tempo e tentativas por papel; os tetos do arquivo global limitam tudo e só podem ser apertados. O `run-start` grava a configuração efetiva e a origem de cada valor ([6.2 · Referência de configuração](../reference/config.md)) |
-| Teto de gasto checado antes de cada tentativa (não é gasto máximo) | Teto por run (centavos e tokens) + `RateLimitError`. Etapa iniciada não é interrompida e não tem teto de tokens próprio, só o `timeoutMs` de cada envio: a ultrapassagem chega a concorrência × uma etapa sem limite (medido: 344 mil tokens com `--max-tokens 300000`, [verificações locais](../research/verificacoes-locais.md) §9). O teto em centavos depende do custo do `getUsage()`: em uso cobrado por request (passo 3) e quando o `getUsage()` falha (passo 7), só o de tokens vale, contado pelos eventos `turn-ended` |
+| Teto de gasto checado antes de cada tentativa (não é gasto máximo) | Teto por run (centavos e tokens) + `RateLimitError`. Etapa iniciada não é interrompida e não tem teto de tokens próprio, só o `timeoutMs` da tentativa (criação do agente, envio e re-prompts dividem esse tempo): a ultrapassagem chega a concorrência × uma etapa sem limite (medido: 344 mil tokens com `--max-tokens 300000`, [verificações locais](../research/verificacoes-locais.md) §9). O teto em centavos depende do custo do `getUsage()`: em uso cobrado por request (passo 3) e quando o `getUsage()` falha (passo 7), só o de tokens vale, contado pelos eventos `turn-ended` |
 | Retomar sem repetir etapas | Journal + `runId` gravado no job desde o início |
+| Um run sobrevive a reinício do Cursor e do MCP server | Todo job roda em um processo destacado (`spawnJob`, nova sessão, sem pipe com quem o iniciou); o MCP server e o CLI só iniciam, leem o estado e pedem o cancelamento ([ADR-0003](../adr/0003-detached-jobs.md)) |
+| Um run que caiu aparece como `failed`, com o `runId` para retomar | O processo do job atualiza um heartbeat no registro do job (a cada 5 s, por uma thread própria: uma chamada síncrona longa, como uma suíte de testes, não o atrasa). Processo morto, ou heartbeat parado há mais de 30 s, projeta `failed` |
+| Cancelar para os agentes, desfaz a etapa que escrevia e deixa o run retomável | `cancel_workflow` e `wf cancel` mandam `SIGTERM` ao processo do job (só se a linha de comando dele leva o id do job); `SIGINT` e `SIGTERM` no processo fazem o mesmo, e um segundo sinal sai na hora. O motor cancela os agentes ativos, desfaz o diretório da etapa que escrevia, grava o `run-end` com `status: cancelled` e solta o lock. A etapa cancelada não entra no journal, e o gasto dela fica no orçamento |
+| A etapa cancelada não deixa edições pela metade | Antes de uma etapa que pode escrever, o motor registra os arquivos do diretório dela (os que o git não ignora) e o índice, byte a byte, sem filtros do git (`core.autocrlf`, `.gitattributes`, LFS) e sem mexer no índice. No cancelamento, o que a etapa criou é apagado, o que mudou ou apagou volta, e o índice volta. Não são desfeitos: commits que a etapa fez, arquivos fora do diretório dela e arquivos ignorados. Duas etapas escrevendo no mesmo diretório ao mesmo tempo voltam cada uma ao próprio ponto de partida, então o resultado não é preciso. Fora de um repositório git nada é desfeito, e o log traz um `warning` dizendo isso |
 | O orçamento acumula entre resumes | O gasto parte do que o log do run já registra (tentativas que falharam inclusive), e o teto de um resume é o novo teto total |
 | O estado de um job tem uma só fonte | O registro do job (`.workflows/jobs/<jobId>.json`) guarda só id do job, id do run, pid e heartbeat. Status, fase, últimas linhas, gasto e resultado são projetados do log de eventos a cada leitura (`wf status`, `wf jobs`, `get_workflow_status`, `wait_workflow`). Não há arquivo de estado para ficar pela metade, e as linhas de `recent` são resumos de uma linha, nunca texto de prompt ou de saída |
 | O conteúdo das etapas fica só no log local, sem segredos, por tempo limitado | Eventos `content` + redação antes da gravação + retenção ao iniciar o run (ver passo 12). O banco de métricas e os exports dele nunca recebem conteúdo |
@@ -155,15 +159,15 @@ flowchart TB
   um arquivo fora do repositório ([verificações locais](../research/verificacoes-locais.md) §9). A regra de escopo
   nas instruções das etapas que escrevem é só um pedido no prompt, e o sandbox não foi testado neste kit. Veja
   [5.1 · Governança](../operating/01-governanca-e-custos.md#segurança).
-- **Gasto máximo.** O teto é checado antes de cada tentativa, e uma tentativa só é limitada pelo `timeoutMs` de
-  cada envio. Uma
-  etapa pode passar do teto sozinha (passo 3; [2.2 §3](../usage/02-configuracao-inicial.md#3-teto-de-custo)).
+- **Gasto máximo.** O teto é checado antes de cada tentativa, e uma tentativa só é limitada pelo `timeoutMs` dela.
+  Uma etapa pode passar do teto sozinha (passo 3; [2.2 §3](../usage/02-configuracao-inicial.md#3-teto-de-custo)).
 - **Barreira contra recursão.** A guarda do passo 4 e o `WF_INSIDE_WORKFLOW` evitam o disparo acidental. Uma etapa
   com `shell` ainda pode contorná-los, por exemplo rodando o CLI sem a variável.
-- **Sobreviver a reinício do MCP server.** O job em andamento morre junto e, na próxima consulta, aparece como
-  `failed` com o `runId` (o pid gravado no job não existe mais). Relance com `start_workflow {resumeRunId}` ou
-  `wf run --resume <runId>`; o journal evita refazer o que já terminou. Para runs longos, use `wf start`, que roda
-  destacado e grava o log em `.workflows/jobs/<jobId>.log`.
+- **Notar a queda de um job no mesmo instante.** O job cujo processo morreu aparece como `failed` com o `runId` na
+  próxima consulta, e o que parou de dar sinal de vida (processo travado, parado, ou um pid reaproveitado), depois de
+  30 s sem heartbeat. Relance com `start_workflow {resumeRunId}` ou `wf start --resume <runId>`; o journal evita
+  refazer o que já terminou. O log do processo fica em `.workflows/jobs/<jobId>.log`. Um processo travado que ainda
+  existe segura o lock do run: a retomada é recusada (`já está em execução`) até ele ser encerrado.
 - **Imunidade a promises rejeitadas do SDK.** O cookbook avisa que o SDK dispara promises não aguardadas na
   inicialização. O kit instala `unhandledRejection` (registra e segue) e `uncaughtException` (grava um `run-end`
   `failed` com o motivo no log de cada run em execução, o que faz os jobs aparecerem como `failed`, e sai).

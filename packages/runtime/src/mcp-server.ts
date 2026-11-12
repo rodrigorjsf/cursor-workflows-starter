@@ -9,12 +9,14 @@
 //                                                   overrides: limits for this run, tighten-only
 //   wait_workflow  {jobId, timeoutSec}              → estado (status, fase, últimas linhas de resumo, gasto, resultado)
 //   get_workflow_status {jobId}                     → estado sem esperar
+//   cancel_workflow {jobId}                         → cancela o job e devolve o estado (o run pode ser retomado)
 //
 // The state is a projection of the run's event log (jobs.ts): the job record holds identity only.
 //
-// Os jobs rodam dentro deste processo. Se o cliente reiniciar o servidor, o job em andamento morre e
-// passa a aparecer como "failed" com o runId; relance com start_workflow {resumeRunId} — o journal
-// evita repetir etapas concluídas. Para runs longos e frágeis, prefira `wf start` (processo destacado).
+// Cada job roda em um processo destacado (`spawnJob`): este servidor só inicia, lê o estado e pede o cancelamento.
+// Reiniciar o servidor (ou o Cursor) não afeta um run em andamento; o servidor novo o encontra pelos arquivos do job.
+// Um job cujo processo morreu, ou cujo heartbeat parou, aparece como "failed" com o runId; relance com
+// start_workflow {resumeRunId} — o journal evita repetir etapas concluídas.
 //
 // STATUS: exercitado por stdio (initialize, tools/list, list_workflows) nos testes de fumaça do kit.
 
@@ -24,9 +26,9 @@ import { readFileSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { LIMIT_FIELDS, type LimitOverrides, loadEffectiveConfig } from "./config/index.js";
+import { type LimitOverrides, loadEffectiveConfig, parseLimitOverrides } from "./config/index.js";
 import { INSIDE_WORKFLOW_ENV } from "./runtime/engine.js";
-import { installCrashHandlers, readJob, startJob, waitJob } from "./runtime/jobs.js";
+import { cancelJob, installCrashHandlers, readJob, spawnJob, waitJob } from "./runtime/jobs.js";
 import { loadWorkflows } from "./runtime/registry.js";
 
 installCrashHandlers();
@@ -93,24 +95,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           description: "Estado atual de um job, sem esperar.",
           inputSchema: { type: "object", required: ["jobId"], properties: { jobId: { type: "string" } } },
         },
+        {
+          name: "cancel_workflow",
+          description:
+            "Cancela um job em andamento: para os agentes ativos, desfaz a etapa que estava escrevendo e marca o job como cancelled. " +
+            "O run pode ser retomado depois com start_workflow {resumeRunId}. Só chame quando o usuário pedir para parar.",
+          inputSchema: { type: "object", required: ["jobId"], properties: { jobId: { type: "string" } } },
+        },
       ],
 }));
-
-/**
- * The `overrides` argument as limit overrides. Only the shape is checked here (an object of numbers, `null` counting as a
- * loosening attempt); the config resolver rejects a number that is not a valid limit and ignores one that loosens.
- */
-function parseOverrides(raw: unknown): LimitOverrides {
-  if (raw === undefined) return {};
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new Error("overrides precisa ser um objeto");
-  const overrides: Record<string, number | null> = {};
-  for (const [key, value] of Object.entries(raw)) {
-    if (!(LIMIT_FIELDS as readonly string[]).includes(key)) throw new Error(`override desconhecido: ${key} (use ${LIMIT_FIELDS.join(", ")})`);
-    if (value !== null && typeof value !== "number") throw new Error(`override ${key} precisa ser um número`);
-    overrides[key] = value;
-  }
-  return overrides;
-}
 
 const text = (v: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(v, null, 2) }] });
 const fail = (v: unknown) => ({ ...text(v), isError: true });
@@ -129,13 +122,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       let mcpOverrides: LimitOverrides;
       let violations;
       try {
-        mcpOverrides = parseOverrides(a.overrides);
+        mcpOverrides = parseLimitOverrides(a.overrides);
         violations = loadEffectiveConfig(def, { cwd, mcpOverrides }).violations;
       } catch (err) {
         if (err instanceof Error) return fail({ error: err.message });
         throw err;
       }
-      const { job } = startJob(def, a.args ?? {}, { cwd, mcpOverrides, runId });
+      const { job } = spawnJob({ cwd, workflow: def.meta.name, args: a.args ?? {}, resumeRunId: runId, overrides: mcpOverrides });
       return text({ jobId: job.jobId, runId: job.runId, next: "chame wait_workflow com este jobId", ...(violations.length ? { violations } : {}) });
     }
     case "wait_workflow": {
@@ -144,6 +137,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
     case "get_workflow_status":
       return text(readJob(cwd, String(a.jobId)) ?? { error: "job não encontrado" });
+    case "cancel_workflow":
+      return text((await cancelJob(cwd, String(a.jobId), 20_000)) ?? { error: "job não encontrado" });
     default:
       return fail({ error: `tool desconhecida: ${req.params.name}` });
   }

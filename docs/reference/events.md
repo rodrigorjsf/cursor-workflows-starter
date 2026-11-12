@@ -77,7 +77,7 @@ Inclui os campos de [`EventBase`](#eventbase).
 
 | Campo | Tipo | Obrigatório | Descrição |
 | --- | --- | --- | --- |
-| `status` | `"finished" \| "failed"` | sim | `finished` = o workflow retornou; `failed` = lançou um erro (inclusive teto de custo ou de tokens). |
+| `status` | `"finished" \| "failed" \| "cancelled"` | sim | `finished` = o workflow retornou; `failed` = lançou um erro (inclusive teto de custo ou de tokens); `cancelled` = o run foi cancelado (`wf cancel`, `cancel_workflow`, SIGINT ou SIGTERM) e pode ser retomado com o mesmo `runId`. |
 | `outcomeStatus` | `string` | não | O campo `status` do resultado do workflow, quando ele devolve um objeto com esse campo (por exemplo `done`). |
 | `result` | `unknown` | não | O valor que o workflow retornou. É o que `wait_workflow` e `wf status` devolvem como `result`. Não é conteúdo de etapa: a retenção não o apaga (o workflow decide o que devolve), mas a redação de segredos vale para ele. |
 | `error` | `string` | não | A mensagem do erro que encerrou o run. |
@@ -183,6 +183,7 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 | `usage` | `UsageTotals` | não | Tokens da tentativa por tipo, como o Cursor os reportou. |
 | `reasoningTokens` | `number` | não | Tokens de raciocínio, quando o modelo os reporta. |
 | `errorKind` | `ErrorKind` | não | Por que a tentativa falhou, quando `ok` é false. |
+| `reverted` | `boolean` | não | true = o run foi cancelado no meio de uma etapa que escreve e as alterações dela no diretório de trabalho foram desfeitas (o diretório voltou ao estado de antes da etapa). Se não foi possível desfazer, há um `warning` com o motivo. |
 | `error` | `string` | não | A mensagem do erro, quando `ok` é false. |
 | `schemaReprompts` | `number` | não | Re-prompts feitos até o agente chamar `submit_result` com JSON válido. |
 | `turns` | `number` | não | Turnos do agente na tentativa. |
@@ -310,10 +311,10 @@ type ContentKind = "prompt" | "agent-message" | "tool-call" | "command-output";
 
 ### ErrorKind
 
-Por que uma tentativa de etapa falhou: estourou o tempo, o run do agente terminou em erro, o JSON do schema nunca veio válido, limite de uso do plano, ou exceção.
+Por que uma tentativa de etapa falhou: estourou o tempo, o run do agente terminou em erro, o JSON do schema nunca veio válido, limite de uso do plano, o run foi cancelado, ou exceção.
 
 ```ts
-type ErrorKind = "timeout" | "run-error" | "schema" | "rate-limit" | "exception";
+type ErrorKind = "timeout" | "run-error" | "schema" | "rate-limit" | "cancelled" | "exception";
 ```
 
 ---

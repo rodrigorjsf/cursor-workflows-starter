@@ -117,7 +117,7 @@ export interface ExecutionState {
   /** Set when the execution wrote its `run-end`. */
   finishedAt?: string;
   /** `running` until the execution writes its `run-end`. A caller that knows the process is gone decides what that means. */
-  status: "running" | "finished" | "failed";
+  status: "running" | "finished" | "failed" | "cancelled";
   phase?: string;
   /** The last progress lines, one line each. */
   recent: string[];

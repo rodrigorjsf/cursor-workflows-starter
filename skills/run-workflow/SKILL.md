@@ -64,9 +64,21 @@ The runtime's messages are in Portuguese. This skill quotes the ones it matches,
    - `já está em execução`: another process is still executing that run, so a second execution is refused. Do not
      resume again; follow the job that is already running (`wait_workflow` or `get_workflow_status` with its
      `jobId`), and tell the user if you do not have it.
-   - Anything else (a step that failed, a process that died): offer to relaunch **resuming**: `start_workflow` with
-     the same `name` and `args` and `resumeRunId` equal to the job's `runId`. Completed steps are not repeated.
+   - Anything else (a step that failed, a process that died or stopped answering: `terminou sem concluir o job`,
+     `sem sinal de vida`): offer to relaunch **resuming**: `start_workflow` with the same `name` and `args` and
+     `resumeRunId` equal to the job's `runId`. Completed steps are not repeated.
    On a relaunch, go back to step 3 with the new `jobId`.
+6. When `status` is `cancelled`, the run was stopped on purpose. Relay that with the `runId`, and offer to resume it
+   as in step 5 if the user wants to continue; the steps it finished are not repeated.
+
+## Cancelling
+
+Cancel when the user asks to stop the run, and at that request only: whether a run is going badly is the user's
+judgement. Call `cancel_workflow` with `{ jobId }`. It stops the active agent runs, reverts the step that was writing
+to the state it had before the step, and returns the job with `status: "cancelled"` (step 6).
+
+- A `note` that the job already ended, or that the process is not the job's: relay it. Nothing was cancelled.
+- `status` still `running` after the call: the process is stopping; chain `wait_workflow` (step 3) until it ends.
 
 ## Without the MCP server
 
@@ -80,6 +92,7 @@ live in the `env` of the `workflows` server in `mcp.json` and do not reach the s
 ```bash
 npm run wf -- start <name> --args '<json>' --max-cents <N> --max-tokens <N> [--resume <runId>]   # returns {jobId, runId, log}
 npm run wf -- wait <jobId> --timeout 240   # repeat until status != running
+npm run wf -- cancel <jobId>               # only when the user asks to stop; returns the job with status cancelled
 ```
 
 In Claude Code, run the `wait` with `timeout: 250000` on the Bash tool: its default (120000 ms) cuts the 240 s wait.
