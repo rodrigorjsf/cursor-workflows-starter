@@ -23,7 +23,7 @@ matches, in code spans; match them verbatim.
      resume: `implement-issue` (`additionalProperties: false`) fails with `invalid args`, and a workflow without
      that guard starts from scratch, without the journal.
 2. Call `start_workflow` with `{ name, args }` (and `resumeRunId`, if any). The step ends with the `jobId` in hand; a
-   return with `error` (`unknown workflow: <name>`, an invalid config with its file and field path, or a kit outside the
+   return with `error` (one that starts with `unknown workflow: `, an invalid config with its file and field path, or a kit outside the
    version range the repo declares) goes back to step 1, or to the user for the config and the kit version: tell them
    to run `wf doctor`.
    - A return with `dashboardUrl` is this run's live page on the dashboard, which also shows every other run of every
@@ -35,7 +35,7 @@ matches, in code spans; match them verbatim.
      not depend on it. A return with neither means the user turned auto-start off: go on to step 3.
    - When the user asks for a tighter budget for this run, pass `overrides` (`maxTokens`, `maxCents`,
      `maxTokensPerStep`, `concurrency`). They only tighten: a looser value comes back in `violations` and has no
-     effect, so tell the user.
+     effect, so tell the user. Any other key fails the start with an error that starts with `unknown override: `.
 3. Chain `wait_workflow` calls with `{ jobId, timeoutSec: 45 }`, one right after the other, until `status` is no
    longer `running`. A return with `error` and no `status` (`job not found`) also ends the wait: relay the error
    and the `jobId` to the user.
@@ -108,8 +108,9 @@ If the `workflows` tools are not available, use the CLI from the terminal. The `
 `meta` of the workflow file (a file in the kit's built-in `workflows/` folder or in the repository's
 `.agents/workflows/`): `wf list` returns only the name and description. The CLI writes the same job state and the
 same messages, so steps 3 to 6 apply equally, with `--resume <runId>` in place of `resumeRunId` (relaunch with
-`start`, also when `next` shows `run`). An unknown name fails with ``unknown workflow: <name>. Use `wf list`.``
-(back to step 1), and an unknown job returns `job not found` (step 3). Caps set in the
+`start`, also when `next` shows `run`). An unknown name fails with an error that starts with `unknown workflow: `
+(the CLI adds ``. Use `wf list`.``; back to step 1), and an unknown job returns an error that starts with
+`job not found` (step 3). Caps set in the
 `env` of the `workflows` server in `mcp.json` do not reach the shell, but the config files (global caps, repo config)
 do: pass `--max-cents` and `--max-tokens` to tighten this run further.
 

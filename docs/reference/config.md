@@ -8,7 +8,7 @@ O comportamento do kit se configura em JSON, em dois arquivos que um único esqu
 
 - **Global**, `~/.cursor-workflows/config.json` (a pasta muda com `WF_HOME`): os tetos rígidos (`caps`) e preferências suas, valem em todos os repositórios.
 - **Do repositório**, `.agents/workflows/config.json`: preferências por workflow e por papel, e a faixa `kit`. Vai para o controle de versão, então só pode **apertar** os tetos globais, nunca afrouxar.
-- **O esquema** é `packages/runtime/schema/config.schema.json`. Aponte `$schema` para ele e o editor completa e valida. Arquivo inválido, ou com chave desconhecida, derruba o run (e o `start_workflow`) antes de qualquer etapa, com o arquivo e o caminho do campo como ponteiro JSON, por exemplo `/workflows/implement-issue/roles/review/retries`.
+- **O esquema** é `packages/runtime/schema/config.schema.json`. Aponte `$schema` para ele e o editor completa e valida. Arquivo inválido, ou com uma chave que o esquema não conhece (`unknown key`), derruba o run (e o `start_workflow`) antes de qualquer etapa, com o arquivo e o caminho do campo como ponteiro JSON, por exemplo `/workflows/implement-issue/roles/review/retries`.
 - Todo objeto aceita `$comment`, que é ignorado.
 
 ## Precedência
@@ -31,7 +31,7 @@ Depois das camadas, os tetos do arquivo global limitam o resultado: **números**
 - Um `caps` no arquivo do repositório é violação e não tem efeito.
 - Um `dashboard` no arquivo do repositório é violação e não tem efeito: o dashboard é um só por usuário, para os runs de todos os repositórios.
 - Um `overrides` do chat que afrouxaria o valor em vigor é violação e não tem efeito; apertar o valor é permitido. O `maxTokensPerStep` do chat vale como teto de todos os papéis e globs de label.
-- Um valor que não é um limite válido (um `concurrency` 0, um `maxTokens` fracionário) numa flag, num `overrides` ou numa variável de ambiente é erro, com o nome de onde veio.
+- Um valor que não é um limite válido (um `concurrency` 0, um `maxTokens` fracionário) numa flag, num `overrides` ou numa variável de ambiente é erro, com o nome de onde veio. Uma chave de `overrides` fora das quatro é erro também: `unknown override: <chave> (use maxTokens, maxTokensPerStep, maxCents, concurrency)`.
 - Um modelo fora de `allowedModels` pedido pela configuração não tem efeito. Um modelo padrão do código que a lista recusa vira uma violação da camada `default` no `run-start`, e as etapas desse papel falham até a configuração trocá-lo.
 - `settingSources` fora de `allowedSettingSources` são removidos, em todas as etapas.
 
