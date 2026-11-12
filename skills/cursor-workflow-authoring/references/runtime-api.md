@@ -96,9 +96,15 @@ export default defineWorkflow<{ target: string }>({
   clamp the result: a lower number or a narrower list wins. The repo file and `overrides` can only tighten them; a
   request that does not is reported as a violation and ignored. `wf config show [workflow]` prints the effective values
   and where each came from.
-- A cap is checked **before** each step and each retry. A step that already started is not interrupted, and a step has
-  no token cap of its own, so the overshoot can reach concurrency × one step. For tight caps use low `concurrency` and
-  a short `timeoutMs` on steps that write.
+- The token caps (the run's `maxTokens` and a step's `maxTokensPerStep`, set per role or label in the config) are
+  checked on every turn while a step runs: the turn that takes the step (all its attempts together) or the run (resumes
+  included) strictly above the cap cancels the SDK run at once, and the attempt fails as `errorKind: "budget"` with no
+  retry. A step over its own cap fails alone (an `agent()` error, `null` in `parallel`); the run's cap cancels every
+  active step, starts none, and ends the run with `Teto de tokens atingido` (even if the workflow code catches the step's
+  error and carries on). A step that already used its whole cap gets no further attempt. The overshoot is at most one turn per
+  active step. The SDK reports usage only at the end of a turn and a turn can be the agent's whole loop, so keep a short
+  `timeoutMs` on steps that write. The cents cap is checked only **before** each step and retry (cost arrives after the
+  step).
 - `maxCents` is compared with `spentCents()`: per attempt, the larger of the raw cost and the charged cost. The charged
   cost alone is 0 for usage included in the plan, bring-your-own-key and credits.
 - A cap is a total for the run. A resume passed a cap (`--max-cents`, `--max-tokens`) sets the new total, so extending a

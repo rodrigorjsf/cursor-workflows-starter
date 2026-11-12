@@ -58,9 +58,13 @@ The runtime's messages are in Portuguese. This skill quotes the ones it matches,
    - `O plano da conta não dá acesso` or `Limite de uso do Cursor atingido`: a resume would fail the same way; the
      step ends with the relay.
    - `Teto de custo atingido` or `Teto de tokens atingido`: the cap is a total for the run, and a resume starts from
-     what the run already spent. The same cap stops it at the same step. Tell the user that continuing takes a higher
-     total cap: `--resume <runId> --max-cents <new total>` on the CLI, or a higher `WF_MAX_CENTS` / `WF_MAX_TOKENS` in the
-     `env` of the `workflows` server in `mcp.json`. The user decides.
+     what the run already spent. The same cap stops it at the same step. The token cap also cancels the steps that are
+     running when it is crossed (their `step-end` carries `errorKind: "budget"`). Tell the user that continuing takes a
+     higher total cap: `--resume <runId> --max-cents <new total>` on the CLI, or a higher `WF_MAX_CENTS` /
+     `WF_MAX_TOKENS` in the `env` of the `workflows` server in `mcp.json`. The user decides.
+   - `Teto de tokens da etapa`: one step went over its own `maxTokensPerStep` and was cancelled, with no retry. A resume
+     runs it again under the same cap. Tell the user the cap is in the config files (`.agents/workflows/config.json`,
+     or the global `~/.cursor-workflows/config.json`); only the user raises it, and a global cap may forbid it.
    - `já está em execução`: another process is still executing that run, so a second execution is refused. Do not
      resume again; follow the job that is already running (`wait_workflow` or `get_workflow_status` with its
      `jobId`), and tell the user if you do not have it.

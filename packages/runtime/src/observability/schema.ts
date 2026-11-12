@@ -82,7 +82,7 @@ CREATE TABLE attempts (
   prompt_chars      INTEGER,
   prompt_text       TEXT,                   -- legado: nunca mais gravado (o texto dos prompts fica só no log de eventos local)
   ok                INTEGER NOT NULL,
-  error_kind        TEXT,                   -- timeout | run-error | schema | rate-limit | exception
+  error_kind        TEXT,                   -- timeout | run-error | schema | rate-limit | budget | exception
   schema_reprompts  INTEGER DEFAULT 0,
   turns             INTEGER DEFAULT 0,
   steps             INTEGER DEFAULT 0,      -- passos (step-completed) no stream; um passo pode agrupar várias chamadas ao modelo

@@ -27,6 +27,13 @@
 - **O orçamento acumula entre resumes.** O gasto (centavos e tokens) é recomposto do log do run, tentativas que falharam
   inclusive, e um resume com `--max-cents`/`--max-tokens` define o novo teto total. Uma tentativa que morreu no meio da
   etapa conta os tokens dos turnos que terminou (o custo em centavos dela nunca chegou ao log).
+- **Tetos de tokens ao vivo, por etapa e por run.** A cada turno de uma etapa (`turn-ended`), o motor compara os
+  tokens com o `maxTokensPerStep` da etapa (todas as tentativas dela somadas) e com o `maxTokens` do run (o gasto do log,
+  resumes inclusive, mais os turnos em andamento). Passou de um dos dois: o run do agente é cancelado na hora e a
+  tentativa falha com o novo `errorKind: "budget"`, sem nova tentativa. A etapa que passa do próprio teto falha
+  sozinha; o teto do run cancela todas as etapas ativas, nenhuma etapa nova começa e o run termina com
+  `Teto de tokens atingido`, depois de as etapas canceladas fecharem a conta. A ultrapassagem é de no máximo um turno
+  por etapa ativa. Antes, um teto só era checado antes de cada tentativa.
 - **Configuração em camadas, com tetos globais e papéis.** Dois arquivos JSON, validados por um esquema que vai com o
   kit (`packages/runtime/schema/config.schema.json`): o global (`~/.cursor-workflows/config.json`, com os tetos
   rígidos `caps`) e o do repositório (`.agents/workflows/config.json`). Precedência: código < global < repositório <

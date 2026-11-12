@@ -50,6 +50,60 @@ export class AccountAccessError extends FatalRunError {}
 /** Códigos de erro do SDK que dizem respeito à conta, não à etapa. */
 const ACCOUNT_ERROR_CODES = new Set(["plan_required"]);
 export class StepFailedError extends Error {}
+/** A step crossed its own token cap (`maxTokensPerStep`): the step fails with no retry, the run goes on. */
+export class StepBudgetError extends StepFailedError {}
+/** How long a run that hit its token cap waits for the steps it cancelled to finish their accounting before it ends. */
+const CANCEL_GRACE_MS = 30_000;
+
+/**
+ * The "stop this attempt now" switch of one attempt, thrown when a token cap is crossed. `cut(err)` cancels the SDK run
+ * in flight and makes `rejected` reject, so the wait on the run fails at once; `throwIfCut()` is for the points where
+ * the attempt can notice on its own. A turn can arrive before `send()` hands the run back: the run is then cancelled as
+ * soon as it is bound.
+ */
+class AttemptCut {
+  private run: Run | undefined;
+  private reason: Error | undefined;
+  private cancelling: Promise<void> | undefined;
+  private reject!: (err: Error) => void;
+  /** Rejects with the error that cut the attempt. */
+  readonly rejected = new Promise<never>((_, reject) => (this.reject = reject));
+
+  constructor() {
+    this.rejected.catch(() => {}); // only the race in waitWithTimeout observes it
+  }
+
+  /** The SDK run in flight, or undefined between runs (finished runs have nothing left to cancel). */
+  bind(run: Run | undefined): void {
+    this.run = run;
+  }
+
+  cut(err: Error): void {
+    if (this.reason) return;
+    this.reason = err;
+    this.reject(err);
+    this.cancelRun();
+  }
+
+  throwIfCut(): void {
+    if (!this.reason) return;
+    this.cancelRun();
+    throw this.reason;
+  }
+
+  isCutBy(err: unknown): boolean {
+    return this.reason !== undefined && err === this.reason;
+  }
+
+  /** Resolves once the run cancelled by the cut has stopped. */
+  stopped(): Promise<void> {
+    return this.cancelling ?? Promise.resolve();
+  }
+
+  private cancelRun(): void {
+    if (this.run) this.cancelling ??= this.run.cancel().catch(() => {});
+  }
+}
 
 /**
  * Marca o ambiente do processo: o shell das etapas herda (o CLI recusa `wf run/start`). Os servidores MCP do
@@ -137,6 +191,16 @@ export interface RunOutcome<R> {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Resolves when every promise has settled, or after `ms`, whichever comes first. */
+async function settledWithin(promises: Promise<unknown>[], ms: number): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([Promise.allSettled(promises), new Promise<void>((resolve) => (timer = setTimeout(resolve, ms)))]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 const ajv = new Ajv({ allErrors: true, strict: false });
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -432,8 +496,31 @@ async function executeRun<A, R>(
   // Erro de conta (ex.: plan_required): registrado aqui para nenhuma etapa enfileirada começar depois dele.
   let accountError: AccountAccessError | undefined;
 
+  // Live token caps. `live` holds the turn totals of the attempts in flight (they join `spentTokens` when the attempt is
+  // charged); `cutters` stop those attempts. Once the run's cap is crossed, `runBreach` is the run's budget error: every
+  // active attempt is cut with it and no step starts after it.
+  const live = new Set<UsageTotals>();
+  const cutters = new Set<AttemptCut>();
+  const running = new Set<Promise<unknown>>();
+  let runBreach: BudgetExceededError | undefined;
+
+  const stepCapError = (step: StepContext, tokens: number) => new StepBudgetError(`Teto de tokens da etapa "${step.label}" atingido: ${tokens} de ${step.tokenCap}.`);
+
+  /** Has the turn that just ended taken the run or the step over a token cap? The run's cap wins: it ends the run. */
+  function tokenBreach(step: StepContext, attemptTokens: number): Error | undefined {
+    if (runBreach) return runBreach;
+    if (budget.maxTokens != null) {
+      let total = spentTokens;
+      for (const usage of live) total += usage.totalTokens;
+      if (total > budget.maxTokens) return (runBreach = new BudgetExceededError(`Teto de tokens atingido: ${total} de ${budget.maxTokens}.`));
+    }
+    const stepTokens = step.tokens + attemptTokens;
+    return step.tokenCap != null && stepTokens > step.tokenCap ? stepCapError(step, stepTokens) : undefined;
+  }
+
   function assertBudget(): void {
     if (accountError) throw accountError;
+    if (runBreach) throw runBreach;
     if (budget.maxCents != null && spentCents >= budget.maxCents) {
       throw new BudgetExceededError(`Teto de custo atingido: ${spentCents}¢ de ${budget.maxCents}¢.`);
     }
@@ -472,6 +559,7 @@ async function executeRun<A, R>(
         spentCents += Math.max(u?.cost?.rawCostCents ?? 0, charged);
         chargedCents += charged;
         spentTokens += usage.totalTokens;
+        live.delete(turnUsage); // its tokens are in spentTokens now (here, not in the attempt's finally: a rate-limit backoff sleeps in between)
         if (!u) {
           const why = lastErr instanceof Error ? lastErr.message : String(lastErr);
           emit({
@@ -507,7 +595,8 @@ async function executeRun<A, R>(
     }
   }
 
-  async function waitWithTimeout(run: Run, ms: number): Promise<RunResult> {
+  /** `abort` rejects when the attempt is cut (token cap): it wins over a result that arrives at the same time. */
+  async function waitWithTimeout(run: Run, ms: number, abort: Promise<never>): Promise<RunResult> {
     let timer: NodeJS.Timeout | undefined;
     let timedOut = false;
     const timeout = new Promise<never>((_, reject) => {
@@ -516,8 +605,10 @@ async function executeRun<A, R>(
         reject(new StepFailedError(`timeout após ${ms} ms`));
       }, ms);
     });
+    const result = run.wait();
+    result.catch(() => {}); // a run that loses the race may still reject later: nobody is waiting for it
     try {
-      return await Promise.race([run.wait(), timeout]);
+      return await Promise.race([abort, result, timeout]);
     } finally {
       clearTimeout(timer);
       // Espera o cancelamento terminar para a próxima tentativa não editar o mesmo cwd em paralelo.
@@ -540,6 +631,10 @@ async function executeRun<A, R>(
     ref: StepRef;
     /** A step-start has been emitted: only then does the step become the flow's "last node". */
     started: boolean;
+    /** The step's token cap (config `maxTokensPerStep`, already clamped): all its attempts together. `null` = none. */
+    tokenCap: number | null;
+    /** Tokens the step's finished attempts used, from their turn events. */
+    tokens: number;
   }
 
   async function agentCall<T>(prompt: string, callOpts: AgentCallOptions = {}): Promise<T> {
@@ -552,7 +647,8 @@ async function executeRun<A, R>(
       throw new StepFailedError(`etapa "${label}": papel desconhecido "${role}" (o workflow declara: ${[...roles.keys()].join(", ") || "nenhum"})`);
     }
     // Workflow defaults < the role's defaults < this call < the config layers: what the user configured wins over the code.
-    const o = applyOverrides({ ...def.defaults, ...(role === undefined ? undefined : roles.get(role)!.defaults), ...callOpts }, resolved.stepOverrides(role, label));
+    const overrides = resolved.stepOverrides(role, label);
+    const o = applyOverrides({ ...def.defaults, ...(role === undefined ? undefined : roles.get(role)!.defaults), ...callOpts }, overrides);
     const phase = o.phase ?? currentPhase;
     const sources = allowedSources(caps.allowedSettingSources, o.settingSources ?? settingSources);
     const mKey = modelKey(o.model);
@@ -568,9 +664,13 @@ async function executeRun<A, R>(
     // Chave calculada de forma síncrona, antes de qualquer await.
     const key = journal.keyFor(prompt, fingerprint);
     const ref: StepRef = { stepId: stepIdOf(key), parentId: flow.last, groupId: flow.groupId };
-    const step: StepContext = { o, role, promptHash, label, phase, sources, mKey, fingerprint, key, ref, started: false };
+    const step: StepContext = { o, role, promptHash, label, phase, sources, mKey, fingerprint, key, ref, started: false, tokenCap: overrides.maxTokensPerStep, tokens: 0 };
+    const stepRun = runStep<T>(prompt, step);
+    running.add(stepRun);
+    const done = () => void running.delete(stepRun);
+    stepRun.then(done, done);
     try {
-      return await runStep<T>(prompt, step);
+      return await stepRun;
     } finally {
       if (step.started) flow.last = ref.stepId; // whatever comes next in this flow continues from this step
     }
@@ -646,6 +746,8 @@ async function executeRun<A, R>(
       let lastError = "";
       for (let attempt = 1; attempt <= attempts; attempt++) {
         assertBudget();
+        // Same rule as the run's cap: nothing left of the step's allowance, no attempt starts (a cap of 0 lets no step run).
+        if (step.tokenCap != null && step.tokens >= step.tokenCap) throw stepCapError(step, step.tokens);
         const attemptId = randomUUID();
         const startedAt = Date.now();
         emitStart(attemptId, attempt, false);
@@ -655,6 +757,11 @@ async function executeRun<A, R>(
         const c = { turns: 0, steps: 0, stepsInTurn: 0, summaries: 0, reprompts: 0, toolCalls: {} as Record<string, number> };
         // Soma dos turn-ended desta tentativa: reserva de tokens quando getUsage() não responde.
         const turnUsage: UsageTotals & { reasoningTokens?: number } = emptyUsage();
+        // Live caps: a turn that takes the step or the run over its token cap cuts the attempt (its own turn, or another
+        // step's turn for the run's cap).
+        const attemptCut = new AttemptCut();
+        live.add(turnUsage);
+        cutters.add(attemptCut);
         const sendOpts: SendOptions = {
           onDelta: ({ update }) => {
             switch (update.type) {
@@ -686,6 +793,10 @@ async function executeRun<A, R>(
                   const t = update.usage;
                   addUsage(turnUsage, { ...t, totalTokens: t.inputTokens + t.outputTokens }); // o cache já está no input
                   if (t.reasoningTokens) turnUsage.reasoningTokens = (turnUsage.reasoningTokens ?? 0) + t.reasoningTokens;
+                  // The real SDK may report one turn per send, so this can fire only when a send ends (see #37).
+                  const breach = tokenBreach(step, turnUsage.totalTokens);
+                  if (breach instanceof BudgetExceededError) for (const active of cutters) active.cut(breach); // the run's cap: every active attempt
+                  else if (breach) attemptCut.cut(breach);
                 }
                 c.turns++;
                 c.stepsInTurn = 0;
@@ -731,7 +842,7 @@ async function executeRun<A, R>(
           });
         };
         try {
-          agent = await Agent.create({
+          const sdkAgent = await Agent.create({
             apiKey: opts.apiKey,
             name: `${def.meta.name}:${label}`,
             model,
@@ -749,7 +860,22 @@ async function executeRun<A, R>(
               customTools: o.schema ? { [SUBMIT_TOOL]: submitResultTool(o.schema, capture) } : undefined,
             },
           });
-          let result = await waitWithTimeout(await send(agent, o.schema ? prompt + schemaInstruction() : prompt, sendOpts), o.timeoutMs ?? 20 * 60_000);
+          agent = sdkAgent;
+          attemptCut.throwIfCut();
+          /** One message and its answer. A cut attempt throws its budget error as soon as it knows, before anything else. */
+          const exchange = async (message: string): Promise<RunResult> => {
+            const run = await send(sdkAgent, message, sendOpts);
+            attemptCut.bind(run);
+            attemptCut.throwIfCut();
+            try {
+              const answer = await waitWithTimeout(run, o.timeoutMs ?? 20 * 60_000, attemptCut.rejected);
+              attemptCut.throwIfCut();
+              return answer;
+            } finally {
+              attemptCut.bind(undefined); // finished or abandoned: a later cut has nothing to cancel until the next send()
+            }
+          };
+          let result = await exchange(o.schema ? prompt + schemaInstruction() : prompt);
           resolvedModel = result.model?.id;
           // Saída estruturada: re-prompt na MESMA conversa até o modelo chamar submit_result com JSON válido.
           let schemaTries = o.schemaRetries ?? 2;
@@ -757,7 +883,7 @@ async function executeRun<A, R>(
             c.reprompts++;
             const reprompt = repromptMessage(capture);
             content.write("prompt", reprompt);
-            result = await waitWithTimeout(await send(agent, reprompt, sendOpts), o.timeoutMs ?? 20 * 60_000);
+            result = await exchange(reprompt);
           }
           charge = await chargeUsage(agent, turnUsage);
 
@@ -775,8 +901,16 @@ async function executeRun<A, R>(
             return value as T;
           }
         } catch (err) {
+          const overCap = attemptCut.isCutBy(err);
+          if (overCap) await attemptCut.stopped(); // let the cancelled run stop before its usage is read and anything else touches the cwd
           if (agent && !charge) charge = await chargeUsage(agent, turnUsage); // timeout/erro também custam
           lastError = err instanceof Error ? err.message : String(err);
+          if (overCap) {
+            // Over a token cap: the attempt fails as "budget" and is not retried. The run's cap ends the run, the step's cap only the step.
+            errorKind = "budget";
+            endEvent(false);
+            throw err;
+          }
           const code = (err as { code?: unknown } | undefined)?.code;
           if (typeof code === "string" && ACCOUNT_ERROR_CODES.has(code)) {
             errorKind = "exception";
@@ -796,6 +930,9 @@ async function executeRun<A, R>(
             errorKind = /^timeout/.test(lastError) ? "timeout" : "exception";
           }
         } finally {
+          cutters.delete(attemptCut);
+          live.delete(turnUsage); // idempotent: an attempt that never got to be charged must not keep counting
+          step.tokens += turnUsage.totalTokens;
           if (agent) await agent[Symbol.asyncDispose]().catch(() => {});
         }
         endEvent(false);
@@ -844,12 +981,20 @@ async function executeRun<A, R>(
     },
   };
 
-  let final: RunOutcome<R>;
+  let ended: { status: "finished" | "failed"; result?: R; error?: string };
   try {
-    final = outcome("finished", { result: await flows.run(rootFlow, () => def.run(ctx)) });
+    ended = { status: "finished", result: await flows.run(rootFlow, () => def.run(ctx)) };
   } catch (err) {
-    final = outcome("failed", { error: err instanceof Error ? err.message : String(err) });
+    ended = { status: "failed", error: err instanceof Error ? err.message : String(err) };
   }
+  // A run that hit its token cap cancelled its active steps; they finish their accounting before the run is closed, so no
+  // step event trails the run-end and their tokens are in the outcome.
+  if (runBreach) {
+    await settledWithin([...running], CANCEL_GRACE_MS);
+    // The workflow may have caught the step's error and carried on: crossing the run's cap still ends the run with the budget error.
+    if (ended.status === "finished") ended = { status: "failed", error: runBreach.message };
+  }
+  const final = outcome(ended.status, ended.status === "finished" ? { result: ended.result } : { error: ended.error });
   const r = final.result as { status?: unknown } | undefined;
   emit({
     type: "run-end",

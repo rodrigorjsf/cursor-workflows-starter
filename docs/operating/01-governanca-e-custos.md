@@ -22,11 +22,12 @@ Para as práticas de implementação (cache, contexto, prompts, memo), veja
 [5.2 · Custos, cache e boas práticas](02-custos-e-cache.md). Os controles abaixo são os de governança.
 
 1. **Teto por run:** `--max-cents`, `--max-tokens`, `WF_MAX_CENTS` ou `WF_MAX_TOKENS`. Não é garantia de gasto
-   máximo. É checado antes de cada tentativa, e uma etapa não tem teto de tokens próprio (só o `timeoutMs` de cada envio), então a
-   ultrapassagem pode chegar a concorrência × uma etapa sem limite. Medido em 2026-11-11: 344 mil tokens com
-   `--max-tokens 300000` ([verificações locais](../research/verificacoes-locais.md) §9; ver
-   [2.2 §3](../usage/02-configuracao-inicial.md#3-teto-de-custo)). Use `timeoutMs` curto nas etapas que escrevem. O teto em
-   centavos compara `maxCents` com `spentCents`: a soma, por tentativa, do maior entre `rawCostCents` (custo bruto)
+   máximo. O teto de tokens do run e o da etapa (`maxTokensPerStep`) são checados a cada turno, durante a etapa: passar
+   de um deles cancela o run do agente na hora (a tentativa falha como `budget`, sem nova tentativa), e a
+   ultrapassagem é de no máximo um turno por etapa ativa. Um turno do SDK pode ser o laço inteiro do agente, então
+   `timeoutMs` curto nas etapas que escrevem continua valendo. Medido em 2026-11-11, antes do teto ao vivo: 344 mil
+   tokens com `--max-tokens 300000` ([verificações locais](../research/verificacoes-locais.md) §9; ver
+   [2.2 §3](../usage/02-configuracao-inicial.md#3-teto-de-custo)). O teto em centavos é checado antes de cada tentativa e compara `maxCents` com `spentCents`: a soma, por tentativa, do maior entre `rawCostCents` (custo bruto)
    e `chargedCents` (cobrado). Ele depende do custo do `getUsage()`, que o Premium testado não devolveu. Defina
    sempre os dois tetos (ver a nota abaixo).
 2. **Modelo por etapa:** a maior parte das etapas roda em modelos baratos. Use o modelo caro só para

@@ -3,7 +3,8 @@
 export const calls: any[] = [];
 /** Comportamento de cada send(), em ordem. Sem entrada: run "finished" com result "ok". */
 export const script: Array<(o: any, msg: string, n: number) => any> = [];
-export const stats = { active: 0, maxActive: 0, disposed: 0, usageReads: 0 };
+/** `cancels`: Run.cancel() calls (not on `hang` runs). `turnsDelivered`: turn-ended deltas that reached onDelta on live runs. */
+export const stats = { active: 0, maxActive: 0, disposed: 0, usageReads: 0, cancels: 0, turnsDelivered: 0 };
 export class CursorAgentError extends Error {
   isRetryable = false;
 }
@@ -39,12 +40,42 @@ export const Agent = {
       async send(msg: string, options?: any) {
         const behave = script.shift() ?? (() => ({ status: "finished", result: "ok" }));
         const r = await behave(o, msg, n++);
-        for (const update of r?.deltas ?? DEFAULT_DELTAS) {
-          if (update.type === "turn-ended" && update.usage) turnUsages.push(update.usage);
+        /** One delta reaches the caller; a turn's usage also counts toward the agent's total (what getUsage() sums). */
+        const deliver = async (update: any, live: boolean) => {
+          if (update.type === "turn-ended" && update.usage) {
+            turnUsages.push(update.usage);
+            if (live) stats.turnsDelivered++;
+          }
           await options?.onDelta?.({ update });
+        };
+        if (r?.live) {
+          // Opt-in, like the real SDK: send() hands back the run first and the deltas stream after it, one per macrotask,
+          // until the run is cancelled (nothing is delivered after cancel()). The result is "cancelled" in that case.
+          let cancelled = false;
+          const streamed = (async () => {
+            for (const update of r.deltas ?? DEFAULT_DELTAS) {
+              await new Promise((resolve) => setImmediate(resolve));
+              if (cancelled) return;
+              await deliver(update, true);
+            }
+          })();
+          return {
+            cancel: async () => {
+              if (!cancelled) stats.cancels++;
+              cancelled = true;
+              await streamed;
+            },
+            wait: async () => {
+              await streamed;
+              if (r.rejectWait) throw r.rejectWait; // the run fails after its turns, e.g. with a RateLimitError
+              if (cancelled && r.stuckAfterCancel) await new Promise(() => {}); // a wait() that never settles once cancelled
+              return { id: "r", status: "finished", model: o.model, ...r, ...(cancelled ? { status: "cancelled" } : {}) };
+            },
+          };
         }
+        for (const update of r?.deltas ?? DEFAULT_DELTAS) await deliver(update, false);
         if (r?.hang) return { cancel: async () => {}, wait: () => new Promise(() => {}) };
-        return { cancel: async () => {}, wait: async () => ({ id: "r", status: "finished", model: o.model, ...r }) };
+        return { cancel: async () => void stats.cancels++, wait: async () => ({ id: "r", status: "finished", model: o.model, ...r }) };
       },
       async getUsage() {
         stats.usageReads++;
