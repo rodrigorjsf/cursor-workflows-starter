@@ -20,6 +20,7 @@ code { font-size: var(--text-xs); }
 .run-stats div { display: flex; flex-direction: column; }
 .run-stats dt { color: var(--fg-muted); font-size: var(--text-xs); }
 .run-stats dd { margin: 0; font-size: var(--text-md); font-weight: 600; font-variant-numeric: tabular-nums; }
+.run-stats .none { color: var(--fg-muted); }
 .toolbar { grid-area: toolbar; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; align-content: center; gap: var(--space-2); }
 .replay { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .replay input[type="range"] { width: 160px; accent-color: var(--accent); }

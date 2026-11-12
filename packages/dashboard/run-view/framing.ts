@@ -1,7 +1,7 @@
 // How the Run view frames a run on its canvas: all of it when that stays readable, otherwise as many nodes as fit at a readable
 // zoom. Pure: the caller gives it the size of the pane.
 import type { FitViewOptions } from "@xyflow/react";
-import { type RunGraph, isWork } from "./run-graph.js";
+import { type GraphNode, type RunGraph, isWork } from "./run-graph.js";
 import { type Box, NODE_TEXT_PX, type RunLayout } from "./run-layout.js";
 
 /** Text smaller than this on screen is not readable: a node's label, and the line under it. */
@@ -25,15 +25,21 @@ export function boundsOf(boxes: Box[]): Box {
   return { x, y, width: Math.max(...boxes.map((b) => b.x + b.width)) - x, height: Math.max(...boxes.map((b) => b.y + b.height)) - y };
 }
 
-/** Red stub: never pans. */
-export function panTarget(_box: Box, _viewport: { x: number; y: number; zoom: number }, _pane: { width: number; height: number }): { x: number; y: number } | undefined {
-  return undefined;
+/**
+ * Where to centre the canvas when the node in `box` takes the keyboard focus: its centre, unless the whole of it is already on
+ * the pane at `viewport` (then `undefined`: the canvas stays). A run framed in part leaves nodes off the canvas, and each is a
+ * Tab stop. The caller keeps the zoom (`setCenter(x, y, { zoom })`).
+ */
+export function panTarget(box: Box, viewport: { x: number; y: number; zoom: number }, pane: { width: number; height: number }): { x: number; y: number } | undefined {
+  const { x, y, zoom } = viewport;
+  const inView = box.x * zoom + x >= 0 && (box.x + box.width) * zoom + x <= pane.width && box.y * zoom + y >= 0 && (box.y + box.height) * zoom + y <= pane.height;
+  return inView ? undefined : { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
 /**
  * How to frame the run in a pane of `pane` pixels: all of it when that stays readable; otherwise as many nodes as fit at a
  * readable zoom around a focus, the nearest first. The focus is the node whose log is open; else, in a run that is over, the
- * first step or command that failed or was interrupted (what the reader came for; a fork or join only when no step did), or its first step (to be read from the start); in a live run,
+ * first step or command that failed, was cancelled or was interrupted (what the reader came for; a fork or join only when no step did), or its first step (to be read from the start); in a live run,
  * the latest node. The user pans to the rest; Fit View shows it all.
  */
 export function frameOf(graph: RunGraph, layout: RunLayout, pane: { width: number; height: number }, selectedId?: string): FitViewOptions {
@@ -42,9 +48,10 @@ export function frameOf(graph: RunGraph, layout: RunLayout, pane: { width: numbe
   const settled = graph.nodes.every((n) => n.state !== "running");
   const placed = graph.nodes.filter((n) => layout.nodes[n.id] !== undefined);
   const work = placed.filter((n) => n.kind !== "start");
+  const stopped = (n: GraphNode) => n.state === "failed" || n.state === "cancelled" || n.state === "interrupted";
   const focus =
     placed.find((n) => n.id === selectedId) ??
-    (settled ? (work.find((n) => isWork(n.kind) && (n.state === "failed" || n.state === "interrupted")) ?? work.find((n) => n.state === "failed" || n.state === "interrupted") ?? work[0]) : (work.findLast((n) => n.state === "running") ?? work.at(-1))) ??
+    (settled ? (work.find((n) => isWork(n.kind) && stopped(n)) ?? work.find(stopped) ?? work[0]) : (work.findLast((n) => n.state === "running") ?? work.at(-1))) ??
     placed[0]!;
   const centre = (id: string) => layout.nodes[id]!.x + layout.nodes[id]!.width / 2;
   const order = [focus, ...placed.filter((n) => n !== focus).sort((a, b) => Math.abs(centre(a.id) - centre(focus.id)) - Math.abs(centre(b.id) - centre(focus.id)))];

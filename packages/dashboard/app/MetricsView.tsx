@@ -219,11 +219,12 @@ export function ContextLines({ rows, width }: { rows: Row[]; width: number }) {
         <path d={path(Yo, "ok_rate")} fill="none" stroke="var(--chart-3)" strokeWidth={2} strokeDasharray="5 4" />
         {rows.map((r) => (
           <g key={String(r.ctx_bucket_k)}>
+            {/* The ring first and wider, then the dot inside it: where the two meet (one band: both at the top), both show. */}
+            <circle cx={X(num(r.ctx_bucket_k))} cy={Yo(num(r.ok_rate))} r={7} fill="var(--surface)" stroke="var(--chart-3)" strokeWidth={2}>
+              <title>{`${cell(r.ctx_bucket_k, "band")}: ${formatPercent(num(r.ok_rate))} success · ${formatNumber(num(r.avg_steps))} steps on average`}</title>
+            </circle>
             <circle cx={X(num(r.ctx_bucket_k))} cy={Yc(num(r.cents_per_1k_tokens))} r={4} fill="var(--chart-1)">
               <title>{`${cell(r.ctx_bucket_k, "band")}: ${formatCents(num(r.cents_per_1k_tokens))} per 1k tokens · ${formatCount(num(r.attempts))} attempts`}</title>
-            </circle>
-            <circle cx={X(num(r.ctx_bucket_k))} cy={Yo(num(r.ok_rate))} r={4} fill="var(--surface)" stroke="var(--chart-3)" strokeWidth={2}>
-              <title>{`${cell(r.ctx_bucket_k, "band")}: ${formatPercent(num(r.ok_rate))} success · ${formatNumber(num(r.avg_steps))} steps on average`}</title>
             </circle>
           </g>
         ))}
@@ -291,14 +292,16 @@ function Panel({ title, wide, children, note }: { title: string; wide?: boolean;
 /** The panels for one answer of `/api/summary`. `width` draws the charts at that width; the page measures them instead. */
 export function Panels({ data, width }: { data: Summary; width?: number }) {
   const [chosen, setChosen] = useState("");
-  const totals = data.totals?.[0] ?? {};
+  // `totals.runs` counts only the runs with an agent attempt; the KPI counts every run in the window, as the 'Runs' column of
+  // 'Cost per delivery' does (a run of commands only is a run too).
+  const totals: Row & { runs: number } = { ...data.totals?.[0], runs: (data.workflows ?? []).reduce((total, w) => total + num(w.runs), 0) };
   const models = [...new Set((data.contextBuckets ?? []).map((r) => String(r.model_key)))];
   const model = models.includes(chosen) ? chosen : (models[0] ?? "");
   const daysWithSpend = [...new Set((data.daily ?? []).map((d) => String(d.day)))];
   const chart = (draw: (width: number) => ReactNode) => (width !== undefined ? draw(width) : <Measured>{draw}</Measured>);
   const contextRows = (data.contextBuckets ?? []).filter((r) => r.model_key === model);
 
-  if (num(totals.runs) === 0 && (data.models ?? []).length === 0) {
+  if (totals.runs === 0 && (data.models ?? []).length === 0) {
     return <Empty title="No metrics in this window">The metrics database fills as workflows run. Pick a longer window, or start a run.</Empty>;
   }
   return (

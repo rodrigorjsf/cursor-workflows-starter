@@ -1,16 +1,16 @@
 // The Run view: a run drawn as a graph that grows as its events arrive, with the phases as lanes, and a replay of a finished
 // run. The data comes from `useRunEvents`, the graph from `buildRunGraph` and the positions from `layoutRunGraph`; this file
 // puts them on a React Flow canvas.
-import { Background, Controls, type Edge, type Node, ReactFlow, ReactFlowProvider, useReactFlow, useStore } from "@xyflow/react";
+import { Background, Controls, type Edge, type Node, ReactFlow, ReactFlowProvider, useReactFlow, useStore, useStoreApi } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { JunctionNode, LaneNode, type LaneNodeData, StartNode, WorkNode, type WorkNodeData } from "./nodes.js";
 import { RunActions } from "./RunActions.js";
 import { argsHashOf } from "./resume-command.js";
 import { StepLogPanel } from "./StepLogPanel.js";
-import { frameOf } from "./framing.js";
+import { frameOf, panTarget } from "./framing.js";
 import { formatCents, formatCount, formatDuration } from "../app/format.js";
 import { type RunGraph, buildRunGraph, isWork } from "./run-graph.js";
-import { headerStatus, offeredActions } from "./run-status.js";
+import { headerStatus, offeredActions, runElapsed } from "./run-status.js";
 import { type RunLayout, layoutRunGraph } from "./run-layout.js";
 import { type Connection, useRunEvents } from "./use-run-events.js";
 
@@ -57,7 +57,8 @@ function useClock(active: boolean): number {
   return now;
 }
 
-export function toFlow(graph: RunGraph, layout: RunLayout, now: number, selectedId: string | undefined, open: (id: string) => void): { nodes: Node[]; edges: Edge[] } {
+/** What React Flow draws for `graph` laid out as `layout`. `open` opens a node's log; `focus` brings a node that took the keyboard focus into view. */
+export function toFlow(graph: RunGraph, layout: RunLayout, now: number, selectedId: string | undefined, open: (id: string) => void, focus: (id: string) => void): { nodes: Node[]; edges: Edge[] } {
   const lanes: Node<LaneNodeData, "lane">[] = layout.lanes.map((lane) => ({
     id: `lane-${lane.index}`,
     type: "lane",
@@ -75,7 +76,7 @@ export function toFlow(graph: RunGraph, layout: RunLayout, now: number, selected
     id: node.id,
     type: isWork(node.kind) ? "work" : node.kind === "start" ? "start" : "junction",
     position: { x: layout.nodes[node.id]!.x, y: layout.nodes[node.id]!.y },
-    data: { node, now: node.state === "running" ? now : 0, onOpen: () => open(node.id) },
+    data: { node, now: node.state === "running" ? now : 0, onOpen: () => open(node.id), onFocus: () => focus(node.id) },
     selected: node.id === selectedId,
     draggable: false,
   }));
@@ -95,13 +96,26 @@ const paneOrWindow = (pane: { width: number; height: number }) => (pane.width > 
 /**
  * The canvas. It keeps the run in view as it grows, until the user moves the view themselves. The first drawing is framed
  * by React Flow itself, which waits for the nodes to be measured; later ones are framed by hand, a moment after the layout
- * (or what is framed) changes.
+ * (or what is framed) changes. A node that takes the keyboard focus off the canvas is panned into view, at the same zoom;
+ * that counts as the user moving the view, so the run stays where the reader tabbed to (Fit View hands it back).
  */
 function Canvas({ graph, layout, now, selectedId, onOpen }: { graph: RunGraph; layout: RunLayout; now: number; selectedId?: string; onOpen(id: string): void }) {
-  const { nodes, edges } = useMemo(() => toFlow(graph, layout, now, selectedId, onOpen), [graph, layout, now, selectedId, onOpen]);
-  const { fitView } = useReactFlow();
-  const pane = useStore((s) => ({ width: s.width, height: s.height }), (a, b) => a.width === b.width && a.height === b.height);
+  const { fitView, setCenter } = useReactFlow();
+  const store = useStoreApi();
   const userMoved = useRef(false);
+  const focus = useCallback(
+    (id: string) => {
+      const box = layout.nodes[id];
+      const { transform, width, height } = store.getState(); // read now: the pane may have changed since the last render
+      const target = box && panTarget(box, { x: transform[0], y: transform[1], zoom: transform[2] }, { width, height });
+      if (!target) return;
+      userMoved.current = true;
+      void setCenter(target.x, target.y, { zoom: transform[2], duration: 200 });
+    },
+    [layout, store, setCenter],
+  );
+  const { nodes, edges } = useMemo(() => toFlow(graph, layout, now, selectedId, onOpen, focus), [graph, layout, now, selectedId, onOpen, focus]);
+  const pane = useStore((s) => ({ width: s.width, height: s.height }), (a, b) => a.width === b.width && a.height === b.height);
   const firstFrame = useRef(frameOf(graph, layout, paneOrWindow(pane), selectedId));
   const settled = graph.nodes.every((n) => n.state !== "running");
   const drawn = useRef(false);
@@ -205,9 +219,7 @@ export function RunView({ runId }: { runId: string }) {
   const counts = { steps: graph.nodes.filter((n) => n.kind === "step").length, commands: graph.nodes.filter((n) => n.kind === "command").length };
   const header = headerStatus({ api: { status, error }, run, replaying, settled });
   const offered = offeredActions(status, graph);
-  // A run that is over ends at its run-end, or (its process died) at its last event; a live one at the clock.
-  const endedAt = run.endedAt !== undefined ? Date.parse(run.endedAt) : settled ? Date.parse(String(shown.at(-1)?.ts ?? "")) || now : now;
-  const elapsed = run.startedAt === undefined ? undefined : Math.max(0, endedAt - Date.parse(run.startedAt));
+  const elapsed = runElapsed(run, settled, now);
 
   if (connection === "not-found") {
     return (
@@ -246,7 +258,15 @@ export function RunView({ runId }: { runId: string }) {
         <dl className="run-stats">
           <div>
             <dt>Duration</dt>
-            <dd>{elapsed === undefined ? "–" : formatDuration(elapsed)}</dd>
+            <dd>
+              {elapsed !== undefined ? (
+                formatDuration(elapsed)
+              ) : (
+                <span className="none" title={run.startedAt !== undefined ? "The run did not record its end" : undefined}>
+                  —
+                </span>
+              )}
+            </dd>
           </div>
           <div>
             <dt>Cost</dt>

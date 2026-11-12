@@ -11,6 +11,8 @@ export interface WorkNodeData extends Record<string, unknown> {
   now: number;
   /** Opens the node's log. Called for a key press on the node; a click is React Flow's `onNodeClick`. */
   onOpen?: () => void;
+  /** Brings the node into view on the canvas. Called when the node takes the keyboard focus (Tab), not a click's. */
+  onFocus?: () => void;
 }
 export interface LaneNodeData extends Record<string, unknown> {
   title: string;
@@ -36,9 +38,9 @@ function Handles() {
   );
 }
 
-/** A step or a command: its label, what it runs, a badge when it ran in the cloud, and a tooltip with the details that appears on hover or focus. Clicking it (or Enter on it) opens its log. */
+/** A step or a command: its label, what it runs, a badge when it ran in the cloud, and a tooltip with the details that appears on hover or focus. Clicking it (or Enter on it) opens its log; tabbing to it brings it into view. */
 export function WorkNode({ data, selected }: NodeProps<Node<WorkNodeData, "work">>) {
-  const { node, now, onOpen } = data;
+  const { node, now, onOpen, onFocus } = data;
   const rows = describeNode(node, now);
   const what = node.kind === "command" ? node.detail.command : node.detail.model;
   const cloud = runsInCloud(node);
@@ -50,6 +52,9 @@ export function WorkNode({ data, selected }: NodeProps<Node<WorkNodeData, "work"
       role="button"
       aria-pressed={selected}
       aria-label={`${node.label}: ${node.state}${cloud ? ", cloud agent" : ""}. Open its log`}
+      onFocus={(event) => {
+        if (event.currentTarget.matches(":focus-visible")) onFocus?.(); // a click lands on a node already in view
+      }}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();

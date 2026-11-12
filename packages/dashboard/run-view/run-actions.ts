@@ -7,9 +7,12 @@ export type CancelOutcome = { ok: true; status: string; note: string } | { ok: f
 /** The server's sentence, as a sentence: a capital first letter and a full stop. */
 const sentence = (text: string): string => `${text.charAt(0).toUpperCase()}${text.slice(1)}${/[.!?]$/.test(text) ? "" : "."}`;
 
-/** What the header says after a cancel: of the run (`cloudOnly` false), or of the cloud agents a dead run left (`cloudOnly`). */
+/**
+ * What the header says after a cancel: of the run (`cloudOnly` false), or of the cloud agents a dead run left (`cloudOnly`).
+ * A refusal that says there is nothing to cancel (the run ended, or its agents were cancelled already) is a done outcome.
+ */
 export function cancelResult(outcome: CancelOutcome, cloudOnly: boolean): { step: "done" | "failed"; message: string } {
-  if (!outcome.ok) return { step: "failed", message: sentence(outcome.error) };
+  if (!outcome.ok) return { step: /nothing to cancel/.test(outcome.error) ? "done" : "failed", message: sentence(outcome.error) };
   if (cloudOnly) return { step: /could not reach cloud agent/.test(outcome.note) ? "failed" : "done", message: sentence(outcome.note.replace(/^the run is not running \(\w+\); /, "")) };
   return { step: "done", message: outcome.status === "cancelled" ? "Cancelled." : `Cancelling: ${outcome.note}` };
 }
