@@ -133,7 +133,7 @@ export interface InitResult {
 const CLAUDE_MEMORY_FILES = ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"];
 
 /**
- * Claude Code reads AGENTS.md only when the repo has none of its own memory files (ADR-0004): says so when the repo has one
+ * Claude Code reads AGENTS.md only when the repo has none of its own memory files (same chapter): says so when the repo has one
  * and none of them is AGENTS.md or imports it. Only the repo root is looked at, not the directories above it.
  */
 function claudeCodeNote(cwd: string): string | undefined {
