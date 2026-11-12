@@ -9,7 +9,7 @@
 // - `dashboard.autoStart: false` in the global config file, or `WF_DASH_AUTOSTART=off`, turns the starting off. A dashboard
 //   that is already up is still reported.
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { globalConfigPath, loadConfigFile } from "../config/file.js";
@@ -20,7 +20,7 @@ import { writeFileAtomic } from "./state-files.js";
 /** What `/api/health` answers as `app`: how a caller knows the program on the port is the dashboard and not something else. */
 export const DASHBOARD_APP = "cursor-workflows-dashboard";
 export const DASHBOARD_HOST = "127.0.0.1";
-export const DEFAULT_DASHBOARD_PORT = 4317;
+const DEFAULT_DASHBOARD_PORT = 4317;
 export const HEALTH_PATH = "/api/health";
 
 /** The port the dashboard listens on: `WF_DASH_PORT`, or 4317. Throws on a value that is not a port. */
@@ -74,7 +74,7 @@ export function removeInstance(pid: number): void {
 }
 
 /** The dashboard on `port` (its pid), or undefined when nothing answers there or what answers is not the dashboard. */
-export async function probeDashboard(port: number, timeoutMs = 1000): Promise<{ pid: number } | undefined> {
+export async function probeDashboard(port: number, timeoutMs = 2000): Promise<{ pid: number } | undefined> {
   try {
     const res = await fetch(`${dashboardUrl(port)}${HEALTH_PATH}`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return undefined;
@@ -93,7 +93,7 @@ export type DashboardStatus =
   | { status: "unavailable"; reason: string };
 
 export interface EnsureOptions {
-  /** How long to wait for a starting dashboard to answer. Default 15 s. */
+  /** How long to wait for a starting dashboard to answer. Default 10 s. */
   startTimeoutMs?: number;
   /** The dashboard's entry point. Default: `packages/dashboard/src/main.ts` of this install. */
   entry?: string;
@@ -101,21 +101,47 @@ export interface EnsureOptions {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Takes the right to start the dashboard: creates the pid file, naming this process until the child's pid replaces it. False when another caller holds it. */
+/** True when `pid` runs the dashboard's entry point, and not another program that got the number. Where /proc is missing it cannot tell, and says yes. */
+function isDashboardProcess(pid: number): boolean {
+  if (!existsSync("/proc/self/cmdline")) return true;
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").some((arg) => /dashboard[\\/]src[\\/]main\.ts$/.test(arg));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Takes the right to start the dashboard: creates the pid file, naming this process until the child's pid replaces it. False
+ * when another caller holds it: one that is starting the dashboard now (a record younger than `startTimeoutMs`), or the dashboard
+ * itself, which a probe may have missed only because it was busy. Anything else is stale and is taken over.
+ *
+ * Known limit: two callers that find the same stale record at the same instant can both take it over and both start a process.
+ * The port lets only one of them listen, and the answering dashboard corrects the pid file (`answering`).
+ */
 function claimStart(port: number, startTimeoutMs: number): boolean {
   mkdirSync(userDir(), { recursive: true, mode: 0o700 });
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      writeFileSync(dashboardPidPath(), JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString() } satisfies DashboardInstance), { flag: "wx" });
-      return true;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+  const file = dashboardPidPath();
+  const aside = `${file}.${process.pid}.tmp`;
+  writeFileSync(aside, JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString() } satisfies DashboardInstance)); // complete before anyone can see it
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        linkSync(aside, file); // fails when the file exists
+        return true;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      }
+      const holder = readInstance();
+      if (holder && isAlive(holder.pid) && (Date.now() - Date.parse(holder.startedAt) < startTimeoutMs || isDashboardProcess(holder.pid))) return false;
+      const again = readInstance();
+      if (again?.pid !== holder?.pid || again?.startedAt !== holder?.startedAt) continue; // replaced while we looked: look again
+      rmSync(file, { force: true }); // left by a process that is gone, or that never became the dashboard
     }
-    const holder = readInstance();
-    if (holder && isAlive(holder.pid) && Date.now() - Date.parse(holder.startedAt) < startTimeoutMs) return false; // someone is starting it right now
-    rmSync(dashboardPidPath(), { force: true }); // left by a process that is gone, or that never answered
+    return false;
+  } finally {
+    rmSync(aside, { force: true });
   }
-  return false;
 }
 
 /** The new bytes of the dashboard's log since `offset`, trimmed: the reason a dashboard that exited gave. */
@@ -127,25 +153,44 @@ function logSince(offset: number): string {
   }
 }
 
+/** The dashboard answers on `port` as process `pid`. The pid file is made to say so: a lost race can leave it naming a process that is gone. */
+function answering(port: number, pid: number, started: boolean): DashboardStatus {
+  try {
+    if (readInstance()?.pid !== pid) writeInstance({ pid, port, startedAt: new Date().toISOString() });
+  } catch {
+    /* the record is a convenience: the dashboard is up whether or not it can be written */
+  }
+  return { status: "running", url: dashboardUrl(port), pid, started };
+}
+
 /**
  * Makes sure the dashboard is running and says where. Never throws: whatever goes wrong comes back as `unavailable` with the
  * reason, because a dashboard that cannot start must not stop a workflow from starting.
  */
 export async function ensureDashboard(options: EnsureOptions = {}): Promise<DashboardStatus> {
-  const startTimeoutMs = options.startTimeoutMs ?? 15_000;
+  // `WF_DASH_START_TIMEOUT_MS` exists for the tests, which start dashboards on a machine that is running the whole suite at once.
+  const fromEnv = Number(process.env.WF_DASH_START_TIMEOUT_MS);
+  const startTimeoutMs = options.startTimeoutMs ?? (Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 10_000);
+  const seconds = Math.max(1, Math.round(startTimeoutMs / 1000));
   try {
     const port = dashboardPort();
-    const up = (pid: number, started: boolean): DashboardStatus => ({ status: "running", url: dashboardUrl(port), pid, started });
     const deadline = Date.now() + startTimeoutMs;
     for (;;) {
       const found = await probeDashboard(port);
-      if (found) return up(found.pid, false);
+      if (found) return answering(port, found.pid, false);
       if (!dashboardAutoStart()) return { status: "disabled" };
+      // The dashboard package sits next to the runtime in the kit's checkout: the kit is installed whole, and this is a file to run, not a module to import.
       const entry = options.entry ?? fileURLToPath(new URL("../../../dashboard/src/main.ts", import.meta.url));
       if (!existsSync(entry)) return { status: "unavailable", reason: `the dashboard package is not part of this install (${entry} is missing)` };
-      if (claimStart(port, startTimeoutMs)) return await start(port, entry, startTimeoutMs, up);
-      // Another caller is starting it: wait for it to answer, or for its claim to go stale.
-      if (Date.now() >= deadline) return { status: "unavailable", reason: `a dashboard is starting on port ${port} but did not answer within ${Math.round(startTimeoutMs / 1000)}s` };
+      if (claimStart(port, startTimeoutMs)) return await start(port, entry, startTimeoutMs);
+      // Another caller is starting it, or it is up and busy: wait for it to answer, or for its record to go stale.
+      if (Date.now() >= deadline) {
+        const holder = readInstance();
+        return {
+          status: "unavailable",
+          reason: holder && isDashboardProcess(holder.pid) ? `the dashboard (pid ${holder.pid}) does not answer on port ${port} within ${seconds}s` : `a dashboard is starting on port ${port} but did not answer within ${seconds}s`,
+        };
+      }
       await sleep(100);
     }
   } catch (err) {
@@ -153,36 +198,49 @@ export async function ensureDashboard(options: EnsureOptions = {}): Promise<Dash
   }
 }
 
-/** Spawns the dashboard detached and waits for it to answer. The caller holds the claim. */
-async function start(port: number, entry: string, startTimeoutMs: number, up: (pid: number, started: boolean) => DashboardStatus): Promise<DashboardStatus> {
+/** Spawns the dashboard detached and waits for it to answer. The caller holds the claim; this releases it unless a dashboard is running or still starting. */
+async function start(port: number, entry: string, startTimeoutMs: number): Promise<DashboardStatus> {
   const logFile = dashboardLogPath();
   const offset = existsSync(logFile) ? statSync(logFile).size : 0;
-  const out = openSync(logFile, "a");
   let exited = false;
   let spawnError: string | undefined;
   let pid: number | undefined;
+  let keepRecord = false;
   try {
-    // The Cursor API key is not the dashboard's business: it never reads it, and it outlives the caller.
-    const { CURSOR_API_KEY: _key, ...env } = process.env;
-    const child = spawn(process.execPath, [...process.execArgv, entry], { detached: true, stdio: ["ignore", out, out], env });
-    child.once("exit", () => (exited = true));
-    child.once("error", (err) => (spawnError = err.message));
-    child.unref();
-    pid = child.pid;
-    if (pid) writeInstance({ pid, port, startedAt: new Date().toISOString() });
+    const out = openSync(logFile, "a");
+    try {
+      // The Cursor API key is not the dashboard's business: it never reads it, and it outlives the caller.
+      const { CURSOR_API_KEY: _key, ...env } = process.env;
+      const child = spawn(process.execPath, [...process.execArgv, entry], { detached: true, stdio: ["ignore", out, out], env });
+      child.once("exit", () => (exited = true));
+      child.once("error", (err) => (spawnError = err.message));
+      child.unref();
+      pid = child.pid;
+      if (pid) writeInstance({ pid, port, startedAt: new Date().toISOString() });
+    } finally {
+      closeSync(out); // the child holds its own copy
+    }
+    const deadline = Date.now() + startTimeoutMs;
+    while (Date.now() < deadline && !exited && !spawnError) {
+      const found = await probeDashboard(port, 500);
+      if (found) {
+        keepRecord = true;
+        return answering(port, found.pid, found.pid === pid);
+      }
+      await sleep(100);
+    }
+    // A process that lost the race for the port exits at once, and the winner answers: that is a dashboard running.
+    const found = await probeDashboard(port);
+    if (found) {
+      keepRecord = true;
+      return answering(port, found.pid, found.pid === pid);
+    }
+    if (pid !== undefined && !exited && !spawnError) {
+      keepRecord = true; // alive and not answering yet: the next caller waits for it instead of starting another
+      return { status: "unavailable", reason: `the dashboard (pid ${pid}) is still starting; its link works in a moment: ${dashboardUrl(port)}` };
+    }
+    return { status: "unavailable", reason: spawnError ?? (logSince(offset) || `the dashboard exited without answering on port ${port} (log: ${logFile})`) };
   } finally {
-    closeSync(out); // the child holds its own copy
+    if (!keepRecord) removeInstance(pid ?? process.pid);
   }
-  const deadline = Date.now() + startTimeoutMs;
-  while (Date.now() < deadline && !exited && !spawnError) {
-    const found = await probeDashboard(port, 500);
-    if (found) return up(found.pid, found.pid === pid);
-    await sleep(100);
-  }
-  // A process that lost the race for the port exits at once, and the winner answers: that is a dashboard running.
-  const found = await probeDashboard(port);
-  if (found) return up(found.pid, found.pid === pid);
-  if (pid) removeInstance(pid);
-  const why = spawnError ?? logSince(offset);
-  return { status: "unavailable", reason: why || `the dashboard did not answer on port ${port} within ${Math.round(startTimeoutMs / 1000)}s (log: ${logFile})` };
 }

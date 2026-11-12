@@ -43,23 +43,30 @@ function send(res: ServerResponse, status: number, body: unknown): void {
 
 /** The metrics database, opened read-only the first time it exists: the first run of the kit creates it after the dashboard may already be up. */
 class MetricsSource {
-  private db: Db | undefined;
-  private opened: string | undefined;
+  private opening: Promise<Db> | undefined;
+  private path: string | undefined;
 
+  /** The database, or undefined while there is none. Requests that arrive while it is being opened share the one connection. */
   async get(): Promise<Db | undefined> {
     const path = defaultDbPath();
     if (!existsSync(path)) return undefined;
-    if (this.db && this.opened === path) return this.db;
-    this.close();
-    this.db = await openDb(path, { readOnly: true });
-    this.opened = path;
-    return this.db;
+    if (this.path !== path) {
+      this.close();
+      const opening = openDb(path, { readOnly: true });
+      this.path = path;
+      this.opening = opening;
+      opening.catch(() => {
+        if (this.opening === opening) this.close(); // a failed open is tried again by the next request
+      });
+    }
+    return this.opening;
   }
 
   close(): void {
-    this.db?.close();
-    this.db = undefined;
-    this.opened = undefined;
+    const opening = this.opening;
+    this.opening = undefined;
+    this.path = undefined;
+    void opening?.then((db) => db.close(), () => undefined);
   }
 }
 
@@ -82,7 +89,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
 
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!hostAllowed(req.headers.host)) {
-      res.writeHead(403, { "content-type": "text/plain; charset=utf-8" }).end("host não permitido");
+      res.writeHead(403, { "content-type": "text/plain; charset=utf-8" }).end("host not allowed");
       return;
     }
     if (req.method !== "GET" && req.method !== "HEAD") {

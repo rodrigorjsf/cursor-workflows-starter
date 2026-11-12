@@ -3,61 +3,43 @@
 // per-user home; nothing here touches the user's real `~/.cursor-workflows`.
 import assert from "node:assert/strict";
 import { createServer as createHttpServer } from "node:http";
-import { createServer } from "node:net";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, beforeEach, test } from "node:test";
-import { type DashboardStatus, dashboardPidPath, ensureDashboard, readInstance } from "../src/runtime/dashboard-instance.js";
+import { type DashboardStatus, dashboardPidPath, ensureDashboard, readInstance, writeInstance } from "../src/runtime/dashboard-instance.js";
+import { isAlive } from "../src/runtime/pid.js";
+import { dashboardListens, dashboardLog, freePort } from "./dashboard-fixtures.js";
 
-const KEYS = ["WF_HOME", "WF_DASH_PORT", "WF_DASH_AUTOSTART", "WF_METRICS"] as const;
+const KEYS = ["WF_HOME", "WF_DASH_PORT", "WF_DASH_AUTOSTART", "WF_DASH_START_TIMEOUT_MS", "WF_METRICS"] as const;
 const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
 let home: string;
 let port: number;
 const spawned = new Set<number>();
 
-function freePort(): Promise<number> {
-  return new Promise((ok, fail) => {
-    const probe = createServer();
-    probe.once("error", fail);
-    probe.listen(0, "127.0.0.1", () => {
-      const { port } = probe.address() as { port: number };
-      probe.close(() => ok(port));
-    });
-  });
-}
-
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
 const until = async (what: string, ok: () => boolean) => {
   for (let i = 0; i < 100 && !ok(); i++) await new Promise((r) => setTimeout(r, 50));
   assert.ok(ok(), what);
 };
-const log = () => (existsSync(join(home, "dashboard.log")) ? readFileSync(join(home, "dashboard.log"), "utf8") : "");
+const log = () => dashboardLog(home);
 
 beforeEach(async () => {
   home = mkdtempSync(join(tmpdir(), "wf-dashboard-proc-"));
   port = await freePort();
-  Object.assign(process.env, { WF_HOME: home, WF_DASH_PORT: String(port), WF_METRICS: "off" });
+  Object.assign(process.env, { WF_HOME: home, WF_DASH_PORT: String(port), WF_DASH_START_TIMEOUT_MS: "30000", WF_METRICS: "off" }); // a start may be slow while the whole suite runs
   delete process.env.WF_DASH_AUTOSTART;
 });
 afterEach(() => {
   const recorded = readInstance()?.pid; // a test that failed before it saw the status still leaves its dashboard behind
   if (recorded !== undefined) spawned.add(recorded);
-  for (const pid of spawned) if (alive(pid)) process.kill(pid, "SIGKILL");
+  for (const pid of spawned) if (isAlive(pid)) process.kill(pid, "SIGKILL");
   spawned.clear();
   for (const k of KEYS) if (saved[k] === undefined) delete process.env[k];
   else process.env[k] = saved[k];
   rmSync(home, { recursive: true, force: true });
 });
 after(() => {
-  for (const pid of spawned) if (alive(pid)) process.kill(pid, "SIGKILL");
+  for (const pid of spawned) if (isAlive(pid)) process.kill(pid, "SIGKILL");
 });
 
 /** The status when it is `running`, remembering the process so the test can end it. */
@@ -87,21 +69,21 @@ test("a second call finds the dashboard running and starts nothing", async () =>
   assert.equal(second.started, false);
   assert.equal(second.pid, first.pid);
   assert.equal(second.url, first.url);
-  assert.equal(log().match(/dashboard listening/g)?.length, 1);
+  assert.equal(dashboardListens(home), 1);
 });
 
 test("calls that overlap, as the parallel tool calls of a chat do, start exactly one dashboard", async () => {
   const all = (await Promise.all(Array.from({ length: 5 }, () => ensureDashboard()))).map(running);
   assert.equal(new Set(all.map((s) => s.pid)).size, 1, "everyone gets the same instance");
   assert.equal(all.filter((s) => s.started).length, 1, "and only one of them started it");
-  assert.equal(log().match(/dashboard listening/g)?.length, 1);
+  assert.equal(dashboardListens(home), 1);
   assert.doesNotMatch(log(), /already running/, "no second process was even started");
 });
 
 test("a dashboard that was killed leaves a stale pid file, and the next call starts a new one", async () => {
   const first = running(await ensureDashboard());
   process.kill(first.pid, "SIGKILL");
-  await until("the old dashboard to be gone", () => !alive(first.pid));
+  await until("the old dashboard to be gone", () => !isAlive(first.pid));
   assert.ok(existsSync(dashboardPidPath()), "a killed process cannot clean up");
 
   const next = running(await ensureDashboard());
@@ -112,7 +94,7 @@ test("a dashboard that was killed leaves a stale pid file, and the next call sta
 test("SIGTERM stops the dashboard and removes its pid file", async () => {
   const first = running(await ensureDashboard());
   process.kill(first.pid, "SIGTERM");
-  await until("the dashboard to exit", () => !alive(first.pid));
+  await until("the dashboard to exit", () => !isAlive(first.pid));
   assert.equal(existsSync(dashboardPidPath()), false);
 });
 
@@ -145,6 +127,7 @@ test("a port taken by another program is reported, not fought over", async () =>
     const status = await ensureDashboard({ startTimeoutMs: 10_000 });
     assert.equal(status.status, "unavailable");
     assert.match((status as { reason: string }).reason, new RegExp(`port ${port} is in use by another program.*WF_DASH_PORT`));
+    assert.equal(existsSync(dashboardPidPath()), false, "a start that failed leaves no claim behind");
   } finally {
     squatter.close();
   }
@@ -161,4 +144,54 @@ test("a WF_DASH_PORT that is not a port is unavailable, with the reason", async 
   const status = await ensureDashboard();
   assert.equal(status.status, "unavailable");
   assert.match((status as { reason: string }).reason, /WF_DASH_PORT/);
+});
+
+test("a live dashboard that is too busy to answer the probe is waited for, not replaced: no second process, and the pid file keeps naming it", async () => {
+  const up = running(await ensureDashboard());
+  process.kill(up.pid, "SIGSTOP"); // alive, holds the port, answers nothing
+  try {
+    await new Promise((r) => setTimeout(r, 700)); // older than the start timeout below: a record that is "old" is not a stale one
+    const status = await ensureDashboard({ startTimeoutMs: 600 });
+    assert.equal(status.status, "unavailable");
+    assert.match((status as { reason: string }).reason, new RegExp(`dashboard \\(pid ${up.pid}\\) does not answer`));
+    assert.equal(readInstance()?.pid, up.pid);
+    assert.equal(dashboardListens(home), 1);
+    assert.doesNotMatch(log(), /in use by another program/, "nothing else was started");
+  } finally {
+    process.kill(up.pid, "SIGCONT");
+  }
+  const back = running(await ensureDashboard());
+  assert.deepEqual([back.pid, back.started], [up.pid, false]);
+});
+
+test("a pid file that names the wrong process is corrected as soon as the dashboard answers", async () => {
+  const up = running(await ensureDashboard());
+  writeInstance({ pid: 2 ** 22 + 1, port, startedAt: new Date().toISOString() }); // what a lost race leaves behind: a process that is gone
+  const again = running(await ensureDashboard());
+  assert.equal(again.pid, up.pid);
+  assert.equal(readInstance()?.pid, up.pid);
+});
+
+test("a start that fails before the process exists leaves no claim, so the next call starts the dashboard at once", async () => {
+  mkdirSync(join(home, "dashboard.log")); // the log cannot be opened: the start fails before any process is spawned
+  const failed = await ensureDashboard();
+  assert.equal(failed.status, "unavailable");
+  assert.equal(existsSync(dashboardPidPath()), false);
+
+  rmSync(join(home, "dashboard.log"), { recursive: true });
+  const begun = Date.now();
+  const next = running(await ensureDashboard({ startTimeoutMs: 15_000 }));
+  assert.equal(next.started, true);
+  assert.ok(Date.now() - begun < 10_000, "it did not wait out the earlier claim");
+});
+
+test("a dashboard that is still starting when the wait ends is reported with its link, and is not killed", async () => {
+  const slow = join(home, "slow-dashboard.mjs");
+  writeFileSync(slow, "setInterval(() => {}, 1000);\n"); // alive, never listens
+  const status = await ensureDashboard({ entry: slow, startTimeoutMs: 1_500 });
+  assert.equal(status.status, "unavailable");
+  const reason = (status as { reason: string }).reason;
+  assert.match(reason, new RegExp(`still starting.*http://127\\.0\\.0\\.1:${port}`));
+  const pid = readInstance()?.pid;
+  assert.ok(pid !== undefined && isAlive(pid), "the process it started is still there, and the pid file names it");
 });

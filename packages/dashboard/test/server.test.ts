@@ -2,7 +2,7 @@
 // (`WF_HOME`) and throwaway repos holding run directories written the way the runtime writes them. Every assertion is on a
 // status code, a header or a response body.
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { openDb } from "@cursor-workflows/runtime/observe";
@@ -55,7 +55,7 @@ test("the host check lets the loopback names through and refuses any other Host,
     for (const path of ["/", "/api/runs", "/api/summary", "/api/health"]) {
       const reply = await http(dash.url, path, { host });
       assert.equal(reply.status, 403, `Host ${JSON.stringify(host)} on ${path}`);
-      assert.doesNotMatch(reply.text, /runs|totals/);
+      assert.equal(reply.text, "host not allowed");
     }
   }
 });
@@ -207,4 +207,30 @@ test("GET /api/summary starts answering from the metrics database as soon as the
   } finally {
     db.close();
   }
+});
+
+test("requests that arrive together as the metrics database first appears share one connection to it", async (t) => {
+  if (!existsSync("/proc/self/fd")) return t.skip("counts open file descriptors through /proc");
+  const path = join(box.home, "metrics.db");
+  const db = await openDb(path);
+  try {
+    const replies = await Promise.all(Array.from({ length: 12 }, () => http(dash.url, "/api/summary")));
+    assert.deepEqual(replies.map((r) => r.status), Array(12).fill(200));
+    const open = readdirSync("/proc/self/fd").filter((fd) => {
+      try {
+        return readlinkSync(join("/proc/self/fd", fd)) === path;
+      } catch {
+        return false;
+      }
+    });
+    assert.equal(open.length, 2, "one connection of this test, one of the dashboard: a handle opened and dropped would show up here");
+  } finally {
+    db.close();
+  }
+});
+
+test("serving the dashboard never loads the Cursor SDK: a process that stays up for days does not carry hundreds of megabytes it never uses", async () => {
+  await http(dash.url, "/api/summary");
+  await http(dash.url, "/api/runs");
+  assert.equal((globalThis as { __fakeSdkLoaded?: boolean }).__fakeSdkLoaded, undefined, "something the dashboard imports pulls in @cursor/sdk");
 });

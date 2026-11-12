@@ -19,7 +19,8 @@
   subir, devolve `dashboardWarning` com o motivo e o job começa do mesmo jeito. `dashboard.autoStart: false` no arquivo
   global de configuração, ou `WF_DASH_AUTOSTART=off`, desliga o início (um `dashboard` no arquivo do repositório é
   violação e não tem efeito). A skill `run-workflow` abre o `dashboardUrl` no navegador embutido do Cursor. `npm run dash`
-  continua iniciando o dashboard à mão.
+  continua iniciando o dashboard à mão. O processo do dashboard não carrega o `@cursor/sdk` (o `reconcile` das métricas o
+  importa só quando roda): 86 MB de memória em vez de 315 MB, e a subida cai de 0,7 s para 0,1 s no import.
 - **`wf gc`: limpa o que os runs do `implement-issue` deixam.** Cada run tem o seu worktree, a sua branch local e, depois
   do push, a sua branch no origin, e nada as removia. `wf gc` lista o que vai remover e remove: o worktree, a branch
   local e a branch do origin de um run cujo PR foi mergeado ou fechado, e os de um run que falhou há mais de

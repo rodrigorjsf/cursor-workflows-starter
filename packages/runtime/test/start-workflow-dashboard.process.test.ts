@@ -3,30 +3,19 @@
 // are real child processes against the fake Cursor SDK, a temporary repo and a temporary home.
 import assert from "node:assert/strict";
 import { createServer as createHttpServer } from "node:http";
-import { createServer } from "node:net";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { dashboardListens, freePort } from "./dashboard-fixtures.js";
 
 const PACKAGE = join(import.meta.dirname, "..");
 let sandbox: string;
 let repo: string;
 let home: string;
 let port: number;
-
-function freePort(): Promise<number> {
-  return new Promise((ok, fail) => {
-    const probe = createServer();
-    probe.once("error", fail);
-    probe.listen(0, "127.0.0.1", () => {
-      const { port } = probe.address() as { port: number };
-      probe.close(() => ok(port));
-    });
-  });
-}
 
 beforeEach(async () => {
   sandbox = mkdtempSync(join(tmpdir(), "wf-start-dash-"));
@@ -59,6 +48,7 @@ async function withServer<T>(extra: Record<string, string>, use: (call: (name: s
     WF_METRICS: "off",
     WF_CWD: repo,
     WF_DASH_PORT: String(port),
+    WF_DASH_START_TIMEOUT_MS: "30000", // a start may be slow while the whole suite runs
     ...extra,
   };
   try {
@@ -69,8 +59,6 @@ async function withServer<T>(extra: Record<string, string>, use: (call: (name: s
   }
 }
 
-const listens = () => (existsSync(join(home, "dashboard.log")) ? (readFileSync(join(home, "dashboard.log"), "utf8").match(/dashboard listening/g) ?? []).length : 0);
-
 test("start_workflow starts the dashboard once and returns its link; the dashboard lists the run that was just started", async () => {
   await withServer({}, async (call) => {
     const first = await call("start_workflow", { name: "quick", args: {} });
@@ -79,7 +67,7 @@ test("start_workflow starts the dashboard once and returns its link; the dashboa
 
     const second = await call("start_workflow", { name: "quick", args: {} });
     assert.equal(second.dashboardUrl, first.dashboardUrl);
-    assert.equal(listens(), 1, "the second start found the dashboard running");
+    assert.equal(dashboardListens(home), 1, "the second start found the dashboard running");
 
     const wait = async (jobId: string) => {
       let state = await call("wait_workflow", { jobId, timeoutSec: 5 });
