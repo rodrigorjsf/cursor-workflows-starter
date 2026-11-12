@@ -103,7 +103,7 @@ function markdownFiles(dir: string): string[] {
   );
 }
 
-/** Prose only: fenced blocks and inline code spans are quoted code, identifiers or runtime messages (Portuguese today). */
+/** Prose only: fenced blocks and inline code spans are quoted code, identifiers or runtime messages. */
 const prose = (md: string) => md.replace(/```[\s\S]*?```/g, "").replace(/`[^`]*`/g, "");
 
 test("the distributed skills are written in English", () => {
@@ -154,6 +154,21 @@ test("the setup skill covers init, doctor, upgrade, validate and config, and eac
   // The two long procedures live in references, linked from the section that needs them.
   assert.match(skill, /\]\(references\/validate\.md\)/);
   assert.match(skill, /\]\(references\/config\.md\)/);
+});
+
+test("the setup skill's config reference names every key the config schema accepts, and points at the schema the kit ships", () => {
+  const reference = read("skills", "cursor-workflows-setup", "references", "config.md");
+  const schema = JSON.parse(read("packages", "runtime", "schema", "config.schema.json"));
+  const keys = (properties: Record<string, unknown>) => Object.keys(properties).filter((key) => !key.startsWith("$"));
+  const groups: Record<string, string[]> = { "top level": keys(schema.properties) };
+  for (const name of ["caps", "rolePrefs", "workflowPrefs", "workflowSettings", "cloudPrefs", "dashboardPrefs"]) {
+    groups[name] = keys(schema.definitions[name].properties);
+  }
+  for (const [group, names] of Object.entries(groups)) {
+    for (const key of names) assert.ok(new RegExp("`[^`]*\\b" + key + "\\b[^`]*`").test(reference), `config.md never names ${group} key \`${key}\``);
+  }
+  const shipped = reference.match(/~\/\.cursor-workflows\/kit\/(packages\/runtime\/schema\/config\.schema\.json)/);
+  assert.ok(shipped && existsSync(join(ROOT, shipped[1]!)), "config.md must point at the config schema in the installed kit");
 });
 
 test("the validate reference names what the kit ships: its scripts exist, the cheap workflow exists, and scenario 4 asks for the PR", () => {
