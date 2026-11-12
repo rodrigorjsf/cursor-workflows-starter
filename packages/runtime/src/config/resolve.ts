@@ -9,6 +9,7 @@
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import type { ConfigSource, ConfigViolation, EffectiveCaps, EffectiveConfig, EffectiveLimits, EffectiveRole } from "../runtime/events.js";
 import type { WorkflowDefinition, WorkflowRole } from "../runtime/workflow.js";
+import { DEFAULT_EXEC_TIMEOUT_MS } from "../runtime/command-runner.js";
 import { globMatches, literalLength } from "./glob.js";
 import { ConfigError, type ConfigIssue, type LoadedConfig, type Pointer, type RolePrefs, type WorkflowPrefs, pointerOf } from "./file.js";
 
@@ -208,6 +209,7 @@ function fileEntries(file: LoadedConfig, layer: "global" | "repo", workflow: str
   for (const field of LIMIT_FIELDS) {
     if (prefs[field] !== undefined) entries.push({ layer, ref: file.path, path: `${base}/${field}`, at: pointerOf("limits", field), value: prefs[field] });
   }
+  if (prefs.execTimeoutMs !== undefined) entries.push({ layer, ref: file.path, path: `${base}/execTimeoutMs`, at: pointerOf("execTimeoutMs"), value: prefs.execTimeoutMs });
   for (const section of ["roles", "labels"] as const) {
     for (const [name, rolePrefs] of Object.entries(prefs[section] ?? {})) entries.push(...roleEntries(section, name, rolePrefs, layer, file.path, base));
   }
@@ -286,6 +288,7 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
   // Code defaults: the engine's, the workflow's, then each role's own.
   const fromCode: ConfigSource = { layer: "default" };
   for (const field of LIMIT_FIELDS) set(pointerOf("limits", field), LIMITS[field].codeDefault(budget), fromCode);
+  set(pointerOf("execTimeoutMs"), DEFAULT_EXEC_TIMEOUT_MS, fromCode);
   for (const role of roles) {
     const code = { ...defaults, ...role.defaults };
     for (const field of MODEL_FIELDS) {
@@ -413,6 +416,7 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
     caps,
     roles: Object.fromEntries(roles.map((r) => [r.name, settingsOf(pointerOf("roles", r.name))])),
     labels: Object.fromEntries([...labels].map((glob) => [glob, settingsOf(pointerOf("labels", glob))])),
+    execTimeoutMs: cells.get(pointerOf("execTimeoutMs"))!.value as number,
   };
 
   return {

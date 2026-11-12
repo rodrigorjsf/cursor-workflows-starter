@@ -29,16 +29,17 @@ import {
 } from "@cursor/sdk";
 import { Ajv } from "ajv";
 import { type AgentBackend, localBackend } from "./backend.js";
+import { type CommandOutcome, EXEC_FLUSH_MS, EXEC_LOG_MAX_CHARS, outputLog, runCommand } from "./command-runner.js";
 import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedConfig, type StepOverrides, allowedSources, isModelAllowed, loadEffectiveConfig } from "../config/index.js";
 import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type NewEvent, type RunStatus, type StepRef, type TurnUsage, type WorkflowEvent } from "./events.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
 import { addUsage, emptyUsage, resumeHint, withRatio } from "./projection.js";
-import { RunLockedError, RunStore } from "./run-store.js";
+import { CONTENT_MAX_CHARS, RunLockedError, RunStore } from "./run-store.js";
 import type { RetentionPolicy } from "./retention.js";
 import { registerRun } from "./runs-index.js";
 import { stateDir as runtimeStateDir } from "./state.js";
 import { type Capture, SUBMIT_TOOL, repromptMessage, schemaInstruction, submitResultTool } from "./structured.js";
-import type { AgentCallOptions, Budget, UsageTotals, WorkflowContext, WorkflowDefinition } from "./workflow.js";
+import type { AgentCallOptions, Budget, ExecOptions, ExecResult, UsageTotals, WorkflowContext, WorkflowDefinition } from "./workflow.js";
 import { workflowSourceHash } from "./workflow-source.js";
 import { type Snapshot, revertToSnapshot, takeSnapshot } from "./worktree-snapshot.js";
 
@@ -314,7 +315,7 @@ interface EventChannel {
 }
 
 interface AttemptContent {
-  write(kind: ContentKind, raw: string, extra?: { tool?: string; callId?: string }): void;
+  write(kind: ContentKind, raw: string, extra?: { tool?: string; callId?: string; stream?: "stdout" | "stderr" }): void;
   /** Adds a piece of what the agent is saying. */
   say(delta: string): void;
   /** Writes what the agent said since the last flush as one message. */
@@ -362,7 +363,7 @@ async function openEventChannel(store: RunStore, runId: string, opts: RunOptions
    * not to the metrics recorder, not to `onEvent` listeners. Agent text arrives in deltas and is written one message per turn.
    */
   const attemptContent = (ref: StepRef, attemptId: string): AttemptContent => {
-    const write = (kind: ContentKind, raw: string, extra: { tool?: string; callId?: string } = {}) => {
+    const write = (kind: ContentKind, raw: string, extra: { tool?: string; callId?: string; stream?: "stdout" | "stderr" } = {}) => {
       const { text, chars, truncated } = store.prepareContent(raw);
       append(stamp({ type: "content", ...ref, attemptId, kind, ...extra, text, chars, truncated: truncated || undefined }));
     };
@@ -1109,12 +1110,83 @@ async function executeRun<A, R>(
     }
   }
 
+  /** How many times each shape of `ctx.exec` call has been made in this execution: the same call twice is two nodes, and a resume numbers them alike. */
+  const execOccurrences = new Map<string, number>();
+
+  /** One `ctx.exec` call: a step node of the run. The command runs in its own process, and the call returns what the command did. */
+  async function execCall(command: string, args: string[] = [], callOpts: ExecOptions = {}): Promise<ExecResult> {
+    const flow = currentFlow();
+    const cwd = callOpts.cwd ?? opts.cwd;
+    const timeoutMs = callOpts.timeoutMs ?? resolved.config.execTimeoutMs;
+    if (!(timeoutMs > 0) || !Number.isFinite(timeoutMs)) throw new StepFailedError(`ctx.exec: timeoutMs must be a positive number of milliseconds, got ${timeoutMs}`);
+    if (signal?.aborted) {
+      interrupted = true; // a cancelled run starts no command: no node either
+      throw new RunCancelledError(cancelMessage);
+    }
+    // The node's id comes from the shape of the call, computed before any await: parallel branches number their calls in code order.
+    const shape = sha(JSON.stringify([command, args, cwd]));
+    const occurrence = execOccurrences.get(shape) ?? 0;
+    execOccurrences.set(shape, occurrence + 1);
+    const ref: StepRef = { stepId: `x-${shape.slice(0, 12)}.${occurrence}`, parentId: flow.last, groupId: flow.groupId };
+    const running = runExec(command, args, cwd, timeoutMs, callOpts, ref);
+    inFlight.add(running); // a cancelled run waits for its commands to stop before it ends
+    try {
+      return await running;
+    } catch (err) {
+      if (err instanceof RunCancelledError) interrupted = true;
+      throw err;
+    } finally {
+      inFlight.delete(running);
+      flow.last = ref.stepId; // whatever comes next in this flow continues from this command
+    }
+  }
+
+  async function runExec(command: string, args: string[], cwd: string, timeoutMs: number, callOpts: ExecOptions, ref: StepRef): Promise<ExecResult> {
+    const attemptId = randomUUID();
+    const label = callOpts.label ?? command;
+    const phase = callOpts.phase ?? currentPhase;
+    const startedAt = Date.now();
+    emit({ type: "exec-start", ...ref, attemptId, label, phase, command, timeoutMs });
+    // The command line and the output are content: same redaction, same cut and same retention as an agent's.
+    const content = attemptContent(ref, attemptId);
+    content.write("tool-call", JSON.stringify({ command, args, cwd }), { tool: "exec", callId: attemptId });
+    const log = outputLog((stream, text) => content.write("command-output", text, { tool: "exec", callId: attemptId, stream }), { pieceMax: CONTENT_MAX_CHARS, logMax: EXEC_LOG_MAX_CHARS });
+    const flushing = setInterval(() => log.flush(), EXEC_FLUSH_MS);
+    let done: CommandOutcome;
+    try {
+      done = await runCommand({ command, args, cwd, env: callOpts.env, timeoutMs, signal }, log.push);
+    } finally {
+      clearInterval(flushing);
+      log.end();
+    }
+    const ok = done.outcome === "exit" && done.exitCode === 0;
+    emit({
+      type: "exec-end",
+      ...ref,
+      attemptId,
+      label,
+      phase,
+      command,
+      ok,
+      outcome: done.outcome,
+      exitCode: done.exitCode ?? undefined,
+      signal: done.signal ?? undefined,
+      error: done.error,
+      durationMs: Date.now() - startedAt,
+      outputChars: done.outputChars,
+      outputTruncated: log.truncated || undefined,
+    });
+    if (done.outcome === "cancelled") throw new RunCancelledError(cancelMessage); // the command is dead: the workflow must not go on
+    return { ok, exitCode: done.exitCode, timedOut: done.outcome === "timeout", tail: done.tail, ...(done.error === undefined ? {} : { error: done.error }) };
+  }
+
   const ctx: WorkflowContext<A> = {
     args,
     runId,
     cwd: opts.cwd,
     budget,
     agent: agentCall,
+    exec: execCall,
     parallel: (thunks) =>
       runGroup("parallel", thunks, (thunk) =>
         thunk().catch((err: unknown) => {

@@ -4,6 +4,15 @@
 
 ### Adicionado
 
+- **`ctx.exec`: comandos do workflow assíncronos, com tempo limite e registrados.** `ctx.exec(comando, args, { label,
+  timeoutMs, cwd, env })` roda o comando em um processo assíncrono (o job continua respondendo a status e cancelamento
+  durante um teste longo), o mata no `timeoutMs` (`SIGTERM` ao grupo de processos, `SIGKILL` dois segundos depois) e
+  devolve `{ ok, exitCode, timedOut, tail, error? }`. O padrão do tempo vem da configuração: `workflows.<nome>.execTimeoutMs`
+  (600000 sem ela), que o `run-start` registra. A saída vai para o log de eventos enquanto o comando roda (eventos
+  `content` `command-output`, com `stream`), com a redação e a retenção do conteúdo de um agente, e cada chamada é um nó
+  do run (`exec-start`/`exec-end`, com `stepId`, `parentId` e `groupId`). O cancelamento mata o comando e o que ele
+  iniciou. A skill de autoria documenta o `ctx.exec`, e um teste do repositório reprova chamadas síncronas
+  (`execFileSync`, `execSync`, `spawnSync`) em arquivos de workflow.
 - **Workflow `smoke` e o assistente de validação no Cursor IDE.** O `smoke` é uma etapa estruturada no `composer-2.5`,
   sem tools e sem contexto do projeto, com teto de 50 mil tokens (medido: 21.628): prova chat → MCP → SDK → resultado
   estruturado sem pagar um `implement-issue`. O `scripts/verify/validate-cursor-ide.sh` conduz os seis cenários de

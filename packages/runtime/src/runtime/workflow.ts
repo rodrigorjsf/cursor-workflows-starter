@@ -118,6 +118,37 @@ export interface AgentCallOptions {
   memo?: boolean;
 }
 
+/** Options of one `ctx.exec` call. */
+export interface ExecOptions {
+  /** Name of the command in the run's log and progress. Default: the command's name. */
+  label?: string;
+  /** Groups progress, like `AgentCallOptions.phase`. Default: the last `ctx.phase`. */
+  phase?: string;
+  /**
+   * How long the command may run before it is killed (SIGTERM to its whole process group, SIGKILL two seconds later).
+   * Default: the workflow's `execTimeoutMs` config preference, which defaults to 10 minutes.
+   */
+  timeoutMs?: number;
+  /** Working directory. Default: the run's cwd. */
+  cwd?: string;
+  /** Environment variables added to this process's own. */
+  env?: Record<string, string>;
+}
+
+/** What a `ctx.exec` call hands back. A command that fails, times out or cannot start is a result: the workflow decides what it means. */
+export interface ExecResult {
+  /** True when the command ran and exited with code 0. */
+  ok: boolean;
+  /** The exit code. `null` when the process was killed (at its timeout, or by a signal) or never started. */
+  exitCode: number | null;
+  /** True when the command was killed at its `timeoutMs`. */
+  timedOut: boolean;
+  /** The last 32768 characters of what the command wrote, stdout and stderr in the order they arrived. Not redacted: the log's copy is. */
+  tail: string;
+  /** Why the command could not start (a missing program, a bad cwd). Absent when it ran. */
+  error?: string;
+}
+
 /** Uso de tokens somado (por etapa ou por run). `cacheRead`/`cacheWrite` vêm do provedor via Cursor. */
 export interface UsageTotals {
   inputTokens: number;
@@ -162,6 +193,14 @@ export interface WorkflowContext<A = unknown> {
     items: I[],
     ...stages: Array<(prev: any, item: I, index: number) => Promise<any> | any>
   ): Promise<any[]>;
+  /**
+   * Runs a command (no shell: `command` and its `args`) without blocking the process, and returns its exit code and the
+   * tail of its output. The command is killed at its timeout. Its output is streamed into the run's event log, redacted and
+   * retained like an agent's content, and the call is a step node of the run. Use it for every command a workflow runs
+   * itself (tests, `git`, `gh`): a synchronous call (`execFileSync`) freezes status queries and cancellation. A cancelled
+   * run kills the command and throws. A resume runs the command again: `exec` is not journaled.
+   */
+  exec(command: string, args?: string[], opts?: ExecOptions): Promise<ExecResult>;
   phase(title: string): void;
   log(message: string): void;
   /**

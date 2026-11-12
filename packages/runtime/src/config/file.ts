@@ -39,6 +39,7 @@ export interface WorkflowPrefs {
   maxTokensPerStep?: number | null;
   maxCents?: number | null;
   concurrency?: number;
+  execTimeoutMs?: number;
   roles?: Record<string, RolePrefs>;
   labels?: Record<string, RolePrefs>;
 }

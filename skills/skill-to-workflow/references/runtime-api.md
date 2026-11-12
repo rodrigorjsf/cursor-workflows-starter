@@ -51,6 +51,7 @@ export default defineWorkflow<{ target: string }>({
 | `ctx.agent(prompt, opts)` | Creates a new Cursor SDK agent and runs one step. With `schema`, returns the validated object (the agent must call `submit_result`). Without `schema`, returns the final text. **Throws** if it fails after `retries`. |
 | `ctx.parallel(thunks)` | Barrier: runs in parallel and waits for all. An item that fails becomes `null`. |
 | `ctx.pipeline(items, ...stages)` | No barrier: each item goes through the stages independently. A stage that fails drops the item (`null`) and skips its later stages. A stage receives `(previousResult, item, index)`. |
+| `ctx.exec(command, args, opts)` | Runs a command (tests, `git`, `gh`) and returns `{ ok, exitCode, timedOut, tail, error? }`. Asynchronous, killed at its timeout, logged. See "`exec()` options" below. |
 | `ctx.phase(title)` / `ctx.log(message)` | Progress, shown by `wait_workflow` and on the CLI. |
 | `ctx.metric(name, value)` | An outcome or difficulty signal of the run, written to the `metrics` table (observability.md). |
 | `ctx.args`, `ctx.cwd`, `ctx.runId` | Input, repository and run id (the same on resume). |
@@ -75,6 +76,36 @@ export default defineWorkflow<{ target: string }>({
 | `settingSources` | Which config layers the step loads: `"project"` (AGENTS.md, rules, skills, hooks, project MCP), `"team"`, `"mdm"`, `"user"`. Default when omitted: `["project","team","mdm"]`. Every layer adds fixed context to every call (cost.md). |
 | `memo` | Result cache across runs, keyed by prompt, model, schema, tools, context and repository state. Accepted only with read-only `tools`. |
 | `sandbox` | Turns on the SDK's local sandbox for shell calls (Linux needs `bubblewrap`). Untested here; leave it off. |
+
+## `exec()`: commands the workflow runs itself
+
+Every command a workflow runs goes through `ctx.exec(command, args?, opts?)`, never through `execFileSync`, `execSync`
+or `spawnSync`: a synchronous call freezes the whole process while it runs, so a cancel signal waits behind it, nothing
+can time it out, and its output is invisible. `npm test` fails when a workflow file calls one of them.
+
+```ts
+const tests = await ctx.exec("bash", ["-c", "npm test"], { label: "tests", cwd: worktree, timeoutMs: 15 * 60_000 });
+if (!tests.ok) { /* tests.exitCode, tests.timedOut, tests.tail: the last 32768 characters of stdout and stderr */ }
+```
+
+| Option | Meaning |
+|---|---|
+| `label` | Name of the command in progress and in the event log. Default: the command's name. |
+| `phase` | Groups progress, like `agent()`'s. Default: the last `ctx.phase`. |
+| `timeoutMs` | The command is killed after this long: SIGTERM to its whole process group, SIGKILL two seconds later. Default: `workflows.<name>.execTimeoutMs` in the config files, 10 minutes when unset. Give a network command (`git push`, `gh`) a short one. |
+| `cwd` | Working directory. Default: the run's cwd. |
+| `env` | Variables added to the process's own environment. |
+
+- There is **no shell**: `command` and its `args` go to the program as they are. Use `["bash", ["-c", line]]` when you
+  need one (`bash -c`, not `bash -lc`: rules.md, rule 3).
+- A command that exits non-zero, times out (`timedOut: true`, `exitCode: null`) or cannot start (`error` says why) is a
+  **result**, not an exception: the code decides what it means. A cancelled run kills the command and throws, so the
+  workflow does not go on.
+- The output is streamed into the run's event log as `content` events (stdout and stderr apart), with the same
+  redaction, size cut and retention as an agent's content, and each call is a step node of the run, with a step id, a
+  parent id and a group id. `tail` is the real output, not redacted: do not paste it into anything that leaves the
+  machine without the secrets guard (rules.md, rule 6).
+- A resume runs the command again: `exec` is not journaled. Keep the effects idempotent (rules.md, rule 8).
 
 ## Definition fields
 
