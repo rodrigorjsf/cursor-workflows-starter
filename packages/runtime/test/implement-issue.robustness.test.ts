@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { runWorkflow } from "../src/runtime/engine.js";
 import implementIssue from "../workflows/implement-issue.js";
-import { PLAN, SUB_CODE, branchOf, fx, git, issue, names, run, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
+import { PLAN, SUB_CODE, SUB_TEST, branchOf, fx, git, issue, names, run, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
 import { writeRepoConfig } from "./config-fixtures.js";
 
 beforeEach(setup);
@@ -158,6 +158,92 @@ test("a cancel in the middle of a write step is not a crash: any number of them 
   };
   const resumed = await run({}, runId);
   assert.equal(res(resumed).status, "done", JSON.stringify(res(resumed)));
+});
+
+/**
+ * Cancels run `runId` once at every command a write step runs after its agent answered and before the step is settled (the
+ * suite, the tree snapshots, the checks): execution N cuts at the N-th of them, and the next execution resumes the run. Each
+ * cancelled execution must leave the step marked interrupted and no crash counted. Returns the number of cuts and the
+ * execution that got past the step, which runs on to the end.
+ */
+async function cancelAtEveryCommandAfter(label: string, runId: string) {
+  const cuts: string[] = [];
+  for (let cut = 1; cut <= 40; cut++) {
+    const controller = new AbortController();
+    let agentAnswered = false;
+    let seen = 0;
+    let at: string | undefined;
+    const r = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test" } as any, {
+      cwd: fx.repo,
+      runId,
+      signal: controller.signal,
+      onEvent: (e) => {
+        if (e.type === "step-end" && e.label === label && e.ok) agentAnswered = true;
+        else if (e.type === "exec-start" && agentAnswered && at === undefined && ++seen === cut && progressOf(runId).inFlight) {
+          at = e.label; // still inside the step: cancel while this command runs
+          controller.abort();
+        }
+      },
+    });
+    if (at === undefined) return { cuts, past: r };
+    cuts.push(at);
+    assert.equal(r.status, "cancelled", `cut ${cut} (${at}): ${JSON.stringify(r)}`);
+    const p = progressOf(runId);
+    assert.equal(p.inFlight?.interrupted, true, `cut ${cut} (${at}): the step is marked interrupted, not left as a crash: ${JSON.stringify(p.inFlight)}`);
+    assert.deepEqual(p.crashes ?? {}, {}, `cut ${cut} (${at}): no crash counted`);
+  }
+  throw new Error(`${label}: the step was never got past`);
+}
+
+for (const [step, label] of [["red", "teste-1"], ["green", "codigo-1"], ["refactor", "refatorar-1"]] as const) {
+  test(`a cancel at any command of the ${step} step after its agent answered (the suite, a snapshot, a check) is not a crash`, async () => {
+    issue(["complexity:low"]);
+    // The red step also writes code, which the workflow discards: one more command (the restore) inside the step.
+    fx.handlers["teste-1"] = (o) => {
+      write(o, "test/sub.test.js", SUB_TEST);
+      write(o, "src/stub.js", "export const stub = 1;\n");
+      submit(o, { testFile: "test/sub.test.js", testName: "subtract" });
+    };
+    if (step === "refactor") {
+      let round = 0;
+      fx.handlers["review:standards"] = (o) =>
+        submit(o, ++round === 1 ? { findings: [{ file: "src/math.js", rule: "Mysterious Name", kind: "hard", note: "bad name" }], worst: "name" } : { findings: [], worst: "" });
+      fx.handlers["refatorar-1"] = (o) => {
+        write(o, "src/math.js", `${SUB_CODE}// renamed\n`);
+        submit(o, { summary: "renamed", filesChanged: ["src/math.js"] });
+      };
+    }
+    const { cuts, past } = await cancelAtEveryCommandAfter(label, `cut-${step}`);
+    assert.ok(cuts.length > 2, `more cancels than the default crash limit (2): ${cuts.join(", ")}`);
+    if (step !== "refactor") assert.ok(cuts.some((c) => c.startsWith("suite:")), `the suite is one of the cuts: ${cuts.join(", ")}`);
+    else assert.ok(cuts.includes("suite:refactor"), `the suite is one of the cuts: ${cuts.join(", ")}`);
+    assert.equal(res(past).status, "done", JSON.stringify(res(past)));
+  });
+}
+
+test("a resume cancelled while it undoes a step that crashed the process still counts that crash, once", async () => {
+  issue(["complexity:low"]);
+  fx.handlers["codigo-1"] = FALL;
+  const first = await run({});
+  crashInGreen(first.runId);
+  const controller = new AbortController();
+  const cancelled = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test" } as any, {
+    cwd: fx.repo,
+    runId: first.runId,
+    signal: controller.signal,
+    onEvent: (e) => {
+      if (e.type === "log" && /undoing the interrupted step/.test(e.message)) controller.abort();
+    },
+  });
+  assert.equal(cancelled.status, "cancelled", JSON.stringify(cancelled));
+  assert.deepEqual(Object.values(progressOf(first.runId).crashes ?? {}), [1], "the crash is counted before the undo");
+  fx.handlers["codigo-1"] = (o) => {
+    write(o, "src/math.js", SUB_CODE);
+    submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
+  };
+  const resumed = await run({}, first.runId);
+  assert.equal(res(resumed).status, "done", JSON.stringify(res(resumed)));
+  assert.deepEqual(Object.values(progressOf(first.runId).crashes ?? {}), [1], "and the cancelled undo is not a second crash");
 });
 
 // ── A retried write step starts from a clean tree ────────────────────────────────────────

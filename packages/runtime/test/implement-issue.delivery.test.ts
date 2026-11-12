@@ -4,7 +4,7 @@
 // with the fake SDK and the environment of implement-issue.fixture.ts (fake gh, temp repo with a bare origin, real git).
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { calls } from "@cursor/sdk";
@@ -161,6 +161,72 @@ test("the lock is on the issue of one repository: issue #7 of another --repo is 
     release();
   }
   assert.equal(res(await first).status, "done");
+});
+
+/**
+ * A `gh` in front of the fixture's that knows which repository the cwd is: `gh repo view [repo] --json url -q .url` answers
+ * the URL GitHub gives `repo` (any case, any form gh takes), or the cwd's own, `Owner/Repo`. Everything else goes to the fake.
+ */
+function ghKnowsTheCwdRepository() {
+  const bin = join(fx.root, "bin-repo");
+  mkdirSync(bin);
+  writeFileSync(
+    join(bin, "gh"),
+    `#!/usr/bin/env node
+const { spawnSync } = require("child_process");
+const a = process.argv.slice(2);
+if (a[0] === "repo" && a[1] === "view") {
+  const named = a[2] && !a[2].startsWith("-") ? a[2].replace(/^https:\\/\\/github\\.com\\//i, "").replace(/^github\\.com\\//i, "") : "owner/repo";
+  process.stdout.write("https://github.com/" + (named.toLowerCase() === "owner/repo" ? "Owner/Repo" : named) + "\\n");
+  process.exit(0);
+}
+const r = spawnSync(${JSON.stringify(join(fx.root, "bin", "gh"))}, a, { stdio: "inherit" });
+process.exit(r.status ?? 1);
+`,
+  );
+  chmodSync(join(bin, "gh"), 0o755);
+  process.env.PATH = `${bin}:${process.env.PATH}`; // teardown puts the PATH back
+}
+
+test("the lock is on the issue of the cwd's repository whether or not --repo names it: a run with and one without it refuse each other", async () => {
+  issue(["complexity:low"]);
+  ghKnowsTheCwdRepository();
+  /** Runs `active` until it is writing code, then `others` one after the other while it waits; returns their results. */
+  const whileActive = async (active: Record<string, unknown>, others: Array<[Record<string, unknown>, string]>) => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let reached!: () => void;
+    const atCodeStep = new Promise<void>((resolve) => (reached = resolve));
+    let held = false;
+    fx.handlers["codigo-1"] = async (o) => {
+      if (!held) {
+        held = true;
+        reached();
+        await gate;
+      }
+      write(o, "src/math.js", SUB_CODE);
+      submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
+    };
+    const activeId = `active-${others[0][1]}`;
+    const first = run(active, activeId);
+    const results: Array<{ status: string; activeRunId?: string }> = [];
+    try {
+      await atCodeStep;
+      for (const [args, id] of others) results.push(res(await run(args, id)));
+    } finally {
+      release();
+    }
+    assert.equal(res(await first).status, "done");
+    return { activeId, results };
+  };
+
+  const a = await whileActive({}, [[{ repo: "owner/repo" }, "with-repo"], [{ repo: "https://github.com/OWNER/REPO" }, "with-url"], [{ repo: "other/x" }, "other"]]);
+  assert.deepEqual(a.results.map((r) => r.status), ["issue-locked", "issue-locked", "done"], JSON.stringify(a.results));
+  assert.equal(a.results[0].activeRunId, a.activeId);
+
+  const b = await whileActive({ repo: "Owner/Repo" }, [[{}, "without-repo"]]);
+  assert.deepEqual(b.results.map((r) => r.status), ["issue-locked"], JSON.stringify(b.results));
+  assert.equal(b.results[0].activeRunId, b.activeId);
 });
 
 test("a run that fails, and a run that stops with a status, release the issue", async () => {
