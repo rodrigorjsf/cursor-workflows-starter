@@ -182,7 +182,7 @@ que a forma B precisa e imprime o diff do que mudou; não faz commit nem `git ad
 
 | Arquivo | O que recebe |
 |---|---|
-| `.cursor/mcp.json` | O servidor `workflows` apontando para o kit em `${userHome}/.cursor-workflows/kit`, com `WF_CWD=${workspaceFolder}` e sem `WF_MAX_*` (os tetos ficam na [configuração](../reference/config.md)). Não tem caminho absoluto: o mesmo arquivo vale para o time inteiro |
+| `.cursor/mcp.json` | O servidor `workflows` apontando para o kit em `${userHome}/.cursor-workflows/kit`, com `WF_CWD=${workspaceFolder}` e sem `WF_MAX_*` (os tetos ficam na configuração, [6.2](../reference/config.md)). Não tem caminho absoluto: o mesmo arquivo vale para o time inteiro |
 | `.mcp.json` | O mesmo servidor para o Claude Code, com `${HOME}` no lugar de `${userHome}` |
 | `.agents/workflows/config.json` | `$schema` (autocompletar no editor) e `kit`, a faixa de versão do kit que rodou o `init` (`>=0.3.0 <0.4.0` para o kit 0.3.x). O que o arquivo já tem fica, a faixa inclusive |
 | `.gitignore` | A linha `.workflows/`, a não ser que uma forma usual dela já esteja lá |
@@ -192,7 +192,7 @@ Rodar de novo não muda nada, e um arquivo que já diz o que o `init` escreveria
 existe, só o servidor `workflows` muda: os outros servidores e as chaves extras dele ficam. Um arquivo que não é JSON
 válido, ou um bloco com `begin` e sem `end`, faz o comando falhar antes de gravar qualquer arquivo. `--no-agents-md` pula
 o `AGENTS.md`; `--remove` tira só o bloco dele (e apaga o arquivo se o bloco era tudo o que havia). O servidor só sobe
-quando o kit está em `~/.cursor-workflows/kit`, onde o [instalador](01-instalacao.md#3-instalar) o põe, e o
+quando o kit está em `~/.cursor-workflows/kit`, onde o instalador ([2.1 §3](01-instalacao.md#3-instalar)) o põe, e o
 [`wf doctor`](#conferindo-o-ambiente-wf-doctor) diz, a cada falha, o que corrigir.
 
 ### Conferindo o ambiente: `wf doctor`
@@ -209,7 +209,7 @@ O servidor MCP que não sobe deixa pistas só no log do MCP do IDE. O `wf doctor
 | `models` | Cada modelo que a configuração faz os workflows usarem (papéis, rótulos e o `defaults` do workflow) está no catálogo da conta, por id ou alias | O modelo de um papel não existe na conta: `wf models` |
 | `gh` | `gh auth status` | `gh` ausente ou sem login: `gh auth login` |
 | `mcp-server` | Inicia o servidor como o IDE (comando, args e env da entrada `workflows`, no repositório), pede `tools/list` e espera até 20 s (`WF_DOCTOR_TIMEOUT_MS` muda o limite, em milissegundos) | O servidor morre ao iniciar; o relatório traz o que ele escreveu no stderr |
-| `config` | Os dois arquivos de [configuração](../reference/config.md) são válidos e todos os workflows resolvem, com o caminho do campo errado | Papel desconhecido, JSON inválido |
+| `config` | Os dois arquivos de configuração ([6.2](../reference/config.md)) são válidos e todos os workflows resolvem, com o caminho do campo errado | Papel desconhecido, JSON inválido |
 | `kit-version` | A faixa semver `kit` do `.agents/workflows/config.json` contra o kit que roda o `wf` e contra o kit que cada servidor MCP diz ser (a versão que ele devolve no `initialize`): é este o que o `start_workflow` recusa, e nem sempre é o primeiro | Kit fora da faixa |
 
 O `PATH` que o `wf doctor` vê é o do terminal onde ele roda. Um IDE aberto pelo menu do sistema pode ter outro `PATH`
@@ -221,7 +221,7 @@ relatório passa pela mesma redação de segredos dos logs de run (`[REDACTED]`)
 **A faixa de versão do kit.** O `kit` do `.agents/workflows/config.json` (o `wf init` escreve a do kit que o rodou, como
 `>=0.3.0 <0.4.0`) aceita qualquer faixa semver, como `^0.3.0`. O `wf doctor`, o `wf run`, o `wf start` e o
 `start_workflow` do MCP recusam um kit fora dela, antes de iniciar o que for, dizendo a versão do kit, a faixa e se o kit é mais
-antigo ou mais novo; um kit mais antigo que a faixa se atualiza com [`wf upgrade`](01-instalacao.md#atualizar-wf-upgrade). Os comandos que só leem (`wf list`, `wf config show`) continuam funcionando. Um repositório sem
+antigo ou mais novo; um kit mais antigo que a faixa se atualiza com `wf upgrade` ([2.1 §3](01-instalacao.md#atualizar-wf-upgrade)). Os comandos que só leem (`wf list`, `wf config show`) continuam funcionando. Um repositório sem
 `kit` aceita qualquer versão.
 
 As skills do kit já valem no repositório alvo: o instalador as liga em `~/.claude/skills/`, e não há nada a copiar.
@@ -251,7 +251,7 @@ estruturado): uma etapa, sem tools e sem contexto do projeto, no `composer-2.5`,
 tem de chamar `submit_result` com `answer: "pong"`, e o esquema recusa qualquer outro valor: um run que termina passou
 pelo SDK e voltou. Medido em 2026-11-12 contra a API real: 21.628 tokens, cerca de 25 s, `status: finished`. Numa conta
 em que o `composer-2.5` não está incluído, troque o modelo do papel `ping` (`workflows.smoke.roles.ping.model` na
-[configuração](../reference/config.md), ou `WF_MODEL_PING`). Rode com `/run-workflow smoke` no chat ou `wf run smoke`.
+configuração, [6.2](../reference/config.md), ou `WF_MODEL_PING`). Rode com `/run-workflow smoke` no chat ou `wf run smoke`.
 
 **O assistente** é o [`scripts/verify/validate-cursor-ide.sh`](../../scripts/verify/validate-cursor-ide.sh) (no kit
 instalado, `~/.cursor-workflows/kit/scripts/verify/validate-cursor-ide.sh`). Rode-o no terminal do próprio Cursor: o

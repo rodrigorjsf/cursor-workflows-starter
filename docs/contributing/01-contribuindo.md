@@ -3,7 +3,7 @@
 ## Antes de abrir um PR
 
 Rode `npm ci`, `npm run typecheck` e `npm test`. Os testes são offline (SDK falso), não precisam de conta nem de rede,
-e são os mesmos do CI (Node 22.13.0 e 22.x). O `npm test` inclui o [docs check](02-convencoes-do-livro.md#o-que-o-docs-check-confere):
+e são os mesmos do CI (Node 22.13.0 e 22.x). O `npm test` inclui o docs check ([9.2](02-convencoes-do-livro.md#o-que-o-docs-check-confere)):
 um link quebrado, um rodapé errado ou um capítulo fora do índice reprova o PR.
 
 ## Onde fica cada coisa
@@ -89,7 +89,7 @@ projeto da forma mais completa possível**. Vale para quem rodar testes pagos em
    exigir outro modelo.
 2. **Modelos que consomem cota paga são permitidos quando o teste precisar deles.** Isso inclui modelos de
    terceiros, cobrados à parte com crédito pré-pago, e uso além da franquia semanal. Itens pendentes que exigem isso
-   ([verificações §12](../research/verificacoes-locais.md)):
+   ([8.2 §12](../research/verificacoes-locais.md#12-não-executado-pendências)):
    - a faixa de contexto do Claude Haiku 5.5 (`claude-haiku-5-5`, acima de 100 mil tokens de input);
    - os caminhos HIGH e de review com um modelo de terceiros (por exemplo `gpt-5.3-codex`), se o teste for justamente
      esse.

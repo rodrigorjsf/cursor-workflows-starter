@@ -28,7 +28,7 @@ O `npm test` confere os dois (`test/scripts-conventions.test.ts`): um script sem
 | `scripts/verify/verify-cache.ts` | Workflow: cache de prompt entre agentes irmãos | Conta nova ou SDK novo | [`scripts/verify/README.md`](../../scripts/verify/README.md) |
 
 Os três `verify-*` custam tokens: rode sempre com `--max-tokens`, e veja a
-[política de custo](01-contribuindo.md#testes-contra-a-api-real-política-de-custo).
+política de custo em [9.1](01-contribuindo.md#testes-contra-a-api-real-política-de-custo).
 
 ---
 

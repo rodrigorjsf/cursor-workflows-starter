@@ -363,7 +363,7 @@ com timeout maior).
 ### 5.1 Custos e cache: o que dá para controlar
 
 O detalhamento, com checklist, está em
-[`docs/operating/02-custos-e-cache.md`](../operating/02-custos-e-cache.md) deste repositório. Em resumo:
+[5.2 · Custos, cache e boas práticas](../operating/02-custos-e-cache.md), neste repositório. Em resumo:
 
 - **O cache de prompt do Cursor não é configurável pelo SDK** [PKG]. Ele é automático, e cache read custa menos
   que input numa proporção que depende do modelo. O Auto não tem preço fixo por token: o modo Cost cobra como
@@ -396,7 +396,7 @@ O detalhamento, com checklist, está em
 
 ### 5.2 Observabilidade: o que dá para medir
 
-Detalhes em [`docs/operating/03-observabilidade.md`](../operating/03-observabilidade.md) deste repositório.
+Detalhes em [5.3 · Observabilidade: custo, tokens, contexto e eficiência](../operating/03-observabilidade.md), neste repositório.
 
 - **O SDK expõe** [PKG][DOC](https://cursor.com/docs/sdk/typescript):
   - tokens e custo por agente (`getUsage()`), com `rawCostCents` sem descontos (**0 para uso cobrado por
