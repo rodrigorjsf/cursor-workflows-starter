@@ -322,14 +322,17 @@ async function defaultBranchHead(cmd: Commands, cwd: string): Promise<string> {
  * Puts the run's delivered commit on the origin's copy of its branch. On a resume the history is rewritten (a commit an agent
  * made is undone, the tree is committed again), so a plain push is refused once the branch has been pushed. The push is a force
  * with a lease on the commit the origin has right now, and it happens only when that commit is one this run pushed (or the
- * branch is not there yet): a commit anyone else made on the branch is never overwritten. Returns why the push was refused, or
+ * branch is not there yet; for a run from before the pushes were recorded, `isOlderDelivery` decides): a commit anyone else made
+ * on the branch is never overwritten. Returns why the push was refused, or
  * undefined when the branch is on the origin.
  */
-async function pushDelivery(cmd: Commands, progress: ProgressStore, worktree: string, branch: string, repo: string | undefined): Promise<string | undefined> {
+async function pushDelivery(cmd: Commands, progress: ProgressStore, worktree: string, branch: string, repo: string | undefined, message: string): Promise<string | undefined> {
   const delivered = progress.data.deliveredCommit!;
   const onOrigin = await cmd.remoteBranchHead(worktree, branch);
   if (onOrigin === delivered) return undefined;
-  if (onOrigin && !progress.data.pushed?.includes(onOrigin)) {
+  const ours = (sha: string) =>
+    progress.data.pushed ? progress.data.pushed.includes(sha) : isOlderDelivery(cmd, worktree, sha, progress.data.baseCommit!, message);
+  if (onOrigin && !(await ours(onOrigin))) {
     return `origin/${branch} is at ${onOrigin.slice(0, 7)}, which has commits this workflow did not make, and the push would overwrite them: merge your work from ${worktree} by hand, or push it under another branch`;
   }
   progress.data.pushed = [...(progress.data.pushed ?? []), delivered]; // before the push: a crash right after it still leaves the origin's branch recognized as this run's
@@ -337,6 +340,21 @@ async function pushDelivery(cmd: Commands, progress: ProgressStore, worktree: st
   progress.save();
   await cmd.pushOwned(worktree, branch, onOrigin);
   return undefined;
+}
+
+/**
+ * For a run that delivered before runs recorded what they pushed (no `pushed` list): is `sha` a delivery the workflow made? It
+ * is when this repository has the commit, its only parent is the run's base and its message is the delivery's. A commit
+ * someone added on top has the delivery as its parent, and one made elsewhere is not here: neither is overwritten.
+ */
+async function isOlderDelivery(cmd: Commands, worktree: string, sha: string, baseCommit: string, message: string): Promise<boolean> {
+  try {
+    const [parents, subject] = (await cmd.gitRead(worktree, "log", "-1", "--format=%P%n%B", sha)).split("\n");
+    return parents === baseCommit && subject === message;
+  } catch (err) {
+    if (err instanceof CommandError && err.result.exitCode !== null) return false; // git does not have the commit
+    throw err;
+  }
 }
 
 /** Escreve um corpo longo num arquivo temporário para `--body-file` (sem limite de argumento de linha de comando). */
@@ -973,6 +991,7 @@ export default defineWorkflow<Args>({
       if (!final.ok) return { ...base, status: final.kind === "failed" ? "tests-failed" : `tests-${final.kind}`, worktree, output: final.output };
       const baseCommit = progress.data.baseCommit!;
       const head = (await cmd.gitRead(worktree, "rev-parse", "HEAD")).trim();
+      const deliveryMessage = `feat: ${issue.title} (#${issue.number})`;
       if (head !== progress.data.deliveredCommit) {
         // Commits feitos por agentes (a instrução pede para não fazer) são desfeitos, mantendo a árvore.
         if (head !== baseCommit) await cmd.git(worktree, "reset", "--soft", baseCommit);
@@ -984,7 +1003,7 @@ export default defineWorkflow<Args>({
           ctx.log(`delivery blocked: ${secret}`);
           return { ...base, status: "secret-blocked", reason: secret, branch, worktree, spentCents: ctx.budget.spentCents() };
         }
-        if (!(await cmd.gitIs(worktree, "diff", "--cached", "--quiet"))) await cmd.git(worktree, "commit", "-m", `feat: ${issue.title} (#${issue.number})`);
+        if (!(await cmd.gitIs(worktree, "diff", "--cached", "--quiet"))) await cmd.git(worktree, "commit", "-m", deliveryMessage);
         progress.data.deliveredCommit = (await cmd.gitRead(worktree, "rev-parse", "HEAD")).trim();
         progress.save();
       }
@@ -1009,7 +1028,7 @@ export default defineWorkflow<Args>({
           const leak = findSecretInText(body);
           if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the PR body`, branch, worktree };
         }
-        const refused = await pushDelivery(cmd, progress, worktree, branch, repo);
+        const refused = await pushDelivery(cmd, progress, worktree, branch, repo, deliveryMessage);
         if (refused) return { ...base, status: "push-refused", reason: refused, branch, worktree };
         if (body !== undefined) {
           prUrl = (await withBodyFile(body, (f) => cmd.gh(worktree, "pr", "create", "--head", branch, "--title", `${issue.title} (#${issue.number})`, "--body-file", f, ...repoFlag))).trim();

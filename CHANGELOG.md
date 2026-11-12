@@ -197,7 +197,9 @@
   passa, porque a issue #5 de outro repositório é outra issue; o de um processo que morreu é retomado). A entrega
   empurra com `--force-with-lease`, só em branch `wf/`: o resume depois de o PR existir refaz o commit e entrega por
   cima, em vez de falhar com non-fast-forward. Se a branch no origin tem um commit que o run não empurrou (alguém
-  empurrou uma correção), o run volta `status: "push-refused"` e não sobrescreve nada; o trabalho fica no worktree.
+  empurrou uma correção), o run volta `status: "push-refused"` e não sobrescreve nada; o trabalho fica no worktree. Um run que entregou antes
+  desta mudança não tem a lista do que empurrou: para ele, o commit do origin é seu quando o repositório o tem, o único pai
+  é a base do run e a mensagem é a da entrega.
 - **A execução do agente fica atrás de uma interface, o `AgentBackend`.** O motor deixa de falar com o SDK: cada
   tentativa de uma etapa vai a `AgentBackend.run(prompt, opções resolvidas, sinal de aborto, callback de eventos)`, que
   devolve o resultado da tentativa. A execução local (criar o agente, enviar, esperar, entregar o resultado estruturado,

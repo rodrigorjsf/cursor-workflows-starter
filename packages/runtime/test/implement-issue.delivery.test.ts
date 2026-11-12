@@ -254,6 +254,53 @@ test("a resume after the PR exists redelivers over the rewritten history with a 
   assert.deepEqual(JSON.parse(commandLine.text!).args, ["push", `--force-with-lease=${branch}:${delivered}`, "-u", "origin", branch]);
 });
 
+/** The progress of a run that delivered before runs recorded what they pushed: no `pushed` list. */
+function forgetPushes(runId: string) {
+  const file = join(fx.repo, ".workflows", "runs", runId, "tdd-progress.json");
+  const progress = JSON.parse(readFileSync(file, "utf8"));
+  delete progress.pushed;
+  delete progress.repo;
+  writeFileSync(file, JSON.stringify(progress));
+}
+
+test("a run that delivered before runs recorded their pushes still redelivers on resume: the origin's commit is the workflow's own delivery on the run's base", async () => {
+  issue(["complexity:low"]);
+  const first = await run({ openPr: true });
+  assert.equal(res(first).status, "done", JSON.stringify(res(first)));
+  const branch = branchOf(first.runId);
+  const delivered = onOriginAt(branch);
+  forgetPushes(first.runId);
+  agentCommits(worktreeOf(first.runId));
+
+  const second = await run({ openPr: true }, first.runId);
+  assert.equal(res(second).status, "done", JSON.stringify(res(second)));
+  assert.notEqual(onOriginAt(branch), delivered);
+  assert.equal(onOriginAt(branch), git(worktreeOf(first.runId), "rev-parse", "HEAD").trim());
+  assert.equal(gh().prs.length, 1);
+});
+
+test("for a run with no record of its pushes, a commit someone added on top of the delivery is still not overwritten", async () => {
+  issue(["complexity:low"]);
+  const first = await run({ openPr: true });
+  assert.equal(res(first).status, "done", JSON.stringify(res(first)));
+  const branch = branchOf(first.runId);
+  const clone = join(fx.root, "reviewer");
+  git(fx.root, "clone", "-q", "--branch", branch, origin(), clone);
+  git(clone, "config", "user.name", "reviewer");
+  git(clone, "config", "user.email", "reviewer@example.invalid");
+  writeFileSync(join(clone, "FIX.md"), "a review fix\n");
+  git(clone, "add", "-A");
+  git(clone, "commit", "-qm", "review fix");
+  git(clone, "push", "-q", "origin", branch);
+  const theirs = onOriginAt(branch);
+  forgetPushes(first.runId);
+  agentCommits(worktreeOf(first.runId));
+
+  const second = await run({ openPr: true }, first.runId);
+  assert.equal(res(second).status, "push-refused", JSON.stringify(res(second)));
+  assert.equal(onOriginAt(branch), theirs);
+});
+
 test("the push is refused when the remote branch has commits the workflow did not make; nothing on the origin is overwritten", async () => {
   issue(["complexity:low"]);
   const first = await run({ openPr: true });
