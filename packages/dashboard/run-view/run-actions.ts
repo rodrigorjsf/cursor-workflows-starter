@@ -7,14 +7,22 @@ export type CancelOutcome = { ok: true; status: string; note: string } | { ok: f
 /** The server's sentence, as a sentence: a capital first letter and a full stop. */
 const sentence = (text: string): string => `${text.charAt(0).toUpperCase()}${text.slice(1)}${/[.!?]$/.test(text) ? "" : "."}`;
 
+/** A note that says something is still left to cancel: an agent the Cursor API did not reach, or a killed process not gone yet. */
+const LEFT_TO_CANCEL = /could not reach cloud agent|has not exited yet/;
+
 /**
  * What the header says after a cancel: of the run (`cloudOnly` false), or of the cloud agents a dead run left (`cloudOnly`).
- * A refusal that says there is nothing to cancel (the run ended, or its agents were cancelled already) is a done outcome.
+ * A refusal that says there is nothing to cancel (the run ended, or its agents were cancelled already) is a done outcome. A
+ * frozen run's process is killed, so its job is not `running` afterwards: the note says what the kill did. A note that says
+ * something is left to cancel is a failure, so the button stays.
  */
 export function cancelResult(outcome: CancelOutcome, cloudOnly: boolean): { step: "done" | "failed"; message: string } {
   if (!outcome.ok) return { step: /nothing to cancel/.test(outcome.error) ? "done" : "failed", message: sentence(outcome.error) };
-  if (cloudOnly) return { step: /could not reach cloud agent/.test(outcome.note) ? "failed" : "done", message: sentence(outcome.note.replace(/^the run is not running \(\w+\); /, "")) };
-  return { step: "done", message: outcome.status === "cancelled" ? "Cancelled." : `Cancelling: ${outcome.note}` };
+  const step = LEFT_TO_CANCEL.test(outcome.note) ? "failed" : "done";
+  if (cloudOnly) return { step, message: sentence(outcome.note.replace(/^the run is not running \(\w+\); /, "")) };
+  if (outcome.status === "cancelled") return { step: "done", message: "Cancelled." };
+  if (outcome.status === "running") return { step: "done", message: `Cancelling: ${outcome.note}` };
+  return { step, message: sentence(outcome.note) };
 }
 
 /**
