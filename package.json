@@ -1,6 +1,6 @@
 {
   "name": "cursor-workflows-starter",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Starter kit: workflows determinísticos sobre o Cursor SDK, invocáveis pelo chat do Cursor IDE (MCP) e pelo terminal (CLI).",
   "license": "MIT",

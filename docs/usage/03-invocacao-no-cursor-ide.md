@@ -184,7 +184,7 @@ que a forma B precisa e imprime o diff do que mudou; não faz commit nem `git ad
 |---|---|
 | `.cursor/mcp.json` | O servidor `workflows` apontando para o kit em `${userHome}/.cursor-workflows/kit`, com `WF_CWD=${workspaceFolder}` e sem `WF_MAX_*` (os tetos ficam na [configuração](../reference/config.md)). Não tem caminho absoluto: o mesmo arquivo vale para o time inteiro |
 | `.mcp.json` | O mesmo servidor para o Claude Code, com `${HOME}` no lugar de `${userHome}` |
-| `.agents/workflows/config.json` | `$schema` (autocompletar no editor) e `kit`, a faixa de versão do kit que rodou o `init` (`>=0.2.0 <0.3.0` para o kit 0.2.x). O que o arquivo já tem fica, a faixa inclusive |
+| `.agents/workflows/config.json` | `$schema` (autocompletar no editor) e `kit`, a faixa de versão do kit que rodou o `init` (`>=0.3.0 <0.4.0` para o kit 0.3.x). O que o arquivo já tem fica, a faixa inclusive |
 | `.gitignore` | A linha `.workflows/`, a não ser que uma forma usual dela já esteja lá |
 | `AGENTS.md` | Um bloco de quatro linhas entre `<!-- cursor-workflows:begin -->` e `<!-- cursor-workflows:end -->`: as regras de segurança e o link do guia de instalação. O arquivo é criado se não existir. O Claude Code lê o `CLAUDE.md`, não o `AGENTS.md` ([ADR-0004](../adr/0004-workspaces-and-claude-md-symlink.md)): quando o `CLAUDE.md` não importa o `AGENTS.md` (`@AGENTS.md`), o `init` avisa no stderr e não edita o `CLAUDE.md` |
 
@@ -219,7 +219,7 @@ mais do kit carrega nele: o relatório (em texto ou em `--json`) traz só a veri
 relatório passa pela mesma redação de segredos dos logs de run (`[REDACTED]`), inclusive o stderr do servidor.
 
 **A faixa de versão do kit.** O `kit` do `.agents/workflows/config.json` (o `wf init` escreve a do kit que o rodou, como
-`>=0.2.0 <0.3.0`) aceita qualquer faixa semver, como `^0.2.0`. O `wf doctor`, o `wf run`, o `wf start` e o
+`>=0.3.0 <0.4.0`) aceita qualquer faixa semver, como `^0.3.0`. O `wf doctor`, o `wf run`, o `wf start` e o
 `start_workflow` do MCP recusam um kit fora dela, antes de iniciar o que for, dizendo a versão do kit, a faixa e se o kit é mais
 antigo ou mais novo; um kit mais antigo que a faixa se atualiza com [`wf upgrade`](01-instalacao.md#atualizar-wf-upgrade). Os comandos que só leem (`wf list`, `wf config show`) continuam funcionando. Um repositório sem
 `kit` aceita qualquer versão.
