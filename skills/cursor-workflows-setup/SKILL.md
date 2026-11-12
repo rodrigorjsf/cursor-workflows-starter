@@ -13,7 +13,7 @@ If `wf` is not found, the installer's folder is probably off the PATH: run `~/.l
 to add `~/.local/bin` to their PATH. If that file or `~/.cursor-workflows/kit` is missing, the kit is not installed: the
 user installs it with the install guide, `INSTALL-AGENT.md`, in the kit's GitHub repository.
 
-The runtime's messages are in Portuguese. This skill quotes the ones it matches, in code spans.
+The runtime's messages are in English. This skill quotes the ones it matches, in code spans.
 
 Pick the task, then run its steps in order. Each step ends on a stated result.
 
@@ -26,8 +26,10 @@ Pick the task, then run its steps in order. Each step ends on a stated result.
    - Running it again changes nothing.
 2. Show the user the diff that `wf init` printed on stdout, and its summary from stderr. `wf init` never runs git:
    the user reviews the diff and commits. Done when the user has seen every changed file.
-   - A note about `CLAUDE.md` means Claude Code does not read `AGENTS.md` here: relay it, since the user decides
-     whether to add the `@AGENTS.md` import.
+   - A note that starts with `Claude Code reads` means the repo root has a Claude Code memory file (`CLAUDE.md`,
+     `.claude/CLAUDE.md` or `CLAUDE.local.md`) that neither is `AGENTS.md` nor imports it, so Claude Code does not
+     see the kit block. Relay it, since the user decides whether to add the `@AGENTS.md` line; `wf init` does not edit
+     that file.
 3. Run the checks in "Check the setup". Done when `wf doctor` exits 0.
 4. Tell the user to enable the `workflows` server in the IDE (Cursor: the MCP list in Customize; Claude Code: approve it
    when asked), then restart it. Done when the user has the instruction.

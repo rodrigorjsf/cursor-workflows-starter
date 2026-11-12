@@ -16,7 +16,7 @@ const GUIDE = read("INSTALL-AGENT.md");
 const TAG = `v${(JSON.parse(read("package.json")) as { version: string }).version}`;
 
 const NOT_ENGLISH = /[ãõçáéíóúâêô]|\b(não|para|você|uma|com os|são|está)\b/i;
-/** Prose only: fenced blocks and inline code spans quote commands and the runtime's Portuguese messages. */
+/** Prose only: fenced blocks and inline code spans quote commands and the runtime's messages. */
 const prose = (md: string) => md.replace(/```[\s\S]*?```/g, "").replace(/`[^`]*`/g, "");
 
 test("the guide is in English and links to no other document: an agent needs nothing else", () => {

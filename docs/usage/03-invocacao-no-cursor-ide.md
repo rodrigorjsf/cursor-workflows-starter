@@ -27,7 +27,7 @@ O servidor `workflows` é registrado em `.cursor/mcp.json` (Cursor) e em `.mcp.j
 | Tool | Entrada | Saída |
 |---|---|---|
 | `list_workflows` | — | `name`, `description`, `whenToUse`, `phases`, `argsSchema` de cada workflow |
-| `start_workflow` | `{ name, args, resumeRunId?, overrides? }` | `{ jobId, runId }`, mais `dashboardUrl` (o link da página do run no [dashboard](../operating/03-observabilidade.md#5-dashboard), que o `start_workflow` inicia se nada responde na porta; `dashboardWarning` traz o motivo quando não sobe, e nenhum dos dois aparece com o início automático desligado). O workflow roda em segundo plano, em um processo destacado: reiniciar o servidor ou o Cursor não o interrompe |
+| `start_workflow` | `{ name, args, resumeRunId?, overrides? }` | `{ jobId, runId }`, mais `dashboardUrl` (o link da página do run no dashboard, [5.3 §5](../operating/03-observabilidade.md#5-dashboard), que o `start_workflow` inicia se nada responde na porta; `dashboardWarning` traz o motivo quando não sobe, e nenhum dos dois aparece com o início automático desligado). O workflow roda em segundo plano, em um processo destacado: reiniciar o servidor ou o Cursor não o interrompe |
 | `wait_workflow` | `{ jobId, timeoutSec ≤ 50 }` | Estado do job, projetado do log de eventos do run: `status`, `phase`, `recent` (até 20 linhas de resumo, uma linha cada, nunca texto de prompt ou de saída de agente; o custo de cada etapa é o maior entre bruto e cobrado), `result` (o que o workflow devolveu), `error`, `spentCents` (custo que o teto usa; acumula entre resumes), `chargedCents` (só o valor cobrado), `spentTokens` |
 | `get_workflow_status` | `{ jobId }` | Estado, sem esperar |
 | `cancel_workflow` | `{ jobId }` | Cancela o job: para os agentes ativos, desfaz a etapa que estava escrevendo e devolve o estado com `status: "cancelled"`. O run continua retomável. O agente do chat só chama quando o usuário pede para parar |
@@ -193,7 +193,7 @@ que a forma B precisa e imprime o diff do que mudou; não faz commit nem `git ad
 | `.mcp.json` | O mesmo servidor para o Claude Code, com `${HOME}` no lugar de `${userHome}` |
 | `.agents/workflows/config.json` | `$schema` (autocompletar no editor) e `kit`, a faixa de versão do kit que rodou o `init` (`>=0.3.0 <0.4.0` para o kit 0.3.x). O que o arquivo já tem fica, a faixa inclusive |
 | `.gitignore` | A linha `.workflows/`, a não ser que uma forma usual dela já esteja lá |
-| `AGENTS.md` | Um bloco de quatro linhas entre `<!-- cursor-workflows:begin -->` e `<!-- cursor-workflows:end -->`: as regras de segurança e o link do guia de instalação. O arquivo é criado se não existir. O Claude Code lê o `CLAUDE.md`, não o `AGENTS.md` ([ADR-0004](../adr/0004-workspaces-and-claude-md-symlink.md)): quando o `CLAUDE.md` não importa o `AGENTS.md` (`@AGENTS.md`), o `init` avisa no stderr e não edita o `CLAUDE.md` |
+| `AGENTS.md` | Um bloco de quatro linhas entre `<!-- cursor-workflows:begin -->` e `<!-- cursor-workflows:end -->`: as regras de segurança e o link do guia de instalação. O arquivo é criado se não existir. Quando a raiz do repositório tem um arquivo de memória do Claude Code (`CLAUDE.md`, `.claude/CLAUDE.md` ou `CLAUDE.local.md`), o Claude Code lê esse arquivo, não o `AGENTS.md` ([ADR-0004](../adr/0004-workspaces-and-claude-md-symlink.md)). Se nenhum deles é o próprio `AGENTS.md` nem o importa (a linha `@AGENTS.md`), o `init` avisa no stderr (`Claude Code reads <arquivos>, not AGENTS.md: ...`) e não edita o arquivo. Sem nenhum desses arquivos o Claude Code lê o `AGENTS.md`, e não há aviso |
 
 Rodar de novo não muda nada, e um arquivo que já diz o que o `init` escreveria não é reescrito. Num `mcp.json` que já
 existe, só o servidor `workflows` muda: os outros servidores e as chaves extras dele ficam. Um arquivo que não é JSON
@@ -207,6 +207,8 @@ quando o kit está em `~/.cursor-workflows/kit`, onde o instalador ([2.1 §3](01
 O servidor MCP que não sobe deixa pistas só no log do MCP do IDE. O `wf doctor` (`wf doctor --cwd
 /caminho/do/repo`) roda as verificações abaixo e, a cada falha, diz o que corrigir. Sai com 1 se alguma falhar e, com
 `--json`, imprime o relatório em JSON (`ok` e `checks`, cada um com `id`, `status`, `message` e, nas falhas, `hint`).
+Sem `--json`, cada falha traz a dica depois de `how to fix:`, e a última linha é `All good: N checks passed.` ou
+`N of M checks failed.`
 
 | `id` | O que confere | Falha típica |
 |---|---|---|

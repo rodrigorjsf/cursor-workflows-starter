@@ -2,7 +2,7 @@
 
 Canonical guide for agents and humans working on this repo. `AGENTS.md` is a symlink to this file, so Cursor, Codex
 and Claude Code read the same text. Line budget: 100 lines. It is loaded into every agent's context, so keep it short.
-Detail lives in the contributor section of the docs book (`CONTRIBUTING.md` until the book lands).
+Detail lives in the contributor section of the docs book (`docs/contributing/`).
 
 ## What this repo is
 
@@ -58,7 +58,7 @@ Workflows live in `packages/runtime/workflows/*.ts` (built in) and `.agents/work
 - Commit, push and PR are done by the workflow code, not by you.
 - Tests against the real API: prefer the models included in the plan (`composer-2.5`, Grok, `default`). Models that
   use paid quota are allowed when the test needs them. Always pass `--max-tokens` and `--max-cents`. Full policy in
-  `CONTRIBUTING.md`.
+  chapter 9.1 (`docs/contributing/01-contribuindo.md`).
 - Metrics live in `~/.cursor-workflows/metrics.db` (`npm run stats`, `npm run dash`). Never send the database, or an
   export made with `--no-anonymize`, off the user's machine.
 

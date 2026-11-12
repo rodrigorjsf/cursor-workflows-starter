@@ -57,7 +57,7 @@ values that you tune: [2.2 §3](docs/usage/02-configuracao-inicial.md#3-teto-de-
 |---|---|---|
 | Runtime | `ctx.agent`, `parallel`, `pipeline` and `phase`; model and retries per step; schema-validated output; cost cap | [3.1 · Arquitetura](docs/internals/01-arquitetura.md) |
 | Resume and event log | The journal avoids redoing finished steps; every fact of a run goes to one log per run | [6.1 · Referência de eventos](docs/reference/events.md) |
-| MCP server and `wf` CLI | `start_workflow`, `wait_workflow` and friends; `wf init`, `doctor`, `upgrade`, `run`, `start`, `status`, `jobs`, `stats` | [2.3 · Invocação](docs/usage/03-invocacao-no-cursor-ide.md) |
+| MCP server and `wf` CLI | `start_workflow`, `wait_workflow` and friends; `wf init`, `doctor`, `upgrade`, `config show`, `run`, `start`, `status`, `wait`, `cancel`, `jobs`, `gc`, `stats` | [2.3 · Invocação](docs/usage/03-invocacao-no-cursor-ide.md) |
 | Skills | `run-workflow`, `cursor-workflow-authoring`, `skill-to-workflow` and `cursor-workflows-setup` | [4.1](docs/authoring/01-escrevendo-workflows.md) and [4.2](docs/authoring/02-convertendo-skills-e-subagents.md) |
 | `implement-issue` | Example workflow: TDD slice by slice, a three-axis review, a PR with evidence | [4.2](docs/authoring/02-convertendo-skills-e-subagents.md) |
 | Metrics and dashboard | Cost, tokens and efficiency in a local SQLite; a localhost dashboard | [5.3 · Observabilidade](docs/operating/03-observabilidade.md) |
