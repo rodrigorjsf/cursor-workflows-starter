@@ -15,11 +15,11 @@ main() {
   set -euo pipefail
 
   local default_repo="https://github.com/rodrigorjsf/cursor-workflows-starter.git"
-  local tag="" repo="$default_repo" mode=""
+  local tag="" repo="$default_repo" repo_given="" mode=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --tag) tag="${2:?--tag precisa de um valor, por exemplo --tag v0.3.0}"; mode="tag"; shift 2 ;;
-      --repo) repo="${2:?--repo precisa de um valor}"; shift 2 ;;
+      --repo) repo="${2:?--repo precisa de um valor}"; repo_given="yes"; shift 2 ;;
       --dev) mode="dev"; shift ;;
       --refresh) mode="refresh"; shift ;;
       -h|--help) usage; return 0 ;;
@@ -39,13 +39,13 @@ main() {
 
   mkdir -p "$wf_dir"
   case "$mode" in
-    tag) fetch_kit "$kit" "$tag" "$repo" ;;
+    tag) fetch_kit "$kit" "$tag" "$repo" "$repo_given" ;;
     dev) link_working_copy "$kit" "${BASH_SOURCE[0]:-}" ;;
     refresh) [ -d "$kit" ] || die "não há kit em $kit; instale com --tag vX.Y.Z (ou --dev)" ;;
   esac
 
   check_node "$kit"
-  install_dependencies "$kit" "$mode"
+  install_dependencies "$kit"
   write_shim "$kit" "$bin_dir"
   link_skills "$kit" "$skills_dir"
   write_default_config "$kit" "$wf_dir"
@@ -66,12 +66,14 @@ warn() {
 }
 
 # Puts the kit at $kit on the tag: clones it, or moves an existing clone to the tag. A kit location that is a link is a dev
-# install: it points at somebody's working copy, which this script must not check out.
+# install: it points at somebody's working copy, which this script must not check out. An existing clone fetches from
+# its own origin; a --repo given on the command line replaces that origin first.
 fetch_kit() {
-  local kit="$1" tag="$2" repo="$3"
+  local kit="$1" tag="$2" repo="$3" repo_given="$4"
   [ ! -L "$kit" ] || die "$kit é uma instalação de desenvolvimento (aponta para $(readlink "$kit")); remova o link para instalar uma tag"
   if [ -d "$kit/.git" ]; then
-    git -C "$kit" fetch --quiet --tags --force || die "não consegui buscar as tags de $repo"
+    [ -z "$repo_given" ] || git -C "$kit" remote set-url origin "$repo"
+    git -C "$kit" fetch --quiet --tags --force || die "não consegui buscar as tags de $(git -C "$kit" remote get-url origin)"
     git -C "$kit" -c advice.detachedHead=false checkout --quiet "$tag" || die "a tag $tag não existe em $kit"
   else
     git clone --quiet --branch "$tag" "$repo" "$kit" || die "não consegui clonar $repo na tag $tag"
@@ -97,15 +99,21 @@ check_node() {
     die "o Node $have ($(command -v node)) é antigo demais: o kit exige $need ou mais novo. Instale um Node mais novo, coloque-o no PATH e rode de novo"
 }
 
-# A tag install gets the lockfile's exact tree. A working copy is the maintainer's: `npm ci` would empty its node_modules,
-# so it only gets what is missing.
+# A tag install gets the lockfile's exact tree. A dev install (the kit location links to a working copy) is the
+# maintainer's: `npm ci` would empty its node_modules, so it only gets what is missing.
 install_dependencies() {
-  local kit="$1" mode="$2"
-  if [ "$mode" = "dev" ]; then
+  local kit="$1"
+  if [ -L "$kit" ]; then
     [ -x "$kit/node_modules/.bin/tsx" ] || (cd "$kit" && npm install --no-audit --no-fund)
   else
     (cd "$kit" && npm ci --no-audit --no-fund)
   fi
+}
+
+# $1 as one word for a POSIX shell: in single quotes, each ' written as '\''.
+sh_quote() {
+  local escaped="'\\''"
+  printf "'%s'" "${1//\'/$escaped}"
 }
 
 # The `wf` command: runs the CLI of whatever kit is at $kit. A `wf` the user already has, that this script did not write,
@@ -117,7 +125,7 @@ write_shim() {
     return 0
   fi
   mkdir -p "$bin_dir"
-  printf '#!/bin/sh\n# cursor-workflows shim, written by install.sh. Runs the kit at %s.\nexec "%s/node_modules/.bin/tsx" "%s/packages/runtime/src/cli.ts" "$@"\n' "$kit" "$kit" "$kit" > "$shim.tmp"
+  printf '#!/bin/sh\n# cursor-workflows shim, written by install.sh.\nexec %s %s "$@"\n' "$(sh_quote "$kit/node_modules/.bin/tsx")" "$(sh_quote "$kit/packages/runtime/src/cli.ts")" > "$shim.tmp"
   chmod +x "$shim.tmp"
   mv -f "$shim.tmp" "$shim"
   case ":$PATH:" in
@@ -150,7 +158,7 @@ link_skills() {
   for link in "$skills_dir"/*; do
     [ -L "$link" ] || continue
     case "$(readlink "$link")" in
-      "$kit/skills/"*) [ -e "$link" ] || { rm "$link"; echo "removi $link: a skill saiu do kit"; } ;;
+      "$kit/skills/"*) [ -f "$link/SKILL.md" ] || { rm "$link"; echo "removi $link: a skill saiu do kit"; } ;;
     esac
   done
 }

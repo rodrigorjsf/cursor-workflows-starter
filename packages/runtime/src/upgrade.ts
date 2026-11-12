@@ -23,12 +23,15 @@ export interface UpgradeResult {
   tag: string;
 }
 
+const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+const installerOf = (kit: string): string => join(kit, "scripts", "install.sh");
+
 const git = (kit: string, ...args: string[]): string => {
   try {
     return execFileSync("git", ["-C", kit, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   } catch (err) {
-    const stderr = (err as { stderr?: string }).stderr?.trim();
-    throw new Error(stderr || (err instanceof Error ? err.message : String(err)));
+    throw new Error((err as { stderr?: string }).stderr?.trim() || messageOf(err));
   }
 };
 
@@ -50,7 +53,7 @@ function newestReleaseTag(kit: string): string {
   try {
     git(kit, "fetch", "--quiet", "--tags", "--force");
   } catch (err) {
-    throw new Error(`não consegui buscar as tags do repositório de origem do kit: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`não consegui buscar as tags do repositório de origem do kit: ${messageOf(err)}`);
   }
   const releases = git(kit, "tag", "--list", "v*")
     .split("\n")
@@ -68,11 +71,15 @@ export function upgradeKit(): UpgradeResult {
   const to = semver.parse(tag)!.version;
   if (semver.lte(to, from)) return { upgraded: false, from, to: from, tag };
 
-  git(kit, "-c", "advice.detachedHead=false", "checkout", "--quiet", tag);
+  try {
+    git(kit, "-c", "advice.detachedHead=false", "checkout", "--quiet", tag);
+  } catch (err) {
+    throw new Error(`não consegui mudar o kit para ${tag}; ele continua na versão ${from}: ${messageOf(err)}`);
+  }
   // The new tag's installer, not this one: it knows what the new tag ships. Its output must not mix into our stdout.
-  const refresh = spawnSync("bash", [join(kit, "scripts", "install.sh"), "--refresh"], { stdio: ["ignore", 2, 2] });
+  const refresh = spawnSync("bash", [installerOf(kit), "--refresh"], { stdio: ["ignore", 2, 2] });
   if (refresh.status !== 0) {
-    throw new Error(`o kit já está em ${tag}, mas o instalador falhou ao refazer dependências, comando e links. Rode \`bash ${join(kit, "scripts", "install.sh")} --refresh\` depois de corrigir o erro acima.`);
+    throw new Error(`o kit já está em ${tag}, mas o instalador falhou ao refazer dependências, comando e links. Rode \`bash ${installerOf(kit)} --refresh\` depois de corrigir o erro acima.`);
   }
   return { upgraded: true, from, to, tag };
 }

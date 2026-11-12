@@ -86,7 +86,7 @@
   (`templates/global-config.json`: 3.000.000 de tokens e 500 centavos por run, 600.000 tokens por etapa, simultaneidade 4,
   só etapas locais) se o arquivo não existir. Para antes de instalar se o Node for mais antigo que o `engines.node`, e não
   toca numa pasta de skill, num link ou num `wf` que seja do usuário. `--dev` faz do kit instalado um link para a cópia de
-  trabalho (sem `npm ci`, que esvaziaria o `node_modules` dela), e `--refresh` refaz dependências, comando, links e
+  trabalho (sem `npm ci`, que esvaziaria o `node_modules` dela, nem num `--refresh` depois), e `--refresh` refaz dependências, comando, links e
   configuração para o kit que já está no lugar. O `wf upgrade` busca as tags, leva o kit instalado à release mais nova
   (pré-lançamentos não contam) e roda o `install.sh --refresh` dessa tag: uma skill nova ganha link e o link de uma skill
   que saiu é removido. Ele recusa uma instalação de desenvolvimento, um `wf` que roda de outra pasta e a falta de rede, sem

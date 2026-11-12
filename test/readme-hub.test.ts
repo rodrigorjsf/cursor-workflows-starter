@@ -2,7 +2,8 @@
 // "what you get" table, links into the book) in pt-BR, mirrored by README.en.md in English. Whether its links resolve
 // is docs-check.test.ts; these tests read what the hub holds and what it must leave to the book.
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { markdownFiles, parseMarkdown } from "../scripts/lib/markdown.js";
@@ -110,14 +111,15 @@ test("no deep content is duplicated between a README and the book", () => {
 test("the quickstart only runs commands that exist: the installer it fetches, the wf commands, the npm scripts", () => {
   const scripts = new Set(Object.keys(JSON.parse(read("package.json")).scripts as Record<string, string>));
   const commands = wfCommands();
+  const installerHelp = spawnSync("bash", [join(ROOT, "scripts", "install.sh"), "--help"], { encoding: "utf8" }).stdout;
   for (const hub of HUBS) {
     const lines = read(hub.file).match(/^(?:npm run [\w:-]+|wf [a-z]+|bash \S*install\.sh .*)/gm) ?? [];
     assert.ok(lines.length >= 4, `${hub.file}: the quickstart runs something (found ${lines.length} commands)`);
     for (const line of lines) {
-      const [first, second] = line.split(" ");
-      if (first === "npm") assert.ok(scripts.has(line.split(" ")[2]!), `${hub.file}: ${line} is not a script in package.json`);
+      const [first, second, third] = line.split(" ");
+      if (first === "npm") assert.ok(scripts.has(third!), `${hub.file}: ${line} is not a script in package.json`);
       else if (first === "wf") assert.ok(commands.includes(second!), `${hub.file}: wf ${second} is not a command of the CLI`);
-      else assert.ok(existsSync(join(ROOT, "scripts", "install.sh")), `${hub.file}: the installer is missing`);
+      else for (const flag of line.match(/ --[a-z-]+/g) ?? []) assert.ok(installerHelp.includes(flag.trim()), `${hub.file}: install.sh --help does not list${flag}`);
     }
     assert.ok(lines.some((l) => l.startsWith("wf init")) && lines.some((l) => l.startsWith("wf doctor")), `${hub.file}: the quickstart sets up a repo and checks it`);
   }

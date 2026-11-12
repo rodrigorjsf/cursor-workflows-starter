@@ -14,9 +14,8 @@
 the code.
 
 **B. Install the kit once and point each repository at it.** The kit lives at `~/.cursor-workflows/kit`, installed once per
-machine (the `cursor-workflows-setup` skill, or the install guide
-https://github.com/rodrigorjsf/cursor-workflows-starter/blob/main/INSTALL-AGENT.md). In the target repository run
-`wf init`: it writes the `workflows` server into `.cursor/mcp.json` (through `${userHome}`) and `.mcp.json` (through
+machine by its installer (a missing kit is installed with the install guide, `INSTALL-AGENT.md`, in the kit's GitHub
+repository). In the target repository run `wf init`: it writes the `workflows` server into `.cursor/mcp.json` (through `${userHome}`) and `.mcp.json` (through
 `${HOME}`), a repo config at `.agents/workflows/config.json`, a `.workflows/` line in `.gitignore` and a marked rules
 block in `AGENTS.md`. It prints the diff and never commits.
 

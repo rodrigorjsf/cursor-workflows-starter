@@ -9,8 +9,9 @@ The kit is installed once per machine at `~/.cursor-workflows/kit`, with a `wf` 
 linked into `~/.claude/skills/` (Cursor reads that folder too). Each repo gets its own files from `wf init`. Every
 command below runs as `wf <command>` from the repo's root, or with `--cwd <repo>`.
 
-If `wf` is not found, the kit is not installed, or its folder is not on the PATH: follow
-https://github.com/rodrigorjsf/cursor-workflows-starter/blob/main/INSTALL-AGENT.md and come back.
+If `wf` is not found, the installer's folder is probably off the PATH: run `~/.local/bin/wf` instead, and tell the user
+to add `~/.local/bin` to their PATH. If that file or `~/.cursor-workflows/kit` is missing, the kit is not installed: the
+user installs it with the install guide, `INSTALL-AGENT.md`, in the kit's GitHub repository.
 
 The runtime's messages are in Portuguese. This skill quotes the ones it matches, in code spans.
 

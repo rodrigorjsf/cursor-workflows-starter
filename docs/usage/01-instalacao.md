@@ -49,7 +49,7 @@ Baixar o script para um arquivo, em vez de passá-lo direto ao `bash`, deixa voc
 
 | Passo | Resultado |
 |---|---|
-| Kit | Clona o repositório na tag em `~/.cursor-workflows/kit` (`WF_HOME` muda a pasta `~/.cursor-workflows`). Se já há um clone, move-o para a tag |
+| Kit | Clona o repositório na tag em `~/.cursor-workflows/kit` (`WF_HOME` muda a pasta `~/.cursor-workflows`). Se já há um clone, busca as tags da origem dele e o move para a tag (um `--repo` dado de novo troca essa origem antes) |
 | Node | Para antes de instalar qualquer coisa se o `node` do PATH for mais antigo que o `engines.node` do kit (22.13), dizendo as duas versões |
 | Dependências | `npm ci` na pasta do kit: a árvore exata do `package-lock.json` |
 | Comando `wf` | Escreve `~/.local/bin/wf`, um script que roda o CLI do kit instalado. Se a pasta não está no PATH, o instalador avisa e diz como corrigir (bash ou zsh: `export PATH` no `~/.profile`; fish: `fish_add_path`). Um `wf` que não é dele fica como está, com aviso |

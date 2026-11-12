@@ -255,6 +255,64 @@ function lstatExists(path: string): boolean {
   }
 }
 
+test("--refresh on a dev install never runs npm ci in the working copy", () => {
+  const home = newHome();
+  const copy = workingCopy(true);
+  assert.equal(install(home, ["--dev"], { from: copy }).status, 0);
+  const before = npmCalls().length;
+  assert.equal(install(home, ["--refresh"]).status, 0);
+  assert.deepEqual(npmCalls().slice(before), [], "the working copy has its dependencies: nothing to install, and ci would empty them");
+
+  // Without them, only `install` fills the gap.
+  rmSync(join(copy, "node_modules"));
+  assert.equal(install(home, ["--refresh"]).status, 0);
+  assert.deepEqual(npmCalls().slice(before), [`${kitOf(home)} install --no-audit --no-fund`]);
+});
+
+test("a skill whose folder stays in the kit without a SKILL.md loses its link on --refresh", () => {
+  const home = newHome();
+  assert.equal(install(home, ["--tag", "v0.3.0", "--repo", origin]).status, 0);
+  const folder = join(kitOf(home), "skills", "half-removed");
+  mkdirSync(folder);
+  writeFileSync(join(folder, "SKILL.md"), "---\nname: half-removed\n---\n");
+  assert.equal(install(home, ["--refresh"]).status, 0);
+  assert.ok(lstatSync(join(home, ".claude", "skills", "half-removed")).isSymbolicLink());
+
+  // A checkout leaves untracked leftovers behind; the folder is there, the skill is not.
+  rmSync(join(folder, "SKILL.md"));
+  writeFileSync(join(folder, "notes.txt"), "left over\n");
+  assert.equal(install(home, ["--refresh"]).status, 0);
+  assert.ok(!lstatExists(join(home, ".claude", "skills", "half-removed")));
+});
+
+test("the installer works in a home whose path has spaces, quotes and a dollar sign, and the shim runs the kit from there", () => {
+  const home = join(sandbox, `home ${++counter} it's $HOME "x"`);
+  mkdirSync(home);
+  const r = install(home, ["--tag", "v0.3.0", "--repo", origin]);
+  assert.equal(r.status, 0, r.stderr);
+  const repo = join(home, "repo");
+  mkdirSync(repo);
+  const listed = spawnSync(shimOf(home), ["list", "--cwd", repo], { env: env(home), encoding: "utf8" });
+  assert.equal(listed.status, 0, listed.stderr);
+  assert.ok(listed.stdout.includes("implement-issue"), listed.stdout);
+  assert.equal(readlinkSync(join(home, ".claude", "skills", "run-workflow")), join(kitOf(home), "skills", "run-workflow"));
+});
+
+test("--repo given again points an existing clone at that repository before it fetches the tag", () => {
+  const home = newHome();
+  assert.equal(install(home, ["--tag", "v0.3.0", "--repo", origin]).status, 0);
+  const other = originWithReleases();
+
+  const r = install(home, ["--tag", "v0.4.0", "--repo", other], { from: other });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(git(kitOf(home), "describe", "--tags", "--exact-match"), "v0.4.0");
+  assert.equal(git(kitOf(home), "remote", "get-url", "origin"), other);
+
+  // Without --repo the clone keeps the origin it has (a fork, say).
+  assert.equal(install(home, ["--tag", "v0.4.0"], { from: other }).status, 0);
+  assert.equal(git(kitOf(home), "remote", "get-url", "origin"), other);
+});
+
 test("--refresh without an installed kit says how to install one", () => {
   const home = newHome();
   const r = install(home, ["--refresh"]);
@@ -387,5 +445,21 @@ test("wf upgrade that cannot reach the repository fails and leaves the kit as it
   assert.equal(r.status, 1);
   assert.match(r.stderr, /tags/);
   assert.equal(git(kitOf(home), "describe", "--tags", "--exact-match"), "v0.3.0");
+  assert.deepEqual(npmCalls().slice(before), []);
+});
+
+test("wf upgrade whose checkout fails says which tag it could not move to and leaves the kit where it was", () => {
+  const dir = originWithReleases();
+  const home = newHome();
+  assert.equal(install(home, ["--tag", "v0.3.0", "--repo", dir], { from: dir }).status, 0);
+  const kit = kitOf(home);
+  // A local edit to a file that v0.4.0 changes: git will not overwrite it.
+  writeFileSync(join(kit, "package.json"), `${readFileSync(join(kit, "package.json"), "utf8")}\n`);
+  const before = npmCalls().length;
+
+  const r = upgrade(home);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /não consegui mudar o kit para v0\.4\.0/);
+  assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.3.0");
   assert.deepEqual(npmCalls().slice(before), []);
 });

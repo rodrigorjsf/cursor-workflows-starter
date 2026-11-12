@@ -124,6 +124,8 @@ test("each distributed skill is self-contained: its instructions live in its own
     for (const file of markdownFiles(join("skills", name))) {
       const text = read(file).replace(/https?:\/\/\S+/g, "");
       assert.doesNotMatch(text, /(^|[^\w/.-])(docs|scripts)\//m, `${file} points at a document or script outside its folder`);
+      // A URL into the kit's own repository is a pointer to a document outside the folder too, one that moves with `main`.
+      assert.doesNotMatch(read(file), /rodrigorjsf\/cursor-workflows-starter/, `${file} links into the kit's repository`);
       for (const target of relativeLinks(read(file))) {
         const resolved = resolve(ROOT, dirname(file), target);
         assert.ok(resolved.startsWith(join(ROOT, "skills", name) + "/"), `${file} links to ${target}, outside the skill folder`);
