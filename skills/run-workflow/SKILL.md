@@ -102,21 +102,26 @@ to the state it had before the step, and returns the job with `status: "cancelle
   The runtime still cancels any cloud agents the run left running. Relay the note as it came: it ends with
   `nothing to cancel`, or names the agents after `cancelled the cloud agent it left running:` (`agents` when there are
   several), or names one it `could not reach` and says to resume the run and cancel it.
+- A `note` that says the process is not the job's (`is not the job's process (was the pid reused?)`): the job's
+  process ended and another process got its pid. No signal was sent, and no step was stopped or reverted. As for a job
+  that already ended, the runtime cancels the cloud agents the run left running, and the note ends the same three ways:
+  `nothing to cancel`, the agents after `cancelled the cloud agent it left running:`, or one it `could not reach`.
+  Relay the note as it came. The job can still show `running` until its heartbeat goes stale (30 s by default); chain
+  `wait_workflow` (step 3) and it ends `failed`.
 - A `note` that starts with `process <pid> had no heartbeat and was killed (SIGKILL)`: the process was frozen, so it
   was killed without undoing the step in progress, and the run stays resumable. The job stays `failed`. Once the
   process is gone, the runtime cancels the cloud agents the run left running, as for a job that already ended: the note
   goes on to name them after `cancelled the cloud agent it left running:`, or names one it `could not reach`. Relay it.
   In the rare case the process `has not exited yet`, the note says those agents were not cancelled: call
   `cancel_workflow` on the same `jobId` once more after a few seconds.
-- A resume after a cancel whose note names cloud agents (after `cancelled the cloud agent it left running:`, in
-  either note above) does not reattach to them. It starts a new cloud agent for each of those steps, at new cost, and
+- A `note` that starts with `could not signal process`: relay it. Nothing was cancelled.
+- `status` still `running` after the call: the process is stopping; chain `wait_workflow` (step 3) until it ends.
+- A resume after any cancel whose note names cloud agents after `cancelled the cloud agent it left running:`, whichever
+  note above it is, does not reattach to them. It starts a new cloud agent for each of those steps, at new cost, and
   the work of the cancelled agents is lost; the log warns
   `cloud agent <id>, left by an interrupted attempt, was cancelled: starting a new one`. Tell the user before
   resuming. Only when no cancel named an agent does the resume reattach to it, and use its answer if its run already
   finished.
-- A `note` that the process is not the job's (`is not the job's process`) or that starts with
-  `could not signal process`: relay it. Nothing was cancelled.
-- `status` still `running` after the call: the process is stopping; chain `wait_workflow` (step 3) until it ends.
 
 ## Without the MCP server
 
