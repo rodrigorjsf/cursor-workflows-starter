@@ -101,7 +101,7 @@ test("the MCP tools get_workflow_status and wait_workflow return the same projec
     wf("wait", fromCli.jobId, "--timeout", "60");
     assertFinishedState(await call("get_workflow_status", { jobId: fromCli.jobId }), fromCli.jobId, "get_workflow_status of a job started by the CLI");
 
-    assert.deepEqual(await call("get_workflow_status", { jobId: "nope" }), { error: "job não encontrado" });
+    assert.deepEqual(await call("get_workflow_status", { jobId: "nope" }), { error: "job not found" });
   } finally {
     await client.close();
   }

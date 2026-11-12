@@ -299,22 +299,22 @@ export default defineWorkflow<Args>({
   meta: {
     name: "implement-issue",
     description:
-      "Implementa uma issue do GitHub com TDD fatia a fatia (red → green conferido pelo código), review em três eixos (Standards, Spec, Segurança) e PR no template Summary/Evidence/Merge Danger.",
-    whenToUse: "Quando o usuário pedir para implementar/resolver uma issue específica pelo número.",
+      "Implements a GitHub issue with slice-by-slice TDD (red → green checked by the code), a three-axis review (Standards, Spec, Security) and a PR in the Summary/Evidence/Merge Danger template.",
+    whenToUse: "When the user asks to implement or resolve a specific issue by number.",
     phases: [{ title: "Triagem" }, { title: "Plano" }, { title: "Implementação" }, { title: "Review" }, { title: "Entrega" }],
     // Roles: the keys of `workflows.implement-issue.roles` in the config. Each role's model is a code default that the
     // config and WF_MODEL_<ROLE> replace. `fix` and `design` declare no model: it depends on the tier or on the step.
     // `cloud`: steps that write to the local worktree never go to a cloud agent; read-only ones may, once the cloud
     // spec lands (they read the run's worktree, hence `read-only`).
     roles: [
-      { name: "classify", description: "Classifica a complexidade quando a issue não tem label.", cloud: "ok", defaults: { model: COMPOSER, settingSources: NO_SETTINGS } },
-      { name: "implement.low", description: "Escreve teste e código no tier LOW (e o refactor).", cloud: "never", envAliases: ["LOW"], defaults: { model: COMPOSER } },
-      { name: "implement.med", description: "Escreve teste e código no tier MED (e o refactor).", cloud: "never", envAliases: ["MED"], defaults: { model: GROK } },
-      { name: "implement.high", description: "Escreve teste e código no tier HIGH (e o refactor).", cloud: "never", envAliases: ["HIGH"], defaults: { model: GROK_HIGH } },
-      { name: "review", description: "Revisa o diff em três eixos (Standards, Spec, Segurança).", cloud: "read-only", defaults: { model: GROK_HIGH, settingSources: NO_SETTINGS } },
-      { name: "fix", description: "Corrige a suíte vermelha de uma fatia; o modelo sobe de nível com o tier.", cloud: "never" },
-      { name: "design", description: "Planeja as fatias (MED) ou desenha e julga a interface (HIGH).", cloud: "read-only", defaults: { settingSources: NO_SETTINGS } },
-      { name: "pr-text", description: "Escreve o texto do corpo do PR.", cloud: "read-only", defaults: { model: COMPOSER, settingSources: NO_SETTINGS } },
+      { name: "classify", description: "Classifies the complexity when the issue has no label.", cloud: "ok", defaults: { model: COMPOSER, settingSources: NO_SETTINGS } },
+      { name: "implement.low", description: "Writes test and code in the LOW tier (and the refactor).", cloud: "never", envAliases: ["LOW"], defaults: { model: COMPOSER } },
+      { name: "implement.med", description: "Writes test and code in the MED tier (and the refactor).", cloud: "never", envAliases: ["MED"], defaults: { model: GROK } },
+      { name: "implement.high", description: "Writes test and code in the HIGH tier (and the refactor).", cloud: "never", envAliases: ["HIGH"], defaults: { model: GROK_HIGH } },
+      { name: "review", description: "Reviews the diff on three axes (Standards, Spec, Security).", cloud: "read-only", defaults: { model: GROK_HIGH, settingSources: NO_SETTINGS } },
+      { name: "fix", description: "Fixes a slice's red suite; the model steps up with the tier.", cloud: "never" },
+      { name: "design", description: "Plans the slices (MED) or designs and judges the interface (HIGH).", cloud: "read-only", defaults: { settingSources: NO_SETTINGS } },
+      { name: "pr-text", description: "Writes the PR body text.", cloud: "read-only", defaults: { model: COMPOSER, settingSources: NO_SETTINGS } },
     ],
     argsSchema: {
       type: "object",

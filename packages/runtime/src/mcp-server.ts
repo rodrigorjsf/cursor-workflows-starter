@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// MCP server (stdio) que expõe os workflows ao chat do Cursor IDE e a qualquer cliente MCP (Claude Code,
-// Codex). Padrão assíncrono: start → jobId; wait com teto curto → estado parcial ou final. Isso evita
-// depender do timeout de chamada de tool do cliente, que o Cursor não documenta.
+// MCP server (stdio) that exposes the workflows to the Cursor IDE chat and to any MCP client (Claude Code, Codex).
+// Asynchronous pattern: start -> jobId; wait with a short ceiling -> partial or final state. This avoids depending on
+// the client's tool-call timeout, which Cursor does not document.
 //
 // Tools:
-//   list_workflows                                  → nome, descrição, quando usar, schema dos args
+//   list_workflows                                  → name, description, when to use, args schema; broken files with their error
 //   start_workflow {name, args, resumeRunId?, overrides?} → {jobId, runId, violations?}
 //                                                   overrides: limits for this run, tighten-only
-//   wait_workflow  {jobId, timeoutSec}              → estado (status, fase, últimas linhas de resumo, gasto, resultado)
-//   get_workflow_status {jobId}                     → estado sem esperar
+//   wait_workflow  {jobId, timeoutSec}              → state (status, phase, recent summary lines, spend, result)
+//   get_workflow_status {jobId}                     → state, without waiting
 //   cancel_workflow {jobId}                         → cancel the job and return its state (the run stays resumable)
 //
 // The state is a projection of the run's event log (jobs.ts): the job record holds identity only.
@@ -18,10 +18,10 @@
 // A job whose process died, or whose heartbeat stopped, shows as "failed" with its runId; relaunch with
 // start_workflow {resumeRunId}: the journal keeps finished steps from repeating.
 //
-// STATUS: exercitado por stdio (initialize, tools/list, list_workflows) nos testes de fumaça do kit.
+// STATUS: exercised over stdio (initialize, tools/list, list_workflows) by the kit's smoke tests.
 
-import "./console-to-stderr.js"; // stdout é o canal JSON-RPC: o console do SDK e dos workflows vai para o stderr
-import "./node-check.js"; // antes de tudo: o @cursor/sdk exige Node 22.13+
+import "./console-to-stderr.js"; // stdout is the JSON-RPC channel: the SDK and workflow console goes to stderr
+import "./node-check.js"; // before anything else: @cursor/sdk requires Node 22.13+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -33,9 +33,9 @@ import { type BrokenWorkflow, discoverWorkflows } from "./runtime/registry.js";
 
 installCrashHandlers();
 
-// Os agentes das etapas carregam o .cursor/mcp.json do projeto (settingSources "project") e, com a
-// tool "mcp" liberada, poderiam iniciar este mesmo servidor e disparar workflows recursivamente.
-// O engine marca o ambiente; aqui, dentro de uma etapa, o servidor não expõe nenhuma tool.
+// Step agents load the project's .cursor/mcp.json (settingSources "project") and, with the "mcp" tool allowed, could
+// start this same server and launch workflows recursively. The engine marks the environment; here, inside a step, the
+// server exposes no tools.
 const nested = process.env[INSIDE_WORKFLOW_ENV] === "1";
 
 const cwd = process.env.WF_CWD ?? process.cwd();
@@ -53,14 +53,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     : [
         {
           name: "list_workflows",
-          description: "Lista os workflows determinísticos disponíveis neste repositório.",
+          description: "Lists the deterministic workflows available in this repository. A workflow file that failed to load is listed with its `file` and `error`.",
           inputSchema: { type: "object", properties: {} },
         },
         {
           name: "start_workflow",
           description:
-            "Inicia um workflow pelo nome. O workflow roda até o fim por conta própria (etapas, modelos e revisões " +
-            "definidos em código). Retorna um jobId; depois chame wait_workflow até status != running. Disponíveis: " +
+            "Starts a workflow by name. The workflow runs to the end on its own (steps, models and reviews are " +
+            "defined in code). Returns a jobId; then call wait_workflow until status != running. Available: " +
             [...workflows.values()].map((w) => `${w.meta.name} (${w.meta.whenToUse ?? w.meta.description})`).join("; "),
           inputSchema: {
             type: "object",
@@ -68,17 +68,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             properties: {
               name: { type: "string", enum: [...workflows.keys()] },
               args: { type: "object" },
-              resumeRunId: { type: "string", description: "runId de um run anterior (que falhou, ou que parou num checkpoint e devolveu `next`), para retomar sem repetir etapas concluídas" },
+              resumeRunId: { type: "string", description: "runId of an earlier run (one that failed, or stopped at a checkpoint and returned `next`), to resume it without repeating finished steps" },
               overrides: {
                 type: "object",
                 description:
-                  "Limites mais apertados só para este run (por exemplo um teto de tokens menor para um experimento). Só aperta: um valor mais frouxo que o da configuração, ou os tetos globais, não tem efeito e volta em `violations`.",
+                  "Tighter limits for this run only (for example a lower token cap for an experiment). Tighten-only: a value looser than the config, or than the global caps, has no effect and comes back in `violations`.",
                 additionalProperties: false,
                 properties: {
-                  maxTokens: { type: "integer", minimum: 0, description: "Teto de tokens do run." },
-                  maxTokensPerStep: { type: "integer", minimum: 0, description: "Teto de tokens de cada etapa." },
-                  maxCents: { type: "number", minimum: 0, description: "Teto de custo do run, em centavos." },
-                  concurrency: { type: "integer", minimum: 1, description: "Agentes simultâneos." },
+                  maxTokens: { type: "integer", minimum: 0, description: "Token cap for the run." },
+                  maxTokensPerStep: { type: "integer", minimum: 0, description: "Token cap for each step." },
+                  maxCents: { type: "number", minimum: 0, description: "Cost cap for the run, in cents." },
+                  concurrency: { type: "integer", minimum: 1, description: "Concurrent agents." },
                 },
               },
             },
@@ -86,7 +86,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         },
         {
           name: "wait_workflow",
-          description: "Espera até timeoutSec (máx. 50) pelo fim do job e devolve o estado. Repita enquanto status = running.",
+          description: "Waits up to timeoutSec (max. 50) for the job to end and returns its state. Repeat while status = running.",
           inputSchema: {
             type: "object",
             required: ["jobId"],
@@ -95,15 +95,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         },
         {
           name: "get_workflow_status",
-          description: "Estado atual de um job, sem esperar.",
+          description: "Current state of a job, without waiting.",
           inputSchema: { type: "object", required: ["jobId"], properties: { jobId: { type: "string" } } },
         },
         {
           name: "cancel_workflow",
           description:
-            "Cancela um job em andamento: para os agentes ativos, desfaz a etapa que estava escrevendo e marca o job como cancelled. " +
-            "Um processo travado (job failed com 'sem sinal de vida') é encerrado à força. " +
-            "O run pode ser retomado depois com start_workflow {resumeRunId}. Só chame quando o usuário pedir para parar.",
+            "Cancels a running job: stops the active agents, reverts the step that was writing and marks the job cancelled. " +
+            "A stuck process (a failed job with no heartbeat) is killed. " +
+            "The run can be resumed later with start_workflow {resumeRunId}. Call it only when the user asks to stop.",
           inputSchema: { type: "object", required: ["jobId"], properties: { jobId: { type: "string" } } },
         },
       ],
@@ -113,14 +113,14 @@ const text = (v: unknown) => ({ content: [{ type: "text" as const, text: JSON.st
 const fail = (v: unknown) => ({ ...text(v), isError: true });
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
-  if (nested) return fail({ error: "workflows não podem ser iniciados de dentro de uma etapa de workflow" });
+  if (nested) return fail({ error: "workflows cannot be started from inside a workflow step" });
   const a = (req.params.arguments ?? {}) as Record<string, unknown>;
   switch (req.params.name) {
     case "list_workflows":
       return text([...[...workflows.values()].map((w) => ({ ...w.meta })), ...broken]);
     case "start_workflow": {
       const def = workflows.get(String(a.name));
-      if (!def) return fail({ error: `workflow desconhecido: ${String(a.name)}` });
+      if (!def) return fail({ error: `unknown workflow: ${String(a.name)}` });
       const runId = typeof a.resumeRunId === "string" ? a.resumeRunId : undefined;
       // The config is read afresh here, so an unusable one is refused before a job exists, and a looser override is reported now.
       // So is a kit outside the version range the repo declares: first, because an older kit may not understand a newer config.
@@ -135,18 +135,18 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         throw err;
       }
       const { job } = spawnJob({ cwd, workflow: def.meta.name, args: a.args ?? {}, resumeRunId: runId, overrides: mcpOverrides });
-      return text({ jobId: job.jobId, runId: job.runId, next: "chame wait_workflow com este jobId", ...(violations.length ? { violations } : {}) });
+      return text({ jobId: job.jobId, runId: job.runId, next: "call wait_workflow with this jobId", ...(violations.length ? { violations } : {}) });
     }
     case "wait_workflow": {
       const secs = Math.min(Number(a.timeoutSec ?? 45), 50);
-      return text((await waitJob(cwd, String(a.jobId), secs * 1000)) ?? { error: "job não encontrado" });
+      return text((await waitJob(cwd, String(a.jobId), secs * 1000)) ?? { error: "job not found" });
     }
     case "get_workflow_status":
-      return text(readJob(cwd, String(a.jobId)) ?? { error: "job não encontrado" });
+      return text(readJob(cwd, String(a.jobId)) ?? { error: "job not found" });
     case "cancel_workflow":
-      return text((await cancelJob(cwd, String(a.jobId), 20_000)) ?? { error: "job não encontrado" });
+      return text((await cancelJob(cwd, String(a.jobId), 20_000)) ?? { error: "job not found" });
     default:
-      return fail({ error: `tool desconhecida: ${req.params.name}` });
+      return fail({ error: `unknown tool: ${req.params.name}` });
   }
 });
 

@@ -22,14 +22,14 @@ The runtime's messages are in Portuguese. This skill quotes the ones it matches,
      resume: `implement-issue` (`additionalProperties: false`) fails with `args inválidos`, and a workflow without
      that guard starts from scratch, without the journal.
 2. Call `start_workflow` with `{ name, args }` (and `resumeRunId`, if any). The step ends with the `jobId` in hand; a
-   return with `error` (`workflow desconhecido`, an invalid config with its file and field path, or a kit outside the
+   return with `error` (`unknown workflow`, an invalid config with its file and field path, or a kit outside the
    version range the repo declares) goes back to step 1, or to the user for the config and the kit version: tell them
    to run `wf doctor`.
    - When the user asks for a tighter budget for this run, pass `overrides` (`maxTokens`, `maxCents`,
      `maxTokensPerStep`, `concurrency`). They only tighten: a looser value comes back in `violations` and has no
      effect, so tell the user.
 3. Chain `wait_workflow` calls with `{ jobId, timeoutSec: 45 }`, one right after the other, until `status` is no
-   longer `running`. A return with `error` and no `status` (`job não encontrado`) also ends the wait: relay the error
+   longer `running`. A return with `error` and no `status` (`job not found`) also ends the wait: relay the error
    and the `jobId` to the user.
    - On each return, show the user the current `phase` and the new lines of `recent`, in one or two lines.
    - Note the cost warnings (`getUsage() falhou`, attempt cost not yet reported) for step 4: `recent` keeps only the

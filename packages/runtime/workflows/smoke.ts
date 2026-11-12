@@ -23,15 +23,15 @@ const ANSWER_SCHEMA = {
   properties: { answer: { enum: ["pong"] } },
 };
 
-const PROMPT = "Teste de fumaça do kit. Não leia nem altere nada. Chame a tool submit_result com answer igual a \"pong\".";
+const PROMPT = "Kit smoke test. Do not read or change anything. Call the submit_result tool with answer equal to \"pong\".";
 
 export default defineWorkflow({
   meta: {
     name: "smoke",
-    description: "Teste de fumaça barato: uma etapa de agente com resultado estruturado, num modelo incluído no plano e com teto de tokens baixo.",
-    whenToUse: "Quando o usuário pedir para testar ou validar o kit, o servidor MCP ou o login, antes de rodar um workflow de verdade.",
+    description: "Cheap smoke test: one agent step with a structured result, on a model the plan includes and with a low token cap.",
+    whenToUse: "When the user asks to test or validate the kit, the MCP server or the login, before running a real workflow.",
     phases: [{ title: "Ping" }],
-    roles: [{ name: "ping", description: "A única etapa: devolve o resultado estruturado.", cloud: "ok", defaults: { model: COMPOSER, settingSources: [] } }],
+    roles: [{ name: "ping", description: "The only step: returns the structured result.", cloud: "ok", defaults: { model: COMPOSER, settingSources: [] } }],
     argsSchema: { type: "object", additionalProperties: false, properties: {} },
   },
   defaults: { timeoutMs: 3 * 60_000, retries: 0, schemaRetries: 1 },
