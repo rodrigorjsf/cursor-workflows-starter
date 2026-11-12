@@ -158,6 +158,23 @@ test("memo: reaproveita entre runs no mesmo estado do repo e invalida quando o r
   assert.equal(calls.length, 3);
 });
 
+test("memo still serves a step when the local changes diff past 1 MiB", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  mkdirSync(cwd, { recursive: true });
+  const git = (...a: string[]) => execFileSync("git", a, { cwd, stdio: "ignore" });
+  git("init", "-q");
+  writeFileSync(join(cwd, "big.txt"), "1");
+  git("add", ".");
+  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init");
+  writeFileSync(join(cwd, "big.txt"), "line of local change\n".repeat(120_000)); // ~2.5 MB diff, past Node's 1 MiB default buffer
+  const wf = defineWorkflow({ meta: { name: "mb", description: "mb" }, defaults: { model: { id: "m" } }, run: (ctx) => ctx.agent("plan", { tools: ["read"], memo: true }) });
+
+  await runWorkflow(wf, {}, { cwd });
+  await runWorkflow(wf, {}, { cwd });
+  assert.equal(calls.length, 1, "the second run should come from the memo");
+});
+
 test("memo é recusado em etapa que pode escrever", async () => {
   const wf = defineWorkflow({ meta: { name: "mw", description: "mw" }, defaults: { model: { id: "m" } }, run: (ctx) => ctx.agent("x", { tools: ["read", "edit"], memo: true }) });
   const r = await runWorkflow(wf, {}, { cwd });

@@ -25,7 +25,9 @@ export function isReadOnly(tools: readonly ToolName[] | undefined): boolean {
 /** Estado do repositório em `cwd`, ou undefined se não for um repositório git. */
 export function repoState(cwd: string): string | undefined {
   try {
-    const git = (...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    // Node's default 1 MiB buffer would turn a large local diff into "not a git repo" and silently disable the memo.
+    const git = (...args: string[]) =>
+      execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 * 1024 * 1024 });
     const head = git("rev-parse", "HEAD").trim();
     const hash = createHash("sha256").update(git("diff", "HEAD", "--binary"));
     // Arquivos novos (não rastreados) entram pelo conteúdo. `.workflows/` fica fora via .git/info/exclude.
