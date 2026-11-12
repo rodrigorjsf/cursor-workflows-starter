@@ -33,8 +33,11 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   │   └── nested-mcp-guard.mjs  # servidor MCP sem tools que barra workflow dentro de etapa
 │       │   ├── observability/      # banco SQLite de métricas, recorder, consultas, dashboard localhost
 │       │   ├── init.ts             # wf init: planeja e grava os arquivos do kit no repositório alvo (sem commit)
+│       │   ├── doctor.ts           # wf doctor: as verificações do ambiente e o relatório
+│       │   ├── mcp-launch.ts       # como o IDE inicia o servidor MCP (o `workflows` do .cursor/mcp.json e do .mcp.json)
+│       │   ├── kit-version.ts      # versão do kit e a faixa `kit` que o repositório declara
 │       │   ├── unified-diff.ts     # o diff que o wf init imprime
-│       │   ├── cli.ts              # wf login | whoami | models | list | init | config | run | start | wait | status | cancel | jobs | stats | metrics
+│       │   ├── cli.ts              # wf login | whoami | models | list | init | doctor | config | run | start | wait | status | cancel | jobs | stats | metrics
 │       │   └── mcp-server.ts       # tools MCP: list_workflows, start_workflow, wait_workflow, get_workflow_status, cancel_workflow
 │       ├── workflows/
 │       │   ├── implement-issue.ts  # exemplo: TDD fatia a fatia conferido pelo código → review em 3 eixos → PR com evidência

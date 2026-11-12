@@ -7,6 +7,7 @@
 //   wf list
 //   wf init [--no-agents-md | --remove]   # writes the kit's files into the repo (MCP configs, repo config, .gitignore, AGENTS.md block); prints the diff, never commits
 //   wf config show [workflow]         # effective config of the current repo and where each value came from
+//   wf doctor [--json]                # checks the environment the IDE uses (Node, dependencies, login, models, gh, MCP server, config); exits 1 when a check fails
 //   wf run <workflow> --args '<json>' [--max-cents N] [--resume <runId>]   # primeiro plano; imprime JSON no fim
 //   wf start <workflow> --args '<json>' [--resume <runId>]                 # segundo plano; imprime {jobId}
 //   wf status <jobId>
@@ -30,7 +31,9 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { Cursor } from "@cursor/sdk";
 import { globalConfigPath, loadEffectiveConfig, parseLimitOverrides, repoConfigPath } from "./config/index.js";
+import { formatReport, runDoctor } from "./doctor.js";
 import { initRepo } from "./init.js";
+import { assertKitCompatible } from "./kit-version.js";
 import { unifiedDiff } from "./unified-diff.js";
 import { INSIDE_WORKFLOW_ENV, type RunStatus, runWorkflow } from "./runtime/engine.js";
 import { cancelJob, cancelOnSignals, installCrashHandlers, listJobs, readJob, readJobRecord, spawnJob, startJob, waitJob } from "./runtime/jobs.js";
@@ -53,6 +56,7 @@ const { positionals, values } = parseArgs({
     "no-anonymize": { type: "boolean", default: false },
     "no-agents-md": { type: "boolean", default: false },
     remove: { type: "boolean", default: false },
+    json: { type: "boolean", default: false },
   },
 });
 
@@ -99,6 +103,7 @@ async function main(): Promise<number> {
   if ((command === "run" || command === "start") && process.env[INSIDE_WORKFLOW_ENV] === "1" && !values.job) {
     throw new Error("workflows não podem ser iniciados de dentro de uma etapa de workflow");
   }
+  if (command === "run" || command === "start") assertKitCompatible(cwd); // before anything starts: a kit outside the repo's declared range is refused
   switch (command) {
     case "login": {
       const r = await Cursor.auth.login();
@@ -128,6 +133,12 @@ async function main(): Promise<number> {
       process.stderr.write(changes.length ? `wf init: ${changes.length} arquivo(s) alterado(s) em ${cwd}. Nada foi commitado: revise o diff e faça o commit você mesmo.\n` : "wf init: nada a mudar, o repositório já está configurado.\n");
       for (const note of notes) process.stderr.write(`wf init: ${note}\n`);
       return 0;
+    }
+    case "doctor": {
+      const report = await runDoctor({ cwd });
+      if (values.json) out(report);
+      else process.stdout.write(formatReport(report));
+      return report.ok ? 0 : 1;
     }
     case "config": {
       if (name !== "show") throw new Error("uso: wf config show [workflow] [--max-tokens N] [--max-cents N]");
@@ -234,7 +245,7 @@ async function main(): Promise<number> {
       }
     }
     default:
-      process.stderr.write("uso: wf <login|whoami|list|init|config|run|start|status|wait|cancel|jobs|stats|metrics> ...\n");
+      process.stderr.write("uso: wf <login|whoami|list|init|doctor|config|run|start|status|wait|cancel|jobs|stats|metrics> ...\n");
       return 2;
   }
 }

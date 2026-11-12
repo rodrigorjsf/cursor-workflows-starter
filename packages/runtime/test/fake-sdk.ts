@@ -125,4 +125,24 @@ export const Agent = {
     };
   },
 };
-export const Cursor = {};
+/**
+ * Account and catalog, steered through the environment (a spawned `wf` shares nothing else with the test):
+ * `FAKE_SDK_LOGGED_OUT=1` makes every call fail like a rejected key, with a message that carries the key it was given;
+ * `FAKE_SDK_MODELS=a,b` is the catalog, by id (default: the models the built-in workflows use).
+ */
+const DEFAULT_CATALOG = ["composer-2.5", "grok-4.7"];
+const assertLoggedIn = () => {
+  if (process.env.FAKE_SDK_LOGGED_OUT) throw new Error(`fake SDK: not logged in (key "${process.env.CURSOR_API_KEY ?? "none"}")`);
+};
+export const Cursor = {
+  async me() {
+    assertLoggedIn();
+    return { apiKeyName: "fake-key", userEmail: "dev@example.com", createdAt: "2026-01-01T00:00:00.000Z" };
+  },
+  models: {
+    async list() {
+      assertLoggedIn();
+      return (process.env.FAKE_SDK_MODELS?.split(",") ?? DEFAULT_CATALOG).map((id) => ({ id, displayName: id, aliases: [`${id}-alias`] }));
+    },
+  },
+};

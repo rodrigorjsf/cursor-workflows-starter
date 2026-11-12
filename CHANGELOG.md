@@ -70,6 +70,14 @@
   `CLAUDE.md` não importa o `AGENTS.md` (não o edita). O `templates/agents-md-block.md` ganhou o link para o guia de instalação. O endereço
   `$schema` do esquema passou a ser o da URL bruta (`raw.githubusercontent.com`): a da página do GitHub devolve HTML, que
   o editor não lê.
+- **`wf doctor` confere o ambiente que o IDE usa.** Roda oito verificações, cada falha com a dica de como corrigir:
+  o `node` do PATH (o que o IDE usa para iniciar o servidor, mínimo 22.13), as dependências do kit (o comando do
+  `mcp.json`), o login no SDK, os modelos da configuração contra o catálogo da conta, o `gh`, o servidor MCP (ele é
+  iniciado como o IDE o inicia e precisa responder `tools/list`), a configuração e a versão do kit. Sai com 1 quando
+  alguma falha e, com `--json`, imprime o relatório em JSON. O `wf doctor`, o `wf run`, o `wf start` e o
+  `start_workflow` recusam um kit fora da faixa semver que o `kit` do `.agents/workflows/config.json` declara, com a
+  versão do kit, a faixa e o que fazer; um `kit` que não é uma faixa semver também é recusado. A dependência `semver`
+  entra no pacote do runtime.
 - **O estado do runtime funciona em worktree ligado e submódulo**, onde `.git` é um arquivo: antes, qualquer acesso a
   `.workflows/` falhava com `ENOTDIR`.
 

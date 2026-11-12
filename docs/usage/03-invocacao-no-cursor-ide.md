@@ -187,8 +187,36 @@ Rodar de novo não muda nada, e um arquivo que já diz o que o `init` escreveria
 existe, só o servidor `workflows` muda: os outros servidores e as chaves extras dele ficam. Um arquivo que não é JSON
 válido, ou um bloco com `begin` e sem `end`, faz o comando falhar antes de gravar qualquer arquivo. `--no-agents-md` pula
 o `AGENTS.md`; `--remove` tira só o bloco dele (e apaga o arquivo se o bloco era tudo o que havia). O servidor só sobe
-quando o kit está em `~/.cursor-workflows/kit`: o instalador que cria essa pasta e o `wf doctor` que confere o
-ambiente estão em construção.
+quando o kit está em `~/.cursor-workflows/kit`: o instalador que cria essa pasta está em construção, e o
+[`wf doctor`](#conferindo-o-ambiente-wf-doctor) diz, a cada falha, o que corrigir.
+
+### Conferindo o ambiente: `wf doctor`
+
+O servidor MCP que não sobe deixa pistas só no log do MCP do IDE. O `wf doctor` (`npm run wf -- doctor --cwd
+/caminho/do/repo`) roda as verificações abaixo e, a cada falha, diz o que corrigir. Sai com 1 se alguma falhar e, com
+`--json`, imprime o relatório em JSON (`ok` e `checks`, cada um com `id`, `status`, `message` e, nas falhas, `hint`).
+
+| `id` | O que confere | Falha típica |
+|---|---|---|
+| `node` | O `node` do PATH, que é quem o IDE usa: o comando do `mcp.json` é o `tsx` do kit, cujo shebang é `env node`. Mínimo: o `engines.node` do kit (22.13) | O Node do IDE é o 22.11 |
+| `dependencies` | O comando e o script que o `.cursor/mcp.json` e o `.mcp.json` mandam rodar existem | `node_modules/.bin/tsx` não existe (`ENOENT`): rode `npm ci` na pasta do kit |
+| `login` | Uma chamada autenticada ao Cursor (`Cursor.me()`); o relatório mostra o nome da chave, nunca a chave nem o e-mail | Sem login: `wf login` ou `CURSOR_API_KEY` |
+| `models` | Cada modelo que a configuração faz os workflows usarem (papéis, rótulos e o `defaults` do workflow) está no catálogo da conta, por id ou alias | O modelo de um papel não existe na conta: `wf models` |
+| `gh` | `gh auth status` | `gh` ausente ou sem login: `gh auth login` |
+| `mcp-server` | Inicia o servidor como o IDE (comando, args e env da entrada `workflows`, no repositório), pede `tools/list` e espera até 20 s | O servidor morre ao iniciar; o relatório traz o que ele escreveu no stderr |
+| `config` | Os dois arquivos de [configuração](../reference/config.md) são válidos e todos os workflows resolvem, com o caminho do campo errado | Papel desconhecido, JSON inválido |
+| `kit-version` | A versão do kit contra a faixa semver `kit` do `.agents/workflows/config.json` | Kit fora da faixa |
+
+O `PATH` que o `wf doctor` vê é o do terminal onde ele roda. Um IDE aberto pelo menu do sistema pode ter outro `PATH`
+que o de um terminal (um gerenciador de versões, como o mise ou o nvm, costuma ativar o Node só no shell): rode o
+`wf doctor` num terminal aberto pelo próprio IDE. Se o Node que roda o próprio `wf` for mais antigo que o mínimo, o
+comando sai antes de qualquer verificação, com a mensagem do Node antigo.
+
+**A faixa de versão do kit.** O `kit` do `.agents/workflows/config.json` (o `wf init` escreve a do kit que o rodou, como
+`>=0.2.0 <0.3.0`) aceita qualquer faixa semver, como `^0.2.0`. O `wf doctor`, o `wf run`, o `wf start` e o
+`start_workflow` do MCP recusam um kit fora dela, antes de iniciar o que for, dizendo a versão do kit, a faixa e se o kit é mais
+antigo ou mais novo. Os comandos que só leem (`wf list`, `wf config show`) continuam funcionando. Um repositório sem
+`kit` aceita qualquer versão.
 
 Depois, copie `skills/run-workflow/` para o repositório alvo. No Cursor, se o servidor não aparecer no
 chat, habilite-o em **Customize**, na barra lateral. No Enterprise, o admin pode limitar quais servidores MCP os

@@ -4,6 +4,7 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import { readKitPackage } from "./kit-version.js";
 import { writeFileAtomic } from "./runtime/state-files.js";
 
 /** One file `wf init` changed. `before` is undefined for a new file, `after` for a deleted one. */
@@ -19,9 +20,6 @@ const KIT_FROM_HOME = ".cursor-workflows/kit";
 
 /** Where editors fetch the JSON Schema of the config files: raw JSON on the default branch, so it always resolves. */
 const CONFIG_SCHEMA_URL = "https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/main/packages/runtime/schema/config.schema.json";
-
-/** The runtime package, found from this module: the install location, never the repo root. */
-const PACKAGE_JSON = join(import.meta.dirname, "..", "package.json");
 
 type Json = Record<string, unknown>;
 
@@ -142,7 +140,7 @@ function claudeCodeNote(cwd: string): string | undefined {
 export function initRepo({ cwd, skipAgentsMd = false, remove = false }: InitOptions): InitResult {
   if (!statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`o diretório do repositório não existe: ${cwd}`);
   if (skipAgentsMd && remove) throw new Error("--remove e --no-agents-md se contradizem: --remove só desfaz o bloco do AGENTS.md");
-  const { version } = JSON.parse(readFileSync(PACKAGE_JSON, "utf8")) as { version: string };
+  const { version } = readKitPackage();
   /** Returns the file's new text; undefined when it needs no change, null when it should be deleted. */
   type Plan = (existing: string | undefined, path: string) => string | null | undefined;
   const agentsMd: [string, Plan] = ["AGENTS.md", remove ? withoutAgentsMdBlock : withAgentsMdBlock];

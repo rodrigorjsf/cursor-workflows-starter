@@ -3,12 +3,13 @@
 // `.gitignore` entry, the `AGENTS.md` block (`--no-agents-md`, `--remove`), idempotence, the diff and the absence of a commit.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { copyKit } from "./kit-copy.js";
 
 const PACKAGE = join(import.meta.dirname, "..");
 const KIT_ROOT = join(PACKAGE, "..", "..");
@@ -148,17 +149,7 @@ test("wf init writes a repo config with the schema address and a kit version ran
 });
 
 /** A copy of the kit (runtime package plus templates) at `version`, laid out like an installed checkout. */
-function kitAt(version: string): string {
-  const kit = join(sandbox, `kit-${++counter}`);
-  const runtime = join(kit, "packages", "runtime");
-  for (const entry of ["src", "workflows", "schema", "tsconfig.json", "tsconfig.test.json"]) cpSync(join(PACKAGE, entry), join(runtime, entry), { recursive: true });
-  mkdirSync(join(runtime, "test"));
-  cpSync(join(PACKAGE, "test", "fake-sdk.ts"), join(runtime, "test", "fake-sdk.ts"));
-  cpSync(join(KIT_ROOT, "templates"), join(kit, "templates"), { recursive: true });
-  writeFileSync(join(runtime, "package.json"), JSON.stringify({ ...JSON.parse(readFileSync(join(PACKAGE, "package.json"), "utf8")), version }));
-  symlinkSync(join(KIT_ROOT, "node_modules"), join(kit, "node_modules"));
-  return kit;
-}
+const kitAt = (version: string): string => copyKit(join(sandbox, `kit-${++counter}`), version);
 
 test("the kit range of the repo config is the minor line (0.x) or the major line of the kit that ran init", () => {
   const rangeFor = (version: string) => {

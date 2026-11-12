@@ -22,11 +22,11 @@
 
 import "./console-to-stderr.js"; // stdout é o canal JSON-RPC: o console do SDK e dos workflows vai para o stderr
 import "./node-check.js"; // antes de tudo: o @cursor/sdk exige Node 22.13+
-import { readFileSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { type LimitOverrides, loadEffectiveConfig, parseLimitOverrides } from "./config/index.js";
+import { assertKitCompatible, readKitPackage } from "./kit-version.js";
 import { INSIDE_WORKFLOW_ENV } from "./runtime/engine.js";
 import { cancelJob, installCrashHandlers, readJob, spawnJob, waitJob } from "./runtime/jobs.js";
 import { loadWorkflows } from "./runtime/registry.js";
@@ -41,7 +41,7 @@ const nested = process.env[INSIDE_WORKFLOW_ENV] === "1";
 const cwd = process.env.WF_CWD ?? process.cwd();
 const workflows = nested ? new Map() : await loadWorkflows(cwd);
 
-const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+const { version } = readKitPackage();
 const server = new Server({ name: "cursor-workflows", version }, { capabilities: { tools: {} } });
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -120,9 +120,11 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       if (!def) return fail({ error: `workflow desconhecido: ${String(a.name)}` });
       const runId = typeof a.resumeRunId === "string" ? a.resumeRunId : undefined;
       // The config is read afresh here, so an unusable one is refused before a job exists, and a looser override is reported now.
+      // So is a kit outside the version range the repo declares: first, because an older kit may not understand a newer config.
       let mcpOverrides: LimitOverrides;
       let violations;
       try {
+        assertKitCompatible(cwd);
         mcpOverrides = parseLimitOverrides(a.overrides);
         violations = loadEffectiveConfig(def, { cwd, mcpOverrides }).violations;
       } catch (err) {
