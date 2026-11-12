@@ -22,6 +22,7 @@ import { copyFile, lstat, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { errorText } from "./error-text.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -78,7 +79,7 @@ export function snapshotBranchSegment(branch: string): string | undefined {
 /** The first line git said on stderr, or the error's own message. */
 function gitErrorLine(err: unknown): string {
   const stderr = (err as { stderr?: unknown } | undefined)?.stderr;
-  const text = typeof stderr === "string" && stderr.trim() ? stderr.trim() : err instanceof Error ? err.message : String(err);
+  const text = typeof stderr === "string" && stderr.trim() ? stderr.trim() : errorText(err);
   return text.split("\n")[0]!;
 }
 
