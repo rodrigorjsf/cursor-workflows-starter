@@ -6,6 +6,7 @@
 // terminal, or a record an older kit wrote) falls back on the log, which keeps only a hash of the args: when the hash is that of
 // empty args (`smoke`, for one) the args are known, `{}`; otherwise the command has a placeholder that is not JSON, and the CLI
 // refuses it before it starts anything.
+import { readable } from "./run-graph.js";
 import { shellQuote } from "./shell.js";
 
 /** Where the args of the first start go. Not valid JSON on purpose: pasted unedited it fails loudly instead of resuming with other args. */
@@ -44,10 +45,10 @@ export function resumeCommand({ workflow, runId, repo, argsHash, start }: Resuma
 }
 
 /** The `argsHash` of the latest `run-start` in a run's events: the args a resume has to match are those of the latest execution. Undefined when there is none. */
-export function argsHashOf(events: ReadonlyArray<{ type: string; argsHash?: unknown }>): string | undefined {
+export function argsHashOf(events: ReadonlyArray<{ type: string; v?: unknown; argsHash?: unknown }>): string | undefined {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i]!;
-    if (event.type === "run-start") return typeof event.argsHash === "string" ? event.argsHash : undefined;
+    if (event.type === "run-start") return readable(event) && typeof event.argsHash === "string" ? event.argsHash : undefined; // a newer version's hash may be another hash
   }
   return undefined;
 }

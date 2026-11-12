@@ -20,6 +20,20 @@ export interface RunEvent {
   [field: string]: unknown;
 }
 
+/** The newest event schema version this reader knows (the runtime's `EVENT_SCHEMA_VERSION`; a test pins that they agree). */
+export const KNOWN_EVENT_VERSION = 1;
+
+/**
+ * Whether this reader may interpret `event`: an object whose schema version it knows. An older version, or none (logs written
+ * before events carried `v`), is read with the field checks below; a newer one is opaque even when its type is known, because
+ * its fields may mean something else.
+ */
+export function readable(event: unknown): event is RunEvent {
+  if (!event || typeof event !== "object") return false;
+  const { v } = event as { v?: unknown };
+  return typeof v !== "number" || v <= KNOWN_EVENT_VERSION;
+}
+
 export type NodeKind = "start" | "step" | "command" | "fork" | "join";
 
 /** A node that stands for work (an agent step or a command), as opposed to the start and the forks and joins of groups. */
@@ -212,7 +226,7 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
 
   const run: RunProgress = { status: "running", executions: 0, tokens: 0, costCents: 0 };
   for (const event of events) {
-    if (!event || typeof event !== "object") continue;
+    if (!readable(event)) continue;
     switch (event.type) {
       case "run-start":
         add({ id: START, kind: "start", label: str(event.workflow) ?? "run", state: "ok" }, null);

@@ -11,9 +11,10 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, test } from "node:test";
 import { calls, script } from "@cursor/sdk";
 import { runWorkflow } from "../../runtime/src/runtime/engine.js";
+import { EVENT_SCHEMA_VERSION } from "../../runtime/src/runtime/events.js";
 import { defineWorkflow } from "../../runtime/src/runtime/workflow.js";
 import { EMPTY_ARGS_HASH, argsHashOf } from "../run-view/resume-command.js";
-import { type GraphNode, type RunEvent, buildRunGraph, joinIdOf } from "../run-view/run-graph.js";
+import { type GraphNode, KNOWN_EVENT_VERSION, type RunEvent, buildRunGraph, joinIdOf } from "../run-view/run-graph.js";
 import { type Sandbox, logPath, sandbox } from "./support.js";
 
 let box: Sandbox;
@@ -110,4 +111,8 @@ test("a resumed run keeps its nodes: the steps served from the journal show as c
   assert.deepEqual(byLabel(both.nodes, "plan").detail.cached, "journal");
   assert.equal(byLabel(both.nodes, "plan").state, "cached");
   assert.equal(byLabel(both.nodes, "plan").detail.attempts, 1, "the attempt of the first execution still counts");
+});
+
+test("the Run view knows the event schema version the engine writes: a version bump makes this fail until the reader learns it", () => {
+  assert.equal(KNOWN_EVENT_VERSION, EVENT_SCHEMA_VERSION);
 });

@@ -4,7 +4,7 @@
 // `engine-log.test.ts` checks that against a real run).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type GraphNode, type RunEvent, buildRunGraph, joinIdOf } from "../run-view/run-graph.js";
+import { type GraphNode, KNOWN_EVENT_VERSION, type RunEvent, buildRunGraph, joinIdOf } from "../run-view/run-graph.js";
 import { type Draft, execEnd, execStart, groupEnd, groupStart, phase, ref, RUN, runStart, stamp, step, stepEnd, stepStart, T0 } from "./run-log.js";
 
 const idsOf = (nodes: GraphNode[]) => nodes.map((n) => n.id);
@@ -288,6 +288,17 @@ test("events of other schema versions, unknown types and damaged fields are tole
   assert.deepEqual(arrows(noisy), arrows(clean));
   assert.equal(stateOf(noisy, "s-a"), "ok");
   assert.equal(stateOf(noisy, "s-b"), "running");
+});
+
+test("the event schema version decides how an event is read: an older or unversioned one is read, a newer one is opaque even when its type is known", () => {
+  const known = stamp([runStart, ...step("s-a", "plan")]);
+  const older = known.map(({ v: _v, ...rest }) => rest as RunEvent); // a log from before events carried `v`
+  assert.deepEqual(idsOf(buildRunGraph(older).nodes), idsOf(buildRunGraph(known).nodes));
+
+  const newer = (event: Draft): RunEvent => ({ ...stamp([event])[0]!, v: KNOWN_EVENT_VERSION + 1 });
+  const graph = buildRunGraph([...known, newer(stepStart("s-z", "from the future", { parentId: "s-a" })), newer({ type: "step-end", stepId: "s-a", ok: false, errorKind: "timeout" })]);
+  assert.deepEqual(idsOf(graph.nodes), idsOf(buildRunGraph(known).nodes), "a newer step-start may mean something else: no node");
+  assert.equal(stateOf(graph, "s-a"), "ok", "a newer step-end does not change the step");
 });
 
 test("any prefix of a log is a graph of its own, which is what lets a replay step through the run", () => {

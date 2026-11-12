@@ -39,6 +39,7 @@ test("the args that count are those of the latest execution: a resume may have b
   assert.equal(argsHashOf(events.slice(0, 3)), EMPTY_ARGS_HASH);
   assert.equal(argsHashOf([{ type: "run-start" }, { type: "run-end" }]), undefined, "a log of an older kit may carry no hash");
   assert.equal(argsHashOf([]), undefined);
+  assert.equal(argsHashOf([...events, { type: "run-start", v: 99, argsHash: EMPTY_ARGS_HASH }]), undefined, "a newer version's run-start is not read, nor skipped for an older one");
 });
 
 test("with how the job was started, the command is exact: the same args and the same caps, ready to paste", () => {

@@ -8,6 +8,7 @@
 // - Events are handed over in batches: a command that prints a thousand lines is a few renders, not a thousand.
 import { useEffect, useRef, useState } from "react";
 import { batcher } from "./batch.js";
+import { readable } from "./run-graph.js";
 import type { ContentItem } from "./step-log.js";
 
 /** `loading`: nothing read yet. `ready`: read (the step may have no content yet). `error`: the dashboard could not give it. */
@@ -71,8 +72,8 @@ export function useStepLog(runId: string, stepId: string, live: boolean): StepLo
         if (id <= lastLine.current) return;
         lastLine.current = id;
         try {
-          const event = JSON.parse(message.data) as { type?: string } & Partial<ContentItem>;
-          if (event.type === "content") batch.push({ ...event, id } as ContentItem);
+          const event: unknown = JSON.parse(message.data);
+          if (readable(event) && event.type === "content") batch.push({ ...(event as Partial<ContentItem>), id } as ContentItem);
         } catch {
           /* a line that is not JSON is not an event */
         }
