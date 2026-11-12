@@ -34,7 +34,7 @@ import {
 import { errorText } from "./error-text.js";
 import { BringBackError, type PushedSnapshot, bringBack, cloudRepoUrl, deleteSnapshot, pushSnapshot, snapshotBranch } from "./cloud-snapshot.js";
 import type { JsonSchema } from "./workflow.js";
-import { RESULT_ARTIFACT, artifactInstruction, artifactReprompt, jsonBlockInstruction, jsonBlockReprompt, resultFromArtifact, resultFromJsonBlock } from "./structured.js";
+import { type Parsed, RESULT_ARTIFACT, artifactInstruction, artifactReprompt, jsonBlockInstruction, jsonBlockReprompt, resultFromArtifact, resultFromJsonBlock } from "./structured.js";
 
 /** What a read-only cloud step is told, since the allowlist that would make it so cannot be sent. */
 const READ_ONLY_INSTRUCTION = "\n\n---\nThis is a read-only step: do not create, edit or delete files, do not commit, and do not push or open a pull request.";
@@ -146,7 +146,7 @@ async function downloadResult(agent: SDKAgent): Promise<string | undefined> {
  */
 interface ResultChannel {
   instruction: (schema: JsonSchema) => string;
-  read: (answer: { result?: string }, agent: SDKAgent, schema: JsonSchema) => Promise<ReturnType<typeof resultFromJsonBlock>>;
+  read: (answer: { result?: string }, agent: SDKAgent, schema: JsonSchema) => Promise<Parsed>;
   refusal: string;
   reprompt: (error: string) => string;
 }

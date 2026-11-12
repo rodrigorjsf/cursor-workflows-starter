@@ -91,8 +91,11 @@ function lastJsonBlock(text: string): string | undefined {
   return last;
 }
 
+/** A structured result read from an answer: the validated value, or why there is none. */
+export type Parsed = { ok: true; value: unknown } | { ok: false; error: string };
+
 /** What `text` holds as a result for `schema`: the object, or why it is not one. `what` names where the text came from. */
-function resultFromJson(text: string, schema: JsonSchema, what: string): { ok: true; value: unknown } | { ok: false; error: string } {
+function resultFromJson(text: string, schema: JsonSchema, what: string): Parsed {
   let value: unknown;
   try {
     value = JSON.parse(text);
@@ -105,7 +108,7 @@ function resultFromJson(text: string, schema: JsonSchema, what: string): { ok: t
 }
 
 /** What a cloud agent's final message holds: the result object the schema accepts, or why it holds none. */
-export function resultFromJsonBlock(text: string, schema: JsonSchema): { ok: true; value: unknown } | { ok: false; error: string } {
+export function resultFromJsonBlock(text: string, schema: JsonSchema): Parsed {
   const block = lastJsonBlock(text);
   if (block === undefined) return { ok: false, error: "there is no fenced json code block" };
   return resultFromJson(block, schema, "the json code block");
@@ -129,7 +132,7 @@ export function artifactReprompt(error: string): string {
 }
 
 /** What a result artifact holds: the object the schema accepts, or why it holds none. Undefined `text` is an agent that saved no such file. */
-export function resultFromArtifact(text: string | undefined, schema: JsonSchema): { ok: true; value: unknown } | { ok: false; error: string } {
+export function resultFromArtifact(text: string | undefined, schema: JsonSchema): Parsed {
   if (text === undefined) return { ok: false, error: `there is no ${RESULT_ARTIFACT} in the agent's artifacts` };
   return resultFromJson(text, schema, `the artifact ${RESULT_ARTIFACT}`);
 }
