@@ -188,20 +188,45 @@ test("a resumed run has one job per execution: only the one that is running is c
   assert.equal(gone.exitCode, null, "the first execution's process was left alone");
 });
 
-test("a job that stopped beating but whose process is still there is cancelled the way wf cancel does it: killed", async () => {
+test("a job that stopped beating but whose process is still there is failed, as wf status says, and is cancelled the way wf cancel does it: killed, with the cloud agents it left", async () => {
+  resetCloud();
   const repo = box.repo("repo");
-  const child = await jobProcess(repo, "smoke-aaaa0008", "job-frozen");
+  seedCloudAgent("bc-frz1", [{ status: "running" }]);
+  const ref = { stepId: "s1", parentId: null, groupId: null, attemptId: "s1#1" };
+  const child = await jobProcess(repo, "ship-frzn0008", "job-frozen");
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60_000).toISOString();
-  writeRun(box.home, repo, { runId: "smoke-aaaa0008", workflow: "smoke", startedAt: START, jobId: "job-frozen", events: [{ type: "phase", title: "Ping" }], lockedBy: child.pid });
-  writeJobRecord(repo, "job-frozen", "smoke-aaaa0008", child.pid!, fiveMinutesAgo);
-  assert.equal((await http(dash.url, "/api/runs/smoke-aaaa0008")).json.status, "running", "the run's process holds its lock, so the dashboard shows it as running");
+  writeRun(box.home, repo, {
+    runId: "ship-frzn0008",
+    workflow: "ship",
+    startedAt: START,
+    phases: ["Build"],
+    jobId: "job-frozen",
+    events: [{ type: "phase", title: "Build" }, { type: "step-start", ...ref, stepKey: "s1:k", label: "implement", cached: false, attempt: 1, model: "composer-2.5", location: "cloud" }, { type: "cloud-agent", ...ref, agentId: "bc-frz1" }],
+    lockedBy: child.pid,
+  });
+  writeJobRecord(repo, "job-frozen", "ship-frzn0008", child.pid!, fiveMinutesAgo);
 
-  const reply = await cancel("smoke-aaaa0008", await withToken());
+  const noHeartbeat = new RegExp(`^no heartbeat for \\d+s \\(process ${child.pid}\\); relaunch with resumeRunId="ship-frzn0008"$`);
+  const detail = (await http(dash.url, "/api/runs/ship-frzn0008")).json;
+  assert.equal(detail.status, "failed", "its process still holds the run's lock, but it stopped beating: failed, the status wf status gives the job");
+  assert.match(detail.error, noHeartbeat);
+  assert.equal(((await http(dash.url, "/api/runs")).json.runs as any[]).find((r) => r.runId === "ship-frzn0008").status, "failed");
+  const card = ((await http(dash.url, "/api/board")).json.boards as any[]).find((b) => b.workflow === "ship").cards[0];
+  assert.deepEqual([card.status, card.column], ["failed", "failed"], "the Board puts it in Failed, not in its phase");
+
+  const reply = await cancel("ship-frzn0008", await withToken());
   assert.equal(reply.status, 200, reply.text);
   assert.equal(reply.json.jobId, "job-frozen");
-  assert.match(reply.json.note, /no heartbeat and was killed \(SIGKILL\)/);
+  assert.equal(reply.json.status, "failed");
+  assert.match(reply.json.note, /no heartbeat and was killed \(SIGKILL\) .*; cancelled the cloud agent it left running: bc-frz1$/);
   await exited(child);
   assert.equal(child.signalCode, "SIGKILL", "a frozen process cannot run its SIGTERM handler: it is killed");
+  assert.deepEqual(cloudRunsOf("bc-frz1").map((r) => r.status), ["cancelled"], "nothing keeps spending after the cancel");
+
+  const again = await cancel("ship-frzn0008", await withToken());
+  assert.equal(again.status, 409);
+  assert.match(again.json.error, /nothing to cancel/);
+  resetCloud();
 });
 
 test("cancel says why it did nothing: an unknown run, a run that is not running, a run no job executes", async () => {

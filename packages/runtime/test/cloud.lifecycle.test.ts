@@ -7,7 +7,7 @@ process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import "./isolate-home.js";
-import { readFileSync, rmSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { calls, cloudRunsOf, costConfig, finishCloudRun, forgetCloudAgent, killCloudClients, lookups, resetCloud, resumes, script, stats } from "@cursor/sdk";
@@ -16,7 +16,8 @@ import { openDb } from "../src/observability/db.js";
 import { reconcile } from "../src/observability/queries.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import { cancelRun } from "../src/runtime/run-cancel.js";
-import { cancelJob, writeJob } from "../src/runtime/job-state.js";
+import { cancelJob, readJob, writeJob } from "../src/runtime/job-state.js";
+import { listRuns, readRun } from "../src/runtime/run-view.js";
 import { isAlive } from "../src/runtime/pid.js";
 import { createJob } from "../src/runtime/jobs.js";
 import type { WorkflowEvent } from "../src/runtime/events.js";
@@ -80,10 +81,10 @@ async function until(condition: () => boolean, what: string) {
  * crash would leave it (its client never hears from the cloud again, its lock is stale), while the agent goes on in the cloud.
  * `end()` lets the abandoned execution unwind, so that nothing outlives the test.
  */
-async function crashWhileTheAgentRuns(runId: string, workflow = reviewStep()) {
+async function crashWhileTheAgentRuns(runId: string, workflow = reviewStep(), jobId?: string) {
   script.push(() => ({ hang: true }));
   const abandoned = new AbortController();
-  const execution = runWorkflow(workflow, {}, { cwd, runId, signal: abandoned.signal });
+  const execution = runWorkflow(workflow, {}, { cwd, runId, signal: abandoned.signal, jobId });
   const end = async () => {
     abandoned.abort();
     await execution;
@@ -461,7 +462,7 @@ function frozenJob(runId: string, jobId: string) {
   };
 }
 
-test("cancel_workflow of a frozen job kills its process and leaves its cloud agent running, so the resume reattaches to it and pays once", async () => {
+test("cancel_workflow of a frozen job kills its process and cancels the cloud agent its run left: nothing keeps spending after the user stops, and a resume pays for a new agent", async () => {
   const crashed = await crashWhileTheAgentRuns("life-frozen");
   const job = frozenJob("life-frozen", "frozen-job");
   try {
@@ -471,25 +472,27 @@ test("cancel_workflow of a frozen job kills its process and leaves its cloud age
     const killed = await cancelJob(cwd, "frozen-job", 3000);
 
     assert.equal(isAlive(job.pid), false, "the frozen process is gone");
-    assert.match(killed!.note, /killed \(SIGKILL\)/);
-    assert.match(killed!.note, /cloud agents it left running were not cancelled/);
-    assert.deepEqual(cloudRunsOf("bc-1").map((x) => x.status), ["running"], "the agent goes on in the cloud");
-    assert.equal(stats.cancelled, 0);
+    assert.equal(killed!.status, "failed", "a killed job never wrote its run's end: it stays failed");
+    assert.match(killed!.note, /^process \d+ had no heartbeat and was killed \(SIGKILL\) without undoing the step in progress; the run stays resumable; cancelled the cloud agent it left running: bc-1$/);
+    assert.deepEqual(cloudRunsOf("bc-1").map((x) => x.status), ["cancelled"], "the agent stops in the cloud too");
+    assert.equal(stats.cancelled, 1);
 
-    setTimeout(() => finishCloudRun("bc-1", { result: "from the survivor" }), 60);
+    // The accepted cost of stopping everything: the resume finds the agent cancelled and starts a new one.
+    script.push(() => ({ result: "fresh answer" }));
     const r = await runWorkflow(reviewStep(), {}, { cwd, runId: "life-frozen" });
 
     assert.equal(r.status, "finished", r.error);
-    assert.equal(r.result, "from the survivor");
-    assert.equal(calls.length, 1, "no second cloud agent");
-    assert.deepEqual(resumes, ["bc-1"]);
+    assert.equal(r.result, "fresh answer");
+    const second = logOf("life-frozen").slice(logOf("life-frozen").findLastIndex((e) => e.type === "run-start"));
+    assert.deepEqual(ofType(second, "cloud-agent").map((e) => [e.agentId, e.reattached]), [["bc-2", undefined]], "one new agent");
+    assert.ok(second.some((e) => e.type === "warning" && e.message.includes("cloud agent bc-1, left by an interrupted attempt, was cancelled: starting a new one")));
   } finally {
     job.end();
     await crashed.end();
   }
 });
 
-test("a second cancel_workflow on a job killed for no heartbeat cancels the cloud agents its run left: the user who wants the run stopped still stops them", async () => {
+test("a second cancel_workflow on a frozen job that was killed finds nothing left to cancel: the first one already stopped its cloud agents", async () => {
   const crashed = await crashWhileTheAgentRuns("life-frozen-stop");
   const job = frozenJob("life-frozen-stop", "frozen-stop");
   try {
@@ -497,11 +500,44 @@ test("a second cancel_workflow on a job killed for no heartbeat cancels the clou
     job.freeze();
     await cancelJob(cwd, "frozen-stop", 3000);
 
-    const stopped = await cancelJob(cwd, "frozen-stop", 100);
+    const again = await cancelJob(cwd, "frozen-stop", 100);
 
-    assert.equal(stopped!.status, "failed", "a dead job stays failed");
-    assert.match(stopped!.note, /^the job already ended \(failed\); cancelled the cloud agent it left running: bc-1$/);
+    assert.equal(again!.status, "failed", "a dead job stays failed");
+    assert.equal(again!.note, "the job already ended (failed); nothing to cancel");
     assert.deepEqual(cloudRunsOf("bc-1").map((x) => x.status), ["cancelled"]);
+    assert.equal(stats.cancelled, 1, "nothing is cancelled twice");
+  } finally {
+    job.end();
+    await crashed.end();
+  }
+});
+
+test("a frozen run is failed in the run view with wf status's error, and cancelling it there kills its process and cancels the cloud agent it left", async () => {
+  const runId = "life-frozen-view";
+  const crashed = await crashWhileTheAgentRuns(runId, reviewStep(), "frozen-view");
+  const job = frozenJob(runId, "frozen-view");
+  try {
+    await until(() => isAlive(job.pid), "the job's process to start");
+    job.freeze();
+    // The frozen process still holds its run, as a real one does.
+    writeFileSync(join(runDirIn(cwd, runId), "run.lock"), JSON.stringify({ pid: job.pid, token: "frozen", startedAt: new Date().toISOString(), runId }));
+
+    const noHeartbeat = new RegExp(`^no heartbeat for \\d+s \\(process ${job.pid}\\); relaunch with resumeRunId="${runId}"$`);
+    assert.equal(readJob(cwd, "frozen-view")!.status, "failed");
+    assert.match(readJob(cwd, "frozen-view")!.error!, noHeartbeat);
+    const shown = readRun(runId)!;
+    assert.equal(shown.status, "failed", "the run view says what wf status says");
+    assert.match(shown.error!, noHeartbeat);
+    assert.equal(listRuns().find((r) => r.runId === runId)!.status, "failed", "and so does the list of runs");
+
+    const outcome = await cancelRun(runId, 3000);
+
+    assert.equal(outcome.kind, "signalled", "the frozen process is still there: it is killed, not passed over");
+    assert.match(outcome.kind === "signalled" ? outcome.result.note : "", /killed \(SIGKILL\) .*; cancelled the cloud agent it left running: bc-1$/);
+    assert.equal(isAlive(job.pid), false);
+    assert.deepEqual(cloudRunsOf("bc-1").map((x) => x.status), ["cancelled"]);
+    assert.equal(readRun(runId)!.status, "failed");
+    assert.match(readRun(runId)!.error!, /ended without finishing it/, "with the process gone, the run is failed for that reason");
   } finally {
     job.end();
     await crashed.end();
