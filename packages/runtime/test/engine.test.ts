@@ -8,7 +8,7 @@ import { calls, costConfig, script, stats } from "@cursor/sdk";
 import { runWorkflow } from "../src/runtime/engine.js";
 import { defineWorkflow } from "../src/runtime/workflow.js";
 
-const cwd = join(import.meta.dirname, ".tmp");
+const cwd = join(import.meta.dirname, ".tmp", String(process.pid)); // one directory per test process: concurrent runs must not share it
 const SCHEMA = { type: "object", required: ["tier"], properties: { tier: { enum: ["LOW", "MED", "HIGH"] } } };
 const submit = (v: unknown) => (o: any) => {
   o.local.customTools.submit_result.execute(v, {});
