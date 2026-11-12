@@ -21,6 +21,9 @@ import { type Progress, ProgressStore } from "./tdd.js";
 /** Why something is cleaned up: its PR was merged or closed, or its run failed longer ago than the limit. */
 export type GcReason = "pr-merged" | "pr-closed" | "failed";
 
+/** The reason a PR in this state gives to clean its branch up: only a PR that is done (merged or closed) gives one. */
+const DONE_PR: Partial<Record<PrState, GcReason>> = { MERGED: "pr-merged", CLOSED: "pr-closed" };
+
 /** One thing to remove. `head` is the commit an origin branch points at (the lease its deletion carries). */
 export interface GcAction {
   kind: "worktree" | "local-branch" | "remote-branch";
@@ -194,7 +197,7 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
     const end = lastEnd(cwd, runId);
     const failedFor = end?.how === "failed" ? now - end.at : undefined;
     const failedLongAgo = failedFor !== undefined && failedFor > failedAfterDays * DAY_MS;
-    const reason: GcReason | undefined = state === "MERGED" ? "pr-merged" : state === "CLOSED" ? "pr-closed" : failedLongAgo ? "failed" : undefined;
+    const reason: GcReason | undefined = (state && DONE_PR[state]) ?? (failedLongAgo ? "failed" : undefined);
     if (!reason) {
       plan.kept.push({ runId, why: keptBecause(state, end, failedFor, failedAfterDays) });
       continue;
@@ -219,7 +222,8 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
     if (owned.has(branch) || SHARED_BRANCH.test(branch)) continue;
     try {
       const state = await commands.prState(cwd, branch);
-      if (state === "MERGED" || state === "CLOSED") plan.remove.push({ reason: state === "MERGED" ? "pr-merged" : "pr-closed", actions: [{ kind: "remote-branch", target: branch, head }], notes: [] });
+      const done = state && DONE_PR[state];
+      if (done) plan.remove.push({ reason: done, actions: [{ kind: "remote-branch", target: branch, head }], notes: [] });
       else plan.kept.push({ branch, why: state === "OPEN" ? "its PR is open, and no run of this repo owns it" : "no run of this repo owns it, and it has no PR" });
     } catch (err) {
       plan.errors.push(`origin branch ${branch}: the state of its PR cannot be read, so it is kept: ${message(err)}`);
