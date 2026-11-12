@@ -417,6 +417,11 @@ export async function converse(
   return { kind: "finished", value: delivery ? delivery.value : (answer.result ?? "") };
 }
 
+/** The options every agent of a step gets, wherever it runs and whether it is created or resumed. */
+export function agentBase(o: StepOptions) {
+  return { apiKey: o.apiKey, name: o.name, model: o.model, agents: o.agents, mcpServers: o.mcpServers };
+}
+
 /** Runs the attempt on this machine, in the step's cwd. */
 async function runLocalAttempt(prompt: string, o: StepOptions, signal: AbortSignal, onEvent: (event: AttemptEvent) => void): Promise<AttemptResult> {
   // A structured step is answered through a custom tool, `submit_result`, that validates the object in this process.
@@ -430,14 +435,10 @@ async function runLocalAttempt(prompt: string, o: StepOptions, signal: AbortSign
     onEvent,
     () =>
       Agent.create({
-        apiKey: o.apiKey,
-        name: o.name,
-        model: o.model,
+        ...agentBase(o),
         // Custom tools reach the model as the MCP server `custom-user-tools`: an allowlist without "mcp" would hide submit_result.
         tools: o.schema && o.tools && !o.tools.includes("mcp") ? [...o.tools, "mcp"] : o.tools,
         disallowedTools: o.disallowedTools,
-        agents: o.agents,
-        mcpServers: o.mcpServers,
         local: {
           cwd: o.cwd,
           settingSources: o.settingSources,
