@@ -27,7 +27,8 @@ enforced before any cloud code exists.
 - **Rejected before spending.** The config resolver rejects `cloud` on a role declared `never`, and cloud writes on a role
   declared `read-only`, with a message that names the role. A misconfiguration fails before a token is spent.
 - **Agent execution sits behind a seam.** A cloud backend implements the same `AgentBackend` interface as the local one
-  (the interface comes from [spec #3](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/3)), so
+  (the internal interface is `packages/runtime/src/runtime/backend.ts`; [spec #3](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/3)
+  makes it a public extension point), so
   the engine does not know where a step runs. It creates agents with the SDK's cloud options, never passes custom tools,
   tool allowlists or setting sources, and streams turn events like the local backend.
 - **The cloud sees a snapshot.** Before a cloud step the engine commits the worktree state to a throwaway branch under the

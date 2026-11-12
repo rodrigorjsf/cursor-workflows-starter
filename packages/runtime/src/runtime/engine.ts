@@ -17,7 +17,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  Agent,
   AgentBusyError,
   RateLimitError,
   type ModelSelection,
@@ -29,6 +28,7 @@ import {
   type SettingSource,
 } from "@cursor/sdk";
 import { Ajv } from "ajv";
+import { type AgentBackend, localBackend } from "./backend.js";
 import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedConfig, type StepOverrides, allowedSources, isModelAllowed, loadEffectiveConfig } from "../config/index.js";
 import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type NewEvent, type RunStatus, type StepRef, type WorkflowEvent } from "./events.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
@@ -792,8 +792,10 @@ async function executeRun<A, R>(
     if (!isModelAllowed(caps.allowedModels, o.model.id)) {
       throw new StepFailedError(`etapa "${label}": o modelo ${o.model.id} não está no teto global allowedModels (${caps.allowedModels!.join(", ")})`);
     }
-    if (caps.allowedLocations && !caps.allowedLocations.includes("local")) {
-      throw new StepFailedError(`etapa "${label}": o teto global allowedLocations (${caps.allowedLocations.join(", ") || "vazio"}) não permite etapas locais`);
+    // Every step runs on the local backend today; the cloud spec picks the backend per role (ADR-0005).
+    const backend: AgentBackend = localBackend;
+    if (caps.allowedLocations && !caps.allowedLocations.includes(backend.location)) {
+      throw new StepFailedError(`etapa "${label}": o teto global allowedLocations (${caps.allowedLocations.join(", ") || "vazio"}) não permite etapas ${backend.location === "local" ? "locais" : "na nuvem"}`);
     }
     if (o.schema && o.schema.type !== "object") {
       throw new StepFailedError(`etapa "${label}": schema precisa ter type "object" na raiz (vira o inputSchema de uma tool)`);
@@ -936,7 +938,7 @@ async function executeRun<A, R>(
           });
         };
         try {
-          const sdkAgent = await within(deadline, Agent.create({
+          const sdkAgent = await within(deadline, backend.create({
             apiKey: opts.apiKey,
             name: `${def.meta.name}:${label}`,
             model,
@@ -947,12 +949,10 @@ async function executeRun<A, R>(
             agents: o.agents,
             // O guarda vem antes: um mcpServers da etapa com o mesmo nome continua podendo substituí-lo de propósito.
             mcpServers: withGuard(nestedGuard(sources), o.mcpServers),
-            local: {
-              cwd: o.cwd ?? opts.cwd,
-              settingSources: sources,
-              sandboxOptions: o.sandbox ? { enabled: true } : undefined,
-              customTools: o.schema ? { [SUBMIT_TOOL]: submitResultTool(o.schema, capture) } : undefined,
-            },
+            cwd: stepCwd,
+            settingSources: sources,
+            sandbox: Boolean(o.sandbox),
+            customTools: o.schema ? { [SUBMIT_TOOL]: submitResultTool(o.schema, capture) } : undefined,
           }), (late) => void late[Symbol.asyncDispose]().catch(() => {}));
           agent = sdkAgent;
           attemptCut.throwIfCut();
