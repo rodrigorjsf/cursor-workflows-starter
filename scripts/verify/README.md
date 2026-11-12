@@ -24,3 +24,10 @@ npm run wf -- run verify-cache      --cwd ~/tmp/wf-probe-repo --args '{}' --max-
 | `verify-structured` | `a` e `b` válidos; no stderr, o `step-end` de `b` com `mcp: 2` (JSON recusado e corrigido) | as três etapas entregaram; `b` corrigiu no mesmo turno |
 | `verify-context` | `project.marker`, `project.mcpTools`, `project.blockedCommand`, `insideEnv`; os arquivos em `.probe/` | com `project`: marcador lido, hooks do Cursor e do Claude Code disparam (o deny bloqueia), sem tools do `workflows`, `inside=1`; sem settings: nada disso |
 | `verify-cache` | `cacheReadTokens` de cada etapa nos eventos `turn` | só o prefixo fixo (~4 mil tokens) é reaproveitado com garantia |
+
+## Validação no Cursor IDE
+
+Os três workflows acima conferem o SDK. Quem confere o kit dentro do Cursor IDE é o assistente guiado
+[`validate-cursor-ide.sh`](validate-cursor-ide.sh): ele monta o repositório descartável com o `setup-sandbox-repo.sh`,
+roda os seis cenários com você e escreve `validation-report.json`. O roteiro está em
+[2.3](../../docs/usage/03-invocacao-no-cursor-ide.md#validar-no-cursor-ide).

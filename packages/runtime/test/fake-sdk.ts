@@ -34,6 +34,34 @@ export const costConfig: {
   /** Holds the creation of the agents it answers for (it gets the create options) until the promise settles; `undefined` = not held. */
   createGate?: (options: any) => Promise<unknown> | undefined;
 } = { raw: 9, charged: 7 };
+/** A value that satisfies a JSON Schema: the first `enum` member, the `const`, or the plainest value of the type. */
+function sampleOf(schema: any): unknown {
+  if (schema?.const !== undefined) return schema.const;
+  if (schema?.enum) return schema.enum[0];
+  switch (schema?.type) {
+    case "object":
+      return Object.fromEntries((schema.required ?? []).map((key: string) => [key, sampleOf(schema.properties?.[key])]));
+    case "array":
+      return Array.from({ length: schema.minItems ?? 0 }, () => sampleOf(schema.items));
+    case "string":
+      return "ok";
+    case "number":
+    case "integer":
+      return 0;
+    case "boolean":
+      return true;
+    default:
+      return null;
+  }
+}
+/**
+ * `FAKE_SDK_AUTO_SUBMIT=1`: a structured step is answered with a sample of its schema, as a model that follows the prompt
+ * would. For spawned processes, which cannot reach the process-local `script`. Off by default: most tests choose the answer.
+ */
+function autoSubmit(options: any) {
+  const tool = options.local?.customTools?.submit_result;
+  if (process.env.FAKE_SDK_AUTO_SUBMIT && tool) tool.execute(sampleOf(tool.inputSchema), {});
+}
 export const Agent = {
   async getUsage(_agentId: string) {
     return { usage: { ...TURN_USAGE, totalTokens: 110 }, cost: { chargedCents: 7, rawCostCents: 9 }, runs: [] };
@@ -58,7 +86,11 @@ export const Agent = {
         // `script` is process-local; a test that spawns a CLI or an MCP server steers the fake through the prompt instead.
         const behave =
           script.shift() ??
-          (() => (msg.includes("[fake:hang]") ? { hang: true, cancelDelayMs: msg.includes("[fake:slow-cancel]") ? 5000 : 0 } : { status: "finished", result: "ok" }));
+          (() => {
+            if (msg.includes("[fake:hang]")) return { hang: true, cancelDelayMs: msg.includes("[fake:slow-cancel]") ? 5000 : 0 };
+            autoSubmit(o);
+            return { status: "finished", result: "ok" };
+          });
         const r = await behave(o, msg, n++);
         /** One delta reaches the caller; a turn's usage also counts toward the agent's total (what getUsage() sums). */
         const deliver = async (update: any, live: boolean) => {

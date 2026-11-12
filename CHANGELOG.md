@@ -4,6 +4,13 @@
 
 ### Adicionado
 
+- **Workflow `smoke` e o assistente de validação no Cursor IDE.** O `smoke` é uma etapa estruturada no `composer-2.5`,
+  sem tools e sem contexto do projeto, com teto de 50 mil tokens (medido: 21.628): prova chat → MCP → SDK → resultado
+  estruturado sem pagar um `implement-issue`. O `scripts/verify/validate-cursor-ide.sh` conduz os seis cenários de
+  validação: cria o repositório descartável (reaproveitando o `setup-sandbox-repo.sh`), roda `wf init` e `wf doctor`
+  nele, diz o que digitar no chat, registra o que a pessoa viu (e sobrevive ao reinício do Cursor do cenário 5) e
+  escreve `validation-report.json`, com caminhos e nomes de repositório anonimizados. Mostra o corpo da issue e só a
+  abre depois da confirmação. O `redaction` do log de eventos passa a cobrir também o formato `crsr_` da chave do Cursor.
 - **Log de eventos por run como fonte de verdade.** Todo evento é acrescentado a `.workflows/runs/<runId>/events.jsonl`
   com versão do esquema, horário e id do run. As etapas levam `stepId`, `parentId` e `groupId`, e `parallel`/`pipeline`
   emitem `group-start`/`group-end`: a estrutura do run se refaz só com o log. Etapas servidas do journal ou do memo

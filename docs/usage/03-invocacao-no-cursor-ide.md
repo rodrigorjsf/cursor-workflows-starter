@@ -241,6 +241,50 @@ dentro do kit e depois copie.
 > ([DOC](https://cursor.com/docs/mcp)). Num `~/.cursor/mcp.json` global, ele não
 > aponta para o projeto aberto. Por isso a forma B usa o `mcp.json` **do projeto**.
 
+## Validar no Cursor IDE
+
+"Funciona no Cursor IDE" é um critério com evidência: seis cenários passam no IDE de verdade, na máquina de quem vai
+usar o kit. O kit traz o que torna isso repetível: um workflow barato, o `smoke`, e um assistente guiado.
+
+**O `smoke`** é o workflow mais barato que prova o caminho inteiro (chat → MCP → job destacado → SDK → resultado
+estruturado): uma etapa, sem tools e sem contexto do projeto, no `composer-2.5`, com teto de 50 mil tokens. O agente
+tem de chamar `submit_result` com `answer: "pong"`, e o esquema recusa qualquer outro valor: um run que termina passou
+pelo SDK e voltou. Medido em 2026-11-12 contra a API real: 21.628 tokens, cerca de 25 s, `status: finished`. Numa conta
+em que o `composer-2.5` não está incluído, troque o modelo do papel `ping` (`workflows.smoke.roles.ping.model` na
+[configuração](../reference/config.md), ou `WF_MODEL_PING`). Rode com `/run-workflow smoke` no chat ou `wf run smoke`.
+
+**O assistente** é o [`scripts/verify/validate-cursor-ide.sh`](../../scripts/verify/validate-cursor-ide.sh) (no kit
+instalado, `~/.cursor-workflows/kit/scripts/verify/validate-cursor-ide.sh`). Rode-o no terminal do próprio Cursor: o
+cenário 1 só vale ali, porque o IDE escolhe o próprio Node e PATH. Ele:
+
+1. confere a máquina (`wf`, `gh` logado, dependências do kit) e pergunta a versão do Cursor;
+2. cria um repositório privado descartável no GitHub, com três issues `complexity:low`, reaproveitando o
+   [`setup-sandbox-repo.sh`](../../scripts/verify/setup-sandbox-repo.sh), e roda `wf init` nele. Pede confirmação antes de criar;
+3. roda o `wf doctor` no repositório (cenário 1) e, para cada um dos outros cinco, diz exatamente o que digitar no chat
+   e pergunta o resultado (`pass`, `fail` ou `skip`) e uma nota de uma linha;
+4. escreve o `validation-report.json`, mostra o corpo da issue e só a abre no repositório do kit depois que você confirma.
+
+| # | Cenário | O que você digita no chat | Passa quando |
+|---|---|---|---|
+| 1 | O `wf doctor` está verde no ambiente do IDE | nada: o assistente roda o `wf doctor` no terminal do Cursor | sai com 0 |
+| 2 | O servidor MCP está visível e habilitado | nada: abra a lista de MCP (Customize) | `workflows` ligado, com as cinco tools |
+| 3 | O `smoke` termina | `/run-workflow smoke` | o job termina com `answer: "pong"` |
+| 4 | O `implement-issue` LOW abre um PR no repositório descartável | `/run-workflow implement-issue 1`, pedindo para abrir o PR (`openPr: true`; sem isso o workflow não abre PR) | o job termina e o PR existe |
+| 5 | O run sobrevive ao reinício do Cursor | `/run-workflow implement-issue 2`; com o job rodando, feche o Cursor por completo e abra de novo | o job segue rodando ou terminou; ou falhou com `runId` e o resume termina sem repetir etapas |
+| 6 | O run cancela pelo chat | `/run-workflow implement-issue 3`; com o job rodando, peça ao chat para cancelar | o job termina `cancelled`, com o `runId` para retomar |
+
+No cenário 5, fechar o Cursor fecha o terminal dele e, com ele, o assistente. As respostas ficam em
+`~/.cursor-workflows/validation/progress.env`: reabra o Cursor, rode o assistente de novo e ele segue do cenário 5, com
+as respostas dos anteriores mantidas (Enter confirma cada uma). Os cenários 3 a 6 rodam workflows e gastam cerca de 800
+mil tokens, em modelos que os planos incluem (o `implement-issue` LOW mediu 339 mil;
+[verificações locais](../research/verificacoes-locais.md) §13).
+
+O relatório tem, por cenário, o resultado (`pass`, `fail` ou `skipped`) e a nota, mais os fatos do ambiente (SO, Node,
+versão do kit e do Cursor, se o terminal era o do IDE) e o resultado do `wf doctor`. Caminhos locais, o nome do
+repositório descartável, a conta e a máquina viram marcadores (`~`, `<sandbox-repo>`, `<owner>`, `<user>`, `<path>`), e
+formatos conhecidos de segredo viram `[REDACTED]`. O critério de release (`releaseCriterionMet`) vale só com os seis em
+`pass`. `WF_KIT_REPO=dono/repo` abre a issue em outro repositório que não o de origem do kit.
+
 ## Paridade Cursor × Claude Code
 
 | Eixo | Cursor | Claude Code |

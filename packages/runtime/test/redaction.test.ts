@@ -56,6 +56,7 @@ const FORMATS: Record<string, string> = {
   "GitHub token": ["ghp", "_", "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"].join(""),
   "GitHub fine-grained token": ["github", "_pat_", "11ABCDEFG0abcdefghijkl_", "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"].join(""),
   "AWS access key id": ["AKIA", "IOSFODNN7EXAMPLE"].join(""),
+  "Cursor API key": ["crsr", "_", "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6"].join(""),
   "OpenAI-style key": ["sk", "-", "proj-abcdefghijklmnopqrstuvwxyz0123456789"].join(""),
   "Anthropic-style key": ["sk", "-ant-", "api03-abcdefghijklmnopqrstuvwxyz0123456789"].join(""),
   "Slack token": ["xoxb", "-", "123456789012-abcdefghijklmnop"].join(""),

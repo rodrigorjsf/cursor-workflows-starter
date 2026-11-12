@@ -115,7 +115,16 @@ Ajuste os modelos de cada papel na configuração JSON ou nas variáveis `WF_MOD
 
 ## 5. Teste de fumaça real
 
-Primeiro contato com a API. Use um teto baixo para limitar o custo:
+Primeiro contato com a API. Comece pelo `smoke`, o workflow mais barato do kit: uma etapa, sem tools, no
+`composer-2.5`, com teto de 50 mil tokens ([2.3](03-invocacao-no-cursor-ide.md#validar-no-cursor-ide)). Medido em
+2026-11-12 contra a API real: 21.628 tokens, `status: finished` e `answer: "pong"`.
+
+```bash
+wf run smoke --cwd /caminho/do/repo-de-teste
+```
+
+Se o `smoke` terminar, o login, o modelo e a saída estruturada funcionam. O teste ponta a ponta abaixo custa muito
+mais; use um teto baixo para limitar o custo:
 
 ```bash
 # Repositório de teste com uma issue simples rotulada "complexity:low"

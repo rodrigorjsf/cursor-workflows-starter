@@ -42,6 +42,7 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   ├── cli.ts              # wf login | whoami | models | list | init | doctor | upgrade | config | run | start | wait | status | cancel | jobs | stats | metrics
 │       │   └── mcp-server.ts       # tools MCP: list_workflows, start_workflow, wait_workflow, get_workflow_status, cancel_workflow
 │       ├── workflows/
+│       │   ├── smoke.ts            # teste de fumaça: uma etapa estruturada, num modelo incluído, com teto de 50 mil tokens
 │       │   ├── implement-issue.ts  # exemplo: TDD fatia a fatia conferido pelo código → review em 3 eixos → PR com evidência
 │       │   └── implement-issue/    # prompts (paráfrases das skills de mattpocock/skills), laço TDD, review, corpo do PR
 │       └── test/                   # testes offline (fake SDK)

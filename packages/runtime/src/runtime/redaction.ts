@@ -1,7 +1,7 @@
 // Secrets never reach the run's event log. Two things are replaced with `[REDACTED]` before an event is written (and before
 // any listener sees it):
-//   - text that has the shape of a well-known credential (GitHub, AWS, Slack, Google, npm and Stripe keys, JWTs, bearer
-//     tokens, private key blocks, and the `sk-` keys of the model providers);
+//   - text that has the shape of a well-known credential (GitHub, AWS, Slack, Google, npm, Stripe and Cursor keys, JWTs,
+//     bearer tokens, private key blocks, and the `sk-` keys of the model providers);
 //   - the value of any environment variable whose name contains KEY, TOKEN, SECRET or PASSWORD, plus keys handed to the run
 //     directly (the Cursor API key arrives this way, as `CURSOR_API_KEY` or the `apiKey` option).
 // Best effort, not a guarantee: a secret in a format not listed here, held in a variable not named like one, passes through.
@@ -27,6 +27,7 @@ const FORMATS: RegExp[] = [
   /gh[pousr]_[A-Za-z0-9]{36,}/g, // GitHub personal, OAuth, user-to-server, server-to-server and refresh tokens
   /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, // AWS access key id
   /\bsk-[A-Za-z0-9_-]{20,}/g, // OpenAI, Anthropic and compatible secret keys
+  /crsr_[A-Za-z0-9_-]{16,}/g, // Cursor API key (the `crsr_` prefix implement-issue's secret guard already looks for; a key read from a file is in no env var)
   /xox[abprs]-[A-Za-z0-9-]{10,}/g, // Slack
   /\bAIza[0-9A-Za-z_-]{35}\b/g, // Google API key
   /npm_[A-Za-z0-9]{36}\b/g, // npm token
