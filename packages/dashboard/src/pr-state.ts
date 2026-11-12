@@ -10,7 +10,8 @@
 //   request), so a missing `gh` costs a failed start now and then, not one per poll.
 // - A refresh that fails keeps the state it had.
 import { execFile } from "node:child_process";
-import type { PrState } from "./board.js";
+/** How GitHub says a pull request stands. */
+export type PrState = "open" | "merged" | "closed";
 
 /** A pull request of github.com, exactly: no query, no fragment, no path after the number. */
 const PR_URL = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d{1,9}$/;

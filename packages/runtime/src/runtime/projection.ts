@@ -207,8 +207,10 @@ export interface RunCard {
   badges: string[];
 }
 
-/** The most a card and a phase list carry. A log is written by workflow code and read by a browser: the read side bounds what it hands over. */
-const CARD_MAX = { title: 200, subtitle: 200, label: 80, url: 2048, badge: 40, links: 8, badges: 8, phase: 80, phases: 30 };
+/** The most a card carries. A log is written by workflow code and read by a browser: the read side bounds what it hands over. */
+const CARD_MAX = { title: 200, subtitle: 200, label: 80, url: 2048, badge: 40, links: 8, badges: 8 };
+/** The most a phase title and a run's phase list carry, for the same reason. */
+const PHASES_MAX = { title: 80, count: 30 };
 
 const clip = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 const isText = (value: unknown): value is string => typeof value === "string" && value.trim() !== "";
@@ -224,7 +226,7 @@ function isWebUrl(url: string): boolean {
 }
 
 /** The card a `card` event describes, or undefined when it has no usable title. Log content is data, not code: types are checked, not assumed. */
-function cardOf(event: unknown): RunCard | undefined {
+function parseCardEvent(event: unknown): RunCard | undefined {
   if (typeof event !== "object" || event === null) return undefined;
   const { title, subtitle, links, badges } = event as Record<string, unknown>;
   if (!isText(title)) return undefined;
@@ -251,11 +253,14 @@ export function latestCard(events: readonly WorkflowEvent[]): RunCard | undefine
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i]!;
     if (event.type !== "card") continue;
-    const card = cardOf(event);
+    const card = parseCardEvent(event);
     if (card) return card;
   }
   return undefined;
 }
+
+/** A phase title as the read side hands it over: cut to what a column title may hold. A run's `phase` and its `phases` both go through it, so they always agree. */
+export const boundedPhase = (title: string): string => clip(title, PHASES_MAX.title);
 
 /**
  * The phases of a run, in order: the ones its workflow declared (the latest `run-start` that lists them; logs of older kits
@@ -264,7 +269,9 @@ export function latestCard(events: readonly WorkflowEvent[]): RunCard | undefine
 export function runPhases(events: readonly WorkflowEvent[]): string[] {
   const phases: string[] = [];
   const add = (title: unknown) => {
-    if (isText(title) && phases.length < CARD_MAX.phases && !phases.includes(title)) phases.push(clip(title, CARD_MAX.phase));
+    if (!isText(title) || phases.length >= PHASES_MAX.count) return;
+    const bounded = boundedPhase(title);
+    if (!phases.includes(bounded)) phases.push(bounded);
   };
   const declared = events.findLast((e) => e.type === "run-start" && Array.isArray(e.phases));
   if (declared?.type === "run-start") for (const title of declared.phases ?? []) add(title);

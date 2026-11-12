@@ -4,6 +4,7 @@
 //
 // Pure: it takes the runs the runtime read and the state of the pull requests the cards link to, and builds the answer.
 import type { RunCard, RunSummary, RunViewStatus } from "@cursor-workflows/runtime/observe";
+import type { PrState } from "./pr-state.js";
 
 export type ColumnKind = "phase" | "awaiting-approval" | "done" | "failed" | "cancelled";
 
@@ -13,9 +14,6 @@ export interface BoardColumn {
   title: string;
   kind: ColumnKind;
 }
-
-/** How GitHub says a pull request stands. */
-export type PrState = "open" | "merged" | "closed";
 
 export interface BoardLink {
   label: string;
@@ -62,9 +60,11 @@ const END_COLUMNS: BoardColumn[] = [
 /** The one phase column of a workflow whose runs enter no phase. */
 const RUNNING_COLUMN: BoardColumn = { key: "running", title: "Running", kind: "phase" };
 
-const phaseColumn = (title: string): BoardColumn => ({ key: `phase:${title}`, title, kind: "phase" });
+/** The key of the column of a phase: the one place that spells it. */
+const phaseKey = (title: string): string => `phase:${title}`;
+const phaseColumn = (title: string): BoardColumn => ({ key: phaseKey(title), title, kind: "phase" });
 
-/** The column of a run. `phases` are the board's phase columns, in order; a run that has entered none, or one the board has no column for, waits in the first. */
+/** The column of a run. `phases` are the board's phase columns, in order; a run that has not entered a phase yet waits in the first. */
 function columnOf(run: RunSummary, phases: readonly BoardColumn[]): string {
   switch (run.status) {
     case "cancelled":
@@ -75,13 +75,13 @@ function columnOf(run: RunSummary, phases: readonly BoardColumn[]): string {
       // `unknown`: the workflow returned a result that names no status. It returned, and nothing says it did not deliver.
       return run.outcome === "pending" ? "awaiting-approval" : run.outcome === "failed" ? "failed" : "done";
     default: {
-      const entered = run.phase === undefined ? undefined : phases.find((c) => c.key === `phase:${run.phase}`);
+      const entered = run.phase === undefined ? undefined : phases.find((c) => c.key === phaseKey(run.phase!));
       return (entered ?? phases[0]!).key;
     }
   }
 }
 
-function cardOf(card: RunCard, states: ReadonlyMap<string, PrState>): NonNullable<BoardCard["card"]> {
+function withPrStates(card: RunCard, states: ReadonlyMap<string, PrState>): NonNullable<BoardCard["card"]> {
   return { ...card, links: card.links.map((link) => ({ ...link, state: states.get(link.url) })) };
 }
 
@@ -95,8 +95,9 @@ export function buildBoards(runs: readonly RunSummary[], states: ReadonlyMap<str
     if (run.status !== "missing") byWorkflow.set(run.workflow, [...(byWorkflow.get(run.workflow) ?? []), run]);
   }
   return [...byWorkflow].map(([workflow, group]) => {
-    // The newest run's phases set the order; phases only older runs entered follow.
-    const titles = [...new Set(group.flatMap((run) => run.phases))];
+    // The newest run's phases set the order; phases only older runs entered follow. The phase a run is in now always has its
+    // column, even when the run's own list of phases was cut short.
+    const titles = [...new Set([...group.flatMap((run) => run.phases), ...group.flatMap((run) => (run.status === "running" && run.phase ? [run.phase] : []))])];
     const phases = titles.length > 0 ? titles.map(phaseColumn) : [RUNNING_COLUMN];
     return {
       workflow,
@@ -112,7 +113,7 @@ export function buildBoards(runs: readonly RunSummary[], states: ReadonlyMap<str
         error: run.error,
         spentCents: run.spentCents,
         chargedCents: run.chargedCents,
-        card: run.card && cardOf(run.card, states),
+        card: run.card && withPrStates(run.card, states),
       })),
     };
   });

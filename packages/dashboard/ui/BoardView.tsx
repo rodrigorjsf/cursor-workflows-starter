@@ -2,21 +2,28 @@
 // The server decides which column a run is in; the Board polls, so a card moves a moment after its run does.
 import type { Board, BoardCard, BoardLink, BoardResponse } from "../src/board.js";
 import { money, repoName, runDuration } from "./format.js";
+import { Loaded } from "./Loaded.js";
 import { usePoll } from "./usePoll.js";
 
 const POLL_MS = 2000;
 
 export function BoardView() {
-  const { data, error } = usePoll<BoardResponse>("/api/board", POLL_MS);
-  if (!data) return <p className={error ? "note error" : "note"}>{error ?? "Loading the board…"}</p>;
+  const poll = usePoll<BoardResponse>("/api/board", POLL_MS);
   return (
-    <>
-      {error && <p className="note error">Could not refresh: {error}</p>}
-      {data.boards.length === 0 && <p className="note">No runs yet. Start a workflow from the chat or with <code>npm run wf -- run</code>, and its card appears here.</p>}
-      {data.boards.map((board) => (
-        <WorkflowBoard key={board.workflow} board={board} />
-      ))}
-    </>
+    <Loaded poll={poll} what="the board">
+      {(data) => (
+        <>
+          {data.boards.length === 0 && (
+            <p className="note">
+              No runs yet. Start a workflow from the chat or with <code>npm run wf -- run</code>, and its card appears here.
+            </p>
+          )}
+          {data.boards.map((board) => (
+            <WorkflowBoard key={board.workflow} board={board} />
+          ))}
+        </>
+      )}
+    </Loaded>
   );
 }
 

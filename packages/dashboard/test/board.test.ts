@@ -277,3 +277,25 @@ test("a run's log is read again only when it has changed: polling the Board does
   appendLog(repo, "smoke-aaaa0001", eventLine("smoke-aaaa0001", at(1), { type: "card", title: "second" }) + "\n");
   assert.equal(((await http(dash.url, "/api/board")).json.boards[0].cards[0].card.title), "second");
 });
+
+test("a running run is always in a column of its own phase, however long the title or however many phases the log has entered", async () => {
+  const repo = box.repo("repo");
+  const long = "Phase ".padEnd(120, "x"); // longer than a column title is allowed to be
+  writeRun(box.home, repo, { runId: "smoke-long00001", workflow: "smoke", startedAt: at(0), phases: ["Ping"], events: [{ type: "phase", title: long }, { type: "phase", title: long }], lockedBy: process.ppid });
+  writeRun(box.home, repo, { runId: "smoke-long00002", workflow: "smoke", startedAt: at(1), phases: ["Ping"], events: [{ type: "phase", title: long + "-and-more" }], lockedBy: process.ppid });
+  const many = Array.from({ length: 40 }, (_, i) => ({ type: "phase", title: `Step ${i}` }));
+  writeRun(box.home, repo, { runId: "smoke-many0003", workflow: "smoke", startedAt: at(2), events: many, lockedBy: process.ppid });
+
+  const runs = await runsById();
+  assert.equal(runs["smoke-long00001"].phases.filter((p: string) => p.startsWith("Phase ")).length, 1, "the same long title entered twice is one phase");
+  assert.ok(runs["smoke-long00001"].phases.every((p: string) => p.length <= 80));
+  assert.equal(runs["smoke-long00001"].phase, runs["smoke-long00002"].phase, "titles that are cut to the same text are the same phase");
+
+  const board = await boardOf("smoke");
+  const keys = new Set(board.columns.map((c: any) => c.key));
+  for (const card of board.cards) assert.ok(keys.has(card.column), `${card.runId} sits in column ${card.column}, which the board does not have`);
+  const placed = Object.fromEntries(board.cards.map((c: any) => [c.runId, c.column]));
+  assert.equal(placed["smoke-long00001"], `phase:${runs["smoke-long00001"].phase}`, "its own phase, not the first column");
+  assert.equal(placed["smoke-many0003"], "phase:Step 39", "the 40th phase it entered, past the most a run lists: still its own column");
+  assert.equal(board.columns.filter((c: any) => c.key === placed["smoke-long00001"]).length, 1);
+});

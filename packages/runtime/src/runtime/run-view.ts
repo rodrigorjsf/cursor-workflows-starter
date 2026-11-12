@@ -9,7 +9,7 @@ import { statSync } from "node:fs";
 import { join } from "node:path";
 import type { RunStatus } from "./events.js";
 import type { OutcomeClass } from "./outcome.js";
-import { type ExecutionState, type RunCard, latestCard, projectLatestExecution, resumeHint, runPhases, withRatio } from "./projection.js";
+import { type ExecutionState, type RunCard, boundedPhase, latestCard, projectLatestExecution, resumeHint, runPhases, withRatio } from "./projection.js";
 import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn } from "./run-store.js";
 import { type RunsIndexEntry, readRunsIndex } from "./runs-index.js";
 import type { UsageTotals } from "./workflow.js";
@@ -131,7 +131,7 @@ function detailOf(entry: RunsIndexEntry): RunDetail {
     workflow: execution.workflow,
     status,
     finishedAt: execution.finishedAt,
-    phase: execution.phase,
+    phase: execution.phase === undefined ? undefined : boundedPhase(execution.phase),
     phases: [...projected.phases],
     outcome: execution.outcome,
     card: projected.card && structuredClone(projected.card),

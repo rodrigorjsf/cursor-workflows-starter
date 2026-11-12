@@ -3,6 +3,7 @@
 //   1. daily spend per workflow  2. cost per delivery  3. cost per 1k tokens and success rate per context band
 //   4. waste (failures, re-prompts) and savings (journal/memo)
 import { useState } from "react";
+import { Loaded } from "./Loaded.js";
 import { usePoll } from "./usePoll.js";
 
 type Row = Record<string, unknown>;
@@ -151,21 +152,27 @@ const KPIS: Column[] = [
 
 export function MetricsView() {
   const [days, setDays] = useState("30");
-  const [chosen, setChosen] = useState("");
-  const { data, error } = usePoll<Summary>(`/api/summary?days=${days}`, POLL_MS);
-  if (!data) return <p className={error ? "note error" : "note"}>{error ?? "Loading the metrics…"}</p>;
+  const poll = usePoll<Summary>(`/api/summary?days=${days}`, POLL_MS);
+  return (
+    <Loaded poll={poll} what="the metrics">
+      {(data) => <Panels data={data} days={days} onDays={setDays} />}
+    </Loaded>
+  );
+}
 
+function Panels({ data, days, onDays }: { data: Summary; days: string; onDays: (days: string) => void }) {
+  const [chosen, setChosen] = useState("");
   const totals = data.totals?.[0] ?? {};
   const models = [...new Set((data.contextBuckets ?? []).map((r) => String(r.model_key)))];
   const model = models.includes(chosen) ? chosen : (models[0] ?? "");
   const daysWithSpend = [...new Set((data.daily ?? []).map((d) => String(d.day)))];
 
   return (
-    <div className="metrics">
+    <div className="metrics" lang="pt-BR">
       <h2>Métricas dos workflows</h2>
       <div className="sub">
         Banco local por usuário · custo = <b>raw</b> do Cursor (sem descontos) quando disponível, senão estimativa da tabela <code>pricing</code> · janela{" "}
-        <select aria-label="janela em dias" value={days} onChange={(e) => setDays(e.target.value)}>
+        <select aria-label="janela em dias" value={days} onChange={(e) => onDays(e.target.value)}>
           {["7", "30", "90", "365"].map((d) => (
             <option key={d}>{d}</option>
           ))}
