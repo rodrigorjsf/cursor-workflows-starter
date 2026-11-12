@@ -16,7 +16,8 @@ const KIT_ROOT = join(PACKAGE, "..", "..");
 
 const BEGIN = "<!-- cursor-workflows:begin -->";
 const END = "<!-- cursor-workflows:end -->";
-const GUIDE_URL = "https://github.com/rodrigorjsf/cursor-workflows-starter/blob/main/INSTALL-AGENT.md";
+const TAG = `v${(JSON.parse(readFileSync(join(PACKAGE, "package.json"), "utf8")) as { version: string }).version}`;
+const GUIDE_URL = `https://github.com/rodrigorjsf/cursor-workflows-starter/blob/${TAG}/INSTALL-AGENT.md`;
 
 let sandbox: string;
 let home: string;
@@ -131,7 +132,7 @@ test("wf init writes nothing in the user's home", () => {
   assert.deepEqual(readdirSync(home).sort(), before);
 });
 
-const SCHEMA_URL = "https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/main/packages/runtime/schema/config.schema.json";
+const SCHEMA_URL = `https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/${TAG}/packages/runtime/schema/config.schema.json`;
 
 test("wf init writes a repo config with the schema address and a kit version range, which the kit accepts", () => {
   const repo = emptyRepo();

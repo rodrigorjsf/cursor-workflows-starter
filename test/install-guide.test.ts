@@ -97,3 +97,22 @@ test("every document that tells a reader to fetch or install a tag names the pac
   }
   for (const expected of ["INSTALL-AGENT.md", "README.md", "README.en.md", "docs/usage/01-instalacao.md"]) assert.ok(found.includes(expected), `${expected} no longer pins a tag`);
 });
+
+test("every pointer the kit writes into a repo or a config pins the package version's tag, not a branch", () => {
+  const files = [
+    ["templates", "agents-md-block.md"],
+    ["templates", "global-config.json"],
+    ["packages", "runtime", "schema", "config.schema.json"],
+    ["packages", "runtime", "src", "init.ts"],
+    ["packages", "runtime", "src", "doctor.ts"],
+  ];
+  for (const parts of files) {
+    const text = read(...parts);
+    assert.doesNotMatch(text, /cursor-workflows-starter\/(blob\/)?(main|master|HEAD)\//, `${parts.join("/")} points at a branch`);
+  }
+  assert.ok(read("templates", "agents-md-block.md").includes(`cursor-workflows-starter/blob/${TAG}/INSTALL-AGENT.md`), "the AGENTS.md block links the guide at the tag");
+  assert.equal(
+    (JSON.parse(read("templates", "global-config.json")) as { $schema: string }).$schema,
+    `https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/${TAG}/packages/runtime/schema/config.schema.json`,
+  );
+});

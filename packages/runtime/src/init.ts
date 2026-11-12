@@ -18,8 +18,9 @@ export interface FileChange {
 /** Where the installer puts the kit, relative to the user's home: the one fixed place every committed MCP config can name. */
 const KIT_FROM_HOME = ".cursor-workflows/kit";
 
-/** Where editors fetch the JSON Schema of the config files: raw JSON on the default branch, so it always resolves. */
-const CONFIG_SCHEMA_URL = "https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/main/packages/runtime/schema/config.schema.json";
+/** Where editors fetch the JSON Schema of the config files: raw JSON at the kit's release tag, so autocomplete matches the kit. */
+const configSchemaUrl = (version: string) =>
+  `https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v${version}/packages/runtime/schema/config.schema.json`;
 
 type Json = Record<string, unknown>;
 
@@ -39,7 +40,7 @@ function changedJson(next: Json, current: Json): string | undefined {
 /** The repo config with `$schema` and `kit` first; what the file already says stays, including its own `kit` range. */
 function withKitFields(file: string, existing: string | undefined, version: string): string | undefined {
   const config = parseObject(file, existing);
-  return changedJson({ $schema: CONFIG_SCHEMA_URL, kit: kitRange(version), ...config }, config);
+  return changedJson({ $schema: configSchemaUrl(version), kit: kitRange(version), ...config }, config);
 }
 
 /** The `.gitignore` with the runtime's state directory ignored: unchanged when one of its usual spellings is already there. */
