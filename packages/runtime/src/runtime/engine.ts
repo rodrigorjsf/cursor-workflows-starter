@@ -18,7 +18,7 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ModelSelection, RunUsage, SettingSource } from "@cursor/sdk";
 import { Ajv } from "ajv";
-import { type AgentBackend, type AttemptEvent, type AttemptResult, type StepLocation, type StepOptions, type UsageReading, localBackend } from "./backend.js";
+import { type AgentBackend, type AttemptEvent, type AttemptResult, type ResultVia, type StepLocation, type StepOptions, type UsageReading, localBackend } from "./backend.js";
 import { createCloudBackend } from "./backend-cloud.js";
 import { type CommandOutcome, EXEC_FLUSH_MS, EXEC_LOG_MAX_CHARS, outputLog, runCommand, toExecResult } from "./command-runner.js";
 import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedConfig, type StepOverrides, allowedSources, isModelAllowed, loadEffectiveConfig } from "../config/index.js";
@@ -746,6 +746,8 @@ async function executeRun<A, R>(
     sources: SettingSource[];
     /** Where the step runs: its role's location in the config, once the global `allowedLocations` cap has applied. */
     location: StepLocation;
+    /** How a cloud step delivers a structured result: its role's `resultVia` in the config. */
+    resultVia: ResultVia | undefined;
     mKey: string | undefined;
     fingerprint: Record<string, unknown>;
     /** Journal key. */
@@ -786,7 +788,7 @@ async function executeRun<A, R>(
     // Chave calculada de forma síncrona, antes de qualquer await.
     const key = journal.keyFor(prompt, fingerprint);
     const ref: StepRef = { stepId: stepIdOf(key), parentId: flow.last, groupId: flow.groupId };
-    const step: StepContext = { o, role, promptHash, label, phase, sources, location: overrides.location, mKey, fingerprint, key, ref, started: false, tokenCap: overrides.maxTokensPerStep, tokens: 0 };
+    const step: StepContext = { o, role, promptHash, label, phase, sources, location: overrides.location, resultVia: overrides.resultVia, mKey, fingerprint, key, ref, started: false, tokenCap: overrides.maxTokensPerStep, tokens: 0 };
     return inNode(runStep<T>(prompt, step), flow, ref, () => step.started);
   }
 
@@ -877,15 +879,10 @@ async function executeRun<A, R>(
       throw new StepFailedError(`step "${label}": the global allowedLocations cap (${caps.allowedLocations.join(", ") || "empty"}) does not allow ${backend.location} steps`);
     }
     // A cloud step is rejected before it spends anything. The workflow's declaration (`read-only`) is checked against what the step
-    // does, which only a step knows; and a step that writes has no cloud path yet.
+    // does, which only a step knows. A step that writes works on the snapshot branch, and its commits are brought back into the worktree.
     const writes = !isReadOnly(o.tools);
-    if (location === "cloud" && writes) {
-      const declared = roles.get(role!)?.cloud;
-      throw new StepFailedError(
-        declared === "read-only"
-          ? `step "${label}": role "${role}" is declared cloud: read-only by workflow ${def.meta.name}, but this step can write (its tools are not read-only), so it cannot run in the cloud`
-          : `step "${label}": a step that can write cannot run in the cloud yet (role "${role}" is configured for it): give the step read-only \`tools\`, or set the role's location to local`,
-      );
+    if (location === "cloud" && writes && roles.get(role!)?.cloud === "read-only") {
+      throw new StepFailedError(`step "${label}": role "${role}" is declared cloud: read-only by workflow ${def.meta.name}, but this step can write (its tools are not read-only), so it cannot run in the cloud`);
     }
     if (o.schema && o.schema.type !== "object") {
       throw new StepFailedError(`step "${label}": schema must have type "object" at the root (it becomes a tool's inputSchema)`);
@@ -910,6 +907,7 @@ async function executeRun<A, R>(
       writes,
       schema: o.schema,
       schemaRetries: o.schemaRetries ?? 2,
+      resultVia: step.resultVia,
     };
 
     /**
@@ -1015,6 +1013,7 @@ async function executeRun<A, R>(
         let charge: Charge | undefined;
         let errorKind: ErrorKind | undefined;
         let cancelledBy: RunCancelledError | undefined;
+        let touchedWorktree = false;
         let reverted = false;
         let agentId: string | undefined;
         let resolvedModel: string | undefined;
@@ -1066,6 +1065,7 @@ async function executeRun<A, R>(
           }
           agentId = result.agentId;
           resolvedModel = result.model;
+          touchedWorktree = result.touchedWorktree === true;
           // Timeout/error also cost. No reading and no turns: no agent existed, so nothing was used.
           if (result.usage || turnUsage.totalTokens > 0) charge = chargeUsage(result.usage ?? { failed: "the backend reported no usage" }, turnUsage);
           const { outcome } = result;
@@ -1128,7 +1128,9 @@ async function executeRun<A, R>(
           step.tokens += turnUsage.totalTokens;
         }
         if (cancelledBy) reverted = await reverter.onCancel();
-        else if (o.revertOnRetry && attempt < attempts) reverted = await reverter.beforeRetry();
+        // A backend that may have changed the directory before it failed (a cloud step whose work could not be brought back
+        // half way) has it put back whatever the call asks: the step failed, and a worktree half moved to its result is no one's.
+        else if (touchedWorktree || (o.revertOnRetry && attempt < attempts)) reverted = await reverter.beforeRetry();
         endEvent(false);
         if (cancelledBy) throw cancelledBy;
       }

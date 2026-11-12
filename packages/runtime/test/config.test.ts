@@ -445,6 +445,37 @@ test("a label cannot be sent to the cloud: only roles declare a cloud capability
   assert.equal(calls.length, 0);
 });
 
+test("a role's resultVia is absent from the effective config until a layer sets it, then comes with its provenance; only the two strategies are valid", async () => {
+  const startWith = async (global: unknown, repo?: unknown) => {
+    clearConfig(cwd);
+    writeGlobalConfig(global);
+    if (repo) writeRepoConfig(cwd, repo);
+    return startOf();
+  };
+  const unset = await startWith({});
+  assert.equal("resultVia" in unset.config.roles.classify!, false, "no default cell: the effective config of a run that never asks is what it was");
+
+  const set = await startWith({ workflows: { cfg: { roles: { classify: { resultVia: "artifact" } } } } }, { workflows: { cfg: { roles: { review: { resultVia: "json-block" } } } } });
+  assert.deepEqual([set.config.roles.classify!.resultVia, set.config.roles.review!.resultVia], ["artifact", "json-block"]);
+  assert.deepEqual(set.provenance["/roles/classify/resultVia"], { layer: "global", ref: globalConfigPath() });
+  assert.deepEqual(set.provenance["/roles/review/resultVia"], { layer: "repo", ref: repoConfigPath(cwd) });
+
+  clearConfig(cwd);
+  writeGlobalConfig({ workflows: { cfg: { roles: { classify: { resultVia: "yaml" } } } } });
+  const bad = await runWorkflow(configWorkflow(), {}, { cwd });
+  assert.equal(bad.status, "failed");
+  assert.match(bad.error!, /\/workflows\/cfg\/roles\/classify\/resultVia/);
+  assert.equal(calls.length, 0);
+});
+
+test("a label cannot choose how a cloud step delivers its result either: its steps never run in the cloud", async () => {
+  writeGlobalConfig({ workflows: { cfg: { labels: { "desenhar:*": { resultVia: "artifact" } } } } });
+  const r = await runWorkflow(configWorkflow(), {}, { cwd });
+  assert.equal(r.status, "failed");
+  assert.match(r.error!, /\/workflows\/cfg\/labels\/desenhar:\*\/resultVia: resultVia is set per role/);
+  assert.equal(calls.length, 0);
+});
+
 test("allowedLocations without 'local' keeps every step from running", async () => {
   writeGlobalConfig({ caps: { allowedLocations: ["cloud"] } });
   const r = await runWorkflow(configWorkflow(), {}, { cwd });

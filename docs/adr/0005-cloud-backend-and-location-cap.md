@@ -37,8 +37,20 @@ enforced before any cloud code exists.
   workflow's prefix and pushes it to a configurable remote (default `origin`). After a write step it fetches the cloud
   agent's commits and fast-forwards the local worktree; tests keep running locally. Snapshot branches are deleted when the
   step ends and swept by `wf gc`.
+- **A write step works on the snapshot branch and its work comes back by fast-forward or not at all.** The cloud agent is
+  created to work on the current branch (the snapshot branch) and told to commit there. When its run finishes the engine
+  fetches the branch and moves the worktree's branch, index and working files to it, then deletes the snapshot. It refuses,
+  changing nothing, when the agent's branch no longer contains the snapshot it started from, when the local branch moved
+  meanwhile, or when the working files are no longer what was pushed (bringing the work back would overwrite the changes
+  made in the meantime); the attempt fails like any other and the step's retries apply. A worktree that had no changes needs
+  no snapshot commit (the snapshot is `HEAD`); one that had changes keeps the snapshot commit in the local history, because
+  the agent's commits are built on it. If moving the worktree fails after it began to change the index or the files, the
+  engine puts them back as they were before the step, the way it does for a cancelled step. A role a workflow declares
+  `never` stays that way until its author declares otherwise: `implement-issue`'s write roles are still `never`.
 - **Structured results keep their contract.** The prompt requires a final fenced JSON block, validated with Ajv and
-  corrected by follow-up sends in the same conversation, so workflow code does not change between locations.
+  corrected by follow-up sends in the same conversation, so workflow code does not change between locations. A role can
+  switch (`resultVia: "artifact"`) to a `result.json` file the agent saves in its artifacts directory, downloaded after the
+  run and validated the same way, for schemas the text of an answer does not carry reliably.
 - **The lifecycle matches the local one.** The cloud agent id is stored in the event log as soon as it exists, so a resume
   or a crash reattaches to the running agent instead of starting another. Cancelling a run cancels its cloud agents, and the
   client's two-hour wait limit is a reattach point, not a failure. Two rules keep a reattach from paying twice: an agent that

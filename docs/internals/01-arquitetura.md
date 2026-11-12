@@ -198,15 +198,24 @@ O contrato, além da tabela:
   reenvia o pedido na mesma conversa até o schema ser satisfeito; o motor só recebe o valor validado e os eventos
   `reprompt`. O de nuvem entrega o mesmo contrato com um bloco JSON final: o prompt traz o schema e pede, no fim da
   resposta, um bloco de código `json`; o último bloco é validado com o Ajv e um bloco ausente ou inválido volta ao agente
-  como follow-up, dentro dos `schemaRetries` da etapa.
+  como follow-up, dentro dos `schemaRetries` da etapa. Com `resultVia: "artifact"` no papel, o prompt pede o arquivo
+  `result.json` nos artefatos do agente e o backend o baixa depois de cada resposta (`listArtifacts`, `downloadArtifact`),
+  com a mesma validação e os mesmos follow-ups.
 - O backend de nuvem não manda custom tools, allowlist de tools nem camadas de configuração (o cloud agent as recusa ou
   ignora; o backend avisa das camadas com um `warning`). Antes de criar o agente ele empurra um snapshot do worktree
   (`cloud-snapshot.ts`: o estado em disco, não commitado inclusive, sem tocar no índice nem na `HEAD` do usuário, e sem
   `.workflows/`) para uma branch `wf/cloud-snapshot/<run>/<id>` do remote `cloud.remote` (padrão `origin`) e a apaga quando
   a tentativa termina, de qualquer jeito que termine. O `warning` não conta como "o agente existe": o teto de tokens segue
   esperando o evento `agent`.
-- Uma etapa na nuvem não usa o memo. Hoje só roda ali a etapa de leitura (`writes: false`); a que escreve falha antes de
-  gastar, com a mensagem que diz o que fazer.
+- Uma etapa na nuvem não usa o memo. A que escreve (`writes: true`) roda ali também, desde que o papel não seja declarado
+  `read-only`: o agente trabalha na própria branch de snapshot (`workOnCurrentBranch`) e commita nela, e, quando o run
+  termina com sucesso, `bringBack` (`cloud-snapshot.ts`) busca a branch e avança o worktree até ela, antes de apagar o
+  snapshot. É um fast-forward ou nada: ele recusa, sem mudar nada, quando a branch do agente não contém mais o snapshot, quando
+  a branch local andou ou quando os arquivos já não são o que foi empurrado; a tentativa então falha como qualquer outra. Se
+  o avanço falha depois de mexer no índice e nos arquivos, o backend marca `AttemptResult.touchedWorktree` e o motor devolve o
+  worktree ao snapshot que tirou antes da etapa. O commit do snapshot só existe quando o worktree tinha mudanças (senão o
+  snapshot é o próprio `HEAD`) e o log o guarda em `cloud-agent.snapshot.commit`, para o resume conferir o worktree contra
+  ele.
 - **O agente na nuvem sobrevive ao processo.** O evento `agent` do backend leva também a branch de snapshot de que o agente
   parte (e `reattached`, quando é um agente retomado). O motor o grava no log como `cloud-agent` na hora, antes de a etapa
   terminar. Num resume, `RunStore.interruptedCloud` lista as etapas na nuvem com um `cloud-agent` sem `step-end` (a

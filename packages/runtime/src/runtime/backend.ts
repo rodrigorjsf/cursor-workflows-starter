@@ -43,6 +43,12 @@ import type { AgentCallOptions } from "./workflow.js";
 export type StepLocation = "local" | "cloud";
 
 /**
+ * How a cloud step delivers a structured result, the role's `resultVia` in the config: the last fenced `json` block of its
+ * final message (the default), or a `result.json` file it saves in its artifacts directory, which is downloaded after the run.
+ */
+export type ResultVia = "json-block" | "artifact";
+
+/**
  * The step's options as the engine resolved them (code defaults, role, config layers and the global caps already applied):
  * everything a backend needs to run one attempt, and nothing it has to look up.
  */
@@ -60,6 +66,8 @@ export interface StepOptions extends Pick<AgentCallOptions, "tools" | "disallowe
   writes: boolean;
   /** Re-prompts allowed, in the same conversation, when a structured step has not delivered a valid result. */
   schemaRetries: number;
+  /** How a cloud step delivers its structured result. Absent: `json-block`. A local step delivers it through a tool, whatever this says. */
+  resultVia?: ResultVia;
   /**
    * A cloud agent that an earlier, interrupted attempt of this step left running (the process died, the run was resumed): the
    * cloud backend picks it up instead of creating another, and the local backend never gets one. `snapshot` is the branch
@@ -131,6 +139,11 @@ export interface AttemptResult {
    * is still there. The engine hands the same agent to the next attempt, rather than letting it start another one.
    */
   reattachFailed?: true;
+  /**
+   * The backend may have changed the step's directory before it failed (a cloud step's work could not be brought back into the
+   * worktree half way). The engine puts the directory back as it was before the step, the way it does for a cancelled one.
+   */
+  touchedWorktree?: true;
 }
 
 export interface AgentBackend {
@@ -379,15 +392,17 @@ export type Delivery = { ok: true; value: unknown } | { ok: false; message: stri
 export async function converse(
   exchange: Exchange,
   message: string,
-  { schemaRetries, check, onEvent, running }: { schemaRetries: number; check?: (answer: RunResult) => Delivery; onEvent: (event: AttemptEvent) => void; running?: Run },
+  { schemaRetries, check, onEvent, running }: { schemaRetries: number; check?: (answer: RunResult) => Delivery | Promise<Delivery>; onEvent: (event: AttemptEvent) => void; running?: Run },
 ): Promise<AttemptOutcome> {
   // A reattached agent already has a run going: its answer is the first one, and `message` is not sent again.
   let answer = await (running ? exchange.attach(running) : exchange(message));
-  let delivery = check?.(answer);
-  for (let tries = schemaRetries; check && delivery && !delivery.ok && answer.status === "finished" && tries > 0; tries--) {
+  // Only an answer of a run that finished has a result to check (a backend's check may call an API).
+  const deliveryOf = (a: RunResult) => (check && a.status === "finished" ? check(a) : undefined);
+  let delivery = await deliveryOf(answer);
+  for (let tries = schemaRetries; delivery && !delivery.ok && answer.status === "finished" && tries > 0; tries--) {
     onEvent({ type: "reprompt", message: delivery.reprompt });
     answer = await exchange(delivery.reprompt);
-    delivery = check(answer);
+    delivery = await deliveryOf(answer);
   }
   if (answer.status !== "finished") return { kind: "run-error", message: `run ${answer.status}: ${answer.error?.message ?? "no detail"}` };
   if (delivery && !delivery.ok) return { kind: "schema", message: delivery.message };

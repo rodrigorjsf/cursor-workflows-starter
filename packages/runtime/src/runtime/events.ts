@@ -170,6 +170,8 @@ export interface EffectiveCaps {
 export interface EffectiveRole {
   /** Onde as etapas do papel rodam: `local` (o padrão) ou `cloud`. Um `cloud` que o teto `allowedLocations` não permite vira `local`, com uma violação. Só papéis têm location; um glob de label não. */
   location?: "local" | "cloud";
+  /** Como uma etapa do papel na nuvem entrega o resultado estruturado: `json-block` (o padrão: o último bloco de código `json` da resposta final) ou `artifact` (o arquivo `result.json` que o agente salva nos artefatos dele, baixado depois do run). Só aparece quando uma camada o definiu; só papéis têm um. */
+  resultVia?: "json-block" | "artifact";
   /** Modelo: o ID, os parâmetros e o max mode, cada um com a sua origem em `provenance`. Um glob de label pode trazer só parte deles. */
   model?: Partial<ModelSelection>;
   /** Tempo máximo da etapa, em milissegundos. */
@@ -392,8 +394,8 @@ export interface CloudAgentEvent extends EventBase, StepRef {
   agentId: string;
   /** true = a tentativa reanexou a um agente que uma execução anterior, interrompida, deixou rodando: ele não foi criado agora. */
   reattached?: true;
-  /** A branch de snapshot de que o agente parte e o remote para onde foi empurrada. Quem reanexa a apaga quando a etapa termina. Ausente quando a tentativa reanexou a um agente cuja branch o log não conhece. */
-  snapshot?: { remote: string; branch: string };
+  /** A branch de snapshot de que o agente parte, o remote para onde foi empurrada e o commit dela (o ponto de partida do agente: uma etapa que escreve só traz o trabalho de volta para um worktree que ainda é esse commit). Quem reanexa a apaga quando a etapa termina. Ausente quando a tentativa reanexou a um agente cuja branch o log não conhece. */
+  snapshot?: { remote: string; branch: string; commit?: string };
 }
 
 /** Uma chamada de `ctx.exec` começou. É um nó do run, como uma etapa de agente: o comando fecha com um `exec-end` e a saída dele vai em eventos `content`. */

@@ -154,6 +154,25 @@ test("a structured cloud step takes its result from the final fenced JSON block;
   assert.equal(remoteBranches(remote).length, 0);
 });
 
+test("a role whose resultVia is artifact has its structured result downloaded from the agent's artifacts after the run, and the step ends like any other", async () => {
+  allowCloud({ review: { location: "cloud", resultVia: "artifact" } });
+  const sent: string[] = [];
+  script.push(
+    (_o, msg) => (sent.push(msg), { result: "done", artifacts: { "result.json": '{"verdict": "maybe"}' } }), // not in the enum
+    (_o, msg) => (sent.push(msg), { result: "fixed", artifacts: { "result.json": '{"verdict": "pass", "notes": ["a"]}' } }),
+  );
+  const wf = configWorkflow((ctx) => ctx.agent<{ verdict: string }>("review it", { role: "review", label: "review", tools: [...READ], schema: VERDICT }));
+  const r = await runWorkflow(wf, {}, { cwd });
+
+  assert.equal(r.status, "finished", r.error);
+  assert.deepEqual(r.result, { verdict: "pass", notes: ["a"] });
+  assert.match(sent[0]!, /save the structured result as the file `result\.json` in your artifacts directory/);
+  assert.match(sent[1]!, /^The artifact result\.json did not hold a valid result: .*must be equal to one of the allowed values/);
+  const [end] = stepEnds(r.runId);
+  assert.deepEqual([end!.ok, end!.schemaReprompts, end!.location], [true, 1, "cloud"]);
+  assert.deepEqual(remoteBranches(remote), []);
+});
+
 test("a cloud step that never delivers a valid block fails as a schema error once the follow-ups are used up", async () => {
   allowCloud({ review: { location: "cloud" } });
   const wf = configWorkflow((ctx) => ctx.agent<unknown>("review it", { role: "review", label: "review", tools: [...READ], schema: VERDICT, retries: 0, schemaRetries: 1 }));
@@ -243,18 +262,13 @@ test("a role the global caps do not let into the cloud runs locally: nothing is 
   assert.equal(events.find((e) => e.type === "step-start" && e.location === "local") !== undefined, true);
 });
 
-test("a step that can write is refused before it spends anything: a read-only role says so, any other says writes have no cloud path yet", async () => {
-  allowCloud({ review: { location: "cloud" }, classify: { location: "cloud" } });
-  for (const [role, message] of [
-    ["review", /role "review" is declared cloud: read-only by workflow cfg, but this step can write/],
-    ["classify", /a step that can write cannot run in the cloud yet \(role "classify" is configured for it\)/],
-  ] as const) {
-    // No `tools`: the default toolset can edit files. `edit` listed: the same.
-    for (const tools of [undefined, ["read", "edit"]]) {
-      const r = await runWorkflow(configWorkflow((ctx) => ctx.agent("go", { role, label: "go", tools: tools as never, retries: 0 })), {}, { cwd });
-      assert.equal(r.status, "failed");
-      assert.match(r.error!, message);
-    }
+test("a step that can write is refused before it spends anything on a role the workflow declares read-only", async () => {
+  allowCloud({ review: { location: "cloud" } });
+  // No `tools`: the default toolset can edit files. `edit` listed: the same.
+  for (const tools of [undefined, ["read", "edit"]]) {
+    const r = await runWorkflow(configWorkflow((ctx) => ctx.agent("go", { role: "review", label: "go", tools: tools as never, retries: 0 })), {}, { cwd });
+    assert.equal(r.status, "failed");
+    assert.match(r.error!, /role "review" is declared cloud: read-only by workflow cfg, but this step can write/);
   }
   assert.equal(calls.length, 0, "no agent was created");
   assert.deepEqual(remoteBranches(remote), [], "and nothing was pushed");

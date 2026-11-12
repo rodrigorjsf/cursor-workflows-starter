@@ -222,7 +222,7 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 | `attemptId` | `string` | sim | A tentativa a que o agente pertence (o `attemptId` do `step-start`). |
 | `agentId` | `string` | sim | O id do agente no Cursor (`bc-…`). |
 | `reattached` | `true` | não | true = a tentativa reanexou a um agente que uma execução anterior, interrompida, deixou rodando: ele não foi criado agora. |
-| `snapshot` | `{ remote: string; branch: string }` | não | A branch de snapshot de que o agente parte e o remote para onde foi empurrada. Quem reanexa a apaga quando a etapa termina. Ausente quando a tentativa reanexou a um agente cuja branch o log não conhece. |
+| `snapshot` | `{ remote: string; branch: string; commit?: string }` | não | A branch de snapshot de que o agente parte, o remote para onde foi empurrada e o commit dela (o ponto de partida do agente: uma etapa que escreve só traz o trabalho de volta para um worktree que ainda é esse commit). Quem reanexa a apaga quando a etapa termina. Ausente quando a tentativa reanexou a um agente cuja branch o log não conhece. |
 
 ### `exec-start`
 
@@ -339,6 +339,7 @@ As configurações de uma etapa por papel (ou por glob de label). Só aparece o 
 | Campo | Tipo | Obrigatório | Descrição |
 | --- | --- | --- | --- |
 | `location` | `"local" \| "cloud"` | não | Onde as etapas do papel rodam: `local` (o padrão) ou `cloud`. Um `cloud` que o teto `allowedLocations` não permite vira `local`, com uma violação. Só papéis têm location; um glob de label não. |
+| `resultVia` | `"json-block" \| "artifact"` | não | Como uma etapa do papel na nuvem entrega o resultado estruturado: `json-block` (o padrão: o último bloco de código `json` da resposta final) ou `artifact` (o arquivo `result.json` que o agente salva nos artefatos dele, baixado depois do run). Só aparece quando uma camada o definiu; só papéis têm um. |
 | `model` | `Partial<ModelSelection>` | não | Modelo: o ID, os parâmetros e o max mode, cada um com a sua origem em `provenance`. Um glob de label pode trazer só parte deles. |
 | `timeoutMs` | `number` | não | Tempo máximo da etapa, em milissegundos. |
 | `retries` | `number` | não | Tentativas extras quando a etapa termina em erro. |

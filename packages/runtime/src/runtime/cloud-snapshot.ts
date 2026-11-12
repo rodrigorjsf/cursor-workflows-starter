@@ -1,11 +1,16 @@
-// The snapshot a cloud step runs against. A cloud agent sees only what was pushed to a remote, never the local worktree, so
-// before a cloud step the worktree's state, uncommitted changes included, is committed to a throwaway branch and pushed
-// (ADR-0005); when the step ends the branch is deleted again.
+// The snapshot a cloud step runs against, and the way back from it. A cloud agent sees only what was pushed to a remote, never
+// the local worktree, so before a cloud step the worktree's state, uncommitted changes included, is committed to a throwaway
+// branch and pushed (ADR-0005); when the step ends the branch is deleted again.
 //
 // The user's checkout is not disturbed to take it: the commit is built from a temporary copy of the index, so nothing is
 // staged, no branch moves, HEAD stays and the working files are only read. The snapshot holds what `git add -A` would
 // stage (tracked files as they are on disk, and untracked files git does not ignore); the run's own state (`.workflows/`)
-// never goes. The commit's parent is HEAD, so the remote only needs to send the difference.
+// never goes. The commit's parent is HEAD, so the remote only needs to send the difference. A worktree that has no change
+// needs no commit of its own: the snapshot is HEAD itself, so the history a step leaves behind holds the agent's commits only.
+//
+// A step that writes gets its work back (`bringBack`): the agent commits on the snapshot branch, the engine fetches the branch
+// and fast-forwards the local worktree to it. The snapshot commit of a worktree that had changes becomes part of the local
+// history that way (it is what the agent built on), and the worktree ends clean at the agent's tree.
 //
 // Limit: a branch left behind (the process died between the push and the deletion, or the remote refused the deletion) is not
 // swept by `wf gc` yet: see #44. One a crash left behind is deleted when the resumed run reattaches to the step's agent: the
@@ -35,7 +40,7 @@ export interface PushedSnapshot {
   /** What the remote calls its repository (`git remote get-url`). */
   remoteUrl: string;
   branch: string;
-  /** The snapshot's commit. */
+  /** The snapshot's commit: what the agent starts from, and what `bringBack` checks the worktree against. */
   commit: string;
 }
 
@@ -56,13 +61,13 @@ export function snapshotBranch(runId: string): string {
 }
 
 /** The first line git said on stderr, or the error's own message. */
-function gitErrorLine(err: unknown): string {
+function errorLine(err: unknown): string {
   const stderr = (err as { stderr?: unknown } | undefined)?.stderr;
   const text = typeof stderr === "string" && stderr.trim() ? stderr.trim() : err instanceof Error ? err.message : String(err);
   return text.split("\n")[0]!;
 }
 
-async function git(cwd: string, args: string[], options: { env?: Record<string, string>; signal?: AbortSignal; timeoutMs?: number } = {}): Promise<string> {
+export async function git(cwd: string, args: string[], options: { env?: Record<string, string>; signal?: AbortSignal; timeoutMs?: number } = {}): Promise<string> {
   try {
     const { stdout } = await execFileAsync("git", args, {
       cwd,
@@ -76,7 +81,7 @@ async function git(cwd: string, args: string[], options: { env?: Record<string, 
     return stdout.trim();
   } catch (err) {
     if (options.signal?.aborted) throw options.signal.reason; // the abort, not git's complaint about being killed
-    throw new Error(`git ${args[0]}: ${gitErrorLine(err)}`);
+    throw new Error(`git ${args[0]}: ${errorLine(err)}`);
   }
 }
 
@@ -97,6 +102,20 @@ export async function pushSnapshot({ cwd, remote, branch, signal }: { cwd: strin
   const remoteUrl = await asked(top, ["remote", "get-url", remote], `the remote "${remote}" does not exist in ${top}: add it, or point \`cloud.remote\` in the config at one that does`);
   const head = await asked(top, ["rev-parse", "--verify", "--quiet", "HEAD"], `${top} has no commit yet: a cloud step needs one to start the snapshot from`);
 
+  const tree = await worktreeTree(top, signal);
+  // Nothing changed since HEAD: HEAD is the snapshot. Otherwise a commit on top of it holds the changes.
+  const commit = tree === (await git(top, ["rev-parse", `${head}^{tree}`], { signal }))
+    ? head
+    : await git(top, ["commit-tree", tree, "-p", head, "-m", `wf: snapshot of the worktree for ${branch}`], { env: IDENTITY, signal });
+  await git(top, ["push", "--quiet", "--no-verify", remote, `${commit}:refs/heads/${branch}`], { signal, timeoutMs: NETWORK_TIMEOUT_MS });
+  return { top, remote, remoteUrl, branch, commit };
+}
+
+/**
+ * The tree of the worktree at `top` as the snapshot sees it: what `git add -A` would stage, minus the run's own state. Built in
+ * a temporary copy of the index, so the checkout is only read.
+ */
+async function worktreeTree(top: string, signal?: AbortSignal): Promise<string> {
   const scratch = await mkdtemp(join(tmpdir(), "wf-snapshot-"));
   try {
     const index = join(scratch, "index");
@@ -104,10 +123,7 @@ export async function pushSnapshot({ cwd, remote, branch, signal }: { cwd: strin
     await copyFile(live, index).catch(() => {}); // no index yet: the empty one gets every file
     const env = { GIT_INDEX_FILE: index };
     await git(top, ["add", "-A", "--", ":(top)", ":(top,exclude,glob)**/.workflows/**"], { env, signal });
-    const tree = await git(top, ["write-tree"], { env, signal });
-    const commit = await git(top, ["commit-tree", tree, "-p", head, "-m", `wf: snapshot of the worktree for ${branch}`], { env: IDENTITY, signal });
-    await git(top, ["push", "--quiet", "--no-verify", remote, `${commit}:refs/heads/${branch}`], { signal, timeoutMs: NETWORK_TIMEOUT_MS });
-    return { top, remote, remoteUrl, branch, commit };
+    return await git(top, ["write-tree"], { env, signal });
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
@@ -119,6 +135,84 @@ export async function pushSnapshot({ cwd, remote, branch, signal }: { cwd: strin
  */
 export async function deleteSnapshot(snapshot: Pick<PushedSnapshot, "top" | "remote" | "branch">): Promise<void> {
   await git(snapshot.top, ["push", "--quiet", "--no-verify", snapshot.remote, "--delete", `refs/heads/${snapshot.branch}`], { timeoutMs: NETWORK_TIMEOUT_MS });
+}
+
+/** Why a cloud agent's work could not be brought back into the worktree. */
+export class BringBackError extends Error {
+  /** The index or the working files may have been changed before it failed: whoever owns the step puts them back. */
+  constructor(
+    message: string,
+    readonly touched = false,
+  ) {
+    super(message);
+  }
+}
+
+/** What `bringBack` did. `commits` is how many commits the worktree's branch moved forward; 0 when the agent made none. */
+export interface BroughtBack {
+  commits: number;
+  /** The commit the worktree is at now. */
+  head: string;
+}
+
+/**
+ * Brings the work of a cloud agent that committed on `branch` of `remote` into the worktree it was snapshotted from: fetches
+ * the branch and fast-forwards the worktree's checked-out branch to it, working files and index included, so the worktree ends
+ * clean at the agent's tree. `base` is the snapshot commit the agent started from.
+ *
+ * It is a fast-forward or it is nothing. It refuses, changing nothing, when
+ *  - the agent's branch no longer contains the snapshot (the agent rewrote the history), or
+ *  - the worktree's branch moved while the agent ran (a commit, a reset), or
+ *  - the working files are no longer what was snapshotted: bringing the work back would overwrite the changes made meanwhile.
+ * Once it starts to change the worktree (`BringBackError.touched`) the index and the files are all it touches, and the branch
+ * moves last: a failure leaves HEAD where it was.
+ *
+ * The signal ends the fetch. The part that changes the worktree is not interrupted by it: a half-applied checkout is worse than
+ * a late one, and it takes a moment.
+ */
+export async function bringBack({ cwd, remote, branch, base, signal }: { cwd: string; remote: string; branch: string; base: string; signal?: AbortSignal }): Promise<BroughtBack> {
+  const top = await git(cwd, ["rev-parse", "--show-toplevel"], { signal }).catch((err: unknown) => {
+    throw signal?.aborted ? err : new BringBackError(`${cwd} is not inside a git repository`);
+  });
+  // A private ref: two steps in one repository must not meet on FETCH_HEAD.
+  const fetched = `refs/wf/cloud-result/${randomUUID().slice(0, 8)}`;
+  try {
+    await git(top, ["fetch", "--quiet", "--no-tags", remote, `+refs/heads/${branch}:${fetched}`], { signal, timeoutMs: NETWORK_TIMEOUT_MS }).catch((err: unknown) => {
+      throw signal?.aborted ? err : new BringBackError(`could not fetch the cloud agent's branch ${branch} from ${remote} (${errorLine(err)}): its work is not in the worktree`);
+    });
+    const tip = await git(top, ["rev-parse", `${fetched}^{commit}`], { signal });
+    const head = await git(top, ["rev-parse", "HEAD"], { signal });
+    const isAncestor = (ancestor: string, of: string) => git(top, ["merge-base", "--is-ancestor", ancestor, of], { signal }).then(() => true, () => false);
+
+    if (tip === base) return { commits: 0, head }; // the agent made no commit: there is nothing to bring back
+    if (!(await isAncestor(base, tip))) {
+      throw new BringBackError(`not a fast-forward: the cloud agent's branch ${branch} (${tip.slice(0, 7)}) does not contain the snapshot it started from (${base.slice(0, 7)}), so the agent rewrote the history; its work was not brought back`);
+    }
+    if (!(await isAncestor(head, base))) {
+      throw new BringBackError(`not a fast-forward: the local branch moved while the cloud agent ran (it is at ${head.slice(0, 7)}, the snapshot was taken from a commit it no longer has); the agent's work was not brought back`);
+    }
+    if ((await worktreeTree(top, signal)) !== (await git(top, ["rev-parse", `${base}^{tree}`], { signal }))) {
+      throw new BringBackError("the working files changed while the cloud agent ran, and bringing its work back would overwrite those changes: the agent's work was not brought back");
+    }
+
+    const commits = Number(await git(top, ["rev-list", "--count", `${head}..${tip}`], { signal }));
+    signal?.throwIfAborted();
+    let touched = false;
+    try {
+      // The working files are the snapshot (checked above), so nothing in them is lost: the index is made to hold the snapshot, so
+      // that what the agent deleted is deleted, and then index and files go to the agent's tree, as `git reset --hard` does it.
+      // The branch moves last, which is the one thing that can still fail.
+      touched = true;
+      await git(top, ["read-tree", base]);
+      await git(top, ["read-tree", "--reset", "-u", tip]);
+      await git(top, ["update-ref", "-m", `wf: fast-forward to the cloud agent's work on ${branch}`, "HEAD", tip, head]);
+    } catch (err) {
+      throw new BringBackError(`could not move the worktree to the cloud agent's work (${errorLine(err)})`, touched);
+    }
+    return { commits, head: tip };
+  } finally {
+    await git(top, ["update-ref", "-d", fetched]).catch(() => {});
+  }
 }
 
 /**
