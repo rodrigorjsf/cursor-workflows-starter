@@ -45,11 +45,11 @@ export function readMcpLaunches(cwd: string): McpLaunches {
     try {
       entry = (JSON.parse(readFileSync(path, "utf8")) as { mcpServers?: { workflows?: typeof entry } }).mcpServers?.workflows;
     } catch (err) {
-      problems.push(`${file}: JSON inválido (${err instanceof Error ? err.message : String(err)})`);
+      problems.push(`${file}: invalid JSON (${err instanceof Error ? err.message : String(err)})`);
       continue;
     }
     if (typeof entry?.command !== "string") {
-      problems.push(`${file}: não tem o servidor "workflows" em mcpServers`);
+      problems.push(`${file}: has no "workflows" server in mcpServers`);
       continue;
     }
     const command = substitute(entry.command, cwd);

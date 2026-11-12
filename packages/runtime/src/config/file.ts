@@ -107,7 +107,7 @@ export function validateConfigData(data: unknown): Array<{ path: Pointer; messag
     .filter((e) => e.keyword !== "propertyNames") // the wrapper of the pattern error that names the key
     .map((e) => {
       if (e.keyword === "additionalProperties") {
-        return { path: `${e.instancePath}/${escapePointer(String((e.params as { additionalProperty: string }).additionalProperty))}`, message: "chave desconhecida" };
+        return { path: `${e.instancePath}/${escapePointer(String((e.params as { additionalProperty: string }).additionalProperty))}`, message: "unknown key" };
       }
       const name = e.propertyName === undefined ? "" : `/${escapePointer(e.propertyName)}`;
       return { path: `${e.instancePath}${name}`, message: e.message ?? "invalid" };

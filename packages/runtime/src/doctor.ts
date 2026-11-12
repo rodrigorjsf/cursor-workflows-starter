@@ -33,7 +33,7 @@ function timeoutMs(): number {
 function within<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
   let timer: NodeJS.Timeout;
   const late = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${what} não respondeu em ${ms / 1000}s`)), ms);
+    timer = setTimeout(() => reject(new Error(`${what} did not answer within ${ms / 1000}s`)), ms);
   });
   return Promise.race([promise, late]).finally(() => clearTimeout(timer));
 }
@@ -55,15 +55,15 @@ function findOnPath(name: string, path: string | undefined): string | undefined 
 /** The `node` that `path` resolves to and its version, against the range the kit supports. */
 function probeNode(path: string | undefined, nodeRange: string): { ok: boolean; line: string } {
   const node = findOnPath("node", path);
-  if (!node) return { ok: false, line: "nenhum `node` no PATH: o IDE não consegue iniciar o servidor MCP" };
+  if (!node) return { ok: false, line: "no `node` on the PATH: the IDE cannot start the MCP server" };
   let version: string;
   try {
     version = execFileSync(node, ["--version"], { encoding: "utf8", timeout: 10_000 }).trim();
   } catch (err) {
-    return { ok: false, line: `\`${node} --version\` falhou: ${messageOf(err)}` };
+    return { ok: false, line: `\`${node} --version\` failed: ${messageOf(err)}` };
   }
-  if (semver.satisfies(version, nodeRange)) return { ok: true, line: `${version} em ${node}` };
-  return { ok: false, line: `${version} em ${node}; o @cursor/sdk exige Node ${nodeRange.replace(/^>=/, "")} ou mais novo` };
+  if (semver.satisfies(version, nodeRange)) return { ok: true, line: `${version} at ${node}` };
+  return { ok: false, line: `${version} at ${node}; @cursor/sdk needs Node ${nodeRange.replace(/^>=/, "")} or newer` };
 }
 
 /**
@@ -89,8 +89,8 @@ function checkNode(mcp: McpLaunches): CheckResult {
 /** Why the MCP config cannot start the server at all: no file with the entry, or one that is broken. Undefined when it is usable. */
 function mcpConfigFailure({ launches, problems }: McpLaunches): { message: string; hint: string } | undefined {
   if (launches.length && !problems.length) return undefined;
-  const missing = launches.length ? [] : [`nem ${MCP_CONFIG_FILES.join(" nem ")} registra o servidor "workflows"`];
-  return { message: [...problems, ...missing].join("\n"), hint: "Rode `wf init` neste repositório: ele escreve as duas configs do servidor MCP (ou corrija o arquivo indicado)." };
+  const missing = launches.length ? [] : [`neither ${MCP_CONFIG_FILES.join(" nor ")} registers the "workflows" server`];
+  return { message: [...problems, ...missing].join("\n"), hint: "Run `wf init` in this repository: it writes both MCP server configs (or fix the file named above)." };
 }
 
 /** The kit folder a `<kit>/node_modules/.bin/<command>` path belongs to; undefined for any other path. */
@@ -111,11 +111,11 @@ function checkDependencies(mcp: McpLaunches): CheckResult {
     const scripts = args.filter((a) => /\.(ts|js|mjs|cjs)$/.test(a)).map((a) => resolve(cwd, a));
     const lost = [commandFile, ...scripts].filter((f) => !existsSync(f));
     kitRoot ??= lost.map(kitRootOf).find(Boolean);
-    (lost.length ? absent : found).push(`${file}: ${lost.length ? `${lost.join(", ")} não existe` : commandFile}`);
+    (lost.length ? absent : found).push(`${file}: ${lost.length ? `${lost.join(", ")} does not exist` : commandFile}`);
   }
   if (absent.length) {
     const where = kitRoot ? ` (${kitRoot})` : "";
-    return fail("dependencies", absent.join("\n"), `Rode \`npm ci\` na pasta do kit${where} para instalar as dependências. Se a pasta não existe, o kit ainda não foi instalado nesse caminho: instale-o com o guia ${kitFileUrl("INSTALL-AGENT.md", readKitPackage().version)}`);
+    return fail("dependencies", absent.join("\n"), `Run \`npm ci\` in the kit folder${where} to install the dependencies. If the folder does not exist, the kit is not installed at that path yet: install it with the guide ${kitFileUrl("INSTALL-AGENT.md", readKitPackage().version)}`);
   }
   return pass("dependencies", found.join("\n"));
 }
@@ -123,10 +123,10 @@ function checkDependencies(mcp: McpLaunches): CheckResult {
 /** The SDK login: an authenticated call, so an expired or revoked key fails here and not in the middle of a run. */
 async function checkLogin(): Promise<CheckResult> {
   try {
-    const me = await within(Cursor.me(), timeoutMs(), "o Cursor");
-    return pass("login", `chave "${me.apiKeyName}"`);
+    const me = await within(Cursor.me(), timeoutMs(), "Cursor");
+    return pass("login", `key "${me.apiKeyName}"`);
   } catch (err) {
-    return fail("login", messageOf(err), "Faça login com `wf login` (abre o navegador) ou defina a variável CURSOR_API_KEY no ambiente que inicia o IDE.");
+    return fail("login", messageOf(err), "Log in with `wf login` (it opens the browser) or set CURSOR_API_KEY in the environment that starts the IDE.");
   }
 }
 
@@ -147,12 +147,12 @@ async function probeServer(launch: McpLaunch): Promise<ServerProbe> {
   transport.stderr?.on("data", (chunk: Buffer) => (stderr = `${stderr}${chunk}`.slice(-2000)));
   const client = new Client({ name: "wf-doctor", version: readKitPackage().version });
   try {
-    await within(client.connect(transport), timeoutMs(), "o servidor MCP");
-    const { tools } = await within(client.listTools(), timeoutMs(), "o servidor MCP");
+    await within(client.connect(transport), timeoutMs(), "the MCP server");
+    const { tools } = await within(client.listTools(), timeoutMs(), "the MCP server");
     return { launch, tools: tools.map((t) => t.name), version: client.getServerVersion()?.version };
   } catch (err) {
     const printed = stderr.trim();
-    return { launch, error: `${messageOf(err)}${printed ? `\n  o servidor escreveu no stderr:\n    ${printed.split("\n").slice(-8).join("\n    ")}` : ""}` };
+    return { launch, error: `${messageOf(err)}${printed ? `\n  the server wrote on stderr:\n    ${printed.split("\n").slice(-8).join("\n    ")}` : ""}` };
   } finally {
     await client.close().catch(() => undefined);
   }
@@ -164,30 +164,30 @@ function checkMcpServer(mcp: McpLaunches, probes: ServerProbe[]): CheckResult {
   if (broken) return fail("mcp-server", broken.message, broken.hint);
   const verdicts = probes.map((p) => {
     if (p.error !== undefined) return { ok: false, line: `${p.launch.file}: ${p.error}`, launch: p.launch };
-    if (!p.tools?.includes("start_workflow")) return { ok: false, line: `${p.launch.file}: respondeu tools/list sem a tool start_workflow (tools: ${p.tools?.join(", ") || "nenhuma"})`, launch: p.launch };
-    return { ok: true, line: `${p.launch.file}: respondeu tools/list com ${p.tools.join(", ")}`, launch: p.launch };
+    if (!p.tools?.includes("start_workflow")) return { ok: false, line: `${p.launch.file}: answered tools/list without the start_workflow tool (tools: ${p.tools?.join(", ") || "none"})`, launch: p.launch };
+    return { ok: true, line: `${p.launch.file}: answered tools/list with ${p.tools.join(", ")}`, launch: p.launch };
   });
   const failed = verdicts.filter((v) => !v.ok);
   if (!failed.length) return pass("mcp-server", verdicts.map((v) => v.line).join("\n"));
-  const byHand = failed.map(({ launch }) => `\`${[launch.command, ...launch.args].join(" ")}\``).join(" ou ");
+  const byHand = failed.map(({ launch }) => `\`${[launch.command, ...launch.args].join(" ")}\``).join(" or ");
   return fail(
     "mcp-server",
     failed.map((v) => v.line).join("\n"),
-    `Rode ${byHand} no repositório para ver o erro. Causas comuns: Node antigo no PATH do IDE, dependências do kit faltando, um workflow do repositório que não importa.`,
+    `Run ${byHand} in the repository to see the error. Common causes: an old Node on the IDE's PATH, missing kit dependencies, a repository workflow that does not import.`,
   );
 }
 
 /** `gh auth status`: the workflows that open pull requests and read issues run `gh` as the user, so it must be logged in. */
 async function checkGh(): Promise<CheckResult> {
   if (!findOnPath("gh", process.env.PATH)) {
-    return fail("gh", "`gh` não está no PATH", "Instale o GitHub CLI (https://cli.github.com) e rode `gh auth login`, no ambiente que inicia o IDE.");
+    return fail("gh", "`gh` is not on the PATH", "Install the GitHub CLI (https://cli.github.com) and run `gh auth login`, in the environment that starts the IDE.");
   }
   try {
     await promisify(execFile)("gh", ["auth", "status"], { timeout: timeoutMs() });
-    return pass("gh", "autenticado");
+    return pass("gh", "authenticated");
   } catch (err) {
     const said = (err as { stderr?: string }).stderr?.trim().split("\n")[0] ?? messageOf(err);
-    return fail("gh", `\`gh auth status\` falhou: ${said}`, "Rode `gh auth login`.");
+    return fail("gh", `\`gh auth status\` failed: ${said}`, "Run `gh auth login`.");
   }
 }
 
@@ -205,7 +205,7 @@ async function resolveWorkflows(cwd: string): Promise<Resolution> {
   try {
     defs = [...(await loadWorkflows(cwd)).values()];
   } catch (err) {
-    return { ok: false, message: `não foi possível carregar os workflows do repositório: ${messageOf(err)}` };
+    return { ok: false, message: `could not load the repository's workflows: ${messageOf(err)}` };
   }
   // Every workflow resolves the same two files, so one bad file shows up once per workflow: list each issue once.
   const issues = new Map<string, ConfigIssue>();
@@ -216,7 +216,7 @@ async function resolveWorkflows(cwd: string): Promise<Resolution> {
       workflows.push({ def, resolved: loadEffectiveConfig(def, { cwd }) });
     } catch (err) {
       if (err instanceof ConfigError) for (const issue of err.issues) issues.set(JSON.stringify(issue), issue);
-      else others.push(`o workflow ${def.meta.name} não resolve: ${messageOf(err)}`); // a malformed definition, say
+      else others.push(`workflow ${def.meta.name} does not resolve: ${messageOf(err)}`); // a malformed definition, say
     }
   }
   const problems = [...(issues.size ? [new ConfigError([...issues.values()]).message] : []), ...others];
@@ -224,8 +224,8 @@ async function resolveWorkflows(cwd: string): Promise<Resolution> {
 }
 
 function checkConfig(resolution: Resolution): CheckResult {
-  if (!resolution.ok) return fail("config", resolution.message, "Corrija os campos indicados. O `$schema` do arquivo dá autocompletar e validação no editor.");
-  return pass("config", `${resolution.workflows.length} workflow(s) resolvidos com a configuração global e a do repositório`);
+  if (!resolution.ok) return fail("config", resolution.message, "Fix the fields named above. The file's `$schema` gives autocompletion and validation in the editor.");
+  return pass("config", `${resolution.workflows.length} workflow(s) resolved with the global and the repository config`);
 }
 
 /** Every model id the workflows end up using, each with the places that ask for it (`implement-issue.roles.review`). */
@@ -243,12 +243,12 @@ function configuredModels(workflows: ResolvedWorkflow[]): Map<string, string[]> 
 
 /** The models the config uses against the account's catalog: a model the SDK does not know fails the step that asks for it. */
 async function checkModels(resolution: Resolution): Promise<CheckResult> {
-  if (!resolution.ok) return fail("models", "não foi possível saber quais modelos a configuração usa: ela não resolve (veja a verificação de configuração)", "Corrija a configuração primeiro.");
+  if (!resolution.ok) return fail("models", "cannot tell which models the config uses: it does not resolve (see the configuration check)", "Fix the configuration first.");
   let catalog: Awaited<ReturnType<typeof Cursor.models.list>>;
   try {
-    catalog = await within(Cursor.models.list(), timeoutMs(), "o Cursor");
+    catalog = await within(Cursor.models.list(), timeoutMs(), "Cursor");
   } catch (err) {
-    return fail("models", `não foi possível listar os modelos da conta: ${messageOf(err)}`, "Confira a verificação de login: o catálogo só vem com uma chave válida.");
+    return fail("models", `could not list the account's models: ${messageOf(err)}`, "See the login check: the catalog comes only with a valid key.");
   }
   const known = new Set(catalog.flatMap((m) => [m.id, ...(m.aliases ?? [])]));
   const used = configuredModels(resolution.workflows);
@@ -256,11 +256,11 @@ async function checkModels(resolution: Resolution): Promise<CheckResult> {
   if (unknown.length) {
     return fail(
       "models",
-      unknown.map(([id, where]) => `o modelo "${id}" (${where.join(", ")}) não está no catálogo da conta`).join("\n"),
-      "Rode `wf models` para ver os IDs liberados para a sua chave e troque o modelo na configuração (`workflows.<workflow>.roles.<papel>.model.id`) ou em `WF_MODEL_<PAPEL>`.",
+      unknown.map(([id, where]) => `model "${id}" (${where.join(", ")}) is not in the account's catalog`).join("\n"),
+      "Run `wf models` to see the IDs your key can use, and change the model in the config (`workflows.<workflow>.roles.<role>.model.id`) or in `WF_MODEL_<ROLE>`.",
     );
   }
-  return pass("models", `${used.size} modelo(s) em uso, todos no catálogo da conta: ${[...used.keys()].join(", ")}`);
+  return pass("models", `${used.size} model(s) in use, all in the account's catalog: ${[...used.keys()].join(", ")}`);
 }
 
 /**
@@ -279,7 +279,7 @@ function checkKitVersion(cwd: string, probes: ServerProbe[]): CheckResult {
   return pass(
     "kit-version",
     verdicts
-      .map((v) => (v.range === undefined ? `kit ${v.version} (${v.who}); o repositório não declara uma faixa (\`kit\` em .agents/workflows/config.json)` : `kit ${v.version} (${v.who}), dentro da faixa "${v.range}"`))
+      .map((v) => (v.range === undefined ? `kit ${v.version} (${v.who}); the repository declares no range (\`kit\` in .agents/workflows/config.json)` : `kit ${v.version} (${v.who}), within the range "${v.range}"`))
       .join("\n"),
   );
 }
@@ -288,7 +288,7 @@ function checkKitVersion(cwd: string, probes: ServerProbe[]): CheckResult {
 function guarded(id: CheckId, run: () => CheckResult | Promise<CheckResult>): Promise<CheckResult> {
   return Promise.resolve()
     .then(run)
-    .catch((err: unknown) => fail(id, `erro inesperado na verificação: ${messageOf(err)}`, "Rode `wf doctor` de novo; se o erro continuar, abra uma issue no repositório do kit com esta mensagem."));
+    .catch((err: unknown) => fail(id, `unexpected error in the check: ${messageOf(err)}`, "Run `wf doctor` again; if the error persists, open an issue on the kit's repository with this message."));
 }
 
 /** Runs every check against the repo at `cwd`. Nothing in the report holds a secret: it is redacted like the run logs are. */

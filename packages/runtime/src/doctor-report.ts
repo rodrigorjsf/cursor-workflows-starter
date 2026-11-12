@@ -4,13 +4,13 @@
 /** The checks, in the order the report lists them. Scripts reading `--json` key on these ids. */
 export const CHECK_TITLES = {
   node: "Node.js",
-  dependencies: "Dependências instaladas",
-  login: "Login no Cursor SDK",
-  models: "Modelos da configuração",
+  dependencies: "Installed dependencies",
+  login: "Cursor SDK login",
+  models: "Configured models",
   gh: "GitHub CLI (gh)",
-  "mcp-server": "Servidor MCP",
-  config: "Configuração",
-  "kit-version": "Versão do kit",
+  "mcp-server": "MCP server",
+  config: "Configuration",
+  "kit-version": "Kit version",
 } as const;
 
 export type CheckId = keyof typeof CHECK_TITLES;
@@ -38,17 +38,17 @@ export const reportOf = (checks: CheckResult[]): DoctorReport => ({ ok: checks.e
 
 /** How to get the Node the kit needs: `minimum` is `22.13`, say. */
 export const nodeHint = (minimum: string): string =>
-  `Instale o Node ${minimum} ou mais novo e deixe-o como padrão no ambiente que inicia o IDE (por exemplo \`mise use -g node@22\` ou \`nvm alias default 22\`), depois reinicie o IDE. ` +
-  "Confira com `which node && node -v` num terminal aberto pelo próprio IDE.";
+  `Install Node ${minimum} or newer and make it the default in the environment that starts the IDE (for example \`mise use -g node@22\` or \`nvm alias default 22\`), then restart the IDE. ` +
+  "Check with `which node && node -v` in a terminal opened from the IDE itself.";
 
 /** The report as text for a terminal: one block per check, the fix hint under each failure. */
 export function formatReport(report: DoctorReport): string {
   const indent = (text: string) => text.split("\n").join("\n        ");
   const lines = report.checks.flatMap((c) => [
-    `${c.status === "pass" ? "[ok]   " : "[FALHA]"} ${c.title}: ${indent(c.message)}`,
-    ...(c.status === "fail" && c.hint ? [`        como corrigir: ${indent(c.hint)}`] : []),
+    `${c.status === "pass" ? "[ok]   " : "[FAIL] "} ${c.title}: ${indent(c.message)}`,
+    ...(c.status === "fail" && c.hint ? [`        how to fix: ${indent(c.hint)}`] : []),
   ]);
   const failed = report.checks.filter((c) => c.status === "fail").length;
-  lines.push("", failed ? `${failed} de ${report.checks.length} verificações falharam.` : `Tudo certo: ${report.checks.length} verificações passaram.`);
+  lines.push("", failed ? `${failed} of ${report.checks.length} checks failed.` : `All good: ${report.checks.length} checks passed.`);
   return `${lines.join("\n")}\n`;
 }

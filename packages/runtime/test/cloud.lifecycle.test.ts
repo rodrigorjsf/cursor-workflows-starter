@@ -397,6 +397,33 @@ test("cancelling a run whose process died cancels the cloud agent it left runnin
   }
 });
 
+for (const retries of [0, 1]) {
+  test(`a resume after a crash and a cancel starts a new cloud agent: the agent the crash left was cancelled, so there is nothing to reattach to (retries ${retries})`, async () => {
+    const runId = `life-cancel-resume-${retries}`;
+    const crashed = await crashWhileTheAgentRuns(runId, reviewStep({ retries }));
+    try {
+      assert.deepEqual((await cancelRun(runId, 100)).cancelledAgents, ["bc-1"]);
+      script.push(() => ({ result: "fresh answer" }));
+
+      const r = await runWorkflow(reviewStep({ retries }), {}, { cwd, runId });
+
+      assert.equal(r.status, "finished", r.error);
+      assert.equal(r.result, "fresh answer");
+      const second = logOf(runId).slice(logOf(runId).findLastIndex((e) => e.type === "run-start"));
+      assert.deepEqual(ofType(second, "cloud-agent").map((e) => [e.agentId, e.reattached]), [["bc-2", undefined]], "one new agent, no attempt spent on the cancelled one");
+      assert.ok(second.some((e) => e.type === "warning" && e.message.includes("cloud agent bc-1, left by an interrupted attempt, was cancelled: starting a new one")));
+      const [closed, ended] = ofType(second, "step-end");
+      assert.deepEqual([closed!.attemptId, closed!.ok, closed!.agentId], [crashed.agent.attemptId, false, "bc-1"], "the dead attempt is closed");
+      assert.match(closed!.error!, /replaced its cloud agent bc-1/);
+      assert.deepEqual([ended!.ok, ended!.agentId], [true, "bc-2"]);
+      assert.ok(!second.some((e) => e.type === "step-end" && /run cancelled/.test(e.error ?? "")), "no attempt fails on the cancelled run");
+      assert.deepEqual(remoteBranches(remote), [], "both snapshots are cleaned up");
+    } finally {
+      await crashed.end();
+    }
+  });
+}
+
 test("wf cancel of a job whose process died cancels the cloud agent its run left running, and says so", async () => {
   const crashed = await crashWhileTheAgentRuns("life-dead-job");
   try {

@@ -26,7 +26,7 @@ type Json = Record<string, unknown>;
 /** The semver range a repo declares for the kit that wrote its config: the minor line below 1.0, the major line from 1.0. */
 function kitRange(version: string): string {
   const parts = /^(\d+)\.(\d+)\.\d+/.exec(version);
-  if (!parts) throw new Error(`versão do kit ilegível: ${version}`);
+  if (!parts) throw new Error(`unreadable kit version: ${version}`);
   const [major, minor] = [Number(parts[1]), Number(parts[2])];
   return major === 0 ? `>=0.${minor}.0 <0.${minor + 1}.0` : `>=${major}.0.0 <${major + 1}.0.0`;
 }
@@ -60,7 +60,7 @@ function findBlock(text: string): { start: number; end: number } | undefined {
   const start = text.indexOf(BLOCK_BEGIN);
   if (start === -1) return undefined;
   const end = text.indexOf(BLOCK_END, start);
-  if (end === -1) throw new Error(`AGENTS.md: o bloco do kit começa em "${BLOCK_BEGIN}" e não tem o marcador "${BLOCK_END}"; corrija o arquivo e rode \`wf init\` de novo`);
+  if (end === -1) throw new Error(`AGENTS.md: the kit block starts at "${BLOCK_BEGIN}" and has no "${BLOCK_END}" marker; fix the file and run \`wf init\` again`);
   return { start, end: end + BLOCK_END.length };
 }
 
@@ -106,9 +106,9 @@ function parseObject(file: string, text: string | undefined): Json {
   try {
     value = JSON.parse(text);
   } catch (err) {
-    throw new Error(`${file}: JSON inválido (${err instanceof Error ? err.message : String(err)}); corrija o arquivo e rode \`wf init\` de novo`);
+    throw new Error(`${file}: invalid JSON (${err instanceof Error ? err.message : String(err)}); fix the file and run \`wf init\` again`);
   }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`${file}: esperava um objeto JSON`);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`${file}: expected a JSON object`);
   return value as Json;
 }
 
@@ -129,17 +129,24 @@ export interface InitResult {
   notes: string[];
 }
 
-/** Claude Code reads CLAUDE.md, not AGENTS.md (ADR-0004): says so unless CLAUDE.md is AGENTS.md or imports it. */
+/** The files that make Claude Code read them instead of AGENTS.md (docs/usage/03-invocacao-no-cursor-ide.md). */
+const CLAUDE_MEMORY_FILES = ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"];
+
+/**
+ * Claude Code reads AGENTS.md only when the repo has none of its own memory files (same chapter): says so when the repo has one
+ * and none of them is AGENTS.md or imports it. Only the repo root is looked at, not the directories above it.
+ */
 function claudeCodeNote(cwd: string): string | undefined {
-  const [agents, claude] = [join(cwd, "AGENTS.md"), join(cwd, "CLAUDE.md")];
-  if (existsSync(claude) && (realpathSync(claude) === realpathSync(agents) || readFileSync(claude, "utf8").includes("@AGENTS.md"))) return undefined;
-  return "O Claude Code lê o CLAUDE.md, não o AGENTS.md: para ele ver o bloco do kit, importe o AGENTS.md no CLAUDE.md (a linha `@AGENTS.md`). O wf init não edita o CLAUDE.md.";
+  const agents = realpathSync(join(cwd, "AGENTS.md"));
+  const present = CLAUDE_MEMORY_FILES.filter((file) => existsSync(join(cwd, file)));
+  if (present.length === 0 || present.some((file) => realpathSync(join(cwd, file)) === agents || readFileSync(join(cwd, file), "utf8").includes("@AGENTS.md"))) return undefined;
+  return `Claude Code reads ${present.join(" and ")}, not AGENTS.md: for it to see the kit block, import AGENTS.md there (the line \`@AGENTS.md\`). wf init does not edit ${present.length > 1 ? "those files" : "that file"}.`;
 }
 
 /** Plans the files, writes them, and returns what changed (nothing when the repo is already set up). */
 export function initRepo({ cwd, skipAgentsMd = false, remove = false }: InitOptions): InitResult {
-  if (!statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`o diretório do repositório não existe: ${cwd}`);
-  if (skipAgentsMd && remove) throw new Error("--remove e --no-agents-md se contradizem: --remove só desfaz o bloco do AGENTS.md");
+  if (!statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`the repository directory does not exist: ${cwd}`);
+  if (skipAgentsMd && remove) throw new Error("--remove and --no-agents-md contradict each other: --remove only takes out the AGENTS.md block");
   const { version } = readKitPackage();
   /** Returns the file's new text; undefined when it needs no change, null when it should be deleted. */
   type Plan = (existing: string | undefined, path: string) => string | null | undefined;

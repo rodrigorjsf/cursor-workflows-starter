@@ -1178,6 +1178,9 @@ async function executeRun<A, R>(
     const label = callOpts.label ?? command;
     const phase = callOpts.phase ?? currentPhase;
     const startedAt = Date.now();
+    // The command can print any variable it runs with: the secret-named ones it gets (the call's, and any the workflow set
+    // after the run opened its log) are redacted like those the run started with.
+    store.learnSecrets({ ...process.env, ...callOpts.env });
     emit({ type: "exec-start", ...ref, attemptId, label, phase, command, timeoutMs });
     // The command line and the output are content: same redaction, same cut and same retention as an agent's.
     const content = attemptContent(ref, attemptId);

@@ -38,12 +38,12 @@ const git = (kit: string, ...args: string[]): string => {
 /** Throws unless the kit running this code is the clone the installer made. */
 function installedKit(): string {
   const kit = join(userDir(), "kit");
-  if (!existsSync(kit)) throw new Error(`não há kit instalado em ${kit}. Instale com o guia INSTALL-AGENT.md.`);
+  if (!existsSync(kit)) throw new Error(`no kit is installed at ${kit}. Install it with the INSTALL-AGENT.md guide.`);
   if (lstatSync(kit).isSymbolicLink()) {
-    throw new Error(`o kit em ${kit} é uma instalação de desenvolvimento (aponta para ${realpathSync(kit)}): o wf upgrade não mexe numa cópia de trabalho. Atualize-a com git (git pull ou git checkout <tag>) e rode \`scripts/install.sh --refresh\` nela.`);
+    throw new Error(`the kit at ${kit} is a development install (it points to ${realpathSync(kit)}): wf upgrade does not touch a working copy. Update it with git (git pull or git checkout <tag>) and run \`scripts/install.sh --refresh\` in it.`);
   }
   if (realpathSync(RUNNING_KIT) !== realpathSync(kit)) {
-    throw new Error(`o wf upgrade só atualiza o kit instalado em ${kit}, e este wf roda de ${realpathSync(RUNNING_KIT)}. Rode o \`wf\` do kit instalado.`);
+    throw new Error(`wf upgrade only updates the kit installed at ${kit}, and this wf runs from ${realpathSync(RUNNING_KIT)}. Run the installed kit's \`wf\`.`);
   }
   return kit;
 }
@@ -53,13 +53,13 @@ function newestReleaseTag(kit: string): string {
   try {
     git(kit, "fetch", "--quiet", "--tags", "--force");
   } catch (err) {
-    throw new Error(`não consegui buscar as tags do repositório de origem do kit: ${messageOf(err)}`);
+    throw new Error(`could not fetch the tags of the kit's origin repository: ${messageOf(err)}`);
   }
   const releases = git(kit, "tag", "--list", "v*")
     .split("\n")
     .filter((tag) => semver.valid(tag) !== null && semver.prerelease(tag) === null)
     .sort(semver.rcompare);
-  if (releases.length === 0) throw new Error("o repositório de origem do kit não tem nenhuma tag de versão (vX.Y.Z)");
+  if (releases.length === 0) throw new Error("the kit's origin repository has no version tag (vX.Y.Z)");
   return releases[0]!;
 }
 
@@ -74,12 +74,12 @@ export function upgradeKit(): UpgradeResult {
   try {
     git(kit, "-c", "advice.detachedHead=false", "checkout", "--quiet", tag);
   } catch (err) {
-    throw new Error(`não consegui mudar o kit para ${tag}; ele continua na versão ${from}: ${messageOf(err)}`);
+    throw new Error(`could not move the kit to ${tag}; it stays at version ${from}: ${messageOf(err)}`);
   }
   // The new tag's installer, not this one: it knows what the new tag ships. Its output must not mix into our stdout.
   const refresh = spawnSync("bash", [installerOf(kit), "--refresh"], { stdio: ["ignore", 2, 2] });
   if (refresh.status !== 0) {
-    throw new Error(`o kit já está em ${tag}, mas o instalador falhou ao refazer dependências, comando e links. Rode \`bash ${installerOf(kit)} --refresh\` depois de corrigir o erro acima.`);
+    throw new Error(`the kit is at ${tag} now, but the installer failed to redo the dependencies, the command and the links. Run \`bash ${installerOf(kit)} --refresh\` after fixing the error above.`);
   }
   return { upgraded: true, from, to, tag };
 }

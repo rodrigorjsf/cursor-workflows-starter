@@ -9,13 +9,13 @@ import { fail, formatReport, nodeHint, reportOf } from "./doctor-report.js";
 const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
 if (major < 22 || (major === 22 && minor < 13)) {
   if (process.argv[2] === "doctor") {
-    const node = fail("node", `v${process.versions.node} em ${process.execPath} (o node que roda este wf); o @cursor/sdk exige Node 22.13 ou mais novo`, nodeHint("22.13"));
+    const node = fail("node", `v${process.versions.node} at ${process.execPath} (the node running this wf); @cursor/sdk needs Node 22.13 or newer`, nodeHint("22.13"));
     const report = reportOf([node]);
     process.stdout.write(process.argv.includes("--json") ? `${JSON.stringify(report, null, 2)}\n` : formatReport(report));
   } else {
     process.stderr.write(
-      `cursor-workflows: Node ${process.versions.node} é antigo demais; o @cursor/sdk exige 22.13 ou mais novo. ` +
-        "Confira `node -v` no ambiente que inicia este processo (IDE, terminal ou CI).\n",
+      `cursor-workflows: Node ${process.versions.node} is too old; @cursor/sdk needs 22.13 or newer. ` +
+        "Check `node -v` in the environment that starts this process (IDE, terminal or CI).\n",
     );
   }
   process.exit(1);

@@ -238,6 +238,26 @@ test("secrets are redacted from the output in the log, also one split across two
   }
 });
 
+test("the value of a secret-named variable the command runs with is redacted from its output: one passed in the call's env, and one the workflow set after the run started", async () => {
+  const passed = "passed-only-in-exec-env-42";
+  const late = "set-in-process-env-late-42";
+  try {
+    const wf = workflow(async (ctx) => {
+      process.env.EXEC_TEST_LATE_TOKEN = late; // after the run opened its log
+      return (await ctx.exec(...node("process.stdout.write(process.env.MY_TOKEN + ' ' + process.env.EXEC_TEST_LATE_TOKEN + '\\n')"), { env: { MY_TOKEN: passed } })).tail;
+    });
+    const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });
+    assert.equal(r.status, "finished", r.error);
+    assert.equal(r.result, `${passed} ${late}\n`, "the workflow gets the real output");
+    const log = readFileSync(eventLogPath(cwd, r.runId), "utf8");
+    assert.ok(!log.includes(passed), "the secret passed in ExecOptions.env is not in the log");
+    assert.ok(!log.includes(late), "the secret set in process.env after the run started is not in the log");
+    assert.equal(outputText(eventsOf(r.runId), "stdout"), "[REDACTED] [REDACTED]\n");
+  } finally {
+    delete process.env.EXEC_TEST_LATE_TOKEN;
+  }
+});
+
 test("a private key block written across several reads is redacted whole, not only its first piece", async () => {
   const env = { BEGIN: "-----BEGIN RSA PRIVATE KEY-----", END: "-----END RSA PRIVATE KEY-----", L1: "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7", L2: "VwnRmTqDyH3Yp0Hn5cJd0k2yQ9Lr8XgS1eT4uZb7NfW6aMiOvPxK" };
   const code = `const e = process.env; process.stdout.write('before\\n' + e.BEGIN + '\\n' + e.L1 + '\\n'); ${sleepJs(600)} process.stdout.write(e.L2 + '\\n' + e.END + '\\nafter\\n');`;

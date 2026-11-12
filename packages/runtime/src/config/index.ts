@@ -43,7 +43,7 @@ export function parseLimitOverrides(raw: unknown): LimitOverrides {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new Error("overrides must be an object");
   const overrides: Record<string, number | null> = {};
   for (const [key, value] of Object.entries(raw)) {
-    if (!(LIMIT_FIELDS as readonly string[]).includes(key)) throw new Error(`override desconhecido: ${key} (use ${LIMIT_FIELDS.join(", ")})`);
+    if (!(LIMIT_FIELDS as readonly string[]).includes(key)) throw new Error(`unknown override: ${key} (use ${LIMIT_FIELDS.join(", ")})`);
     if (value !== null && typeof value !== "number") throw new Error(`override ${key} must be a number`);
     overrides[key] = value;
   }
