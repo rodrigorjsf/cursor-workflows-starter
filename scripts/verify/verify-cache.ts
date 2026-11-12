@@ -1,5 +1,5 @@
 // Verificação real: agentes irmãos aproveitam o prefixo em cache? (ver docs/research/verificacoes-locais.md §8)
-import { defineWorkflow } from "../../src/runtime/workflow.js";
+import { defineWorkflow } from "../../packages/runtime/src/runtime/workflow.js";
 
 const PROMPT = "Leia README.md, AGENTS.md e package.json. Responda em uma linha: quantas linhas tem cada arquivo.";
 const OPTS = { tools: ["read"], settingSources: [] as [] };

@@ -14,7 +14,8 @@ test("console-to-stderr: console.log, info e debug vão para o stderr; o stdout 
   const file = join(dir, "p.mts");
   writeFileSync(file, `await import(${JSON.stringify(join(root, "src", "console-to-stderr.ts"))});\nconsole.log("L"); console.info("I"); console.debug("D");\n`);
   try {
-    const r = spawnSync(join(root, "node_modules", ".bin", "tsx"), [file], { encoding: "utf8" });
+    // tsx is hoisted to the workspace root's node_modules, so load it by module resolution, not by a path under the package.
+    const r = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), file], { encoding: "utf8" });
     assert.equal(r.status, 0, r.stderr);
     assert.equal(r.stdout, "");
     assert.match(r.stderr, /L\n[\s\S]*I\n[\s\S]*D\n/);

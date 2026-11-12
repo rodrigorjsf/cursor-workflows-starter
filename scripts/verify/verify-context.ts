@@ -1,6 +1,6 @@
 // Verificação real: o que settingSources carrega em runs locais e a guarda contra recursão
 // (ver docs/research/verificacoes-locais.md §7). Rode sobre o repositório criado por setup-probe-repo.sh.
-import { defineWorkflow } from "../../src/runtime/workflow.js";
+import { defineWorkflow } from "../../packages/runtime/src/runtime/workflow.js";
 
 const SCHEMA = {
   type: "object",

@@ -1,5 +1,5 @@
 // Verificação real: saída estruturada via submit_result (ver docs/research/verificacoes-locais.md §7).
-import { defineWorkflow } from "../../src/runtime/workflow.js";
+import { defineWorkflow } from "../../packages/runtime/src/runtime/workflow.js";
 
 const NAME_SCHEMA = { type: "object", required: ["name", "version"], properties: { name: { type: "string" }, version: { type: "string" } } };
 const FILES_SCHEMA = { type: "object", required: ["files"], properties: { files: { type: "array", minItems: 3, items: { type: "string" } } } };
