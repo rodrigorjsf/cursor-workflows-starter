@@ -21,6 +21,7 @@ import type { LimitOverrides } from "../config/index.js";
 import { type RunOptions, newRunId, runWorkflow } from "./engine.js";
 import type { RunStatus } from "./events.js";
 import { type ExecutionState, type Ledger, projectExecution, replayLedger, resumeHint, withRatio } from "./projection.js";
+import { isAlive } from "./pid.js";
 import { abortOpenRuns, eventLogPath, readEventLog } from "./run-store.js";
 import { stateDir } from "./state.js";
 import { writeFileAtomic } from "./state-files.js";
@@ -83,15 +84,6 @@ export function jobsDir(cwd: string): string {
 
 export function jobLogPath(cwd: string, jobId: string): string {
   return join(jobsDir(cwd), `${jobId}.log`);
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /** The job record on disk (identity only), without the projection. */

@@ -10,6 +10,7 @@ import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { dirname, join } from "node:path";
 import { EVENT_SCHEMA_VERSION, type RunStartEvent, type RunStatus, type WorkflowEvent, isContentLine } from "./events.js";
 import { Journal } from "./journal.js";
+import { isAlive } from "./pid.js";
 import { type Ledger, replayLedger } from "./projection.js";
 import { type Redactor, createRedactor } from "./redaction.js";
 import { type RetentionPolicy, pruneContent } from "./retention.js";
@@ -39,15 +40,6 @@ interface LockContent {
  */
 const heldLocks = new Map<string, () => void>();
 let exitHookInstalled = false;
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "EPERM"; // exists, but belongs to someone else
-  }
-}
 
 /**
  * What makes a pid this process and not another one that got the same number later: the boot id plus the process start
