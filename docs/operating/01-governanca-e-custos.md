@@ -117,8 +117,11 @@ contexto que as etapas carregam (`settingSources`):
   outro clone), de um run dentro da espera, e a de um run cortado no meio da etapa dona dela, por `gcFailedAfterDays` dias
   (a de um run cancelado, sem limite, como o próprio run): um resume pode reanexar ao agente e buscar nessa branch o
   trabalho de uma etapa que escreve. O gc não pergunta à nuvem se o agente ainda serve. Se o run do agente foi cancelado (o
-  cancelamento de um run cujo processo morreu faz isso), o resume não reanexa: cria outro agente, que custa de novo, e apaga
-  a branch, junto com o que o agente cancelado commitou nela ([6.2 §Etapas na nuvem](../reference/config.md#etapas-na-nuvem)).
+  cancelamento do run faz isso em qualquer estado do job, também quando o processo dele morreu ou travou:
+  [ADR-0007](../adr/0007-cancel-stops-cloud-agents.md) e
+  [5.3 §Cancelar um run e copiar o comando de resume](03-observabilidade.md#cancelar-um-run-e-copiar-o-comando-de-resume)),
+  o resume não reanexa: cria outro agente, que custa de novo, e apaga a branch, junto com o que o agente cancelado
+  commitou nela ([6.2 §Etapas na nuvem](../reference/config.md#etapas-na-nuvem)).
   `wf gc` não pergunta de PR para nenhuma delas, e só olha o remote `cloud.remote`.
 - **Uma guarda evita que uma etapa dispare outro workflow por acidente**; ela não é uma fronteira de segurança
   (ver acima, "Workflow disparando workflow").

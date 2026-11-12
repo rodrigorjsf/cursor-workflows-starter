@@ -277,7 +277,10 @@
   que substitui o ADR-0006). Um job que executa recebe SIGTERM; um job congelado (processo vivo, sem heartbeat) é morto, o
   que não desfaz a etapa em andamento, e os agentes que o log mostra sem fim são cancelados pela API da Cursor; um job cujo
   processo já morreu tem os agentes cancelados pela API, sem resume. Um resume depois de qualquer um desses cancelamentos
-  cria um agente novo e paga de novo. No dashboard, um run morto com agentes na nuvem ganha **Cancel cloud agent**.
+  cria um agente novo e paga de novo, inclusive depois de cancelar um job congelado só para liberar o run. No dashboard,
+  um run congelado aparece como `failed`, com o erro `no heartbeat for <N>s`, e ganha **Cancel run**, com ou sem etapa na
+  nuvem: o cancelamento mata o processo e cancela os cloud agents dele. Um run cujo processo morreu com agentes na nuvem
+  ganha **Cancel cloud agent**.
 - **As mensagens do kit são em inglês.** Tudo o que o runtime, o CLI e o instalador imprimem, devolvem ou lançam (os
   prefixos `warning:` e `error:` do instalador inclusive); o guia de instalação e as skills citam as mensagens como saem.
 - **Dashboard redesenhado.** Runs, Board e Metrics com um só arquivo de tokens de cor (claro e escuro) e um formatador

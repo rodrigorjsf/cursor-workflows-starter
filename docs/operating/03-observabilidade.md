@@ -366,12 +366,12 @@ O painel mostra tudo como texto, nunca como HTML: um log guarda o que um agente 
 
 No cabeçalho da página do run:
 
-- **Cancel run** (só num run em andamento) pede uma confirmação ali mesmo e cancela pelo mesmo caminho do `wf cancel` e do
+- **Cancel run** (num run em andamento, ou num run travado, descrito abaixo) pede uma confirmação ali mesmo e cancela pelo mesmo caminho do `wf cancel` e do
   `cancel_workflow` (`cancelJob`: `SIGTERM` ao processo do job, que cancela os agentes, desfaz a etapa de escrita em curso e
   escreve o fim do run como `cancelled`). O cartão vai para a coluna Cancelled quando o log o registra. Se o job demora mais
   do que a espera (20 s) para parar, a resposta diz que ele ainda está parando. Um run que não foi iniciado como job (`wf run`
   num terminal) não tem processo registrado para sinalizar: o dashboard responde `409` e diz para dar Ctrl-C naquele terminal.
-- **Cancel cloud agent** (**Cancel N cloud agents** quando são vários; num run `failed` cujo processo morreu ou travou com
+- **Cancel cloud agent** (**Cancel N cloud agents** quando são vários; num run `failed` cujo processo não existe mais, com
   uma etapa na nuvem interrompida e o agente registrado no log) chama a mesma rota: ela cancela, pela API da Cursor e com a
   chave do usuário, os cloud agents que o run deixou rodando e a página mostra a nota da resposta (`200`), que os nomeia, no
   lugar do botão. O cancelamento não fica registrado no log, então depois de recarregar a página o botão volta; quando não
@@ -384,9 +384,12 @@ No cabeçalho da página do run:
   ainda segura um run `failed`) e o entrega ao `cancelJob`, que encerra o processo com `SIGKILL`, sem desfazer a etapa em
   curso, e depois cancela pela API da Cursor os cloud agents que o run deixou rodando, como o `wf cancel` faz. O run segue
   `failed` e retomável, e a nota começa com `process <pid> had no heartbeat and was killed (SIGKILL)` e nomeia os agentes
-  cancelados; um resume depois disso cria agentes novos, que custam de novo. Com uma etapa na nuvem interrompida, o botão é
-  o **Cancel cloud agent** acima. Um run travado sem etapa na nuvem não ganha botão na página: cancele o job dele com
-  `wf cancel <jobId>` (o `wf jobs` lista os jobs do repositório), pelo mesmo caminho.
+  cancelados; um resume depois disso cria agentes novos, que custam de novo
+  ([ADR-0007](../adr/0007-cancel-stops-cloud-agents.md)). O botão desse run é o **Cancel run**, com ou sem etapa na nuvem:
+  a página o oferece quando o erro da API começa com `no heartbeat for`, e mostra a nota no lugar dele. Enquanto o processo
+  segura o lock, o **Copy resume command** leva a um `already running`: cancele antes de retomar. Quando a nota diz que um
+  agente não foi alcançado ou que o processo ainda não saiu, a página a mostra como falha e mantém o botão, para cancelar
+  de novo. Fora do dashboard, `wf cancel <jobId>` (o `wf jobs` lista os jobs do repositório) faz o mesmo.
 - **Copy resume command** (num run `failed` ou `cancelled`) copia
   `wf start <workflow> --args '<args>' --resume <runId> --cwd <repositório>`, com os mesmos `--max-cents`, `--max-tokens` e
   `--overrides` do start. O registro do job da última execução (`.workflows/jobs/<jobId>.json`, campo `start`) guarda os
