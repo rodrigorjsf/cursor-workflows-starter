@@ -86,6 +86,7 @@ button:hover { border-color: var(--accent); }
 .work .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .work .sub { margin-top: 2px; color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .work .glyph { flex: none; width: 1em; text-align: center; }
+.work .where { flex: none; margin-left: auto; padding: 0 6px; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent); font-size: 11px; font-weight: 600; line-height: 16px; }
 .state-running { border-color: var(--running); }
 .state-ok { border-color: var(--ok); }
 .state-failed { border-color: var(--failed); }
@@ -115,6 +116,9 @@ button:hover { border-color: var(--accent); }
 /* tooltip */
 .tip { display: none; position: absolute; left: 0; top: calc(100% + 6px); z-index: 10; min-width: 220px; max-width: 320px; margin: 0; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25); pointer-events: none; font-size: 12px; font-weight: 400; }
 .work:hover .tip, .work:focus-visible .tip { display: block; }
+/* a tooltip with a link in it takes the pointer, and bridges the gap to its node, so that the pointer can get from the node to the link */
+.tip.linked { pointer-events: auto; }
+.tip.linked::before { content: ""; position: absolute; left: 0; right: 0; top: -7px; height: 7px; }
 .tip div { display: flex; gap: 10px; justify-content: space-between; padding: 1px 0; }
 .tip dt { color: var(--muted); }
 .tip dd { margin: 0; text-align: right; overflow-wrap: anywhere; }

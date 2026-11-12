@@ -90,7 +90,8 @@ const IDENTITY = { GIT_AUTHOR_NAME: "cursor-workflows", GIT_AUTHOR_EMAIL: "curso
 /**
  * Commits the state of the worktree `cwd` to the branch `branch` of `remote` and pushes it. Rejects with the reason when it
  * cannot (not a git repository, no such remote, no commit yet, the push is refused) and with the signal's reason when
- * `signal` aborts; a failure leaves nothing on the remote.
+ * `signal` aborts before the push starts; a failure leaves nothing on the remote. An abort that comes during the push does not
+ * stop it: the snapshot that results is returned, and the caller (which sees the abort at once) deletes it.
  */
 export async function pushSnapshot({ cwd, remote, branch, signal }: { cwd: string; remote: string; branch: string; signal?: AbortSignal }): Promise<PushedSnapshot> {
   /** Runs a git command that tells the user something about their setup when it fails; an abort is never that. */
@@ -107,7 +108,11 @@ export async function pushSnapshot({ cwd, remote, branch, signal }: { cwd: strin
   const commit = tree === (await git(top, ["rev-parse", `${head}^{tree}`], { signal }))
     ? head
     : await git(top, ["commit-tree", tree, "-p", head, "-m", `wf: snapshot of the worktree for ${branch}`], { env: IDENTITY, signal });
-  await git(top, ["push", "--quiet", "--no-verify", remote, `${commit}:refs/heads/${branch}`], { signal, timeoutMs: NETWORK_TIMEOUT_MS });
+  // The push is not cut by an abort that comes while it runs. A remote that has the objects goes on to accept the branch after its
+  // client is gone, so a killed push can leave a branch that no one knows about; run to its end (the network timeout bounds it),
+  // the push hands the branch to the caller, whose cleanup deletes it. A cancel during a push therefore waits for the push.
+  signal?.throwIfAborted();
+  await git(top, ["push", "--quiet", "--no-verify", remote, `${commit}:refs/heads/${branch}`], { timeoutMs: NETWORK_TIMEOUT_MS });
   return { top, remote, remoteUrl, branch, commit };
 }
 

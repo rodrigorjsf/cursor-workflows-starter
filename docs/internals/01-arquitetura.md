@@ -205,8 +205,11 @@ O contrato, além da tabela:
   ignora; o backend avisa das camadas com um `warning`). Antes de criar o agente ele empurra um snapshot do worktree
   (`cloud-snapshot.ts`: o estado em disco, não commitado inclusive, sem tocar no índice nem na `HEAD` do usuário, e sem
   `.workflows/`) para uma branch `wf/cloud-snapshot/<run>/<id>` do remote `cloud.remote` (padrão `origin`) e a apaga quando
-  a tentativa termina, de qualquer jeito que termine. O `warning` não conta como "o agente existe": o teto de tokens segue
-  esperando o evento `agent`.
+  a tentativa termina, de qualquer jeito que termine. Um cancelamento ou um timeout que chega com o push em andamento não o
+  corta: um remote que já tem os objetos aceita a branch depois que o cliente sumiu, e um push morto deixaria uma branch que
+  ninguém conhece. O push termina (o limite de rede o limita), e a limpeza da tentativa apaga a branch, então um cancelamento
+  nesse instante espera o push. O `warning` não conta como "o agente existe": o teto de tokens segue esperando o evento
+  `agent`.
 - Uma etapa na nuvem não usa o memo. A que escreve (`writes: true`) roda ali também, desde que o papel não seja declarado
   `read-only`: o agente trabalha na própria branch de snapshot (`workOnCurrentBranch`) e commita nela, e, quando o run
   termina com sucesso, `bringBack` (`cloud-snapshot.ts`) busca a branch e avança o worktree até ela, antes de apagar o
@@ -231,8 +234,9 @@ O contrato, além da tabela:
   o próximo resume ainda vê a etapa como interrompida. Um agente que a nuvem não conhece mais (404: a primeira mensagem não
   chegou, ou ele foi apagado) é trocado por um novo, com um aviso, e a tentativa morta fecha com os tokens que seus turnos tinham
   reportado (eram gasto de verdade); qualquer outra falha ao alcançá-lo (`AttemptResult.reattachFailed`) falha só a tentativa, e a
-  seguinte tenta reanexar de novo: criar outro agente seria pagar duas vezes. Um run reanexado não tem o stream: o log não guarda o que o agente fez enquanto nenhum processo olhava, e os
-  tetos de tokens ao vivo só atuam quando o run termina (o `warning` da reanexação diz isso).
+  seguinte tenta reanexar de novo: criar outro agente seria pagar duas vezes. Um run reanexado não tem o stream: o log não guarda o que o agente fez enquanto nenhum processo olhava (só a resposta
+  final dele entra, como uma mensagem do agente: `converse` a emite como `text`), e os tetos de tokens ao vivo só atuam
+  quando o run termina (o `warning` da reanexação diz isso).
 - **Cancelar e o limite de espera.** Cancelar o run aborta o `signal` da tentativa, e `runAttempt` cancela o run em andamento
   na nuvem e espera ele parar, o reanexado inclusive; um cancelamento que chega enquanto o backend procura o agente
   interrompido dá uma breve espera pela lista e cancela o run que ela trouxer. Um run cujo processo já morreu não tem

@@ -4,6 +4,15 @@
 
 ### Adicionado
 
+- **Dashboard: etapas na nuvem.** Na página do run, uma etapa que rodou como cloud agent da Cursor ganha o selo **☁ cloud**
+  no nó, e os detalhes (tooltip e dados acima do log da etapa) ganham a linha **Cloud agent** com o id (`bc-…`) como link
+  para o agente na Cursor (`https://cursor.com/agents/<id>`), além da localização e do custo. O id vem do evento
+  `cloud-agent`, então o link aparece enquanto a etapa ainda roda; só um id no formato `bc-…` vira link. O log da etapa
+  mostra as mensagens do cloud agent como as de um agente local; numa etapa que um resume reanexou a um agente que
+  continuou rodando, o motor agora registra a resposta final dele como uma mensagem do agente (o run reanexado não tem
+  stream). Corrigido junto: um timeout ou cancelamento que chegava com o push do snapshot em andamento matava o push, mas o
+  remote podia aceitar a branch depois, e ela ficava lá sem dono (o teste de limpeza da branch falhava de vez em quando numa
+  máquina carregada); agora o push termina e a limpeza da tentativa apaga a branch (o cancelamento espera o push).
 - **Etapas de leitura em Cursor cloud agents.** Um papel pode rodar na nuvem: `workflows.<nome>.roles.<papel>.location`
   (`local`, o padrão, ou `cloud`) nos arquivos de configuração. A nuvem só vale se o `caps.allowedLocations` do arquivo
   global a permitir (sem a chave, só `local`: o pedido de um papel vira uma violação e a etapa roda local) e se o workflow

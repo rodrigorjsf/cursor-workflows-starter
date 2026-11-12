@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type GraphNode, KNOWN_EVENT_VERSION, type RunEvent, buildRunGraph, joinIdOf } from "../run-view/run-graph.js";
-import { type Draft, execEnd, execStart, groupEnd, groupStart, phase, ref, RUN, runStart, stamp, step, stepEnd, stepStart, T0 } from "./run-log.js";
+import { type Draft, cloudAgent, execEnd, execStart, groupEnd, groupStart, phase, ref, RUN, runStart, stamp, step, stepEnd, stepStart, T0 } from "./run-log.js";
 
 const idsOf = (nodes: GraphNode[]) => nodes.map((n) => n.id);
 const arrows = (graph: { edges: Array<{ source: string; target: string }> }) => graph.edges.map((e) => `${e.source}>${e.target}`).sort();
@@ -165,6 +165,39 @@ test("a step from the journal or the memo spent nothing now: no attempts, no cos
   const graph = buildRunGraph(stamp([runStart, stepStart("s-a", "again", {}, { cached: "memo" }), stepEnd("s-a", "again", {}, { cached: "memo", usage: { totalTokens: 900 }, rawCents: 8, chargedCents: 8 })]));
   const detail = nodeOf(graph, "s-a").detail;
   assert.deepEqual([detail.attempts, detail.tokens, detail.costCents, detail.cached], [0, 0, 0, "memo"]);
+});
+
+test("a cloud step names its agent from the moment the agent exists, before the step ends; the latest agent is the step's when an attempt replaced it", () => {
+  const cloud = { location: "cloud" };
+  const going = buildRunGraph(stamp([runStart, stepStart("s-a", "look", {}, cloud), cloudAgent("s-a", "bc-1111")]));
+  assert.equal(nodeOf(going, "s-a").state, "running");
+  assert.deepEqual([nodeOf(going, "s-a").detail.location, nodeOf(going, "s-a").detail.cloudAgentId], ["cloud", "bc-1111"]);
+
+  const replaced = buildRunGraph(
+    stamp([
+      runStart,
+      stepStart("s-a", "look", {}, cloud),
+      cloudAgent("s-a", "bc-1111"),
+      stepEnd("s-a", "look", {}, { attemptId: "s-a#1", ok: false, errorKind: "exception", location: "cloud", agentId: "bc-1111" }),
+      stepStart("s-a", "look", {}, { ...cloud, attemptId: "s-a#2", attempt: 2 }),
+      cloudAgent("s-a", "bc-2222", {}, { attemptId: "s-a#2" }),
+      stepEnd("s-a", "look", {}, { attemptId: "s-a#2", attempt: 2, location: "cloud", agentId: "bc-2222" }),
+    ]),
+  );
+  assert.equal(nodeOf(replaced, "s-a").detail.cloudAgentId, "bc-2222");
+});
+
+test("a step that did not run in the cloud has no cloud agent, whatever agent id its end carries; a log that never named one leaves it out", () => {
+  const graph = buildRunGraph(
+    stamp([
+      runStart,
+      stepStart("s-a", "local one", {}, { location: "local" }),
+      stepEnd("s-a", "local one", {}, { location: "local", agentId: "agent-7" }),
+      stepStart("s-b", "older log", {}),
+      stepEnd("s-b", "older log", {}),
+    ]),
+  );
+  for (const id of ["s-a", "s-b"]) assert.equal("cloudAgentId" in nodeOf(graph, id).detail, false, id);
 });
 
 test("a command shows how it ended: the exit code, or the outcome when it was killed", () => {

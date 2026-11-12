@@ -298,6 +298,9 @@ const reviewStep = (extra: Record<string, unknown> = {}) => configWorkflow((ctx)
 
 test("the snapshot branch is deleted when the step ends any way it ends: cancelled, timed out, refused by the account, or errored", async () => {
   allowCloud({ review: { location: "cloud" } });
+  // A step whose timeout fires before its agent has a message (a loaded machine is slow to push) never consumes its entry of the
+  // script: each case starts from an empty one, so that an entry left over cannot be the answer of the next case's agent.
+  const alone = () => void (script.length = 0);
 
   // Cancelled: the run's signal aborts while the cloud agent is running, so its run is cancelled before the branch goes.
   const controller = new AbortController();
@@ -310,14 +313,16 @@ test("the snapshot branch is deleted when the step ends any way it ends: cancell
   assert.equal(stats.cancelled, 1, "the cloud run was cancelled and waited for");
   assert.deepEqual(remoteBranches(remote), []);
 
-  // Timed out.
+  // Timed out (long enough for the agent to have its message even on a loaded machine; short enough to be quick).
+  alone();
   script.push(() => ({ hang: true }));
-  const timedOut = await runWorkflow(reviewStep({ timeoutMs: 100 }), {}, { cwd });
+  const timedOut = await runWorkflow(reviewStep({ timeoutMs: 1500 }), {}, { cwd });
   assert.equal(timedOut.status, "failed");
-  assert.match(timedOut.error!, /timeout after 100 ms/);
+  assert.match(timedOut.error!, /timeout after 1500 ms/);
   assert.deepEqual(remoteBranches(remote), []);
 
   // The cloud run itself ended in error.
+  alone();
   script.push(() => ({ status: "error", error: { message: "the VM died" } }));
   const errored = await runWorkflow(reviewStep(), {}, { cwd });
   assert.equal(errored.status, "failed");
@@ -331,6 +336,20 @@ test("the snapshot branch is deleted when the step ends any way it ends: cancell
   assert.match(refused.error!, /plan does not give access/);
   assert.deepEqual(remoteBranches(remote), []);
   assert.equal(stats.active, 0, "no agent is left running");
+});
+
+test("a timeout that arrives while the snapshot is being pushed still leaves no branch on the remote, even though the remote accepts the push after the client gave up", async () => {
+  allowCloud({ review: { location: "cloud" } });
+  // A remote that takes its time over a push: the step's timeout fires while the push is in flight. (A loaded machine does the same to a fast remote.)
+  writeFileSync(join(remote, "hooks", "pre-receive"), "#!/bin/sh\nsleep 0.6\n", { mode: 0o755 });
+  script.push(() => ({ result: "never asked" }));
+  const r = await runWorkflow(reviewStep({ timeoutMs: 200 }), {}, { cwd });
+
+  assert.equal(r.status, "failed");
+  assert.match(r.error!, /timeout after 200 ms/);
+  assert.equal(calls.length, 0, "the agent was never created: the step ended with the push");
+  await new Promise((resolve) => setTimeout(resolve, 1500)); // a push the client gave up on is still accepted by the remote
+  assert.deepEqual(remoteBranches(remote), [], "the branch the push created is gone");
 });
 
 test("a snapshot branch the remote will not delete is reported with its name, and the step still delivers", async () => {

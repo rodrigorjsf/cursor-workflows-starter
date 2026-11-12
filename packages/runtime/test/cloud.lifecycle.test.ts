@@ -122,6 +122,23 @@ test("a resume after a crash reattaches to the cloud agent that is still running
   }
 });
 
+test("a reattached step's log holds what the agent answered, as a message: the run it took over has no stream, so the step log would show nothing of the agent", async () => {
+  const crashed = await crashWhileTheAgentRuns("life-msg");
+  try {
+    setTimeout(() => finishCloudRun("bc-1", { result: "from the survivor" }), 60);
+    const r = await runWorkflow(reviewStep(), {}, { cwd, runId: "life-msg" });
+    assert.equal(r.status, "finished", r.error);
+
+    const events = logOf("life-msg");
+    const second = events.slice(events.findLastIndex((e) => e.type === "run-start"));
+    const [takeover] = ofType(second, "cloud-agent");
+    const said = ofType(second, "content").filter((e) => e.kind === "agent-message");
+    assert.deepEqual(said.map((e) => [e.attemptId, e.text]), [[takeover!.attemptId, "from the survivor"]], "one message, in the attempt that took the agent over");
+  } finally {
+    await crashed.end();
+  }
+});
+
 test("a resume finds the answer of a cloud agent that finished while no process was watching, without sending anything", async () => {
   const crashed = await crashWhileTheAgentRuns("life-3");
   try {

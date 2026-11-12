@@ -941,7 +941,7 @@ async function executeRun<A, R>(
       subtractUsage(totals, counted);
       emit({
         type: "warning",
-        message: `step "${label}": reattached to cloud agent ${interrupted.agentId}, which an earlier execution of this run left running; what the agent did while no process was watching is not in the event log, and the live token caps act only when its run ends`,
+        message: `step "${label}": reattached to cloud agent ${interrupted.agentId}, which an earlier execution of this run left running; what the agent did while no process was watching is not in the event log (only its final answer is, as one message), and the live token caps act only when its run ends`,
       });
     };
 

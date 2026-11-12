@@ -396,6 +396,8 @@ export async function converse(
 ): Promise<AttemptOutcome> {
   // A reattached agent already has a run going: its answer is the first one, and `message` is not sent again.
   let answer = await (running ? exchange.attach(running) : exchange(message));
+  // A run found by a lookup has no stream (no `onDelta`): its answer is all the attempt can log of what the agent said.
+  if (running && answer.result) onEvent({ type: "text", delta: answer.result });
   // Only an answer of a run that finished has a result to check (a backend's check may call an API).
   const deliveryOf = (a: RunResult) => (check && a.status === "finished" ? check(a) : undefined);
   let delivery = await deliveryOf(answer);

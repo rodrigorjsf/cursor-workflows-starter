@@ -65,7 +65,9 @@ accepts tighter `overrides` per run).
    { "location": "cloud" } } } } }` into `~/.cursor-workflows/config.json` (and take it out afterwards). The user types
    `/run-workflow smoke`. Pass: the job ends `finished` with `answer: "pong"`, the run's log has a `cloud-agent` event with a
    `bc-` agent id, and `git ls-remote --heads origin 'wf/cloud-snapshot/*'` in the sandbox lists nothing. The wizard asks
-   whether to run it; the report lists it as optional, and the release criterion counts scenarios 1 to 7 only.
+   whether to run it; the report lists it as optional, and the release criterion counts scenarios 1 to 7 only. In the
+   dashboard's page of that run the `ping` step carries a cloud badge, and hovering it shows a link to the agent in Cursor
+   and its cost; look, but the result does not depend on it.
 
 When a scenario fails, collect the `wf doctor --json` output and the failing job's `wf status <jobId>`, replace local
 paths and repo names with placeholders, show the user the text, and file a GitHub issue on the kit's repository only
