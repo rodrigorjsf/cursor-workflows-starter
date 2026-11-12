@@ -2,8 +2,8 @@
 // implement-issue.fixture.ts). The tier comes from the highest matching label, a step that crashes the process again and
 // again stops being resumed, and every retry of a write step starts from a clean tree.
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { runWorkflow } from "../src/runtime/engine.js";
 import implementIssue from "../workflows/implement-issue.js";
@@ -272,6 +272,165 @@ test("a resume cancelled while it undoes a step that crashed the process still c
   const resumed = await run({}, first.runId);
   assert.equal(res(resumed).status, "done", JSON.stringify(res(resumed)));
   assert.deepEqual(Object.values(progressOf(first.runId).crashes ?? {}), [1], "and the cancelled undo is not a second crash");
+});
+
+test("a command that fails after a write step's agent answered is not a crash: the run's catch marks the step, and the resume counts nothing", async () => {
+  issue(["complexity:low"]);
+  let lock = "";
+  let once = true;
+  fx.handlers["teste-1"] = (o) => {
+    write(o, "test/sub.test.js", SUB_TEST);
+    if (once) {
+      once = false;
+      const gd = git(o.local.cwd, "rev-parse", "--git-dir").trim();
+      lock = join(isAbsolute(gd) ? gd : join(o.local.cwd, gd), "index.lock");
+      writeFileSync(lock, ""); // the snapshot after the step (`git add -A`) fails: a CommandError, not a cancel
+    }
+    submit(o, { testFile: "test/sub.test.js", testName: "subtract" });
+  };
+  const first = await run({});
+  assert.equal(first.status, "failed", JSON.stringify(first));
+  assert.match(String(first.error), /index\.lock/);
+  assert.equal(progressOf(first.runId).inFlight?.interrupted, true, JSON.stringify(progressOf(first.runId).inFlight));
+  rmSync(lock, { force: true });
+  const resumed = await run({}, first.runId);
+  assert.deepEqual(progressOf(first.runId).crashes ?? {}, {}, "a failed git is not a crash");
+  assert.equal(res(resumed).status, "done", JSON.stringify(res(resumed)));
+});
+
+test("a step begun after a cancelled execution belongs to the execution that began it: if that one did not end cancelled, the resume counts a crash", async () => {
+  issue(["complexity:low"]);
+  const runId = "implement-issue-cancelthenfall";
+  let lock = "";
+  let execution = 0;
+  fx.handlers["codigo-1"] = (o) => {
+    if (execution === 1) return { hang: true }; // cancelled while the step runs
+    write(o, "src/math.js", SUB_CODE);
+    if (execution === 2) {
+      const gd = git(o.local.cwd, "rev-parse", "--git-dir").trim();
+      lock = join(isAbsolute(gd) ? gd : join(o.local.cwd, gd), "index.lock");
+      writeFileSync(lock, ""); // the check after the step fails: execution 2 ends failed, not cancelled
+    }
+    submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
+  };
+  for (execution = 1; execution <= 2; execution++) {
+    const controller = new AbortController();
+    const r = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test" } as any, {
+      cwd: fx.repo,
+      runId,
+      signal: controller.signal,
+      onEvent: (e) => {
+        if (execution === 1 && e.type === "step-start" && e.label === "codigo-1") setTimeout(() => controller.abort(), 100);
+      },
+    });
+    assert.equal(r.status, execution === 1 ? "cancelled" : "failed", `execution ${execution}: ${JSON.stringify(r)}`);
+    await new Promise((resolve) => setTimeout(resolve, 50)); // the cancelled body is done unwinding
+    const p = progressOf(runId);
+    assert.equal(p.inFlight?.execution, execution, `the step in flight says which execution began it: ${JSON.stringify(p.inFlight)}`);
+    delete p.inFlight.interrupted; // as when the process dies before the catch writes the mark
+    writeFileSync(progressFile(runId), JSON.stringify(p));
+  }
+  rmSync(lock, { force: true });
+  const resumed = await run({}, runId);
+  assert.equal(res(resumed).status, "done", JSON.stringify(res(resumed)));
+  assert.deepEqual(Object.values(progressOf(runId).crashes ?? {}), [1], "execution 2 began the step and ended failed: one crash");
+});
+
+// ── A fix round counts once its fix step ran to its end ──────────────────────────────────
+
+/** Green writes a wrong subtract: the green suite fails and the fix rounds start. */
+const WRONG_SUB = SUB_CODE.replace("a - b", "a + b");
+const wrongGreen = (o: any) => {
+  write(o, "src/math.js", WRONG_SUB);
+  submit(o, { summary: "s", filesChanged: ["src/math.js"] });
+};
+const rightFix = (o: any) => {
+  write(o, "src/math.js", SUB_CODE);
+  submit(o, { summary: "fixed", filesChanged: ["src/math.js"] });
+};
+
+test("a cancel while a fix step runs does not use up the fix round: the resume runs the same round again", async () => {
+  issue(["complexity:low"]);
+  fx.handlers["codigo-1"] = wrongGreen;
+  fx.handlers["corrigir-1-1"] = rightFix;
+  fx.handlers["corrigir-1-2"] = rightFix;
+  const runId = "implement-issue-fixcancel1";
+  // More cancels than the default fixRounds (2): none of them may count as a round.
+  for (let n = 1; n <= 3; n++) {
+    const controller = new AbortController();
+    const r = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test" } as any, {
+      cwd: fx.repo,
+      runId,
+      signal: controller.signal,
+      onEvent: (e) => {
+        if (e.type === "step-start" && String(e.label).startsWith("corrigir-")) controller.abort();
+      },
+    });
+    assert.equal(r.status, "cancelled", `cancel ${n}: ${JSON.stringify(r)}`);
+  }
+  const resumed = await run({}, runId);
+  assert.equal(res(resumed).status, "done", JSON.stringify(res(resumed)));
+  assert.ok(!names().includes("corrigir-1-2"), `every cancelled step was round 1: ${names().join(", ")}`);
+});
+
+test("a fix step that ran to its end counts, even when the run is cancelled during its suite: the resume goes on to the next round", async () => {
+  issue(["complexity:low"]);
+  fx.handlers["codigo-1"] = wrongGreen;
+  fx.handlers["corrigir-1-1"] = (o) => {
+    write(o, "src/math.js", SUB_CODE.replace("a - b", "a * b")); // still wrong
+    submit(o, { summary: "tried", filesChanged: ["src/math.js"] });
+  };
+  fx.handlers["corrigir-1-2"] = rightFix;
+  const runId = "implement-issue-fixsuitecancel";
+  const controller = new AbortController();
+  const cancelled = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test" } as any, {
+    cwd: fx.repo,
+    runId,
+    signal: controller.signal,
+    onEvent: (e) => {
+      if (e.type === "exec-start" && String(e.label).startsWith("suite:fix:1:1")) controller.abort();
+    },
+  });
+  assert.equal(cancelled.status, "cancelled", JSON.stringify(cancelled));
+  const resumed = await run({}, runId);
+  assert.equal(res(resumed).status, "done", JSON.stringify(res(resumed)));
+  assert.deepEqual(names().filter((s) => s.startsWith("corrigir")), ["corrigir-1-1", "corrigir-1-2"], "round 1 is not run again");
+});
+
+test("a fix step that crashes the process again and again stops at the crash limit, like any write step", async () => {
+  issue(["complexity:low"]);
+  fx.handlers["codigo-1"] = wrongGreen;
+  // The fix step "crashes": what the progress held while it ran is what a dead process leaves behind.
+  let held: string | undefined;
+  const crashingFix = (o: any) => {
+    held ??= readFileSync(progressFile(runId), "utf8");
+    write(o, "src/math.js", `${WRONG_SUB}// half-made edit\n`);
+    return FALL();
+  };
+  fx.handlers["corrigir-1-1"] = crashingFix;
+  fx.handlers["corrigir-1-2"] = crashingFix;
+  const runId = "implement-issue-fixcrash";
+  const crash = () => {
+    assert.ok(held, "the fix step ran");
+    writeFileSync(progressFile(runId), held!);
+    writeFileSync(join(worktreeOf(runId), "stray.txt"), "half-made edit\n");
+    held = undefined;
+  };
+  const first = await run({}, runId);
+  assert.equal(first.status, "failed", JSON.stringify(first));
+  crash();
+  // The default limit is 2: the step is resumed after its first and second crash, as the same round...
+  for (const n of [1, 2]) {
+    const resumed = await run({}, runId);
+    assert.equal(resumed.status, "failed", `resume ${n} ran the fix step again: ${JSON.stringify(resumed)}`);
+    crash();
+  }
+  // ...and not after its third.
+  const stopped = await run({}, runId);
+  assert.equal(res(stopped).status, "step-crash-loop", JSON.stringify(res(stopped)));
+  assert.match(res(stopped).step, /^fix:.*:1$/);
+  assert.equal(res(stopped).crashes, 3);
+  assert.ok(!names().includes("corrigir-1-2"), `a crashed round is not a round that ran: ${names().join(", ")}`);
 });
 
 // ── A retried write step starts from a clean tree ────────────────────────────────────────
