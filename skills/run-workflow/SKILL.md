@@ -86,8 +86,9 @@ matches, in code spans; match them verbatim.
      at no new cost. Call `cancel_workflow` only once here: a second call on the now-dead job cancels those agents.
      A run with cloud steps may have left cloud agents running when its process died, and they keep spending until
      cancelled. If the user wants the run stopped rather than resumed, call `cancel_workflow` on the failed job: it
-     cancels those agents (see "Cancelling"). The job stays `failed` and the run stays resumable; tell the user what a
-     later resume then costs (see "Cancelling").
+     cancels those agents (see "Cancelling"). A `no heartbeat` job takes two calls: the first only kills the frozen
+     process. The job stays `failed` and the run stays resumable; tell the user what a later resume then costs (see
+     "Cancelling").
    On a relaunch, go back to step 3 with the new `jobId`.
 6. When `status` is `cancelled`, the run was stopped on purpose. Relay that with the `runId`, and offer to resume it
    as in step 5 if the user wants to continue; the steps it finished are not repeated.
@@ -104,9 +105,12 @@ to the state it had before the step, and returns the job with `status: "cancelle
   several), or names one it `could not reach` and says to resume the run and cancel it.
 - A `note` that starts with `process <pid> had no heartbeat and was killed (SIGKILL)`: the process was frozen, so it
   was killed without undoing the step in progress, and the run stays resumable. The job stays `failed`, and any cloud
-  agents the run left running were not cancelled. The user asked to stop, so call `cancel_workflow` on the same
-  `jobId` again at once, without asking again: the job is dead now, so that call cancels those agents and returns a
-  note that starts with `the job already ended`, as above. Relay both notes.
+  agents the run left running were not cancelled. What comes next depends on why you cancelled:
+  - To free the run for a resume (step 5, after `already running`): do not cancel again. Resume now; the resume
+    reattaches to those agents.
+  - Because the user asked to stop the run: call `cancel_workflow` on the same `jobId` again at once, without asking
+    again. The job is dead now, so that call cancels those agents and returns a note that starts with
+    `the job already ended`, as above. Relay both notes.
 - A resume after a cancel whose note names cloud agents (after `cancelled the cloud agent it left running:`) does not
   reattach to them. It starts a new cloud agent for each of those steps, at new cost, and the work of the cancelled
   agents is lost; the log warns
