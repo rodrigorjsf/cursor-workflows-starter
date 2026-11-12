@@ -13,7 +13,7 @@ import { closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, rmS
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { globalConfigPath, loadConfigFile } from "../config/file.js";
-import { isAlive } from "./pid.js";
+import { commandLineHas, isAlive } from "./pid.js";
 import { userDir } from "./state.js";
 import { writeFileAtomic } from "./state-files.js";
 
@@ -105,12 +105,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** True when `pid` runs the dashboard's entry point, and not another program that got the number. Where /proc is missing it cannot tell, and says yes. */
 function isDashboardProcess(pid: number): boolean {
-  if (!existsSync("/proc/self/cmdline")) return true;
-  try {
-    return readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").some((arg) => /dashboard[\\/]src[\\/]main\.ts$/.test(arg));
-  } catch {
-    return false;
-  }
+  return commandLineHas(pid, (arg) => /dashboard[\\/]src[\\/]main\.ts$/.test(arg));
 }
 
 /**

@@ -11,7 +11,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { RunStatus } from "./events.js";
 import { type ExecutionState, type Ledger, projectExecution, replayLedger, resumeHint, withRatio } from "./projection.js";
-import { isAlive } from "./pid.js";
+import { commandLineHas, isAlive } from "./pid.js";
 import { eventLogPath, readEventLog } from "./run-store.js";
 import { stateDir } from "./state.js";
 import { writeFileAtomic } from "./state-files.js";
@@ -186,12 +186,7 @@ export function writeJob(cwd: string, record: JobRecord): void {
 
 /** True when `record.pid` is the process of this job and not another one that got the number: its command line carries the job id. */
 function isJobProcess(record: JobRecord): boolean {
-  if (!existsSync("/proc/self/cmdline")) return true; // a platform without /proc cannot tell
-  try {
-    return readFileSync(`/proc/${record.pid}/cmdline`, "utf8").split("\0").includes(record.jobId);
-  } catch {
-    return false;
-  }
+  return commandLineHas(record.pid, (arg) => arg === record.jobId);
 }
 
 /** What `cancelJob` returns: the job's state afterwards, and what the cancellation did (or why it did nothing). */
