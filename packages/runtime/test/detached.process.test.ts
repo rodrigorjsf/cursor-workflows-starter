@@ -9,7 +9,8 @@ import { join } from "node:path";
 import { after, afterEach, before, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { createJob, writeJob } from "../src/runtime/jobs.js";
+import { createJob } from "../src/runtime/jobs.js";
+import { writeJob } from "../src/runtime/job-state.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 
 const PACKAGE = join(import.meta.dirname, "..");

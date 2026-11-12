@@ -21,9 +21,6 @@ import { resumeHint } from "./projection.js";
 import { abortOpenRuns } from "./run-store.js";
 import type { WorkflowDefinition } from "./workflow.js";
 
-// Everything that imports `jobs.ts` keeps finding the job state here.
-export { HEARTBEAT_MS, HEARTBEAT_STALE_MS, type CancelResult, type JobRecord, type JobState, cancelJob, jobLogPath, jobsDir, listJobs, readJob, readJobRecord, waitJob, writeJob } from "./job-state.js";
-
 /** Creates the job record before the run (the CLI `start` writes it in the parent, before the spawn). */
 export function createJob(cwd: string, workflow: string, runId?: string, jobId: string = randomUUID().slice(0, 8), pid = process.pid): JobRecord {
   // Date and time stay in the record, not in the workflow: the script must be deterministic for the resume.

@@ -31,7 +31,8 @@ import { type LimitOverrides, limitOverridesSchema, loadEffectiveConfig, parseLi
 import { assertKitCompatible, readKitPackage } from "./kit-version.js";
 import { type DashboardStatus, ensureDashboard } from "./runtime/dashboard-instance.js";
 import { INSIDE_WORKFLOW_ENV } from "./runtime/engine.js";
-import { cancelJob, installCrashHandlers, readJob, spawnJob, waitJob } from "./runtime/jobs.js";
+import { installCrashHandlers, spawnJob } from "./runtime/jobs.js";
+import { cancelJob, readJob, waitJob } from "./runtime/job-state.js";
 import { type BrokenWorkflow, discoverWorkflows } from "./runtime/registry.js";
 
 installCrashHandlers();

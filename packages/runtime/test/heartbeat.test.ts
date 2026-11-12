@@ -9,7 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, test } from "node:test";
 import { calls, script, stats } from "@cursor/sdk";
-import { createJob, jobsDir, readJob, startJob, writeJob } from "../src/runtime/jobs.js";
+import { createJob, startJob } from "../src/runtime/jobs.js";
+import { jobsDir, readJob, writeJob } from "../src/runtime/job-state.js";
 import { defineWorkflow } from "../src/runtime/workflow.js";
 
 const cwd = mkdtempSync(join(tmpdir(), "wf-heartbeat-"));

@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { defaultDbPath } from "../src/observability/db.js";
-import { type JobRecord, jobsDir, writeJob } from "../src/runtime/jobs.js";
+import { type JobRecord, jobsDir, writeJob } from "../src/runtime/job-state.js";
 import { MemoStore } from "../src/runtime/memo.js";
 import { stateDir, userDir } from "../src/runtime/state.js";
 import { appendJsonl, readJsonl, writeFileAtomic } from "../src/runtime/state-files.js";
