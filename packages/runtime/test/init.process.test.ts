@@ -531,13 +531,16 @@ test("wf init warns about a memory file in a directory above the repo, and advis
 });
 
 test("wf init counts CLAUDE.md in the home directory but not ~/.claude/CLAUDE.md, the user memory that loads beside AGENTS.md", () => {
-  const repo = join(home, `repo-${++counter}`);
-  mkdirSync(repo);
+  const homeRepo = () => {
+    const repo = join(home, `repo-${++counter}`);
+    mkdirSync(repo);
+    return repo;
+  };
   put(join(home, ".claude", "CLAUDE.md"), "# My preferences\n");
   try {
-    assert.equal(claudeCodeNote(repo), undefined, "~/.claude/CLAUDE.md does not hide AGENTS.md");
+    assert.equal(claudeCodeNote(homeRepo()), undefined, "~/.claude/CLAUDE.md does not hide AGENTS.md");
     put(join(home, "CLAUDE.md"), "# Home guide\n");
-    assert.ok(claudeCodeNote(repo)?.startsWith(`wf init: Claude Code reads ${join(home, "CLAUDE.md")}, not AGENTS.md`), "~/CLAUDE.md hides it");
+    assert.ok(claudeCodeNote(homeRepo())?.startsWith(`wf init: Claude Code reads ${join(home, "CLAUDE.md")}, not AGENTS.md`), "~/CLAUDE.md hides it");
   } finally {
     rmSync(join(home, ".claude"), { recursive: true, force: true });
     rmSync(join(home, "CLAUDE.md"), { force: true });

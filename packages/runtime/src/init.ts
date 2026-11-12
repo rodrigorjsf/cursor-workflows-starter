@@ -2,7 +2,8 @@
 // the caller can show them; it never runs git, so it never commits. Running it again plans no change.
 
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { kitFileUrl, readKitPackage } from "./kit-version.js";
 import { writeFileAtomic } from "./runtime/state-files.js";
@@ -129,18 +130,67 @@ export interface InitResult {
   notes: string[];
 }
 
-/** The files that make Claude Code read them instead of AGENTS.md (docs/usage/03-invocacao-no-cursor-ide.md). */
+/**
+ * The files that make Claude Code read them instead of AGENTS.md, in the working directory or any directory above it
+ * (docs/usage/03-invocacao-no-cursor-ide.md; code.claude.com/docs/en/memory, "When Claude Code reads AGENTS.md").
+ */
 const CLAUDE_MEMORY_FILES = ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"];
 
 /**
- * Claude Code reads AGENTS.md only when the repo has none of its own memory files (same chapter): says so when the repo has one
- * and none of them is AGENTS.md or imports it. Only the repo root is looked at, not the directories above it.
+ * The `@path` imports of a memory file, the way Claude Code reads them: outside fenced code blocks and code spans, each path
+ * relative to the file's folder (code.claude.com/docs/en/memory, "Import additional files"). Returns absolute paths.
+ */
+function importsOf(file: string): string[] {
+  const paths: string[] = [];
+  let fence: string | undefined;
+  for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence !== undefined) {
+      if (marker?.[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) fence = undefined;
+      continue;
+    }
+    if (marker !== undefined) {
+      fence = marker;
+      continue;
+    }
+    for (const [, path] of line.replace(/(`+).*?\1/g, "").matchAll(/(?:^|\s)@(\S+)/g)) {
+      paths.push(path.startsWith("~/") ? join(homedir(), path.slice(2)) : resolve(dirname(file), path));
+    }
+  }
+  return paths;
+}
+
+/**
+ * Claude Code reads AGENTS.md only when no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md sits in the repo or in a directory
+ * above it; ~/.claude/CLAUDE.md, the user's own memory, does not count, while ~/CLAUDE.md does. Says so when such a file
+ * exists and none of them is AGENTS.md or imports it, with the import line that works from the file to edit.
  */
 function claudeCodeNote(cwd: string): string | undefined {
-  const agents = realpathSync(join(cwd, "AGENTS.md"));
-  const present = CLAUDE_MEMORY_FILES.filter((file) => existsSync(join(cwd, file)));
-  if (present.length === 0 || present.some((file) => realpathSync(join(cwd, file)) === agents || readFileSync(join(cwd, file), "utf8").includes("@AGENTS.md"))) return undefined;
-  return `Claude Code reads ${present.join(" and ")}, not AGENTS.md: for it to see the kit block, import AGENTS.md there (the line \`@AGENTS.md\`). wf init does not edit ${present.length > 1 ? "those files" : "that file"}.`;
+  const root = realpathSync(cwd);
+  const agents = realpathSync(join(root, "AGENTS.md"));
+  const userMemory = join(homedir(), ".claude", "CLAUDE.md");
+  const userMemoryReal = existsSync(userMemory) ? realpathSync(userMemory) : userMemory;
+  const present: string[] = [];
+  for (let dir = root; ; dir = dirname(dir)) {
+    for (const file of CLAUDE_MEMORY_FILES) {
+      const path = join(dir, file);
+      if (statSync(path, { throwIfNoEntry: false })?.isFile() && realpathSync(path) !== userMemoryReal) present.push(path);
+    }
+    if (dirname(dir) === dir) break;
+  }
+  if (present.length === 0) return undefined;
+  if (present.some((path) => realpathSync(path) === agents || importsOf(path).some((target) => existsSync(target) && realpathSync(target) === agents))) return undefined;
+
+  // The repo's own files by their path in the repo, the ones above it by their absolute path.
+  const shown = present.map((path) => (relative(root, path).startsWith("..") ? path : relative(root, path)));
+  const target = CLAUDE_MEMORY_FILES.find((file) => shown.includes(file));
+  const fix =
+    target === undefined
+      ? "create CLAUDE.md in the repository root with the line `@AGENTS.md`"
+      : target === ".claude/CLAUDE.md"
+        ? "add the line `@../AGENTS.md` to .claude/CLAUDE.md (an import resolves from the folder of the file that holds it)"
+        : `add the line \`@AGENTS.md\` to ${target}`;
+  return `Claude Code reads ${shown.join(" and ")}, not AGENTS.md: for it to see the kit block, ${fix}. wf init does not write Claude Code's memory files.`;
 }
 
 /** Plans the files, writes them, and returns what changed (nothing when the repo is already set up). */
