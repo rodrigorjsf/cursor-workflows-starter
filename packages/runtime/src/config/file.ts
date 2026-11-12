@@ -21,6 +21,7 @@ export interface ConfigCaps {
   allowedSettingSources?: SettingSource[] | null;
   allowedLocations?: Array<"local" | "cloud"> | null;
   maxConcurrency?: number | null;
+  requireSandbox?: boolean | null;
 }
 
 export interface RolePrefs {

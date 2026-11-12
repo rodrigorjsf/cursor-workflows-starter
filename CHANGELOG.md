@@ -50,7 +50,8 @@
   `design`, `pr-text`), e a configuração define por papel o modelo (com `params`), o tempo, as tentativas e as camadas
   de configuração, com globs de label como alternativa. `null` desliga um limite, chave ausente herda. A configuração
   é lida de novo a cada run; o `run-start` grava a configuração efetiva, a origem de cada valor e as violações;
-  `wf config show [workflow]` imprime os três. `start_workflow` aceita `overrides` que só apertam. A referência
+  `wf config show [workflow]` imprime os três. `start_workflow` aceita `overrides` que só apertam. O teto
+  `requireSandbox: true` liga o sandbox do SDK em toda etapa, mesmo que o código do workflow o desligue. A referência
   (`docs/reference/config.md`) é gerada do esquema (`npm run docs:config`), e o `npm test` falha se ela divergir.
 - **Jobs destacados, com heartbeat.** `start_workflow` passa a iniciar cada run em um processo destacado (o mesmo que
   `wf start` já usava): reiniciar o Cursor ou o servidor MCP não o interrompe, e o servidor novo o encontra pelos

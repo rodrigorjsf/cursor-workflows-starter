@@ -1016,7 +1016,8 @@ async function executeRun<A, R>(
             mcpServers: withGuard(nestedGuard(sources), o.mcpServers),
             cwd: stepCwd,
             settingSources: sources,
-            sandbox: Boolean(o.sandbox),
+            // The global cap wins over the workflow code: a pull request that edits a workflow cannot turn sandboxing off.
+            sandbox: caps.requireSandbox === true || Boolean(o.sandbox),
             customTools: o.schema ? { [SUBMIT_TOOL]: submitResultTool(o.schema, capture) } : undefined,
           }), (late) => void late[Symbol.asyncDispose]().catch(() => {}));
           agent = sdkAgent;

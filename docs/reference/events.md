@@ -253,6 +253,7 @@ Os tetos globais em vigor (o `caps` do arquivo global). `null` = sem teto.
 | `allowedSettingSources` | `SettingSource[] \| null` | sim | Camadas de configuração que uma etapa pode carregar; `null` libera todas. |
 | `allowedLocations` | `Array<"local" \| "cloud"> \| null` | sim | Onde uma etapa pode rodar; `null` libera todos. |
 | `maxConcurrency` | `number \| null` | sim | Agentes simultâneos; `null` = sem teto. |
+| `requireSandbox` | `boolean \| null` | sim | `true` liga o sandbox do SDK em toda etapa, mesmo que o código do workflow o desligue; `null` deixa o código decidir. |
 
 ### EffectiveRole
 

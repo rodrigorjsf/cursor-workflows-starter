@@ -241,6 +241,7 @@ test("the global caps clamp the result: numbers take the minimum, and a repo pre
     allowedSettingSources: null,
     allowedLocations: null,
     maxConcurrency: null,
+    requireSandbox: null,
   });
 
   assert.deepEqual(
@@ -364,6 +365,24 @@ test("allowedLocations without 'local' keeps every step from running", async () 
   assert.equal(r.status, "failed");
   assert.match(r.error!, /allowedLocations/);
   assert.equal(calls.length, 0);
+});
+
+test("requireSandbox in the global caps sandboxes every step, even one whose code turns the sandbox off", async () => {
+  const wf = configWorkflow(async (ctx) => {
+    await ctx.agent("p", { role: "classify", label: "off", sandbox: false });
+    return ctx.agent("p", { role: "classify", label: "unset" });
+  });
+  writeGlobalConfig({ caps: { requireSandbox: true } });
+  const locked = await runWorkflow(wf, {}, { cwd });
+  assert.equal(locked.status, "finished", locked.error);
+  assert.deepEqual(calls.map((c) => c.local?.sandboxOptions), [{ enabled: true }, { enabled: true }]);
+
+  calls.length = 0;
+  writeGlobalConfig({ caps: {} });
+  writeRepoConfig(cwd, { caps: { requireSandbox: false } });
+  const free = await runWorkflow(wf, {}, { cwd });
+  assert.equal(free.status, "finished", free.error);
+  assert.deepEqual(calls.map((c) => c.local?.sandboxOptions), [undefined, undefined], "without the cap the code decides; a repo file cannot set caps");
 });
 
 test("tighten-only overrides (the chat): a lower limit applies, a looser one is a violation with no effect", async () => {

@@ -138,6 +138,8 @@ export interface EffectiveCaps {
   allowedLocations: Array<"local" | "cloud"> | null;
   /** Agentes simultâneos; `null` = sem teto. */
   maxConcurrency: number | null;
+  /** `true` liga o sandbox do SDK em toda etapa, mesmo que o código do workflow o desligue; `null` deixa o código decidir. */
+  requireSandbox: boolean | null;
 }
 
 /** As configurações de uma etapa por papel (ou por glob de label). Só aparece o que alguma camada definiu. */

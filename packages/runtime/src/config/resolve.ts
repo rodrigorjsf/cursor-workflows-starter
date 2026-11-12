@@ -268,6 +268,7 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
     allowedSettingSources: rawCaps.allowedSettingSources ?? null,
     allowedLocations: rawCaps.allowedLocations ?? null,
     maxConcurrency: rawCaps.maxConcurrency ?? null,
+    requireSandbox: rawCaps.requireSandbox ?? null,
   };
   /** The numeric cap of each limit field; `settingSources` and model ids have their own checks. */
   const capOf = new Map<string, number | null>(LIMIT_FIELDS.map((f) => [f, caps[LIMITS[f].cap]]));

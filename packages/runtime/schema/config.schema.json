@@ -83,7 +83,11 @@
           "uniqueItems": true,
           "description": "Onde as etapas podem rodar. Hoje só `local` existe; `cloud` é reservado. `null` libera todos."
         },
-        "maxConcurrency": { "type": ["integer", "null"], "minimum": 1, "description": "Máximo de agentes simultâneos num run. `null` desliga." }
+        "maxConcurrency": { "type": ["integer", "null"], "minimum": 1, "description": "Máximo de agentes simultâneos num run. `null` desliga." },
+        "requireSandbox": {
+          "type": ["boolean", "null"],
+          "description": "`true` liga o sandbox local do SDK em toda etapa, mesmo quando o código do workflow o desliga: um pull request que edita um workflow não afrouxa o sandbox. Ausente, `false` ou `null`: vale o `sandbox` de cada etapa."
+        }
       }
     },
     "settingSource": { "enum": ["project", "user", "team", "mdm", "plugins", "all"] },

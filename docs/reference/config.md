@@ -74,6 +74,7 @@ Valida os dois arquivos de configuração do kit: o global (`~/.cursor-workflows
 | `allowedSettingSources` | `array de "project" \| "user" \| "team" \| "mdm" \| "plugins" \| "all" \| null` | não | Camadas de configuração (`settingSources`) que uma etapa pode carregar. Listas: vale a interseção. O instalador grava todas menos `all`. `null` libera todas. |
 | `allowedLocations` | `array de "local" \| "cloud" \| null` | não | Onde as etapas podem rodar. Hoje só `local` existe; `cloud` é reservado. `null` libera todos. |
 | `maxConcurrency` | `integer \| null` | não | Máximo de agentes simultâneos num run. `null` desliga. |
+| `requireSandbox` | `boolean \| null` | não | `true` liga o sandbox local do SDK em toda etapa, mesmo quando o código do workflow o desliga: um pull request que edita um workflow não afrouxa o sandbox. Ausente, `false` ou `null`: vale o `sandbox` de cada etapa. |
 
 ## Preferências de um workflow
 
