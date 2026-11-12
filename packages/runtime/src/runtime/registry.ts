@@ -9,6 +9,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { WorkflowDefinition } from "./workflow.js";
+import { recordWorkflowSource } from "./workflow-source.js";
 
 export function workflowDirs(cwd: string): string[] {
   const dirs = [resolve(import.meta.dirname, "..", "..", "workflows"), join(cwd, ".agents", "workflows")];
@@ -34,7 +35,10 @@ export async function discoverWorkflows(
       const path = join(dir, file);
       try {
         const mod = (await import(pathToFileURL(path).href)) as { default?: WorkflowDefinition<any, any> };
-        if (mod.default?.meta?.name) workflows.set(mod.default.meta.name, mod.default);
+        if (mod.default?.meta?.name) {
+          recordWorkflowSource(mod.default, path);
+          workflows.set(mod.default.meta.name, mod.default);
+        }
       } catch (err) {
         broken.push({ file: path, error: err instanceof Error ? err.message : String(err) });
       }

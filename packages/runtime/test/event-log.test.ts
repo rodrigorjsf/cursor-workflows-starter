@@ -11,6 +11,7 @@ import { calls, costConfig, script, stats } from "@cursor/sdk";
 import { runWorkflow } from "../src/runtime/engine.js";
 import type { WorkflowEvent } from "../src/runtime/events.js";
 import { eventLogPath, readEventLog, runDirPath } from "../src/runtime/run-store.js";
+import { discoverWorkflows } from "../src/runtime/registry.js";
 import { readRunsIndex } from "../src/runtime/runs-index.js";
 import { defineWorkflow } from "../src/runtime/workflow.js";
 
@@ -320,6 +321,31 @@ test("resuming a run whose workflow changed records a warning event; resuming it
 
   await runWorkflow(v2, {}, { cwd, runId: failed.runId });
   assert.equal(changeWarnings(logOf(failed.runId).events).length, 1, "the same code as the previous execution: no new warning");
+});
+
+test("resuming a run whose workflow's imported module changed records the code-changed warning", async () => {
+  const dir = join(cwd, "workflows");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "helper.ts"), `export const answer = () => "v1";\n`);
+  writeFileSync(
+    join(dir, "uses-helper.ts"),
+    `import { answer } from "./helper.js";\nexport default { meta: { name: "uses-helper", description: "x" }, run: async () => answer() };\n`,
+  );
+  const previousDir = process.env.WORKFLOWS_DIR;
+  process.env.WORKFLOWS_DIR = dir;
+  try {
+    const load = async () => (await discoverWorkflows(cwd)).workflows.get("uses-helper")!;
+    const first = await runWorkflow(await load(), {}, { cwd });
+    assert.equal(first.status, "finished", first.error);
+
+    writeFileSync(join(dir, "helper.ts"), `export const answer = () => "v2";\n`); // only the imported module changes
+    await runWorkflow(await load(), {}, { cwd, runId: first.runId });
+    const changeWarnings = ofType(logOf(first.runId).events, "warning").filter((w) => /workflow mudou/.test(w.message));
+    assert.equal(changeWarnings.length, 1);
+  } finally {
+    if (previousDir === undefined) delete process.env.WORKFLOWS_DIR;
+    else process.env.WORKFLOWS_DIR = previousDir;
+  }
 });
 
 test("a group that a fatal error aborts is closed with ok=false, and the run fails", async () => {

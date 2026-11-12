@@ -39,6 +39,7 @@ import { registerRun } from "./runs-index.js";
 import { stateDir as runtimeStateDir } from "./state.js";
 import { type Capture, SUBMIT_TOOL, repromptMessage, schemaInstruction, submitResultTool } from "./structured.js";
 import type { AgentCallOptions, Budget, UsageTotals, WorkflowContext, WorkflowDefinition } from "./workflow.js";
+import { workflowSourceHash } from "./workflow-source.js";
 import { type Snapshot, revertToSnapshot, takeSnapshot } from "./worktree-snapshot.js";
 
 export type { ErrorKind, RunStatus, TurnUsage, WorkflowEvent } from "./events.js";
@@ -235,7 +236,8 @@ function announceRun<A>(o: {
   recorderWarning: string | undefined;
 }): void {
   const { def, args, opts, runId, store, resolved, emit, recorderWarning } = o;
-  const workflowHash = sha(JSON.stringify(def.meta) + JSON.stringify(def.defaults ?? {}) + def.run.toString()).slice(0, 16);
+  // The source fingerprint covers the modules the workflow imports (prompts, helpers); `run.toString()` alone does not.
+  const workflowHash = sha(JSON.stringify(def.meta) + JSON.stringify(def.defaults ?? {}) + def.run.toString() + (workflowSourceHash(def) ?? "")).slice(0, 16);
   const startedAt = new Date().toISOString();
   const pruned = store.pruneOldContent(opts.retention);
   emit({
