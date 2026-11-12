@@ -27,22 +27,81 @@
 
 ## 3. Instalar
 
+O kit se instala **uma vez por máquina**, numa tag de lançamento, em `~/.cursor-workflows/kit`. Cada repositório que o
+usa recebe depois os próprios arquivos, do `wf init` ([2.3](03-invocacao-no-cursor-ide.md#usar-o-kit-em-outros-repositórios)).
+
+### Pelo agente (recomendado)
+
+Aponte qualquer agente de código para o guia, fixado numa tag:
+`https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.2.0/INSTALL-AGENT.md`. Ele checa a máquina,
+instala o kit, confere o login, roda o `wf init` no repositório atual e termina no `wf doctor`. O guia é público, está
+em inglês (texto escrito para agentes) e não depende de nenhum outro documento. A tag que ele traz é sempre a versão do
+pacote: o `npm test` reprova se os dois divergirem, então uma versão nova só sai com o guia apontando para ela.
+
+### Pelo instalador
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.2.0/scripts/install.sh -o /tmp/wf-install.sh
+bash /tmp/wf-install.sh --tag v0.2.0
+```
+
+Baixar o script para um arquivo, em vez de passá-lo direto ao `bash`, deixa você lê-lo antes de rodar. O instalador:
+
+| Passo | Resultado |
+|---|---|
+| Kit | Clona o repositório na tag em `~/.cursor-workflows/kit` (`WF_HOME` muda a pasta `~/.cursor-workflows`). Se já há um clone, move-o para a tag |
+| Node | Para antes de instalar qualquer coisa se o `node` do PATH for mais antigo que o `engines.node` do kit (22.13), dizendo as duas versões |
+| Dependências | `npm ci` na pasta do kit: a árvore exata do `package-lock.json` |
+| Comando `wf` | Escreve `~/.local/bin/wf`, um script que roda o CLI do kit instalado. Se a pasta não está no PATH, o instalador avisa e diz como corrigir (bash ou zsh: `export PATH` no `~/.profile`; fish: `fish_add_path`). Um `wf` que não é dele fica como está, com aviso |
+| Skills | Liga cada skill do kit (`run-workflow`, `cursor-workflow-authoring`, `skill-to-workflow`, `cursor-workflows-setup`) em `~/.claude/skills/`, com links simbólicos para `~/.cursor-workflows/kit/skills/`. O Claude Code lê essa pasta, e o Cursor também (compatibilidade). Uma pasta ou um link de mesmo nome que seja seu fica como está, com aviso |
+| Configuração global | Escreve `~/.cursor-workflows/config.json` com os tetos padrão **se o arquivo não existir**: 3.000.000 de tokens e 500 centavos por run, 600.000 tokens por etapa, simultaneidade 4, todos os modelos, todas as camadas de configuração menos `all`, só etapas locais ([6.2](../reference/config.md)). Um arquivo seu nunca é reescrito |
+
+Rodar de novo é seguro: o instalador refaz o que falta e não muda o que já está certo. Cada skill ligada passa pelo local
+fixo do kit, então o link continua valendo quando o kit troca de uma tag para outra.
+
+### Atualizar: `wf upgrade`
+
+```bash
+wf upgrade
+```
+
+Busca as tags do repositório de origem, escolhe a mais nova (só versões `vX.Y.Z`; pré-lançamentos não contam), faz o
+checkout dela e roda o `install.sh --refresh` **dessa tag**, que reinstala as dependências e refaz o comando, os links
+das skills (uma skill nova ganha link, e o link de uma skill que saiu é removido) e a configuração padrão, sem tocar em
+arquivo seu. O stdout é `{ "upgraded", "from", "to", "tag" }`; o andamento vai para o stderr. Já na versão mais nova, ele
+só diz isso. Depois de atualizar, rode `wf doctor` em cada repositório: um kit fora da faixa `kit` do repositório é recusado
+([2.3](03-invocacao-no-cursor-ide.md#conferindo-o-ambiente-wf-doctor)).
+
+Ele recusa o que não é um kit instalado: um kit em modo de desenvolvimento (abaixo), um `wf` que roda de outra pasta, e a
+falta de rede (o kit continua na versão em que estava). Se o instalador falhar depois do checkout, a mensagem diz o
+comando para terminar: `bash ~/.cursor-workflows/kit/scripts/install.sh --refresh`.
+
+### Modo de desenvolvimento
+
+Quem mexe no próprio kit instala o clone em vez de uma tag:
+
 ```bash
 git clone <seu-fork-deste-kit> cursor-workflows && cd cursor-workflows
-npm ci              # usa o package-lock.json versionado
-npm run typecheck     # deve terminar sem erros
-npm test              # testes offline do engine (sem rede, sem conta)
+npm ci                    # usa o package-lock.json versionado
+npm run typecheck         # deve terminar sem erros
+npm test                  # testes offline do engine (sem rede, sem conta)
+scripts/install.sh --dev  # ~/.cursor-workflows/kit passa a ser um link para este clone
 ```
+
+Com `--dev`, o comando `wf`, o servidor MCP dos repositórios e as skills globais rodam o seu código. O instalador usa
+`npm install` só se faltar o `node_modules` (o `npm ci` esvaziaria o seu). O `wf upgrade` recusa essa instalação, e o
+instalador não troca um modo pelo outro: para passar de uma tag para o modo de desenvolvimento, mova `~/.cursor-workflows/kit`
+para trás (e o inverso vale também).
 
 ## 4. Login e modelos
 
 ```bash
-npm run wf -- login     # abre o navegador e grava uma chave de usuário (90 dias por padrão) em ~/.cursor/sdk/auth.json
-npm run wf -- whoami    # confirma a conta
-npm run models          # = wf models: id, displayName, aliases e params de cada modelo liberado pelo plano e pelo admin
+wf login     # abre o navegador e grava uma chave de usuário (90 dias por padrão) em ~/.cursor/sdk/auth.json
+wf whoami    # confirma a conta
+wf models    # id, displayName, aliases e params de cada modelo liberado pelo plano e pelo admin
 ```
 
-Sem navegador local (SSH, WSL sem navegador), rode `NO_OPEN_BROWSER=1 npm run wf -- login`: a URL vai para o stderr
+Sem navegador local (SSH, WSL sem navegador), rode `NO_OPEN_BROWSER=1 wf login`: a URL vai para o stderr
 e pode ser aberta em outro dispositivo. Gere a URL só quando for concluir o login: ela expira em poucos minutos
 (medido em 2026-11-11, [verificações locais](../research/verificacoes-locais.md) §4).
 
@@ -60,7 +119,7 @@ Primeiro contato com a API. Use um teto baixo para limitar o custo:
 
 ```bash
 # Repositório de teste com uma issue simples rotulada "complexity:low"
-npm run wf -- run implement-issue --cwd /caminho/do/repo-de-teste --args '{"issue":1}' --max-cents 50 --max-tokens 2000000
+wf run implement-issue --cwd /caminho/do/repo-de-teste --args '{"issue":1}' --max-cents 50 --max-tokens 2000000
 ```
 
 Passe sempre os dois tetos: em uso cobrado por request, o teto em centavos fica cego
@@ -73,7 +132,7 @@ O que conferir:
    continua `default` (medido em 2026-11-11).
 2. Nenhuma etapa falhou com `ConfigurationError` (o pacote mostra `Cannot use this model: <id>. Available
    models: ...`; a doc cita "Bad model name"). Se falhar, o ID não está liberado para a sua conta: ajuste
-   os `WF_MODEL_*` com o que aparece em `npm run models`. Outra falha possível é uma run com `status: "error"` e a
+   os `WF_MODEL_*` com o que aparece em `wf models`. Outra falha possível é uma run com `status: "error"` e a
    mensagem "... is not included in your weekly usage": o modelo está no catálogo, mas o plano não o cobre sem
    crédito pré-pago. Foi o caso de `gpt-5.3-codex` num Premium em 2026-11-11. Troque por um modelo do Cursor.
 3. A saída final tem `status: "finished"`, `spentCents` (o custo que o teto conta) e `chargedCents` (só o cobrado,
@@ -94,20 +153,25 @@ são os candidatos mais prováveis.
 
 ## 6. Habilitar no Cursor IDE
 
-1. Abra o repositório no Cursor.
+1. Abra no Cursor o repositório em que você rodou o `wf init` (ou este, de desenvolvimento).
 2. Habilite o servidor `workflows`, que vem de `.cursor/mcp.json`, em **Customize**, na barra lateral
    ([DOC](https://cursor.com/docs/mcp)). No Enterprise, o admin pode limitar quais servidores MCP os membros rodam:
    a MCP Allowlist aprova servidores stdio por padrão de comando, e um servidor fora dos padrões só roda se o admin
    permitir MCPs configurados pelo próprio usuário ([DOC](https://cursor.com/docs/mcp)). Com a Team list ligada, a
    IDE e a CLI bloqueiam o servidor que não está na lista ([DOC](https://cursor.com/docs/release-notes)). Então um
    membro pode precisar que o admin libere o servidor antes.
-3. Confira o Node que a IDE usa. O Cursor sobe o servidor com o `node` do PATH do próprio processo (o `tsx` do
+3. Rode o `wf doctor` num terminal aberto pelo próprio IDE: ele confere o Node que o IDE usa, as dependências, o login, os
+   modelos, o `gh`, o servidor MCP e a configuração ([2.3](03-invocacao-no-cursor-ide.md#conferindo-o-ambiente-wf-doctor)).
+   Sobre o Node: confira o que a IDE usa. O Cursor sobe o servidor com o `node` do PATH do próprio processo (o `tsx` do
    `mcp.json` começa com `#!/usr/bin/env node`), e um gerenciador de versões (mise, nvm) ativado pelo perfil do
    shell pode não valer ali. Rode `node -v` nesse ambiente. Abaixo do Node 22.13, o CLI e o MCP server saem com uma
    mensagem clara, com a versão encontrada; no Cursor, ela aparece em **Output → MCP Logs**
    ([DOC](https://cursor.com/docs/mcp)).
-4. Confira que as skills `/run-workflow`, `/cursor-workflow-authoring` e `/skill-to-workflow` aparecem no chat ao digitar
-   `/`. Elas ficam em `.agents/skills/`, que o Cursor lê nativamente.
+4. Confira que as skills `/run-workflow`, `/cursor-workflow-authoring`, `/skill-to-workflow` e `/cursor-workflows-setup`
+   aparecem no chat ao digitar `/`. O instalador as liga em `~/.claude/skills/`, que o Cursor lê por compatibilidade
+   (a doc de skills do Cursor também cita `~/.agents/skills/` e `~/.cursor/skills/`;
+   [DOC](https://cursor.com/docs/skills)). Neste repositório, de desenvolvimento, elas chegam por `.agents/skills/`,
+   que o Cursor lê nativamente.
 5. No chat: `/run-workflow implement-issue 1`.
 
 ## 7. Habilitar no Claude Code (opcional)
@@ -118,8 +182,9 @@ são os candidatos mais prováveis.
    servidores do `.mcp.json` sem perguntar ([DOC](https://code.claude.com/docs/en/mcp)); num `claude -p` em 2026-11-11 as
    quatro tools apareceram como `mcp__workflows__*` e o `CLAUDE.md` (na época, só `@AGENTS.md`) foi lido
    ([verificações §10](../research/verificacoes-locais.md)).
-2. O Claude Code não lê nada sob `.agents/`. Para ter as skills lá também, rode `scripts/link-claude-skills.sh`,
-   que cria links em `.claude/skills/`. O Cursor também lê `.claude/skills/`, então a mesma skill pode aparecer
+2. O Claude Code não lê nada sob `.agents/`. Em qualquer repositório, as skills do kit chegam a ele pelos links do
+   instalador em `~/.claude/skills/`. Só neste repositório, de desenvolvimento, que guarda as skills em
+   `.agents/skills/`, rode `scripts/link-claude-skills.sh`, que cria links em `.claude/skills/`. O Cursor também lê `.claude/skills/`, então a mesma skill pode aparecer
    duas vezes no Cursor. A skill de autoria se chama `cursor-workflow-authoring` porque o Claude Code tem uma
    skill embutida `workflow-authoring` (a da ferramenta Workflow dele), e uma skill de projeto com o mesmo nome
    substituiria a embutida ([DOC](https://code.claude.com/docs/en/skills)).

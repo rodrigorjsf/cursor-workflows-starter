@@ -8,7 +8,7 @@ flowchart LR
     U[Usuário] -->|"/run-workflow implement-issue 123"| S["Skill run-workflow<br/>(.agents/skills)"]
     S --> A[Agente do chat]
     A -->|"start_workflow / wait_workflow"| MC[".cursor/mcp.json<br/>habilitado em Customize"]
-    A -.->|"shell: npm run wf -- start / wait"| C[CLI wf]
+    A -.->|"shell: wf start / wait"| C[CLI wf]
   end
   subgraph Claude["Claude Code"]
     U2[Usuário] --> A2[Claude] -->|"mcp__workflows__*"| MCC[".mcp.json<br/>aprovação na sessão interativa"]
@@ -70,9 +70,9 @@ Run Mode e a allowlist de MCP, e um membro não muda isso.
 Fallback quando o MCP não está habilitado, e caminho preferido em CI e em runs longos:
 
 ```bash
-npm run wf -- start implement-issue --args '{"issue":123}'   # processo destacado; log em .workflows/jobs/<id>.log
-npm run wf -- wait <jobId> --timeout 240
-npm run wf -- cancel <jobId>          # para o run (SIGTERM ao processo do job); o run continua retomável
+wf start implement-issue --args '{"issue":123}'   # processo destacado; log em .workflows/jobs/<id>.log
+wf wait <jobId> --timeout 240
+wf cancel <jobId>          # para o run (SIGTERM ao processo do job); o run continua retomável
 ```
 
 `start` valida o nome do workflow e o JSON dos args **antes** de destacar o processo e grava o job (com `runId`)
@@ -119,6 +119,7 @@ O kit usa `.agents/` como local neutro e mantém só o que é específico de cad
 |---|---|---|---|---|---|
 | Skills: Cursor IDE | ✅ nativo (`.agents/skills/`, `~/.agents/skills/`) | ✅ nativo | ✅ compat. | ✅ compat. | [doc de skills do Cursor](https://cursor.com/docs/skills) [DOC] |
 | Skills: runs do Cursor SDK (`settingSources: ["project"]`) | ✅ (first-party) | ✅ | ✅ (third-party) | ✅ (third-party) | bundle do `@cursor/sdk@1.3.1`. Medido em 2026-11-11: o SDK carregou as mesmas 58 skills com `["team","mdm"]` e com `"project"`, e nenhuma com `[]`; a origem delas não foi isolada ([verificações locais](../research/verificacoes-locais.md) §7) |
+| Skills do usuário (globais) | `~/.agents/skills/` | `~/.cursor/skills/` | `~/.claude/skills/` (o Cursor também lê, por compatibilidade) | — | [doc de skills do Cursor](https://cursor.com/docs/skills) [DOC] |
 | Skills: Claude Code | ❌ não lê nada sob `.agents/` | ❌ | ✅ | ❌ | docs de [memória](https://code.claude.com/docs/en/memory) e de [skills](https://code.claude.com/docs/en/skills) do Claude Code [DOC] |
 | Subagents: Cursor | ❌ não documentado | ✅ | ✅ compat. | ✅ compat. | [doc de subagents do Cursor](https://cursor.com/docs/subagents) [DOC] |
 | Subagents: Claude Code | ❌ | ❌ | ✅ | ❌ | [doc de subagents do Claude Code](https://code.claude.com/docs/en/sub-agents) [DOC] |
@@ -128,6 +129,9 @@ O kit usa `.agents/` como local neutro e mantém só o que é específico de cad
 
 Consequências no kit:
 
+- **Skills do kit, instaladas.** O instalador liga cada skill de `skills/` em `~/.claude/skills/` (links simbólicos para
+  o kit), então elas valem em todo repositório, no Cursor e no Claude Code, sem cópia; `wf upgrade` as mantém em dia
+  ([2.1 §3](01-instalacao.md#3-instalar)). Isso resolve a duplicata do próximo item para quem usa o kit instalado.
 - **Skills em `.agents/skills/`.** Funcionam no Cursor IDE, nas etapas dos workflows e no Codex.
   Para o Claude Code, `scripts/link-claude-skills.sh` cria links em `.claude/skills/`. A ressalva é que o Cursor
   também lê `.claude/skills/`, então a skill pode aparecer duas vezes no Cursor. A doc de skills lista as pastas
@@ -148,15 +152,16 @@ Há duas formas.
 **A. Copiar o kit para dentro do repositório** (mais simples). Os workflows ficam em `workflows/`, versionados
 junto com o código.
 
-**B. Instalar o kit uma vez e apontar cada repositório para ele.** No repositório alvo, crie
-`.cursor/mcp.json`:
+**B. Instalar o kit uma vez e apontar cada repositório para ele.** Instale o kit ([2.1 §3](01-instalacao.md#3-instalar):
+`INSTALL-AGENT.md` ou `scripts/install.sh`), que fica em `~/.cursor-workflows/kit`, e rode o `wf init` no repositório
+alvo (abaixo). Escrito à mão, o `.cursor/mcp.json` é:
 
 ```json
 {
   "mcpServers": {
     "workflows": {
-      "command": "${userHome}/tools/cursor-workflows/node_modules/.bin/tsx",
-      "args": ["${userHome}/tools/cursor-workflows/packages/runtime/src/mcp-server.ts"],
+      "command": "${userHome}/.cursor-workflows/kit/node_modules/.bin/tsx",
+      "args": ["${userHome}/.cursor-workflows/kit/packages/runtime/src/mcp-server.ts"],
       "env": { "WF_CWD": "${workspaceFolder}", "WF_MAX_CENTS": "500", "WF_MAX_TOKENS": "2000000" }
     }
   }
@@ -172,7 +177,7 @@ um aviso: o teto em centavos não contou essa tentativa (o de tokens, sim; na fa
 Em uso cobrado por request (planos legados e alguns Enterprise), `rawCostCents` vem 0 e o teto em centavos fica
 cego; só `WF_MAX_TOKENS` protege. Defina sempre os dois, como no exemplo.
 
-**Em vez de criar esses arquivos à mão, rode o `wf init`** (`npm run wf -- init --cwd /caminho/do/repo`). Ele grava o
+**Em vez de criar esses arquivos à mão, rode o `wf init`** (`wf init --cwd /caminho/do/repo`). Ele grava o
 que a forma B precisa e imprime o diff do que mudou; não faz commit nem `git add`:
 
 | Arquivo | O que recebe |
@@ -187,12 +192,12 @@ Rodar de novo não muda nada, e um arquivo que já diz o que o `init` escreveria
 existe, só o servidor `workflows` muda: os outros servidores e as chaves extras dele ficam. Um arquivo que não é JSON
 válido, ou um bloco com `begin` e sem `end`, faz o comando falhar antes de gravar qualquer arquivo. `--no-agents-md` pula
 o `AGENTS.md`; `--remove` tira só o bloco dele (e apaga o arquivo se o bloco era tudo o que havia). O servidor só sobe
-quando o kit está em `~/.cursor-workflows/kit`: o instalador que cria essa pasta está em construção, e o
+quando o kit está em `~/.cursor-workflows/kit`, onde o [instalador](01-instalacao.md#3-instalar) o põe, e o
 [`wf doctor`](#conferindo-o-ambiente-wf-doctor) diz, a cada falha, o que corrigir.
 
 ### Conferindo o ambiente: `wf doctor`
 
-O servidor MCP que não sobe deixa pistas só no log do MCP do IDE. O `wf doctor` (`npm run wf -- doctor --cwd
+O servidor MCP que não sobe deixa pistas só no log do MCP do IDE. O `wf doctor` (`wf doctor --cwd
 /caminho/do/repo`) roda as verificações abaixo e, a cada falha, diz o que corrigir. Sai com 1 se alguma falhar e, com
 `--json`, imprime o relatório em JSON (`ok` e `checks`, cada um com `id`, `status`, `message` e, nas falhas, `hint`).
 
@@ -216,15 +221,15 @@ relatório passa pela mesma redação de segredos dos logs de run (`[REDACTED]`)
 **A faixa de versão do kit.** O `kit` do `.agents/workflows/config.json` (o `wf init` escreve a do kit que o rodou, como
 `>=0.2.0 <0.3.0`) aceita qualquer faixa semver, como `^0.2.0`. O `wf doctor`, o `wf run`, o `wf start` e o
 `start_workflow` do MCP recusam um kit fora dela, antes de iniciar o que for, dizendo a versão do kit, a faixa e se o kit é mais
-antigo ou mais novo. Os comandos que só leem (`wf list`, `wf config show`) continuam funcionando. Um repositório sem
+antigo ou mais novo; um kit mais antigo que a faixa se atualiza com [`wf upgrade`](01-instalacao.md#atualizar-wf-upgrade). Os comandos que só leem (`wf list`, `wf config show`) continuam funcionando. Um repositório sem
 `kit` aceita qualquer versão.
 
-Depois, copie `skills/run-workflow/` para o repositório alvo. No Cursor, se o servidor não aparecer no
-chat, habilite-o em **Customize**, na barra lateral. No Enterprise, o admin pode limitar quais servidores MCP os
+As skills do kit já valem no repositório alvo: o instalador as liga em `~/.claude/skills/`, e não há nada a copiar.
+No Cursor, se o servidor não aparecer no chat, habilite-o em **Customize**, na barra lateral. No Enterprise, o admin pode limitar quais servidores MCP os
 membros rodam (servidores stdio são aprovados por padrão de comando; [DOC](https://cursor.com/docs/mcp)); com a
 Team list ligada, um membro pode precisar que o admin libere o servidor antes
 ([DOC](https://cursor.com/docs/release-notes)). Para o Claude
-Code, replique o servidor no `.mcp.json` do repositório com caminhos absolutos.
+Code, o `wf init` já escreve o `.mcp.json` do repositório, com `${HOME}` no lugar de um caminho absoluto.
 
 Os workflows do repositório alvo ficam em `.agents/workflows/*.ts`. O runtime carrega essa pasta automaticamente
 (além dos workflows do kit) e, em nome repetido, a do repositório vence. Escreva-os sem importar o runtime por

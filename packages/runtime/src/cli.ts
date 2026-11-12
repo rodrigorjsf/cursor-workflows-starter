@@ -7,6 +7,7 @@
 //   wf list
 //   wf init [--no-agents-md | --remove]   # writes the kit's files into the repo (MCP configs, repo config, .gitignore, AGENTS.md block); prints the diff, never commits
 //   wf config show [workflow]         # effective config of the current repo and where each value came from
+//   wf upgrade                        # moves the installed kit (~/.cursor-workflows/kit) to the newest release tag and redoes its dependencies, shim and skill links
 //   wf doctor [--json]                # checks the environment the IDE uses (Node, dependencies, login, models, gh, MCP server, config, kit version); exits 1 when a check fails
 //   wf run <workflow> --args '<json>' [--max-cents N] [--resume <runId>]   # primeiro plano; imprime JSON no fim
 //   wf start <workflow> --args '<json>' [--resume <runId>]                 # segundo plano; imprime {jobId}
@@ -35,6 +36,7 @@ import { formatReport, runDoctor } from "./doctor.js";
 import { initRepo } from "./init.js";
 import { assertKitCompatible } from "./kit-version.js";
 import { unifiedDiff } from "./unified-diff.js";
+import { upgradeKit } from "./upgrade.js";
 import { INSIDE_WORKFLOW_ENV, type RunStatus, runWorkflow } from "./runtime/engine.js";
 import { cancelJob, cancelOnSignals, installCrashHandlers, listJobs, readJob, readJobRecord, spawnJob, startJob, waitJob } from "./runtime/jobs.js";
 import { loadWorkflows } from "./runtime/registry.js";
@@ -139,6 +141,16 @@ async function main(): Promise<number> {
       if (values.json) out(report);
       else process.stdout.write(formatReport(report));
       return report.ok ? 0 : 1;
+    }
+    case "upgrade": {
+      const result = upgradeKit();
+      out(result);
+      process.stderr.write(
+        result.upgraded
+          ? `wf upgrade: kit ${result.from} -> ${result.to} (${result.tag}). Rode \`wf doctor\` em cada repositório que usa o kit.\n`
+          : `wf upgrade: o kit ${result.from} já é a versão mais nova (${result.tag}).\n`,
+      );
+      return 0;
     }
     case "config": {
       if (name !== "show") throw new Error("uso: wf config show [workflow] [--max-tokens N] [--max-cents N]");
@@ -245,7 +257,7 @@ async function main(): Promise<number> {
       }
     }
     default:
-      process.stderr.write("uso: wf <login|whoami|list|init|doctor|config|run|start|status|wait|cancel|jobs|stats|metrics> ...\n");
+      process.stderr.write("uso: wf <login|whoami|models|list|init|doctor|upgrade|config|run|start|status|wait|cancel|jobs|stats|metrics> ...\n");
       return 2;
   }
 }

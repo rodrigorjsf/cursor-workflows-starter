@@ -37,8 +37,9 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   ├── doctor-report.ts    # o formato do relatório do doctor (só a biblioteca padrão: o node-check.ts o usa num Node antigo)
 │       │   ├── mcp-launch.ts       # como o IDE inicia o servidor MCP (o `workflows` do .cursor/mcp.json e do .mcp.json)
 │       │   ├── kit-version.ts      # versão do kit e a faixa `kit` que o repositório declara
+│       │   ├── upgrade.ts          # wf upgrade: leva o kit instalado à tag mais nova e roda o install.sh --refresh dela
 │       │   ├── unified-diff.ts     # o diff que o wf init imprime
-│       │   ├── cli.ts              # wf login | whoami | models | list | init | doctor | config | run | start | wait | status | cancel | jobs | stats | metrics
+│       │   ├── cli.ts              # wf login | whoami | models | list | init | doctor | upgrade | config | run | start | wait | status | cancel | jobs | stats | metrics
 │       │   └── mcp-server.ts       # tools MCP: list_workflows, start_workflow, wait_workflow, get_workflow_status, cancel_workflow
 │       ├── workflows/
 │       │   ├── implement-issue.ts  # exemplo: TDD fatia a fatia conferido pelo código → review em 3 eixos → PR com evidência
@@ -47,8 +48,10 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 ├── skills/                 # skills distribuídas (autossuficientes: SKILL.md + references/)
 │   ├── run-workflow/       # /run-workflow <nome> <args>: dispara e acompanha
 │   ├── cursor-workflow-authoring/ # referência para escrever workflows
-│   └── skill-to-workflow/  # /skill-to-workflow: converte skills e subagents em workflow
-├── templates/              # arquivos que o setup do kit grava no repositório alvo (bloco do AGENTS.md)
+│   ├── skill-to-workflow/  # /skill-to-workflow: converte skills e subagents em workflow
+│   └── cursor-workflows-setup/ # init, doctor, upgrade, validação no Cursor IDE e configuração
+├── templates/              # arquivos que o setup do kit grava: o bloco do AGENTS.md (repositório alvo) e global-config.json (tetos padrão do usuário)
+├── INSTALL-AGENT.md        # guia público de instalação para agentes, fixado numa tag (inglês)
 ├── test/                   # testes do repositório (layout, MCP dogfood, scripts da raiz, docs)
 ├── .agents/                # local neutro (Cursor e Codex leem nativamente)
 │   ├── skills/             # links simbólicos para skills/ (dogfood)
@@ -56,7 +59,7 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 ├── .claude/rules/          # regras do Claude Code com escopo por caminho
 ├── .cursor/mcp.json        # MCP server no Cursor
 ├── .mcp.json               # o mesmo MCP server no Claude Code
-├── scripts/                # procedimentos do mantenedor (tabela em 9.4)
+├── scripts/                # procedimentos do mantenedor (tabela em 9.4); install.sh é o instalador do kit
 ├── SECURITY.md · CHANGELOG.md · README.md · README.en.md
 └── docs/                   # o livro: README.md é o índice; uma pasta por parte (vision/, usage/, internals/, ..., adr/)
 ```

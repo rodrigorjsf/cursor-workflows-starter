@@ -2,10 +2,11 @@
 // "what you get" table, links into the book) in pt-BR, mirrored by README.en.md in English. Whether its links resolve
 // is docs-check.test.ts; these tests read what the hub holds and what it must leave to the book.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { markdownFiles, parseMarkdown } from "../scripts/lib/markdown.js";
+import { wfCommands } from "./cli-commands.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const read = (path: string) => readFileSync(join(ROOT, path), "utf8");
@@ -106,12 +107,29 @@ test("no deep content is duplicated between a README and the book", () => {
   }
 });
 
-test("the quickstart only runs npm scripts that exist", () => {
+test("the quickstart only runs commands that exist: the installer it fetches, the wf commands, the npm scripts", () => {
   const scripts = new Set(Object.keys(JSON.parse(read("package.json")).scripts as Record<string, string>));
+  const commands = wfCommands();
   for (const hub of HUBS) {
-    const commands = [...read(hub.file).matchAll(/^npm run ([\w:-]+)/gm)].map((m) => m[1]!);
-    assert.ok(commands.length > 0, `${hub.file}: the quickstart runs something`);
-    for (const command of commands) assert.ok(scripts.has(command), `${hub.file}: npm run ${command} is not a script in package.json`);
+    const lines = read(hub.file).match(/^(?:npm run [\w:-]+|wf [a-z]+|bash \S*install\.sh .*)/gm) ?? [];
+    assert.ok(lines.length >= 4, `${hub.file}: the quickstart runs something (found ${lines.length} commands)`);
+    for (const line of lines) {
+      const [first, second] = line.split(" ");
+      if (first === "npm") assert.ok(scripts.has(line.split(" ")[2]!), `${hub.file}: ${line} is not a script in package.json`);
+      else if (first === "wf") assert.ok(commands.includes(second!), `${hub.file}: wf ${second} is not a command of the CLI`);
+      else assert.ok(existsSync(join(ROOT, "scripts", "install.sh")), `${hub.file}: the installer is missing`);
+    }
+    assert.ok(lines.some((l) => l.startsWith("wf init")) && lines.some((l) => l.startsWith("wf doctor")), `${hub.file}: the quickstart sets up a repo and checks it`);
+  }
+});
+
+test("the quickstart fetches and installs the tag of the package version, the same one the install guide pins", () => {
+  const tag = `v${(JSON.parse(read("package.json")) as { version: string }).version}`;
+  for (const hub of HUBS) {
+    const text = read(hub.file);
+    assert.ok(text.includes(`rodrigorjsf/cursor-workflows-starter/${tag}/scripts/install.sh`), `${hub.file}: fetch install.sh at ${tag}`);
+    assert.ok(text.includes(`install.sh --tag ${tag}`), `${hub.file}: install ${tag}`);
+    assert.ok(parseMarkdown(text).links.some((l) => l.target === "INSTALL-AGENT.md"), `${hub.file}: links to INSTALL-AGENT.md`);
   }
 });
 

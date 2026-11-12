@@ -11,8 +11,12 @@ A runtime for **deterministic workflows** on the Cursor SDK (`@cursor/sdk`), as 
 - `packages/runtime/`: the product. Engine, CLI (`src/cli.ts`), MCP server (`src/mcp-server.ts`), built-in
   workflows (`workflows/`) and their offline tests (`test/`).
 - `skills/`: the skills distributed to users. `.agents/skills/` symlinks to them for dogfooding; never copy them.
-- `templates/`: files the kit's setup writes into a target repo. Today that is the `AGENTS.md` rules block
-  (`templates/agents-md-block.md`), which `wf init` (`packages/runtime/src/init.ts`) appends.
+- `templates/`: files the kit's setup writes: the `AGENTS.md` rules block (`templates/agents-md-block.md`) that `wf init`
+  (`packages/runtime/src/init.ts`) appends to a target repo, and the default global config
+  (`templates/global-config.json`) that the installer copies for the user.
+- Install: `scripts/install.sh` (clones a tag into `~/.cursor-workflows/kit`, `--dev` links a working copy) and
+  `wf upgrade` (`packages/runtime/src/upgrade.ts`). `INSTALL-AGENT.md` is the public guide, pinned to the tag of the
+  package version: bump it with the version (`npm test` fails otherwise).
 - The repo root is the dev space: this guide, the dogfood MCP config (`.mcp.json`, `.cursor/mcp.json`), `docs/`,
   `scripts/`, repo-level tests (`test/`).
 

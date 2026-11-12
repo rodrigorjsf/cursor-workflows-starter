@@ -36,17 +36,20 @@ flowchart LR
 
 ## Quick start
 
-Requires Node 22.13 or newer, a paid Cursor plan, `git` and an authenticated `gh`.
+Requires Node 22.13 or newer, a paid Cursor plan, `git` and an authenticated `gh`. Easiest: ask a coding agent to follow
+[INSTALL-AGENT.md](INSTALL-AGENT.md). By hand:
 
 ```bash
-npm ci
-npm run wf -- login          # browser login; usage bills YOUR account
-npm run models               # model IDs available to you
-npm run wf -- run implement-issue --cwd /path/to/test-repo --args '{"issue":1}' --max-cents 100 --max-tokens 300000
+curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.2.0/scripts/install.sh -o /tmp/wf-install.sh
+bash /tmp/wf-install.sh --tag v0.2.0   # the kit at the tag, the wf command and the global skills
+wf login                               # browser login; usage bills YOUR account
+wf init                                # in your repo: writes the kit's files, shows the diff, never commits
+wf doctor                              # checks Node, login, models, gh, the MCP server and the config
 ```
 
-Always pass both caps. In the Cursor IDE, enable the `workflows` MCP server and type `/run-workflow implement-issue 123`
-([2.1 §6](docs/usage/01-instalacao.md#6-habilitar-no-cursor-ide)). The caps: [2.2 §3](docs/usage/02-configuracao-inicial.md#3-teto-de-custo).
+In the Cursor IDE, enable the `workflows` MCP server and type `/run-workflow implement-issue 123`
+([2.1 §6](docs/usage/01-instalacao.md#6-habilitar-no-cursor-ide)). The cost caps come from a global config with default
+values that you tune: [2.2 §3](docs/usage/02-configuracao-inicial.md#3-teto-de-custo).
 
 ## What you get
 
@@ -54,8 +57,8 @@ Always pass both caps. In the Cursor IDE, enable the `workflows` MCP server and 
 |---|---|---|
 | Runtime | `ctx.agent`, `parallel`, `pipeline` and `phase`; model and retries per step; schema-validated output; cost cap | [3.1 · Arquitetura](docs/internals/01-arquitetura.md) |
 | Resume and event log | The journal avoids redoing finished steps; every fact of a run goes to one log per run | [6.1 · Referência de eventos](docs/reference/events.md) |
-| MCP server and `wf` CLI | `start_workflow`, `wait_workflow` and friends; `wf run`, `start`, `status`, `jobs`, `stats` | [2.3 · Invocação](docs/usage/03-invocacao-no-cursor-ide.md) |
-| Skills | `run-workflow`, `cursor-workflow-authoring` and `skill-to-workflow` | [4.1](docs/authoring/01-escrevendo-workflows.md) and [4.2](docs/authoring/02-convertendo-skills-e-subagents.md) |
+| MCP server and `wf` CLI | `start_workflow`, `wait_workflow` and friends; `wf init`, `doctor`, `upgrade`, `run`, `start`, `status`, `jobs`, `stats` | [2.3 · Invocação](docs/usage/03-invocacao-no-cursor-ide.md) |
+| Skills | `run-workflow`, `cursor-workflow-authoring`, `skill-to-workflow` and `cursor-workflows-setup` | [4.1](docs/authoring/01-escrevendo-workflows.md) and [4.2](docs/authoring/02-convertendo-skills-e-subagents.md) |
 | `implement-issue` | Example workflow: TDD slice by slice, a three-axis review, a PR with evidence | [4.2](docs/authoring/02-convertendo-skills-e-subagents.md) |
 | Metrics and dashboard | Cost, tokens and efficiency in a local SQLite; a localhost dashboard | [5.3 · Observabilidade](docs/operating/03-observabilidade.md) |
 

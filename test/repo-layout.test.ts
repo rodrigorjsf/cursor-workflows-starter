@@ -9,7 +9,7 @@ import { test } from "node:test";
 const ROOT = resolve(import.meta.dirname, "..");
 const read = (...p: string[]) => readFileSync(join(ROOT, ...p), "utf8");
 
-const DISTRIBUTED_SKILLS = ["run-workflow", "cursor-workflow-authoring", "skill-to-workflow"];
+const DISTRIBUTED_SKILLS = ["run-workflow", "cursor-workflow-authoring", "skill-to-workflow", "cursor-workflows-setup"];
 
 test("distributed skills live in the top-level skills folder", () => {
   for (const name of DISTRIBUTED_SKILLS) {
@@ -142,6 +142,16 @@ test("every reference file of a skill is linked from its SKILL.md", () => {
       assert.ok(skill.includes(`(${relative(join("skills", name), file)})`), `${file} is not linked from skills/${name}/SKILL.md`);
     }
   }
+});
+
+test("the setup skill covers init, doctor, upgrade, validate and config, and each is a section the agent can pick", () => {
+  const skill = read("skills", "cursor-workflows-setup", "SKILL.md");
+  for (const command of ["wf init", "wf doctor", "wf upgrade", "wf config show"]) assert.ok(skill.includes(`\`${command}`), `the setup skill never runs \`${command}\``);
+  const sections = skill.split("\n").filter((line) => line.startsWith("## "));
+  for (const topic of [/init/i, /check/i, /upgrade/i, /validate/i, /config/i]) assert.ok(sections.some((s) => topic.test(s)), `no section for ${topic}`);
+  // The two long procedures live in references, linked from the section that needs them.
+  assert.match(skill, /\]\(references\/validate\.md\)/);
+  assert.match(skill, /\]\(references\/config\.md\)/);
 });
 
 test("reference files two skills share stay identical", () => {
