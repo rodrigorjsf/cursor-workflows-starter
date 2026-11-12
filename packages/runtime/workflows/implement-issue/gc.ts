@@ -19,7 +19,7 @@
 // shortly after the process died). A run cut off in the middle of the cloud step that owns the branch keeps it longer, for as long
 // as gc keeps a failed run (`gcFailedAfterDays`), and for ever when the run was cancelled, which gc keeps too: a resume may reattach
 // to that agent, and a write step's work is on that branch. gc does not ask the cloud whether it will: when the agent is gone, or
-// its newest run was cancelled (cancelling a run whose process died does that), the resume starts a new agent instead. Either
+// its newest run was cancelled (any cancel of the run does that, whatever state its job was in), the resume starts a new agent instead. Either
 // way the resume deletes the branch.
 import { existsSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";

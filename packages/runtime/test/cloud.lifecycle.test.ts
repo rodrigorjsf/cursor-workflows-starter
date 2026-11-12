@@ -442,24 +442,113 @@ test("wf cancel of a job whose process died cancels the cloud agent its run left
   }
 });
 
+/** Makes a heartbeat older than 50 ms stale for the readers, so a test need not wait 30 s. Returns what puts the threshold back. */
+function staleAfter50ms(): () => void {
+  const staleBefore = process.env.WF_HEARTBEAT_STALE_MS;
+  process.env.WF_HEARTBEAT_STALE_MS = "50";
+  return () => {
+    if (staleBefore === undefined) delete process.env.WF_HEARTBEAT_STALE_MS;
+    else process.env.WF_HEARTBEAT_STALE_MS = staleBefore;
+  };
+}
+
+/** Writes the run's lock as process `pid` holds it: what a process that executes the run leaves while it does. */
+const holdLock = (runId: string, pid: number) =>
+  writeFileSync(join(runDirIn(cwd, runId), "run.lock"), JSON.stringify({ pid, token: `held-${pid}`, startedAt: new Date().toISOString(), runId }));
+
 /**
  * After `crashWhileTheAgentRuns`, the job of the run as a frozen process leaves it: alive (SIGSTOP) with its job id on its
- * command line, and a heartbeat older than `WF_HEARTBEAT_STALE_MS`, so `cancelJob` kills it with SIGKILL.
+ * command line, holding the run's lock as a real one does, and a heartbeat older than `WF_HEARTBEAT_STALE_MS`, so `cancelJob`
+ * kills it with SIGKILL.
  */
 function frozenJob(runId: string, jobId: string) {
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", jobId], { stdio: "ignore" });
-  const staleBefore = process.env.WF_HEARTBEAT_STALE_MS;
-  process.env.WF_HEARTBEAT_STALE_MS = "50";
+  const restore = staleAfter50ms();
   writeJob(cwd, { jobId, runId, pid: child.pid!, heartbeat: new Date(Date.now() - 60_000).toISOString() });
+  holdLock(runId, child.pid!);
   return {
     pid: child.pid!,
     freeze: () => process.kill(child.pid!, "SIGSTOP"),
     end: () => {
       if (isAlive(child.pid!)) process.kill(child.pid!, "SIGKILL"); // a stopped process outlives a failed test otherwise
-      if (staleBefore === undefined) delete process.env.WF_HEARTBEAT_STALE_MS;
-      else process.env.WF_HEARTBEAT_STALE_MS = staleBefore;
+      restore();
     },
   };
+}
+
+/** A live process that is no job's: `sleep`, standing in for whatever got a dead job's pid, or for a new execution's process. */
+function bystander() {
+  const child = spawn("sleep", ["60"], { stdio: "ignore" });
+  return { pid: child.pid!, end: () => isAlive(child.pid!) && process.kill(child.pid!, "SIGKILL") };
+}
+
+test("a run that resumes a crashed job is running in the run view while the new execution holds its lock, before it writes its run-start", async () => {
+  const runId = "life-resume-window";
+  const crashed = await crashWhileTheAgentRuns(runId, reviewStep(), "crashed-job"); // the latest run-start names crashed-job
+  const restore = staleAfter50ms();
+  const resuming = bystander();
+  try {
+    const dead = spawnSync("true").pid!;
+    writeJob(cwd, { jobId: "crashed-job", runId, pid: dead, heartbeat: new Date(Date.now() - 60 * 60_000).toISOString() });
+    holdLock(runId, resuming.pid); // the resume has taken the run, and not yet announced itself
+
+    const shown = readRun(runId)!;
+
+    assert.equal(shown.status, "running", shown.error);
+    assert.equal(shown.error, undefined);
+    assert.equal(listRuns().find((r) => r.runId === runId)!.status, "running");
+  } finally {
+    resuming.end();
+    restore();
+    await crashed.end();
+  }
+});
+
+test("a crashed job whose pid another process got is not frozen: cancelling its run cancels the cloud agent the crash left, and leaves that process alone", async () => {
+  const runId = "life-pid-reused";
+  const crashed = await crashWhileTheAgentRuns(runId, reviewStep(), "reused-job");
+  const restore = staleAfter50ms();
+  const other = bystander();
+  try {
+    writeJob(cwd, { jobId: "reused-job", runId, pid: other.pid, heartbeat: new Date(Date.now() - 60_000).toISOString() });
+    assert.equal(readRun(runId)!.status, "failed");
+    const error = readJob(cwd, "reused-job")!.error!;
+    assert.match(error, /^process \d+ ended without finishing the job/, "wf status says the job ended");
+    assert.doesNotMatch(error, /no heartbeat/, "never the frozen job's wording, which readers act on");
+
+    const outcome = await cancelRun(runId, 1000);
+
+    assert.deepEqual(outcome, { kind: "not-running", status: "failed", cancelledAgents: ["bc-1"] });
+    assert.deepEqual(cloudRunsOf("bc-1").map((x) => x.status), ["cancelled"], "nothing keeps spending");
+    assert.ok(isAlive(other.pid), "the process that got the pid was left alone");
+  } finally {
+    other.end();
+    restore();
+    await crashed.end();
+  }
+});
+
+for (const heartbeat of ["stale", "fresh"] as const) {
+  test(`wf cancel of a job whose pid another process got (heartbeat ${heartbeat}) cancels the cloud agent its run left, and sends no signal`, async () => {
+    const runId = `life-reused-cancel-${heartbeat}`;
+    const crashed = await crashWhileTheAgentRuns(runId);
+    const restore = staleAfter50ms();
+    const other = bystander();
+    try {
+      const at = heartbeat === "stale" ? Date.now() - 60_000 : Date.now() + 60_000; // "fresh" stays fresh for the whole test
+      writeJob(cwd, { jobId: `reused-${heartbeat}`, runId, pid: other.pid, heartbeat: new Date(at).toISOString() });
+
+      const result = await cancelJob(cwd, `reused-${heartbeat}`, 100);
+
+      assert.match(result!.note, /; cancelled the cloud agent it left running: bc-1$/);
+      assert.deepEqual(cloudRunsOf("bc-1").map((x) => x.status), ["cancelled"]);
+      assert.ok(isAlive(other.pid), "no signal reached the process that got the pid");
+    } finally {
+      other.end();
+      restore();
+      await crashed.end();
+    }
+  });
 }
 
 test("cancel_workflow of a frozen job kills its process and cancels the cloud agent its run left: nothing keeps spending after the user stops, and a resume pays for a new agent", async () => {
@@ -519,8 +608,6 @@ test("a frozen run is failed in the run view with wf status's error, and cancell
   try {
     await until(() => isAlive(job.pid), "the job's process to start");
     job.freeze();
-    // The frozen process still holds its run, as a real one does.
-    writeFileSync(join(runDirIn(cwd, runId), "run.lock"), JSON.stringify({ pid: job.pid, token: "frozen", startedAt: new Date().toISOString(), runId }));
 
     const noHeartbeat = new RegExp(`^no heartbeat for \\d+s \\(process ${job.pid}\\); relaunch with resumeRunId="${runId}"$`);
     assert.equal(readJob(cwd, "frozen-view")!.status, "failed");

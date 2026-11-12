@@ -366,16 +366,19 @@ O painel mostra tudo como texto, nunca como HTML: um log guarda o que um agente 
 
 No cabeçalho da página do run:
 
-- **Cancel run** (num run em andamento, ou num run travado, descrito abaixo) pede uma confirmação ali mesmo e cancela pelo mesmo caminho do `wf cancel` e do
-  `cancel_workflow` (`cancelJob`: `SIGTERM` ao processo do job, que cancela os agentes, desfaz a etapa de escrita em curso e
-  escreve o fim do run como `cancelled`). O cartão vai para a coluna Cancelled quando o log o registra. Se o job demora mais
-  do que a espera (20 s) para parar, a resposta diz que ele ainda está parando. Um run que não foi iniciado como job (`wf run`
+- **Cancel run** (num run em andamento, ou num run travado, descrito abaixo) pede uma confirmação ali mesmo e cancela pelo
+  mesmo caminho do `wf cancel` e do `cancel_workflow` (`cancelJob`). Num run em andamento, é um `SIGTERM` ao processo do
+  job, que cancela os agentes, desfaz a etapa de escrita em curso e escreve o fim do run como `cancelled`; o cartão vai para
+  a coluna Cancelled quando o log o registra. Num run travado, é um `SIGKILL`: nada é desfeito, o run segue `failed` (o
+  cartão fica em Failed) e os cloud agents que ele deixou rodando são cancelados, como diz o item do run travado. Se o job
+  demora mais do que a espera (20 s) para parar, a resposta diz que ele ainda está parando. Um run que não foi iniciado como job (`wf run`
   num terminal) não tem processo registrado para sinalizar: o dashboard responde `409` e diz para dar Ctrl-C naquele terminal.
 - **Cancel cloud agent** (**Cancel N cloud agents** quando são vários; num run `failed` cujo processo não existe mais, com
   uma etapa na nuvem interrompida e o agente registrado no log) chama a mesma rota: ela cancela, pela API da Cursor e com a
   chave do usuário, os cloud agents que o run deixou rodando e a página mostra a nota da resposta (`200`), que os nomeia, no
   lugar do botão. O cancelamento não fica registrado no log, então depois de recarregar a página o botão volta; quando não
-  há mais nada a cancelar, a rota responde `409` e a página mostra a mensagem, como resultado concluído, não como erro.
+  há mais nada a cancelar, a rota responde `409` com `nothing to cancel`, e só essa recusa a página mostra como resultado
+  concluído, não como erro.
   Um resume depois disso não reanexa aos agentes cancelados: cria outros, que custam de novo
   ([6.2 §Etapas na nuvem](../reference/config.md#etapas-na-nuvem)).
   Quando a nota diz que um agente não foi alcançado, a página a mostra como falha e mantém o botão.

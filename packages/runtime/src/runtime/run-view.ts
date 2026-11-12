@@ -4,9 +4,10 @@
 // Runs are found through the global runs index (`~/.cursor-workflows/runs.jsonl`), which names each run's repo; the run's
 // own state lives in `<repo>/.workflows/runs/<runId>/`. The status is the projection of the run's latest execution, with what
 // the log cannot say, the rule `wf status` applies to a job: an execution that never wrote its `run-end` is `running` only
-// while a process holds the run's lock and, for a run started as a job, while that job's heartbeat is fresh. Without a
-// process the process died; with a stale heartbeat it is frozen (it still holds the lock). Either way the run shows as
-// `failed` with how to resume it, the same as its job does.
+// while a process holds the run's lock and, for a run started as a job, while that job is not frozen (its own process holds
+// the lock with a stale heartbeat). Without a process the process died; a frozen job still holds the lock. Either way the
+// run shows as `failed` with how to resume it, the same as its job does. A lock held by another process than the job's is a
+// new execution that has not written its run-start yet (a resume): the run is `running`.
 import { statSync } from "node:fs";
 import { join } from "node:path";
 import type { RunStatus } from "./events.js";
@@ -129,7 +130,7 @@ function detailOf(entry: RunsIndexEntry): RunDetail {
 
   let { status, error } = execution;
   if (status === "running") {
-    // The rule `wf status` applies to the run's job: a process that is gone, or one that stopped beating, has failed it.
+    // The rule `wf status` applies to the run's job: a process that is gone, or a frozen job (`silentJobError`), has failed it.
     if (!isRunExecuting(entry.repo, entry.runId)) {
       status = "failed";
       error = `the process executing the run ended without finishing it; ${resumeHint(entry.runId)}`;

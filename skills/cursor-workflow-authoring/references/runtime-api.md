@@ -151,7 +151,8 @@ if (!tests.ok) { /* tests.exitCode, tests.timedOut, tests.tail: the last 32768 c
   exists; if the process dies and the run is resumed, the step reattaches to that agent and takes the answer of the run it already
   has instead of paying for another (code that changes the step's prompt or options starts a new step, and the old agent finishes
   unwatched unless the run is cancelled). Cancelling a running run cancels its cloud runs. Cancelling a run whose process already
-  died (`wf cancel`, `cancel_workflow`, the dashboard's cancel route) cancels, through the Cursor API, the cloud runs of the agents
+  died, or whose job is frozen (its process is killed first) (`wf cancel`, `cancel_workflow`, the dashboard's cancel route),
+  cancels, through the Cursor API, the cloud runs of the agents
   its log shows without an end; it writes nothing to the log, so those steps stay interrupted. Two cases make the resumed step
   start a new cloud agent, at new cost, instead of reattaching, each with a warning: the cloud no longer has the agent
   (`cloud agent <id>, left by an interrupted attempt, is no longer there: starting a new one`), or no run of the agent is going
