@@ -3,7 +3,8 @@
 // real child process and asserts on what the workflow gets back and on the replayed event log.
 import assert from "node:assert/strict";
 import "./isolate-home.js";
-import { existsSync as existsSyncSafe, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync as existsSyncSafe, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
@@ -283,10 +284,7 @@ test("a process the command left running, holding its output, is killed when the
   assert.equal(result.ok, true, "the command itself exited 0");
   const child = Number(result.tail.trim());
   assert.ok(child > 1);
-  await until("the process left behind to be gone", () => !alive(child) || undefined, 3_000).catch(() => {
-    process.kill(child, "SIGKILL");
-    assert.fail(`process ${child} outlived the call`);
-  });
+  await expectGone(child, "the call");
 });
 
 test("a command has no stdin and no terminal: whatever would wait for someone to type (a credential prompt) fails at once", async () => {
@@ -340,14 +338,62 @@ test("one line longer than an event holds is split across events, whole", async 
   assert.equal(execEnds(events)[0]!.outputTruncated, undefined);
 });
 
+/** The state letter of the process in `/proc/<pid>/stat` (`S` sleeping, `Z` zombie, ...); `undefined` where there is no `/proc`, or no such process. */
+const stateOf = (pid: number): string | undefined => {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8"); // `pid (command) S ...`: the command may hold spaces and parentheses
+    return stat[stat.lastIndexOf(")") + 2];
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Whether the process is running. A process that died but whose parent has not reaped it yet (a zombie, state `Z`: the
+ * command's `sleep` is reparented to init when its `bash` dies, and init reaps it a moment later) still answers
+ * `kill(pid, 0)`, and is not running. Where there is no `/proc` to read the state from, the answer is `kill`'s.
+ */
 const alive = (pid: number) => {
   try {
     process.kill(pid, 0);
-    return true;
   } catch {
     return false;
   }
+  const state = stateOf(pid);
+  return state !== "Z" && state !== "X";
 };
+
+/** Waits for the process to be gone. One still running after 3 s is killed, so it does not run on after the test, and fails the test. */
+async function expectGone(pid: number, boundary: string): Promise<void> {
+  await until(`process ${pid} to be gone`, () => !alive(pid) || undefined, 3_000).catch(() => {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      /* it went just now: it still outlived the wait */
+    }
+    assert.fail(`process ${pid} outlived ${boundary}`);
+  });
+}
+
+// A zombie answers `kill(pid, 0)` like a live process. `exec sleep` makes one on purpose: once the shell has become a
+// program that never waits for children, a child of it that dies stays dead and unreaped for as long as the parent lives.
+// The child is killed only after the `exec` (a shell reaps its children, so one that died before it would leave no zombie).
+test("alive() counts a process that is running, and not one that died but was not yet reaped (a zombie)", { skip: !existsSyncSafe("/proc/self/stat") && "needs /proc" }, async () => {
+  const parent = spawn("bash", ["-c", "sleep 60 & echo $!; exec sleep 30"], { stdio: ["ignore", "pipe", "ignore"] });
+  const parentPid = parent.pid!;
+  try {
+    const child = await new Promise<number>((resolve) => parent.stdout.once("data", (chunk) => resolve(Number(String(chunk).trim()))));
+    await until("the shell to have become `sleep`", () => readFileSync(`/proc/${parentPid}/comm`, "utf8").trim() === "sleep" || undefined);
+    assert.equal(alive(child), true, "the child is running");
+    process.kill(child, "SIGKILL");
+    await until("the child to have died", () => stateOf(child) === "Z" || undefined);
+    process.kill(child, 0); // it still answers: this is what `alive` used to take for "running"
+    assert.equal(alive(parentPid), true, "the parent is running");
+    assert.equal(alive(child), false, "the dead child is not");
+  } finally {
+    parent.kill("SIGKILL");
+  }
+});
 
 test("a command is killed at its timeout and the call returns: the workflow is not stuck behind it", async () => {
   const wf = workflow(async (ctx) => ctx.exec(...node("setInterval(() => {}, 1000)"), { label: "hang", timeoutMs: 400 }));
@@ -369,10 +415,7 @@ test("the whole process tree is killed, not only the process the call started", 
   assert.equal(result.timedOut, true);
   const child = Number(result.tail.trim());
   assert.ok(child > 1, `the command printed its child's pid: ${JSON.stringify(result.tail)}`);
-  await until("the grandchild to be gone", () => !alive(child) || undefined, 3_000).catch(() => {
-    process.kill(child, "SIGKILL");
-    assert.fail(`process ${child} outlived the command's timeout`);
-  });
+  await expectGone(child, "the command's timeout");
 });
 
 test("a command that ignores SIGTERM is killed for good two seconds later", async () => {
@@ -442,7 +485,8 @@ test("cancelling the run kills the running commands, ends their nodes as cancell
   assert.equal(events.at(-1)!.type, "run-end", "no node event trails the run's end");
   const pids = contentOf(events).filter((c) => c.kind === "command-output").map((c) => Number(c.text!.trim()));
   assert.equal(pids.length, 2);
-  for (const pid of pids) assert.equal(alive(pid), false, `process ${pid} is gone`);
+  // The signal reached the whole group before the run returned; the processes need a moment to act on it, and on a busy machine that moment is not short.
+  await Promise.all(pids.map((pid) => expectGone(pid, "the cancelled run")));
 });
 
 test("a call made after the run was cancelled never starts: no node, the run ends cancelled", async () => {
