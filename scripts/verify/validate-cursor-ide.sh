@@ -478,6 +478,7 @@ if ! keep_recorded 8; then
     step "In a chat of the sandbox window, type:"
     say "    /run-workflow smoke"
     note "Pass: the chat reports the job finished, with the answer pong, and the run's log has a cloud-agent event with a bc- agent id."
+    note "Also worth a look, not part of the pass: in the dashboard's page of that run the ping step has a cloud badge, and hovering it shows a link to the agent in Cursor and its cost."
     pause "Press Enter when the chat has answered."
     say "The cloud agents the sandbox's runs logged (the newest last):"
     grep -h '"type":"cloud-agent"' "$SANDBOX_DIR"/.workflows/runs/*/events.jsonl 2>/dev/null | tail -n 3 || true

@@ -49,6 +49,8 @@ export interface NodeDetail {
   command?: string;
   /** Where the step ran. Events carry it from the cloud backend on; before that every step ran `local`. */
   location: string;
+  /** The Cursor cloud agent of a step that ran in the cloud (`bc-…`), from the moment the agent exists. The latest one when an attempt replaced it. */
+  cloudAgentId?: string;
   /** Attempts that really ran: a step served from the journal or the memo has none. */
   attempts: number;
   tokens: number;
@@ -162,6 +164,7 @@ interface Work {
   model?: string;
   command?: string;
   location?: string;
+  cloudAgentId?: string;
   attempts: Map<string, Attempt>;
 }
 
@@ -279,6 +282,12 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
       case "exec-start":
         begin(event, "command");
         break;
+      case "cloud-agent": {
+        const found = work.get(str(event.stepId) ?? "");
+        const agentId = str(event.agentId);
+        if (found && agentId !== undefined) found.cloudAgentId = agentId;
+        break;
+      }
       case "turn": {
         const at = attemptOf(event);
         const usage = event.usage as Record<string, unknown> | undefined;
@@ -328,6 +337,7 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
       ...(w.model !== undefined && { model: w.model }),
       ...(w.command !== undefined && { command: w.command }),
       location: w.location ?? "local",
+      ...(w.cloudAgentId !== undefined && { cloudAgentId: w.cloudAgentId }),
       attempts: real.length,
       tokens: real.reduce((sum, a) => sum + (a.ended ? (a.tokens ?? a.turnTokens) : a.turnTokens), 0),
       costCents: real.reduce((sum, a) => sum + a.costCents, 0),

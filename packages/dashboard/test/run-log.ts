@@ -41,6 +41,8 @@ export const stepEnd = (stepId: string, label: string, r: Ref = {}, extra: Recor
   chargedCents: 0,
   ...extra,
 });
+/** The cloud agent of a step's attempt, as the engine logs it the moment the agent exists. */
+export const cloudAgent = (stepId: string, agentId: string, r: Ref = {}, extra: Record<string, unknown> = {}): Draft => ({ type: "cloud-agent", ...ref(stepId, r), attemptId: `${stepId}#1`, agentId, ...extra });
 export const execStart = (stepId: string, label: string, r: Ref = {}, extra: Record<string, unknown> = {}): Draft => ({ type: "exec-start", ...ref(stepId, r), attemptId: `${stepId}#1`, label, command: "npm", timeoutMs: 60000, ...extra });
 export const execEnd = (stepId: string, label: string, r: Ref = {}, extra: Record<string, unknown> = {}): Draft => ({
   type: "exec-end",

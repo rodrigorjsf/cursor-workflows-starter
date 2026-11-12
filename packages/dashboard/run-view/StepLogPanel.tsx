@@ -3,12 +3,16 @@
 // stood at a replay's position when the run is being replayed. Everything is drawn as text: a log holds what an agent wrote.
 import { type ReactNode, useEffect, useMemo, useRef } from "react";
 import { describeNode } from "./node-details.js";
+import { RowValue } from "./RowValue.js";
 import type { GraphNode } from "./run-graph.js";
 import { type Body, type LogEntry, type OutputBlock, buildStepLog } from "./step-log.js";
 import { useStepLog } from "./use-step-log.js";
 
 /** How close to the bottom (in pixels) a reader still counts as following the tail. */
 const FOLLOW_SLACK_PX = 40;
+/** The rows of a node's details that head its log, and the ones a step that ran in the cloud adds (where, which agent, what it cost). */
+const FACTS = ["State", "Model", "Command", "Attempts", "Duration"];
+const CLOUD_FACTS = ["Location", "Cloud agent", "Cost"];
 
 /** The text of a body, or what stands in its place when it was removed or cut. */
 function Text({ body, className }: { body: Body; className?: string }) {
@@ -105,7 +109,8 @@ export function StepLogPanel({ runId, node, now, live, upTo, onClose }: StepLogP
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const rows = describeNode(node, now).filter(([name]) => ["State", "Model", "Command", "Attempts", "Duration"].includes(name));
+  const shown = node.detail.location === "cloud" ? [...FACTS, ...CLOUD_FACTS] : FACTS;
+  const rows = describeNode(node, now).filter((row) => shown.includes(row.name));
   let body: ReactNode;
   if (feed.status === "loading") body = <p className="notice">Reading the step…</p>;
   else if (feed.status === "error") {
@@ -137,10 +142,12 @@ export function StepLogPanel({ runId, node, now, live, upTo, onClose }: StepLogP
         </button>
       </header>
       <dl className="facts">
-        {rows.map(([name, value]) => (
-          <div key={name}>
-            <dt>{name}</dt>
-            <dd>{value}</dd>
+        {rows.map((row) => (
+          <div key={row.name}>
+            <dt>{row.name}</dt>
+            <dd>
+              <RowValue row={row} />
+            </dd>
           </div>
         ))}
       </dl>

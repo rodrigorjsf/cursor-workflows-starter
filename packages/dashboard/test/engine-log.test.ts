@@ -4,27 +4,42 @@
 // is the structure the graph derives: a parallel group, a pipeline, a command, a nested group, a step after a group, and a
 // run that is resumed. A change to how the engine numbers its ids or groups fails here, not in someone's browser.
 //
+// The same goes for a step that ran in the cloud (the fake SDK has a cloud mode and the test a temporary bare remote): the
+// node says it was a cloud one, names its agent, and the step's log has what the agent said, read through the dashboard's API.
+//
 // The one place the dashboard's tests reach into the runtime's sources: the engine is the thing under test.
 process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, test } from "node:test";
-import { calls, script } from "@cursor/sdk";
+import { calls, resetCloud, script } from "@cursor/sdk";
 import { runWorkflow } from "../../runtime/src/runtime/engine.js";
 import { EVENT_SCHEMA_VERSION } from "../../runtime/src/runtime/events.js";
 import { defineWorkflow } from "../../runtime/src/runtime/workflow.js";
+import { repoWithRemote } from "../../runtime/test/cloud-fixtures.js";
+import { clearConfig, configWorkflow, writeGlobalConfig } from "../../runtime/test/config-fixtures.js";
+import { describeNode } from "../run-view/node-details.js";
 import { EMPTY_ARGS_HASH, argsHashOf } from "../run-view/resume-command.js";
 import { type GraphNode, KNOWN_EVENT_VERSION, type RunEvent, buildRunGraph, joinIdOf } from "../run-view/run-graph.js";
-import { type Sandbox, logPath, sandbox } from "./support.js";
+import { type ContentItem, buildStepLog } from "../run-view/step-log.js";
+import { type DashboardServer, startDashboard } from "../src/server.js";
+import { http, type Sandbox, logPath, sandbox } from "./support.js";
 
 let box: Sandbox;
+let dash: DashboardServer | undefined;
+let cloudRepo: string | undefined;
 beforeEach(() => {
   box = sandbox();
 });
-afterEach(() => {
+afterEach(async () => {
+  await dash?.close();
+  dash = undefined;
+  if (cloudRepo !== undefined) clearConfig(cloudRepo);
+  cloudRepo = undefined;
   box.dispose();
   script.length = 0;
   calls.length = 0;
+  resetCloud();
 });
 
 const NODE = [process.execPath, ["-e", "0"]] as const;
@@ -115,4 +130,86 @@ test("a resumed run keeps its nodes: the steps served from the journal show as c
 
 test("the Run view knows the event schema version the engine writes: a version bump makes this fail until the reader learns it", () => {
   assert.equal(KNOWN_EVENT_VERSION, EVENT_SCHEMA_VERSION);
+});
+
+// ── a step in the cloud ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** A repository with a bare `origin`, and a config that allows the cloud and sends the `review` role there. */
+function cloudSetup(): string {
+  const repo = box.repo("cloud-repo");
+  cloudRepo = repo;
+  repoWithRemote(repo, box.repo("origin.git"));
+  writeGlobalConfig({ caps: { allowedLocations: ["local", "cloud"] }, workflows: { cfg: { roles: { review: { location: "cloud" } } } } });
+  return repo;
+}
+
+const READ = ["read", "grep"] as const;
+const usage = { inputTokens: 100, outputTokens: 10, cacheReadTokens: 60, cacheWriteTokens: 20 };
+/** What the agent streams: a message, then the end of its turn. */
+const says = (text: string) => [{ type: "text-delta", text }, { type: "step-completed", stepId: 1 }, { type: "turn-ended", usage }];
+
+/** One read-only step on the `review` role (the config above sends it to the cloud), then one on `classify`, which stays local. */
+const cloudWorkflow = configWorkflow(async (ctx) => {
+  await ctx.agent("look at the change", { role: "review", label: "look", tools: [...READ] });
+  await ctx.agent("sort it", { role: "classify", label: "sort" });
+  return "ok";
+});
+
+const rowsOf = (node: GraphNode) => Object.fromEntries(describeNode(node, 0).map((row) => [row.name, row]));
+
+test("the graph of a real run with a cloud step: that step is a cloud one, names the agent the SDK created with a link to it in Cursor, and carries its cost; the local step beside it is not marked", async () => {
+  script.push(() => ({ result: "all good", deltas: says("Looking at the change.") }), () => ({ result: "ok" }));
+  const repo = cloudSetup();
+  const result = await runWorkflow(cloudWorkflow, {}, { cwd: repo });
+  assert.equal(result.status, "finished", result.error);
+  assert.equal(calls.length, 2);
+  assert.ok(calls[0].cloud && !calls[1].cloud, "the review step was created as a cloud agent, the classify step as a local one");
+
+  const graph = buildRunGraph(eventsOf(repo, result.runId));
+  const cloud = byLabel(graph.nodes, "look");
+  assert.equal(cloud.state, "ok");
+  assert.deepEqual([cloud.detail.location, cloud.detail.cloudAgentId], ["cloud", "bc-1"]);
+  const rows = rowsOf(cloud);
+  assert.deepEqual([rows.Location!.value, rows["Cloud agent"]!.value, rows["Cloud agent"]!.href], ["cloud", "bc-1", "https://cursor.com/agents/bc-1"]);
+  assert.deepEqual([rows.Tokens!.value, rows.Cost!.value], ["110", "9¢"], "what the cloud usage API reported, as the cap counts it");
+
+  const local = byLabel(graph.nodes, "sort");
+  assert.equal(local.detail.location, "local");
+  assert.equal("cloudAgentId" in local.detail, false);
+  assert.equal(rowsOf(local)["Cloud agent"], undefined);
+});
+
+test("a cloud step shows its agent while it still runs: the id is in the log before the step ends", async () => {
+  const repo = cloudSetup();
+  let atSend: RunEvent[] = [];
+  script.push(() => {
+    atSend = eventsOf(repo, "running-1"); // the agent has its message now; the step has not ended
+    return { result: "done" };
+  });
+  const wf = configWorkflow((ctx) => ctx.agent("look", { role: "review", label: "look", tools: [...READ] }));
+  const result = await runWorkflow(wf, {}, { cwd: repo, runId: "running-1" });
+  assert.equal(result.status, "finished", result.error);
+
+  const node = byLabel(buildRunGraph(atSend).nodes, "look");
+  assert.equal(node.state, "running");
+  assert.deepEqual([node.detail.location, node.detail.cloudAgentId], ["cloud", "bc-1"]);
+});
+
+test("the step log of a cloud step shows what the cloud agent said, read through the dashboard's API", async () => {
+  script.push(() => ({ result: "all good", deltas: says("Looking at the change.") }), () => ({ result: "ok" }));
+  const repo = cloudSetup();
+  const result = await runWorkflow(cloudWorkflow, {}, { cwd: repo });
+  assert.equal(result.status, "finished", result.error);
+  const cloud = byLabel(buildRunGraph(eventsOf(repo, result.runId)).nodes, "look");
+
+  dash = await startDashboard({ port: 0 });
+  const reply = await http(dash.url, `/api/runs/${encodeURIComponent(result.runId)}/steps/${encodeURIComponent(cloud.id)}/content`);
+  assert.equal(reply.status, 200);
+  const log = buildStepLog((reply.json as { content: ContentItem[] }).content);
+
+  assert.equal(log.attempts.length, 1);
+  const entries = log.attempts[0]!.entries;
+  assert.deepEqual(entries.map((e) => e.kind), ["prompt", "message"]);
+  const message = entries[1]!;
+  assert.equal(message.kind === "message" && message.text, "Looking at the change.");
 });
