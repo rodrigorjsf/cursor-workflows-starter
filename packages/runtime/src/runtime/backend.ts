@@ -8,7 +8,8 @@
 //    cancelled, the step timed out, a token cap was crossed) and puts the cause in `signal.reason`. On abort the backend
 //    cancels the agent run in flight, waits for it to stop (the next attempt must not edit the same directory in
 //    parallel), reads the usage the attempt left behind, disposes the agent and reports `{ kind: "aborted", reason }`
-//    with the signal's reason. An agent that is still being created when the signal aborts is disposed when it arrives.
+//    with the signal's reason. An agent that is still being created when the signal aborts is disposed when it arrives. A
+//    `send()` already in flight gets a short grace to hand back its run, so that run is cancelled and waited for too.
 //  - `onEvent` receives what happens while the attempt runs, in order. A `turn` event is how the engine enforces the live
 //    token caps: the engine may abort the signal from inside the callback, and the backend must then cancel at once.
 //  - A token cap never abandons a creation: the engine holds a cap's abort back until the backend reports the agent (an
@@ -120,7 +121,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** SDK error codes that are about the account, not the step. Trying again does not help. */
 const ACCOUNT_ERROR_CODES = new Set(["plan_required"]);
 
-function failure(err: unknown): Extract<AttemptOutcome, { kind: "error" }> {
+function classifyError(err: unknown): Extract<AttemptOutcome, { kind: "error" }> {
   const message = err instanceof Error ? err.message : String(err);
   const code = (err as { code?: unknown } | undefined)?.code;
   if (typeof code === "string" && ACCOUNT_ERROR_CODES.has(code)) return { kind: "error", reason: "account", message, code };
@@ -129,15 +130,23 @@ function failure(err: unknown): Extract<AttemptOutcome, { kind: "error" }> {
   return { kind: "error", reason: "other", message };
 }
 
+/** How long an abort waits for a `send()` already in flight to hand back its run, so the run can be cancelled and awaited. */
+const SEND_GRACE_MS = 1000;
+
 /**
  * Settles with `promise`, or rejects with the signal's reason as soon as it aborts. A value that arrives after the race
  * was given up goes to `late`, so an agent created too late is still disposed. The abort wins over a result that arrives
- * at the same time.
+ * at the same time. With `graceMs`, an abort first waits that long for the value (a run that is about to be handed back
+ * is cancelled by the caller, and waited for, instead of being left to stop on its own).
  */
-async function within<T>(signal: AbortSignal, promise: Promise<T>, late?: (value: T) => void): Promise<T> {
+async function within<T>(signal: AbortSignal, promise: Promise<T>, late?: (value: T) => void, graceMs = 0): Promise<T> {
   let onAbort!: () => void;
+  let abortedFirst = false;
   const aborted = new Promise<never>((_, reject) => {
-    onAbort = () => reject(signal.reason);
+    onAbort = () => {
+      abortedFirst = true;
+      reject(signal.reason);
+    };
     if (signal.aborted) onAbort();
     else signal.addEventListener("abort", onAbort, { once: true });
   });
@@ -145,6 +154,12 @@ async function within<T>(signal: AbortSignal, promise: Promise<T>, late?: (value
   try {
     return await Promise.race([aborted, promise]);
   } catch (err) {
+    if (abortedFirst && graceMs > 0) {
+      let timer: NodeJS.Timeout | undefined;
+      const arrived = await Promise.race([promise.then((value) => ({ value }), () => undefined), new Promise<undefined>((resolve) => (timer = setTimeout(() => resolve(undefined), graceMs)))]);
+      clearTimeout(timer);
+      if (arrived) return arrived.value;
+    }
     promise.then(late, () => {}); // given up (or failed): whatever it yields later is not ours
     throw err;
   } finally {
@@ -293,7 +308,7 @@ async function runLocalAttempt(prompt: string, o: StepOptions, signal: AbortSign
     signal.throwIfAborted();
     /** One message and its answer. An aborted attempt throws the signal's reason as soon as it knows, before anything else. */
     const exchange = async (message: string): Promise<RunResult> => {
-      const run = await within(signal, sendWhenFree(created, message, sendOpts), (late) => void late.cancel().catch(() => {}));
+      const run = await within(signal, sendWhenFree(created, message, sendOpts), (late) => void late.cancel().catch(() => {}), SEND_GRACE_MS);
       canceller.bind(run);
       signal.throwIfAborted();
       try {
@@ -322,7 +337,7 @@ async function runLocalAttempt(prompt: string, o: StepOptions, signal: AbortSign
     }
   } catch (err) {
     // Once the signal is aborted, whatever else the SDK throws is a consequence of it: the cause is the signal's reason.
-    outcome = signal.aborted ? { kind: "aborted", reason: signal.reason } : failure(err);
+    outcome = signal.aborted ? { kind: "aborted", reason: signal.reason } : classifyError(err);
   }
   try {
     // Let the run cancelled by an abort stop before its usage is read and anything else touches the cwd. A timeout or an error also costs.

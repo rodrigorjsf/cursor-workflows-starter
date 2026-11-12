@@ -161,6 +161,39 @@ test("a signal aborted while the agent is being created ends the attempt at once
   assert.equal(stats.sends, 0);
 });
 
+test("a signal aborted while send() is still handing back the run waits for that run, cancels it and waits for the cancellation before reading the usage", async () => {
+  script.push(async () => {
+    await wait(60); // send() takes a while to hand the run back
+    return { hang: true, cancelDelayMs: 40 };
+  });
+  const controller = new AbortController();
+  const reason = new Error("cap crossed by another step");
+  setTimeout(() => controller.abort(reason), 15);
+  const { result } = await attempt("p", options(), controller.signal);
+
+  assert.deepEqual(outcomeOf(result), { kind: "aborted", reason });
+  assert.equal(stats.cancelled, 1, "the run that came back late was cancelled, and the attempt waited for it to stop");
+  assert.equal(stats.usageReads, 1, "the usage was read after the run stopped, not while it was still running");
+  assert.equal(stats.disposed, 1);
+});
+
+test("a send() that never hands back a run does not hold the attempt: it ends after a short grace, and the run that arrives late is cancelled", async () => {
+  script.push(async () => {
+    await wait(1400);
+    return { hang: true };
+  });
+  const controller = new AbortController();
+  const reason = new Error("timeout after 20 ms");
+  setTimeout(() => controller.abort(reason), 20);
+  const startedAt = Date.now();
+  const { result } = await attempt("p", options(), controller.signal);
+
+  assert.deepEqual(outcomeOf(result), { kind: "aborted", reason });
+  assert.ok(Date.now() - startedAt < 1250, "the attempt gave up on the send after the grace instead of waiting for it");
+  await wait(500);
+  assert.equal(stats.cancelled, 1, "the run that arrived late was cancelled, not left running");
+});
+
 test("a signal aborted as soon as the agent is reported stops the attempt before it sends anything", async () => {
   const controller = new AbortController();
   const reason = new Error("cap held back until the agent existed");

@@ -790,6 +790,7 @@ async function executeRun<A, R>(
       emitStart(attemptId, 1, from);
       emit({ type: "step-end", ...ref, attemptId, stepKey: key, label, phase, ok: true, cached: from, chargedCents: 0, model: o.model?.id, modelKey: mKey });
     };
+    const stepCwd = o.cwd ?? opts.cwd;
     const cached = journal.get(key);
     if (cached) {
       servedFrom("journal");
@@ -800,7 +801,7 @@ async function executeRun<A, R>(
       if (!isReadOnly(o.tools)) {
         throw new StepFailedError(`step "${label}": memo requires \`tools\` with read-only tools only (read, grep, glob, ls, semSearch...)`);
       }
-      const state = repoState(o.cwd ?? opts.cwd);
+      const state = repoState(stepCwd);
       if (state) {
         memoKey = memo.key({ prompt, ...fingerprint, cwd: undefined }, state);
         const hit = memo.get(memoKey);
@@ -836,7 +837,7 @@ async function executeRun<A, R>(
       agents: o.agents,
       // O guarda vem antes: um mcpServers da etapa com o mesmo nome continua podendo substituí-lo de propósito.
       mcpServers: withGuard(nestedGuard(sources), o.mcpServers),
-      cwd: o.cwd ?? opts.cwd,
+      cwd: stepCwd,
       settingSources: sources,
       // The global cap wins over the workflow code: a pull request that edits a workflow cannot turn sandboxing off.
       sandbox: caps.requireSandbox === true || Boolean(o.sandbox),
@@ -847,7 +848,6 @@ async function executeRun<A, R>(
     await sem.acquire();
     try {
       // A step that can write is reverted if the run is cancelled in the middle of it, so a resume meets no half-made edits.
-      const stepCwd = o.cwd ?? opts.cwd;
       const writes = !isReadOnly(o.tools);
       const snapshot = writes && !signal?.aborted ? await takeSnapshot(stepCwd) : undefined;
       const revert = reverts.forStep({ writes, snapshot, stepCwd, label, warn: (message) => emit({ type: "warning", message }) });
@@ -977,7 +977,7 @@ async function executeRun<A, R>(
                 errorKind = "cancelled";
                 cancelledBy = outcome.reason;
               } else {
-                errorKind = /^timeout/.test(lastError) ? "timeout" : "exception";
+                errorKind = outcome.reason instanceof StepTimeoutError ? "timeout" : "exception";
               }
               break;
             }
@@ -999,7 +999,7 @@ async function executeRun<A, R>(
                 errorKind = "rate-limit";
                 await sleep(2000 * 2 ** (attempt - 1));
               } else {
-                errorKind = /^timeout/.test(lastError) ? "timeout" : "exception";
+                errorKind = /^timeout/.test(lastError) ? "timeout" : "exception"; // a timeout the backend itself reports in its message
               }
               break;
           }
