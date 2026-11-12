@@ -23,8 +23,9 @@
   um crash reanexa ao agente que ainda roda (`Agent.resume`, `Agent.listRuns`) em vez de criar outro: espera o run que ele já
   tinha, sem reenviar o prompt, fecha no log a tentativa morta, cobra o uso do agente uma só vez e apaga a branch de snapshot
   que o crash deixou. Um agente que a nuvem não conhece mais é trocado por um novo, com aviso; qualquer outra falha ao
-  alcançá-lo falha só a tentativa e a próxima reanexa de novo. Cancelar o run cancela os runs dele na nuvem, o reanexado
-  inclusive. O limite de espera de duas horas do cliente do SDK deixou de falhar a etapa: o backend pergunta à nuvem
+  alcançá-lo falha só a tentativa e a próxima reanexa de novo. Cancelar um run que executa cancela os runs dele na nuvem, o
+  reanexado inclusive, e um cancelamento no meio da busca do agente cancela o run que ele achar; um run cujo processo já morreu
+  não tem a quem cancelar (retome e cancele). O limite de espera de duas horas do cliente do SDK deixou de falhar a etapa: o backend pergunta à nuvem
   (`Agent.getRun`) e espera de novo pelo run que continua. Novo workflow de verificação contra a API real,
   `scripts/verify/verify-cloud.ts` ([8.2 §14](docs/research/verificacoes-locais.md)), e o cenário 8 (opcional) do assistente
   de validação. O `AgentBackend` ganhou `StepOptions.reattach`, o evento `agent` ganhou `snapshot` e `reattached`, e

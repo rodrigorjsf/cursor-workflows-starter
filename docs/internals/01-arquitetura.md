@@ -213,15 +213,21 @@ O contrato, além da tabela:
   projeção `interruptedCloudSteps`), e a primeira tentativa de cada uma recebe `StepOptions.reattach`: o backend de nuvem
   retoma o agente pelo id (`Agent.resume`), acha o run que estava em andamento (`Agent.listRuns`: o que ainda roda, senão o
   mais novo) e espera por ele, sem reenviar o prompt; um run que terminou enquanto ninguém olhava entrega a resposta na hora, e
-  um resultado inválido recebe o follow-up de sempre, no agente retomado. O motor fecha no log a tentativa morta (um
+  um resultado inválido recebe o follow-up de sempre, no agente retomado. Ao reanexar, o motor fecha no log a tentativa morta (um
   `step-end` sem cobrança, `errorKind: "exception"`) e tira do orçamento os tokens dos turnos que ela tinha reportado, porque
-  a tentativa que reanexa paga o uso inteiro do agente. A branch de snapshot que o crash deixou é apagada no fim. Um agente
-  que a nuvem não conhece mais (404: a primeira mensagem não chegou, ou ele foi apagado) é trocado por um novo, com um aviso;
-  qualquer outra falha ao alcançá-lo falha só a tentativa, e a seguinte tenta reanexar de novo: criar outro agente seria pagar
-  duas vezes. Um run reanexado não tem o stream: o log não guarda o que o agente fez enquanto nenhum processo olhava, e os
+  a tentativa que reanexa paga o uso inteiro do agente. A branch de snapshot que o crash deixou é apagada no fim. O motor só fecha
+  a tentativa morta quando a nova tem um agente (o evento `agent`): se a nuvem não responde em nenhuma tentativa, nada se fecha, e
+  o próximo resume ainda vê a etapa como interrompida. Um agente que a nuvem não conhece mais (404: a primeira mensagem não
+  chegou, ou ele foi apagado) é trocado por um novo, com um aviso, e a tentativa morta fecha com os tokens que seus turnos tinham
+  reportado (eram gasto de verdade); qualquer outra falha ao alcançá-lo (`AttemptResult.reattachFailed`) falha só a tentativa, e a
+  seguinte tenta reanexar de novo: criar outro agente seria pagar duas vezes. Um run reanexado não tem o stream: o log não guarda o que o agente fez enquanto nenhum processo olhava, e os
   tetos de tokens ao vivo só atuam quando o run termina (o `warning` da reanexação diz isso).
 - **Cancelar e o limite de espera.** Cancelar o run aborta o `signal` da tentativa, e `runAttempt` cancela o run em andamento
-  na nuvem e espera ele parar, o reanexado inclusive. O cliente do SDK desiste de esperar um run da nuvem depois de duas horas
+  na nuvem e espera ele parar, o reanexado inclusive; um cancelamento que chega enquanto o backend procura o agente
+  interrompido dá uma breve espera pela lista e cancela o run que ela trouxer. Um run cujo processo já morreu não tem
+  `signal` a abortar, e o cancelamento por fora (`wf cancel`, o botão do dashboard) não chama a API da Cursor: para parar o
+  agente dele, retome o run e cancele. A busca do agente também não varre o log atrás de agentes de etapas que o resume
+  não executa. O cliente do SDK desiste de esperar um run da nuvem depois de duas horas
   (`wait()` devolve `error` com "Timed out waiting for the cloud run to finish.", e aquele handle fica falho, embora o run
   continue lá). O backend de nuvem não trata um `error` assim como o fim da etapa: pergunta à nuvem (`Agent.getRun`) e, se o
   run ainda roda (ou já terminou), espera de novo por ele. Só um run que a própria nuvem diz ter falhado é um erro; quem limita

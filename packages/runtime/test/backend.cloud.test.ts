@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { calls, costConfig, finishCloudRun, resetCloud, script, seedCloudAgent, stats } from "@cursor/sdk";
+import { calls, costConfig, finishCloudRun, lookups, resetCloud, script, seedCloudAgent, stats } from "@cursor/sdk";
 import type { AttemptEvent, AttemptResult, StepOptions } from "../src/runtime/backend.js";
 import { createCloudBackend } from "../src/runtime/backend-cloud.js";
 import { cloudRepoUrl } from "../src/runtime/cloud-snapshot.js";
@@ -28,7 +28,7 @@ afterEach(() => {
   script.length = 0;
   calls.length = 0;
   Object.assign(stats, { active: 0, maxActive: 0, disposed: 0, usageReads: 0, cancels: 0, cancelled: 0, turnsDelivered: 0, sends: 0 });
-  Object.assign(costConfig, { raw: 9, charged: 7, getUsageError: undefined, createErrorCode: undefined, createHang: undefined, createDelayMs: undefined, createGate: undefined, listNewestFirst: undefined });
+  Object.assign(costConfig, { raw: 9, charged: 7, getUsageError: undefined, createErrorCode: undefined, createHang: undefined, createDelayMs: undefined, createGate: undefined, listNewestFirst: undefined, cloudWaitLimitMs: undefined, listRunsDelayMs: undefined });
   resetCloud();
 });
 
@@ -62,8 +62,9 @@ test("an attempt streams the cloud agent's activity through the callback and rep
   const { result, events } = await attempt("do it", options());
 
   assert.deepEqual(events.map((e) => e.type), ["warning", "agent", "text", "step", "turn"]);
-  assert.deepEqual(events[1], { type: "agent", agentId: "bc-1", snapshot: { remote: "origin", branch: (events[1] as { snapshot: { branch: string } }).snapshot.branch } });
-  assert.match((events[1] as { snapshot: { branch: string } }).snapshot.branch, /^wf\/cloud-snapshot\/run-1\/[0-9a-f]{8}$/, "the agent's event says which snapshot it starts from");
+  const agentEvent = events[1] as Extract<AttemptEvent, { type: "agent" }>;
+  assert.deepEqual([agentEvent.type, agentEvent.agentId, agentEvent.snapshot?.remote, agentEvent.reattached], ["agent", "bc-1", "origin", undefined]);
+  assert.match(agentEvent.snapshot!.branch, /^wf\/cloud-snapshot\/run-1\/[0-9a-f]{8}$/, "the agent's event says which snapshot it starts from");
   assert.deepEqual(outcomeOf(result), { kind: "finished", value: "the answer" });
   assert.equal(result.agentId, "bc-1");
   assert.ok(result.usage && "report" in result.usage);
@@ -255,4 +256,15 @@ test("a reattached attempt waits for the run still going, or else takes the newe
     assert.equal(calls.length, 0, "no agent was created");
     assert.equal(stats.sends, 0, "and nothing was sent");
   }
+});
+
+test("a wait that keeps giving up at once while the run goes on is not retried in a tight loop: the next wait starts no sooner than the floor", async () => {
+  costConfig.cloudWaitLimitMs = 1; // the client's wait fails at once, again and again; the run is still going
+  script.push(() => ({ hang: true }));
+  const running = createCloudBackend({ remote: "origin", runId: "run-1", waitFloorMs: 80 }).run("p", options(), new AbortController().signal, () => {});
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  const lookedUp = lookups.filter((l) => l.kind === "getRun").length;
+  finishCloudRun("bc-1", { result: "at last" });
+  assert.deepEqual(outcomeOf(await running), { kind: "finished", value: "at last" });
+  assert.ok(lookedUp >= 2 && lookedUp <= 8, `${lookedUp} lookups in 400 ms with an 80 ms floor`);
 });

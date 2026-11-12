@@ -10,6 +10,7 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { calls, cloudRunsOf, costConfig, finishCloudRun, forgetCloudAgent, killCloudClients, lookups, resetCloud, resumes, script, stats } from "@cursor/sdk";
+import { createCloudBackend } from "../src/runtime/backend-cloud.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import type { WorkflowEvent } from "../src/runtime/events.js";
 import { eventLogPath, readEventLog, runDirIn } from "../src/runtime/run-store.js";
@@ -31,7 +32,7 @@ afterEach(() => {
   calls.length = 0;
   resetCloud();
   Object.assign(stats, { active: 0, maxActive: 0, disposed: 0, usageReads: 0, cancels: 0, cancelled: 0, turnsDelivered: 0, sends: 0 });
-  Object.assign(costConfig, { raw: 9, charged: 7, getUsageError: undefined, createErrorCode: undefined, cloudWaitLimitMs: undefined, lookupFailures: undefined });
+  Object.assign(costConfig, { raw: 9, charged: 7, getUsageError: undefined, createErrorCode: undefined, cloudWaitLimitMs: undefined, lookupFailures: undefined, listRunsDelayMs: undefined });
 });
 
 const READ = ["read", "grep"] as const;
@@ -115,7 +116,7 @@ test("a resume after a crash reattaches to the cloud agent that is still running
     const [closed, ended] = ofType(second, "step-end");
     assert.deepEqual([closed!.attemptId, closed!.ok, closed!.chargedCents, closed!.agentId], [crashed.agent.attemptId, false, 0, "bc-1"], "the dead attempt is closed, uncharged");
     assert.deepEqual([ended!.ok, ended!.agentId, ended!.attemptId === crashed.agent.attemptId], [true, "bc-1", false]);
-    assert.ok(second.some((e) => e.type === "warning" && /reattaching to cloud agent bc-1/.test(e.message)), "and the user is told");
+    assert.ok(second.some((e) => e.type === "warning" && /reattached to cloud agent bc-1/.test(e.message)), "and the user is told");
   } finally {
     await crashed.end();
   }
@@ -150,6 +151,10 @@ test("a cloud agent the cloud no longer has is replaced by a new one, and both s
     assert.deepEqual([fresh!.agentId, fresh!.reattached], ["bc-2", undefined]);
     assert.notEqual(fresh!.snapshot!.branch, crashed.agent.snapshot!.branch, "from a snapshot of its own");
     assert.deepEqual(remoteBranches(remote), [], "the branch the crash left and the one this attempt pushed are both gone");
+    assert.deepEqual([r.spentTokens, r.spentCents], [220, 9], "what the lost agent's turns reported was real spend and stays counted, next to the new agent's");
+    const [closed] = ofType(second, "step-end");
+    assert.deepEqual([closed!.attemptId, closed!.ok, closed!.usage?.totalTokens, closed!.agentId], [crashed.agent.attemptId, false, 110, "bc-1"], "the dead attempt closes with the tokens it had reported");
+    assert.match(closed!.error!, /replaced its cloud agent bc-1/);
   } finally {
     await crashed.end();
   }
@@ -167,8 +172,9 @@ test("a cloud agent that cannot be reached is not replaced: the attempt fails an
     assert.deepEqual([calls.length, resumes], [1, ["bc-1", "bc-1"]], "no second agent was paid for");
     const second = logOf("life-5").slice(logOf("life-5").findLastIndex((e) => e.type === "run-start"));
     const ends = ofType(second, "step-end");
-    assert.deepEqual(ends.map((e) => e.ok), [false, false, true], "the dead attempt, the one that could not reach the agent, the one that did");
-    assert.match(ends[1]!.error!, /could not reattach to cloud agent bc-1: service unavailable/);
+    assert.deepEqual(ends.map((e) => e.ok), [false, false, true], "the attempt that could not reach the agent, the dead one (closed once an attempt had the agent), the one that did");
+    assert.match(ends[0]!.error!, /could not reattach to cloud agent bc-1: service unavailable/);
+    assert.equal(ends[1]!.attemptId, crashed.agent.attemptId);
     assert.deepEqual(remoteBranches(remote), []);
   } finally {
     await crashed.end();
@@ -240,7 +246,8 @@ test("a cloud agent the run reattached to is cancelled with the run", async () =
 test("the client's wait limit is a reattach point, not a failure: the step keeps waiting for the same agent and the same run", async () => {
   costConfig.cloudWaitLimitMs = 30; // the real limit is two hours
   script.push(() => ({ hang: true }));
-  const running = runWorkflow(reviewStep(), {}, { cwd, runId: "life-9" });
+  const backend = createCloudBackend({ remote: "origin", runId: "life-9", waitFloorMs: 0 }); // no pause between waits: the limit here is 30 ms, not two hours
+  const running = runWorkflow(reviewStep(), {}, { cwd, runId: "life-9", backend });
   await until(() => stats.sends === 1, "the cloud agent to have its message");
   setTimeout(() => finishCloudRun("bc-1", { result: "after several waits" }), 150);
   const r = await running;
@@ -255,7 +262,8 @@ test("the client's wait limit is a reattach point, not a failure: the step keeps
 test("a run the cloud itself reports as failed is a failed step even when the client's wait limit came first", async () => {
   costConfig.cloudWaitLimitMs = 30;
   script.push(() => ({ hang: true }));
-  const running = runWorkflow(reviewStep(), {}, { cwd, runId: "life-10" });
+  const backend = createCloudBackend({ remote: "origin", runId: "life-10", waitFloorMs: 0 });
+  const running = runWorkflow(reviewStep(), {}, { cwd, runId: "life-10", backend });
   await until(() => stats.sends === 1, "the cloud agent to have its message");
   setTimeout(() => finishCloudRun("bc-1", { status: "error", error: { message: "the VM died" } }), 100);
   const r = await running;
@@ -263,4 +271,43 @@ test("a run the cloud itself reports as failed is a failed step even when the cl
   assert.equal(r.status, "failed");
   assert.match(r.error!, /run error: the VM died/);
   assert.equal(calls.length, 1, "nothing was started again");
+});
+
+test("a cloud agent that could not be reached on any attempt is still the step's agent on the next resume: nothing was closed, so no second agent is created", async () => {
+  const crashed = await crashWhileTheAgentRuns("life-11");
+  try {
+    costConfig.lookupFailures = 2; // both attempts of the step meet an unreachable cloud
+    const failed = await runWorkflow(reviewStep({ retries: 1 }), {}, { cwd, runId: "life-11" });
+    assert.equal(failed.status, "failed");
+    assert.match(failed.error!, /could not reattach to cloud agent bc-1/);
+    assert.equal(calls.length, 1, "no replacement was started");
+    const afterFailure = logOf("life-11").slice(logOf("life-11").findLastIndex((e) => e.type === "run-start"));
+    assert.ok(!ofType(afterFailure, "step-end").some((e) => e.attemptId === crashed.agent.attemptId), "the dead attempt is not closed: the agent is still the step's");
+
+    finishCloudRun("bc-1", { result: "answered meanwhile" });
+    const resumed = await runWorkflow(reviewStep(), {}, { cwd, runId: "life-11" });
+    assert.equal(resumed.status, "finished", resumed.error);
+    assert.equal(resumed.result, "answered meanwhile");
+    assert.deepEqual([calls.length, resumed.spentTokens], [1, 110], "still one agent, paid once");
+  } finally {
+    await crashed.end();
+  }
+});
+
+test("cancelling a run while it looks for the interrupted agent cancels the run that agent is in", async () => {
+  const crashed = await crashWhileTheAgentRuns("life-12");
+  try {
+    costConfig.listRunsDelayMs = 250; // the lookup is still in flight when the user cancels
+    const controller = new AbortController();
+    const resumed = runWorkflow(reviewStep(), {}, { cwd, runId: "life-12", signal: controller.signal });
+    await until(() => lookups.some((l) => l.kind === "listRuns"), "the run to look the agent up");
+    controller.abort();
+    const r = await resumed;
+
+    assert.equal(r.status, "cancelled");
+    assert.deepEqual(cloudRunsOf("bc-1").map((x) => x.status), ["cancelled"], "the agent's run was cancelled, not left to finish unwatched");
+    assert.equal(stats.cancelled, 1);
+  } finally {
+    await crashed.end();
+  }
 });

@@ -41,6 +41,8 @@ export const costConfig: {
   cloudWaitLimitMs?: number;
   /** `Agent.listRuns` answers newest first instead of oldest first (the real API's order is not documented). */
   listNewestFirst?: boolean;
+  /** `Agent.listRuns` takes this long to answer, in ms: a lookup that is still in flight when something happens. */
+  listRunsDelayMs?: number;
   /** The next this many `Agent.listRuns` calls fail like a server that is down (503): a lookup that does not say "not found". */
   lookupFailures?: number;
   /** Holds the creation of the agents it answers for (it gets the create options) until the promise settles; `undefined` = not held. */
@@ -338,6 +340,7 @@ export const Agent = {
   /** The runs of a cloud agent, oldest first unless `costConfig.listNewestFirst` (the real API's order is not documented: callers must not depend on it). */
   async listRuns(agentId: string, _options?: any) {
     lookups.push({ kind: "listRuns", agentId });
+    if (costConfig.listRunsDelayMs) await new Promise((resolve) => setTimeout(resolve, costConfig.listRunsDelayMs));
     if (costConfig.lookupFailures) {
       costConfig.lookupFailures--;
       throw Object.assign(new CursorAgentError("service unavailable"), { status: 503, isRetryable: true });

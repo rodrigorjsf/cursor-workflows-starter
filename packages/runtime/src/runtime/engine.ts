@@ -24,7 +24,7 @@ import { type CommandOutcome, EXEC_FLUSH_MS, EXEC_LOG_MAX_CHARS, outputLog, runC
 import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedConfig, type StepOverrides, allowedSources, isModelAllowed, loadEffectiveConfig } from "../config/index.js";
 import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type OutputStream, type NewEvent, type RunStatus, type StepRef, type TurnUsage, type WorkflowEvent } from "./events.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
-import { type InterruptedCloudStep, addUsage, emptyUsage, resumeHint, withRatio } from "./projection.js";
+import { type InterruptedCloudStep, addUsage, emptyUsage, resumeHint, subtractUsage, turnTokens, withRatio } from "./projection.js";
 import { CONTENT_MAX_CHARS, RunLockedError, RunStore } from "./run-store.js";
 import type { RetentionPolicy } from "./retention.js";
 import { registerRun } from "./runs-index.js";
@@ -913,10 +913,13 @@ async function executeRun<A, R>(
     };
 
     /**
-     * The first attempt of a cloud step that an earlier execution left running takes the agent over. The log closes the dead
-     * attempt (uncharged: this one pays for the agent) and the budget stops counting the turns it had reported; the user is told.
+     * An attempt of a cloud step that an earlier execution left running has an agent now: the log closes the dead attempt, so the
+     * next resume meets the new one instead. When the attempt took the same agent over, it pays for the agent's whole usage, so
+     * the dead attempt closes uncharged and the budget stops counting the turns it had reported. When the cloud had lost the agent
+     * and a new one started, those turns were real spend that nothing else will count: the dead attempt closes with them.
      */
-    const takeOver = (interrupted: InterruptedCloudStep, attempt: number): void => {
+    const closeInterrupted = (interrupted: InterruptedCloudStep, attempt: number, sameAgent: boolean): void => {
+      const counted = interrupted.countedTokens;
       emit({
         type: "step-end",
         ...ref,
@@ -930,16 +933,17 @@ async function executeRun<A, R>(
         chargedCents: 0,
         model: o.model?.id,
         modelKey: mKey,
+        usage: sameAgent || counted.totalTokens === 0 ? undefined : counted,
         errorKind: "exception",
-        error: `the process that was executing this attempt ended before it did; attempt ${attempt} reattaches to its cloud agent ${interrupted.agentId}`,
+        error: `the process that was executing this attempt ended before it did; attempt ${attempt} ${sameAgent ? "reattached to" : "replaced"} its cloud agent ${interrupted.agentId}`,
         agentId: interrupted.agentId,
       });
-      const counted = interrupted.countedTokens;
+      if (!sameAgent) return;
       spentTokens -= counted.totalTokens;
-      addUsage(totals, { inputTokens: -counted.inputTokens, outputTokens: -counted.outputTokens, cacheReadTokens: -counted.cacheReadTokens, cacheWriteTokens: -counted.cacheWriteTokens, totalTokens: -counted.totalTokens });
+      subtractUsage(totals, counted);
       emit({
         type: "warning",
-        message: `step "${label}": reattaching to cloud agent ${interrupted.agentId}, which an earlier execution of this run left running; what the agent did while no process was watching is not in the event log, and the live token caps act only when its run ends`,
+        message: `step "${label}": reattached to cloud agent ${interrupted.agentId}, which an earlier execution of this run left running; what the agent did while no process was watching is not in the event log, and the live token caps act only when its run ends`,
       });
     };
 
@@ -966,10 +970,6 @@ async function executeRun<A, R>(
         const attemptId = randomUUID();
         const startedAt = Date.now();
         const timeoutMs = o.timeoutMs ?? 20 * 60_000;
-        if (reattach && !tookOver) {
-          takeOver(reattach, attempt);
-          tookOver = true; // the dead attempt is closed once, whatever the next attempts do
-        }
         emitStart(attemptId, attempt, false);
         const content = attemptContent(ref, attemptId);
         content.write("prompt", prompt);
@@ -990,7 +990,7 @@ async function executeRun<A, R>(
         const handle = attemptEvents(c, content, {
           turn: (t) => {
             emit({ type: "turn", ...ref, attemptId, idx: c.turns, steps: c.stepsInTurn, usage: t });
-            addUsage(turnUsage, { ...t, totalTokens: t.inputTokens + t.outputTokens }); // o cache já está no input
+            addUsage(turnUsage, turnTokens(t));
             if (t.reasoningTokens) turnUsage.reasoningTokens = (turnUsage.reasoningTokens ?? 0) + t.reasoningTokens;
             // The real SDK may report one turn per send, so this can fire only when a send ends (see #37).
             const breach = tokenBreach(step, turnUsage.totalTokens);
@@ -1000,7 +1000,12 @@ async function executeRun<A, R>(
           warning: (message) => emit({ type: "warning", message: `step "${label}": ${message}` }),
           // A cloud agent is written to the log the moment it exists: a crash from here on leaves its id behind for the resume.
           agent: (agent) => {
-            if (location === "cloud") emit({ type: "cloud-agent", ...ref, attemptId, agentId: agent.agentId, reattached: agent.reattached, snapshot: agent.snapshot });
+            if (location !== "cloud") return;
+            if (reattach && !tookOver) {
+              tookOver = true; // the dead attempt is closed once, whatever the next attempts do
+              closeInterrupted(reattach, attempt, agent.agentId === reattach.agentId);
+            }
+            emit({ type: "cloud-agent", ...ref, attemptId, agentId: agent.agentId, reattached: agent.reattached, snapshot: agent.snapshot });
           },
         });
         const onEvent = (event: AttemptEvent) => {
@@ -1064,8 +1069,8 @@ async function executeRun<A, R>(
           // Timeout/error also cost. No reading and no turns: no agent existed, so nothing was used.
           if (result.usage || turnUsage.totalTokens > 0) charge = chargeUsage(result.usage ?? { failed: "the backend reported no usage" }, turnUsage);
           const { outcome } = result;
-          // An attempt that could not even reach the interrupted agent leaves it to the next attempt; any other ending is done with it.
-          if (outcome.kind !== "error") reattach = undefined;
+          // An attempt that could not reach the interrupted agent leaves it to the next attempt; any other ending is done with it.
+          if (!result.reattachFailed) reattach = undefined;
           switch (outcome.kind) {
             case "finished":
               journal.record({ key, label, model: model.id, result: outcome.value, chargedCents: charge?.charged ?? 0, totalTokens: charge?.usage.totalTokens ?? 0 });

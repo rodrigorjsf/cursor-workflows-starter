@@ -4,7 +4,7 @@
 // Nothing here reads a file or the clock: both take the events. Neither ever carries step content: the projection looks
 // at metadata fields only, and `content` events are not read at all.
 
-import type { CloudAgentEvent, ExecEndEvent, RunStatus, WorkflowEvent } from "./events.js";
+import type { CloudAgentEvent, ExecEndEvent, RunStatus, TurnUsage, WorkflowEvent } from "./events.js";
 import { type OutcomeClass, outcomeClass } from "./outcome.js";
 import type { UsageTotals } from "./workflow.js";
 
@@ -21,6 +21,14 @@ export function addUsage(acc: UsageTotals, u: Partial<UsageTotals> | undefined):
   acc.cacheWriteTokens += u.cacheWriteTokens ?? 0;
   acc.totalTokens += u.totalTokens ?? 0;
 }
+
+/** Takes `u` away from `acc`: the undo of an `addUsage` of the same tokens. */
+export function subtractUsage(acc: UsageTotals, u: UsageTotals): void {
+  addUsage(acc, { inputTokens: -u.inputTokens, outputTokens: -u.outputTokens, cacheReadTokens: -u.cacheReadTokens, cacheWriteTokens: -u.cacheWriteTokens, totalTokens: -u.totalTokens });
+}
+
+/** A turn's tokens as totals. The cache is already in the input (measured), so the total is input + output. */
+export const turnTokens = (u: TurnUsage): UsageTotals => ({ ...u, totalTokens: u.inputTokens + u.outputTokens });
 
 export function withRatio(u: UsageTotals): UsageTotals & { cacheHitRatio: number | null } {
   // Measured on the API: inputTokens already includes cache reads and writes, and totalTokens = input + output.
@@ -53,7 +61,7 @@ export function replayLedger(events: Iterable<WorkflowEvent>): Ledger {
   for (const e of events) {
     if (e.type === "turn") {
       const tokens = unfinished.get(e.attemptId) ?? emptyUsage();
-      addUsage(tokens, { ...e.usage, totalTokens: e.usage.inputTokens + e.usage.outputTokens }); // the cache is already in the input
+      addUsage(tokens, turnTokens(e.usage));
       unfinished.set(e.attemptId, tokens);
     } else if (e.type === "step-end" && !e.cached) {
       unfinished.delete(e.attemptId);
@@ -96,7 +104,7 @@ export function interruptedCloudSteps(events: Iterable<WorkflowEvent>): Map<stri
     if (e.type === "cloud-agent") open.set(e.attemptId, e);
     else if (e.type === "turn") {
       const tokens = turns.get(e.attemptId) ?? emptyUsage();
-      addUsage(tokens, { ...e.usage, totalTokens: e.usage.inputTokens + e.usage.outputTokens });
+      addUsage(tokens, turnTokens(e.usage));
       turns.set(e.attemptId, tokens);
     } else if (e.type === "step-end" && !e.cached) {
       open.delete(e.attemptId);

@@ -35,7 +35,7 @@ import {
   type SendOptions,
   type SettingSource,
 } from "@cursor/sdk";
-import type { TurnUsage } from "./events.js";
+import type { CloudAgentEvent, TurnUsage } from "./events.js";
 import { type Capture, SUBMIT_TOOL, repromptMessage, schemaInstruction, submitResultTool } from "./structured.js";
 import type { AgentCallOptions } from "./workflow.js";
 
@@ -69,10 +69,7 @@ export interface StepOptions extends Pick<AgentCallOptions, "tools" | "disallowe
 }
 
 /** A snapshot branch of the worktree on a git remote: what a cloud agent starts from (see cloud-snapshot.ts). */
-export interface SnapshotRef {
-  remote: string;
-  branch: string;
-}
+export type SnapshotRef = NonNullable<CloudAgentEvent["snapshot"]>;
 
 /** What happens while an attempt runs. The engine counts and logs these; a backend only reports them. */
 export type AttemptEvent =
@@ -129,6 +126,11 @@ export interface AttemptResult {
   model?: string;
   /** The attempt's usage. Absent when no agent existed, so nothing was used. */
   usage?: UsageReading;
+  /**
+   * The attempt was asked to reattach to an interrupted agent (`StepOptions.reattach`) and could not reach it to say whether it
+   * is still there. The engine hands the same agent to the next attempt, rather than letting it start another one.
+   */
+  reattachFailed?: true;
 }
 
 export interface AgentBackend {
@@ -152,7 +154,7 @@ export function classifyError(err: unknown): Extract<AttemptOutcome, { kind: "er
 }
 
 /** How long an abort waits for a `send()` already in flight to hand back its run, so the run can be cancelled and awaited. */
-const SEND_GRACE_MS = 1000;
+export const SEND_GRACE_MS = 1000;
 
 /**
  * Settles with `promise`, or rejects with the signal's reason as soon as it aborts. A value that arrives after the race

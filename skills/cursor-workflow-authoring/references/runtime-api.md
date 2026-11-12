@@ -143,7 +143,7 @@ if (!tests.ok) { /* tests.exitCode, tests.timedOut, tests.tail: the last 32768 c
 - A cloud step outlives the process. The engine writes the cloud agent's id to the event log (`cloud-agent`) the moment the agent
   exists; if the process dies and the run is resumed, the step reattaches to that agent and takes the answer of the run it already
   has instead of paying for another (code that changes the step's prompt or options starts a new step, and the old agent finishes
-  unwatched). Cancelling the run cancels its cloud runs. The client stops waiting for a cloud run after two hours: the engine asks
+  unwatched). Cancelling a running run cancels its cloud runs (a run whose process already died has nothing to signal: resume it, then cancel). The client stops waiting for a cloud run after two hours: the engine asks
   the cloud, and a run still going is waited for again, so only the step's `timeoutMs` bounds a long step.
 
 ## Caps

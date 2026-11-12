@@ -13,6 +13,7 @@
 
 import { Agent, type Run, type SDKAgent } from "@cursor/sdk";
 import {
+  SEND_GRACE_MS,
   type AgentBackend,
   type AttemptEvent,
   type AttemptResult,
@@ -36,7 +37,12 @@ export interface CloudBackendOptions {
   remote: string;
   /** The run the steps belong to: part of every snapshot branch's name. */
   runId: string;
+  /** The least time between two waits on a run that is still going (default one second; tests turn it off). */
+  waitFloorMs?: number;
 }
+
+const WAIT_FLOOR_MS = 1000;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -51,16 +57,20 @@ function isGone(err: unknown): boolean {
  * or when its stream fails for good) while the run goes on in the cloud, and that handle stays failed. So an "error" answer is
  * checked with the cloud: a run that is still going (or has ended in the meantime) is looked up afresh and waited on again,
  * and only a run the cloud itself calls failed is an error. The step's own timeout and the run's cancellation still end it.
+ * A wait that gave up at once, with the run still going, is a failing client and not the two-hour limit: the next wait starts
+ * no sooner than `floorMs` after the last one, so the loop never spins on the API.
  */
-function settleCloudRun(apiKey: string | undefined, signal: AbortSignal): SettleRun {
+function settleCloudRun(apiKey: string | undefined, signal: AbortSignal, floorMs: number): SettleRun {
   return async (first) => {
     for (let run = first; ; ) {
+      const waitedAt = Date.now();
       const answer = await run.wait();
       if (answer.status !== "error" || signal.aborted) return answer;
       const fresh = await Agent.getRun(run.id, { runtime: "cloud", agentId: run.agentId, apiKey }).catch(() => undefined);
       if (!fresh) return answer; // the cloud cannot be asked: the answer stands
       if (fresh.status === "error") return fresh.wait(); // the run itself failed: the cloud's account of it
       run = fresh;
+      await sleep(floorMs - (Date.now() - waitedAt));
     }
   };
 }
@@ -74,23 +84,37 @@ interface Resumed {
 /**
  * Resumes the agent an interrupted attempt left, and finds the run it was in the middle of: the one still going, or else the
  * latest. Undefined when the cloud no longer has the agent (it never got the first message, or it was deleted): the attempt
- * then starts a new one. Any other failure rejects.
+ * then starts a new one. Any other failure rejects. A run that is cancelled while this looks the agent up cancels the run it
+ * finds: the user stopped the run, and the agent must not go on spending.
  */
 async function resumeInterrupted(o: StepOptions, agentId: string, signal: AbortSignal): Promise<Resumed | undefined> {
   const agent = await within(signal, Agent.resume(agentId, { apiKey: o.apiKey, name: o.name, model: o.model, agents: o.agents, mcpServers: o.mcpServers }), (late) => void late[Symbol.asyncDispose]().catch(() => {}));
+  const release = () => agent[Symbol.asyncDispose]().catch(() => {});
+  /** The run of `runs` to wait for: the one still going wins, then the newest by its creation time (the order of the cloud's list is not documented). */
+  const pick = (runs: Run[]) => runs.find((run) => run.status === "running") ?? runs.toSorted((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0];
+  const stop = (runs: Run[]) => {
+    const going = pick(runs);
+    return going?.status === "running" ? going.cancel().catch(() => {}) : Promise.resolve();
+  };
   try {
-    // The order of the cloud's list is not documented: the run still going wins, then the newest by its creation time.
-    const { items } = await within(signal, Agent.listRuns(agentId, { runtime: "cloud", apiKey: o.apiKey }));
-    const running = items.find((run) => run.status === "running") ?? items.toSorted((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0];
-    return { agent, running };
+    // An abort gets a short grace for the list to arrive, so the run it names is cancelled and not left to finish unwatched.
+    const { items } = await within(signal, Agent.listRuns(agentId, { runtime: "cloud", apiKey: o.apiKey }), (late) => void stop(late.items).then(release), SEND_GRACE_MS);
+    if (signal.aborted) {
+      await stop(items);
+      throw signal.reason;
+    }
+    return { agent, running: pick(items) };
   } catch (err) {
-    await agent[Symbol.asyncDispose]().catch(() => {});
+    await release();
     if (isGone(err)) return undefined;
     throw err;
   }
 }
 
-async function runCloudAttempt({ remote, runId }: CloudBackendOptions, prompt: string, o: StepOptions, signal: AbortSignal, onEvent: (event: AttemptEvent) => void): Promise<AttemptResult> {
+/** Where an attempt's agent comes from: an interrupted one, resumed, or a new one, started from the snapshot this attempt pushed. */
+type Start = ({ kind: "resumed" } & Resumed) | { kind: "fresh"; snapshot: PushedSnapshot };
+
+async function runCloudAttempt({ remote, runId, waitFloorMs = WAIT_FLOOR_MS }: CloudBackendOptions, prompt: string, o: StepOptions, signal: AbortSignal, onEvent: (event: AttemptEvent) => void): Promise<AttemptResult> {
   onEvent({
     type: "warning",
     message: `cloud agents ignore setting sources (requested: ${o.settingSources.join(", ") || "none"}): the VM loads the project, team and plugin settings it always loads`,
@@ -103,20 +127,22 @@ async function runCloudAttempt({ remote, runId }: CloudBackendOptions, prompt: s
     } catch (err) {
       if (signal.aborted) return { outcome: { kind: "aborted", reason: signal.reason } };
       // Not "gone": the agent may well be running. Starting another would pay twice, so the attempt fails and the engine reattaches again.
-      return { outcome: { ...classifyError(err), message: `could not reattach to cloud agent ${previous.agentId}: ${errorText(err)}` } };
+      return { outcome: { ...classifyError(err), message: `could not reattach to cloud agent ${previous.agentId}: ${errorText(err)}` }, reattachFailed: true };
     }
     if (!resumed) onEvent({ type: "warning", message: `cloud agent ${previous.agentId}, left by an interrupted attempt, is no longer there: starting a new one` });
   }
-  let snapshot: PushedSnapshot | undefined;
-  if (!resumed) {
+  let start: Start;
+  if (resumed) {
+    start = { kind: "resumed", ...resumed };
+  } else {
     try {
-      snapshot = await pushSnapshot({ cwd: o.cwd, remote, branch: snapshotBranch(runId), signal });
+      start = { kind: "fresh", snapshot: await pushSnapshot({ cwd: o.cwd, remote, branch: snapshotBranch(runId), signal }) };
     } catch (err) {
       return { outcome: signal.aborted ? { kind: "aborted", reason: signal.reason } : { kind: "error", reason: "other", message: `cloud snapshot: ${errorText(err)}` } };
     }
   }
   /** Where the agent of this attempt starts from. A reattached one keeps the branch the interrupted attempt pushed. */
-  const startsFrom: SnapshotRef | undefined = resumed ? previous?.snapshot : snapshot && { remote: snapshot.remote, branch: snapshot.branch };
+  const startsFrom: SnapshotRef | undefined = start.kind === "resumed" ? previous?.snapshot : { remote: start.snapshot.remote, branch: start.snapshot.branch };
   try {
     const { schema } = o;
     const check = (answer: { result?: string }): Delivery => {
@@ -127,10 +153,10 @@ async function runCloudAttempt({ remote, runId }: CloudBackendOptions, prompt: s
     return await runAttempt(
       signal,
       // The agent's event says where it starts from and whether it is one taken over: the log keeps that with the id, for a resume to clean up after it.
-      (event) => onEvent(event.type === "agent" ? { ...event, ...(startsFrom && { snapshot: startsFrom }), ...(resumed && { reattached: true as const }) } : event),
+      (event) => onEvent(event.type === "agent" ? { ...event, ...(startsFrom && { snapshot: startsFrom }), ...(start.kind === "resumed" && { reattached: true as const }) } : event),
       () =>
-        resumed
-          ? Promise.resolve(resumed.agent)
+        start.kind === "resumed"
+          ? Promise.resolve(start.agent)
           : // Never `tools`, `disallowedTools`, `systemPrompt` or `local` (custom tools, setting sources): a cloud agent rejects or ignores them.
             Agent.create({
               apiKey: o.apiKey,
@@ -138,15 +164,15 @@ async function runCloudAttempt({ remote, runId }: CloudBackendOptions, prompt: s
               model: o.model,
               agents: o.agents,
               mcpServers: o.mcpServers,
-              cloud: { repos: [{ url: cloudRepoUrl(snapshot!.remoteUrl), startingRef: snapshot!.branch }], autoCreatePR: false },
+              cloud: { repos: [{ url: cloudRepoUrl(start.snapshot.remoteUrl), startingRef: start.snapshot.branch }], autoCreatePR: false },
             }),
-      (exchange) => converse(exchange, message, { schemaRetries: o.schemaRetries, check: schema ? check : undefined, onEvent, running: resumed?.running }),
-      settleCloudRun(o.apiKey, signal),
+      (exchange) => converse(exchange, message, { schemaRetries: o.schemaRetries, check: schema ? check : undefined, onEvent, running: start.kind === "resumed" ? start.running : undefined }),
+      settleCloudRun(o.apiKey, signal, waitFloorMs),
     );
   } finally {
     // The branch this attempt pushed, and the one an interrupted attempt left (the agent it belonged to is done with it, or gone).
     const branches: Array<Pick<PushedSnapshot, "top" | "remote" | "branch">> = [];
-    if (snapshot) branches.push(snapshot);
+    if (start.kind === "fresh") branches.push(start.snapshot);
     if (previous?.snapshot) branches.push({ top: o.cwd, ...previous.snapshot });
     for (const branch of branches) {
       await deleteSnapshot(branch).catch((err: unknown) =>
