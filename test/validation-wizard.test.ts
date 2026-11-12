@@ -52,7 +52,7 @@ case "$1" in
     json=no; for a in "$@"; do [ "$a" = "--json" ] && json=yes; done
     if [ "$json" = yes ]; then cat "$FAKE_DIR/doctor.json"; else echo "[ok] Node.js: v22"; fi
     exit "\${FAKE_DOCTOR_EXIT:-0}" ;;
-  init) echo "diff --git a/x b/x"; echo "wf init: 5 arquivo(s) alterado(s)" >&2 ;;
+  init) [ "\${FAKE_INIT_EXIT:-0}" != 0 ] && exit "$FAKE_INIT_EXIT"; echo "diff --git a/x b/x"; echo "wf init: 5 arquivo(s) alterado(s)" >&2 ;;
   status) printf '{"jobId":"%s","status":"running"}\\n' "$2" ;;
 esac
 exit 0`;
@@ -122,6 +122,7 @@ const startsFive = (job: string) => [job]; // the jobId; inside the IDE the wiza
 const fiveOutsideIde = (job: string, result: string, note = "") => [job, "", result, note]; // jobId, "Cursor is back", result, note
 const fiveResumed = (result: string, note = "") => [result, note];
 const fileIssue = (yn: "y" | "n") => [yn];
+const noSandboxPrompts = [""]; // a sandbox that exists but was never opened in Cursor: only the "folder opened" pause is asked
 
 const NOTES = ["five tools listed", "answered pong", "PR opened", "still running after the restart", "cancelled in 4 s"];
 /** A whole run outside the IDE's terminal, scenarios 2 to 6 answered; `results` default to pass. */
@@ -184,6 +185,39 @@ test("it tells the person exactly what to type in the chat for each scenario, an
   assert.match(r.stdout, /openPr: true/, "scenario 4 must ask for the PR: implement-issue opens none by default");
   assert.match(r.stdout, /list_workflows[\s\S]*cancel_workflow/, "scenario 2 names the five tools");
   assert.ok(m.calls().includes(`open https://github.com/${REPO}/pulls`), "the PR page is opened for the person");
+});
+
+test("scenario 5 gives the text to paste for the job the person noted, and a job still running is not yet a pass", () => {
+  const m = machine();
+  const r = m.run(wholeRunOutside());
+
+  assert.ok(r.stdout.includes("What is the state of workflow job ab12cd34?"), "the chat text names the job");
+  assert.ok(r.stdout.includes(`wf wait ab12cd34 --cwd ${m.sandboxDir}`), "and the person can wait for the job from a terminal");
+  assert.match(r.stdout, /still running is not a pass yet/i);
+  assert.match(r.stdout, /resumeRunId/);
+  assert.ok(m.calls().includes(`wf jobs --cwd ${m.sandboxDir}`), "scenarios 4 and 6 show what wf says about the jobs");
+});
+
+test("a setup that stopped half way is picked up where it stopped: the repo is not created twice, nor its issues", () => {
+  const m = machine();
+  const broken = m.run([...start("no"), REPO, "y"], { FAKE_INIT_EXIT: "1" });
+  assert.equal(broken.status, 1, broken.out);
+  assert.match(broken.stderr, /wf init failed/);
+  assert.match(readFileSync(join(m.reportDir, "progress.env"), "utf8"), /^SANDBOX_REPO=acme-corp\/wf-sandbox-77$/m, "the repo that now exists on GitHub is remembered");
+
+  const again = m.run([...start("no"), ...noSandboxPrompts, ...doctorRead, ...asked("pass"), ...asked("pass"), ...asked("pass"), ...fiveOutsideIde("j", "pass"), ...asked("pass"), ...fileIssue("n")]);
+  assert.equal(again.status, 0, again.out);
+  const calls = m.calls();
+  assert.equal(calls.filter((c) => c.startsWith("gh repo create")).length, 1);
+  assert.equal(calls.filter((c) => c.startsWith(`gh issue create -R ${REPO}`)).length, 3, "issues 2 and 3 are created once");
+});
+
+test("a sandbox script that fails says how to start over, repo on GitHub included", () => {
+  const m = machine();
+  mkdirSync(m.sandboxDir, { recursive: true }); // the script refuses a folder that exists
+  const r = m.run([...start("no"), REPO, "y"]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /gh repo delete acme-corp\/wf-sandbox-77/);
 });
 
 test("inside the IDE's terminal: the run stops at scenario 5 (quitting Cursor ends the wizard), and a second run resumes with the earlier answers kept", () => {

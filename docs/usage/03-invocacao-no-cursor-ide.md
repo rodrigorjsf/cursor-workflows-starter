@@ -259,7 +259,7 @@ cenário 1 só vale ali, porque o IDE escolhe o próprio Node e PATH. Ele:
 
 1. confere a máquina (`wf`, `gh` logado, dependências do kit) e pergunta a versão do Cursor;
 2. cria um repositório privado descartável no GitHub, com três issues `complexity:low`, reaproveitando o
-   [`setup-sandbox-repo.sh`](../../scripts/verify/setup-sandbox-repo.sh), e roda `wf init` nele. Pede confirmação antes de criar;
+   [`setup-sandbox-repo.sh`](../../scripts/verify/setup-sandbox-repo.sh), e roda `wf init` nele. Pede confirmação antes de criar, e se parar no meio retoma de onde parou, sem criar duas vezes o repositório nem as issues;
 3. roda o `wf doctor` no repositório (cenário 1) e, para cada um dos outros cinco, diz exatamente o que digitar no chat
    e pergunta o resultado (`pass`, `fail` ou `skip`) e uma nota de uma linha;
 4. escreve o `validation-report.json`, mostra o corpo da issue e só a abre no repositório do kit depois que você confirma.
@@ -270,7 +270,7 @@ cenário 1 só vale ali, porque o IDE escolhe o próprio Node e PATH. Ele:
 | 2 | O servidor MCP está visível e habilitado | nada: abra a lista de MCP (Customize) | `workflows` ligado, com as cinco tools |
 | 3 | O `smoke` termina | `/run-workflow smoke` | o job termina com `answer: "pong"` |
 | 4 | O `implement-issue` LOW abre um PR no repositório descartável | `/run-workflow implement-issue 1`, pedindo para abrir o PR (`openPr: true`; sem isso o workflow não abre PR) | o job termina e o PR existe |
-| 5 | O run sobrevive ao reinício do Cursor | `/run-workflow implement-issue 2`; com o job rodando, feche o Cursor por completo e abra de novo | o job segue rodando ou terminou; ou falhou com `runId` e o resume termina sem repetir etapas |
+| 5 | O run sobrevive ao reinício do Cursor | `/run-workflow implement-issue 2`; com o job rodando, feche o Cursor por completo e abra de novo | o job termina mesmo com o Cursor reiniciado no meio (um job ainda rodando não é um `pass`: espere); ou falhou com `runId` e o resume termina sem repetir etapas |
 | 6 | O run cancela pelo chat | `/run-workflow implement-issue 3`; com o job rodando, peça ao chat para cancelar | o job termina `cancelled`, com o `runId` para retomar |
 
 No cenário 5, fechar o Cursor fecha o terminal dele e, com ele, o assistente. As respostas ficam em
@@ -281,7 +281,7 @@ mil tokens, em modelos que os planos incluem (o `implement-issue` LOW mediu 339 
 
 O relatório tem, por cenário, o resultado (`pass`, `fail` ou `skipped`) e a nota, mais os fatos do ambiente (SO, Node,
 versão do kit e do Cursor, se o terminal era o do IDE) e o resultado do `wf doctor`. Caminhos locais, o nome do
-repositório descartável, a conta e a máquina viram marcadores (`~`, `<sandbox-repo>`, `<owner>`, `<user>`, `<path>`), e
+repositório descartável, a conta e a máquina viram marcadores (`~`, `<sandbox-dir>`, `<kit>`, `<sandbox-repo>`, `<owner>`, `<user>`, `<host>`, `<email>`, `<path>`), e
 formatos conhecidos de segredo viram `[REDACTED]`. O critério de release (`releaseCriterionMet`) vale só com os seis em
 `pass`. `WF_KIT_REPO=dono/repo` abre a issue em outro repositório que não o de origem do kit.
 

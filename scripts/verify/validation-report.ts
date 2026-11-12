@@ -15,23 +15,23 @@ import { parseArgs } from "node:util";
 import { createRedactor } from "../../packages/runtime/src/runtime/redaction.js";
 import { isEntryPoint } from "../lib/cli.js";
 
-export type Result = "pass" | "fail" | "skipped";
+type Result = "pass" | "fail" | "skipped";
 
-export interface Scenario {
+interface Scenario {
   id: number;
   title: string;
   result: Result;
   note: string;
 }
 
-export interface DoctorCheck {
+interface DoctorCheck {
   id: string;
   status: string;
   message: string;
   hint?: string;
 }
 
-export interface Report {
+interface Report {
   schemaVersion: 1;
   createdAt: string;
   kit: { version: string | null };
@@ -42,7 +42,7 @@ export interface Report {
 }
 
 /** `KEY=value` lines; the value is everything after the first `=`. Anything else is ignored. */
-export function parseProgress(text: string): Record<string, string> {
+function parseProgress(text: string): Record<string, string> {
   const values: Record<string, string> = {};
   for (const line of text.split("\n")) {
     const m = /^([A-Z][A-Z0-9_]*)=(.*)$/.exec(line.replace(/\r$/, ""));
@@ -52,7 +52,7 @@ export function parseProgress(text: string): Record<string, string> {
 }
 
 /** What identifies the person, their account and their machine in the text the report is made of. */
-export interface Where {
+interface Where {
   sandboxRepo?: string;
   sandboxDir?: string;
   kitDir?: string;
@@ -71,14 +71,16 @@ const WINDOWS_PATH = /\b[A-Za-z]:\\[^\s"'`<>|*?]+/g;
 const POSIX_PATH = /(?<![\w.~<>/:-])\/[\w.@+%~=-]+(?:\/[\w.@+%~=-]+)+\/?/g;
 
 /** The function that anonymizes one string: credentials, then the known places and names (longest first), then any other path or email. */
-export function anonymizer(where: Where, env: NodeJS.ProcessEnv = process.env): (text: string) => string {
+function anonymizer(where: Where, env: NodeJS.ProcessEnv = process.env): (text: string) => string {
   const redactor = createRedactor({ env });
   const places: Array<[RegExp, string]> = [];
   const place = (value: string | undefined, replacement: string) => {
     if (value && value.length > 1) places.push([new RegExp(escapeRegExp(value), "g"), replacement]);
   };
+  // A bare name goes wherever it appears in what the person wrote, even as an ordinary word: privacy over prose. Four
+  // characters at least, so `dev` or `me` do not eat every sentence.
   const name = (value: string | undefined, replacement: string) => {
-    if (value && value.length >= 3) places.push([wholeWord(value), replacement]);
+    if (value && value.length >= 4) places.push([wholeWord(value), replacement]);
   };
   const [owner, repoName] = (where.sandboxRepo ?? "").split("/");
   // Longest first, so a folder inside the home is named by its own placeholder and not as a path under `~`.
@@ -100,13 +102,22 @@ export function anonymizer(where: Where, env: NodeJS.ProcessEnv = process.env): 
   };
 }
 
-/** A copy of `value` with every string inside it passed through `fn`. */
-function mapStrings<T>(value: T, fn: (text: string) => string): T {
-  if (typeof value === "string") return fn(value) as T;
-  if (Array.isArray(value)) return value.map((item) => mapStrings(item, fn)) as T;
-  if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, mapStrings(v, fn)])) as T;
-  return value;
+/**
+ * The report with `fn` applied to the text people and machines wrote: the notes, the Cursor version and what `wf doctor`
+ * said. The scenario titles and the check ids are the wizard's own words and stay as they are.
+ */
+function anonymizeFreeText(report: Report, fn: (text: string) => string): Report {
+  const { environment, doctor, scenarios } = report;
+  return {
+    ...report,
+    environment: { ...environment, cursorVersion: environment.cursorVersion === null ? null : fn(environment.cursorVersion) },
+    doctor: doctor && { ok: doctor.ok, checks: doctor.checks.map((c) => ({ ...c, message: fn(c.message), ...(c.hint === undefined ? {} : { hint: fn(c.hint) }) })) },
+    scenarios: scenarios.map((s) => ({ ...s, note: fn(s.note) })),
+  };
 }
+
+/** The release criterion of the foundation spec: "works in the Cursor IDE" means these many scenarios pass. */
+const SCENARIO_COUNT = 6;
 
 const RESULTS: Record<string, Result> = { pass: "pass", fail: "fail" };
 
@@ -145,7 +156,7 @@ function kitVersion(kitDir: string | undefined): string | null {
   }
 }
 
-export function buildReport(progress: Record<string, string>, doctorText: string | undefined, kitDir: string | undefined, now = new Date()): Report {
+function buildReport(progress: Record<string, string>, doctorText: string | undefined, kitDir: string | undefined, now = new Date()): Report {
   const scenarios = scenariosOf(progress);
   const count = (result: Result) => scenarios.filter((s) => s.result === result).length;
   const pass = count("pass");
@@ -163,19 +174,19 @@ export function buildReport(progress: Record<string, string>, doctorText: string
     },
     doctor: doctorOf(doctorText),
     scenarios,
-    summary: { pass, fail: count("fail"), skipped: count("skipped"), releaseCriterionMet: scenarios.length > 0 && pass === scenarios.length },
+    summary: { pass, fail: count("fail"), skipped: count("skipped"), releaseCriterionMet: scenarios.length === SCENARIO_COUNT && pass === SCENARIO_COUNT },
   };
 }
 
-export function issueTitle(report: Report): string {
+function issueTitle(report: Report): string {
   const { pass, fail, skipped } = report.summary;
-  return [`Cursor IDE validation: ${pass} of ${report.scenarios.length} scenarios passed`, ...(fail ? [`${fail} failed`] : []), ...(skipped ? [`${skipped} not run`] : [])].join(", ");
+  return [`Cursor IDE validation: ${pass} of ${SCENARIO_COUNT} scenarios passed`, ...(fail ? [`${fail} failed`] : []), ...(skipped ? [`${skipped} not run`] : [])].join(", ");
 }
 
 /** A table cell: one line, and a `|` that cannot close the cell. */
 const cell = (text: string) => text.replace(/\r?\n/g, "; ").replace(/\|/g, "\\|");
 
-export function issueBody(report: Report): string {
+function issueBody(report: Report): string {
   const { environment: env, doctor, scenarios, summary } = report;
   const lines = [
     "## Cursor IDE validation",
@@ -222,7 +233,7 @@ function main(argv: string[]): number {
     user: userInfo().username,
     host: hostname(),
   });
-  const report = mapStrings(buildReport(progress, values.doctor ? readFileSync(values.doctor, "utf8") : undefined, kitDir), anonymize);
+  const report = anonymizeFreeText(buildReport(progress, values.doctor ? readFileSync(values.doctor, "utf8") : undefined, kitDir), anonymize);
   const dir = resolve(values["out-dir"]);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "validation-report.json"), `${JSON.stringify(report, null, 2)}\n`);

@@ -299,21 +299,28 @@ else
   ask SANDBOX_REPO "Name of the new repository (owner/name):"
   [[ "$SANDBOX_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "Expected owner/name, got \"$SANDBOX_REPO\"."
   SANDBOX_DIR="$HOME/tmp/${SANDBOX_REPO##*/}"
-  confirm "Create the private repository $SANDBOX_REPO on GitHub, with 3 issues, and $SANDBOX_DIR here?" \
+  visibility="${GH_VISIBILITY:---private}" # the sandbox script's own default and variable
+  confirm "Create the ${visibility#--} repository $SANDBOX_REPO on GitHub, with 3 issues, and $SANDBOX_DIR here?" \
     || { say "Nothing was created. Run the wizard again when you are ready."; exit 0; }
-  # The existing script makes the repo and issue 1. If it stops half way, remove $SANDBOX_DIR before running again.
+  # The existing script makes the repo and issue 1; it refuses a folder that exists.
   bash "$HERE/setup-sandbox-repo.sh" "$SANDBOX_REPO" "$SANDBOX_DIR" \
-    || die "The sandbox script failed (above). Fix that, remove $SANDBOX_DIR if it exists, and run the wizard again."
+    || die "The sandbox script failed (above). If it got as far as creating the repository, delete it (gh repo delete $SANDBOX_REPO) and remove $SANDBOX_DIR, then run the wizard again."
+  record SANDBOX_REPO "$SANDBOX_REPO" # from here on a rerun picks the sandbox up where this stage stops
+  record SANDBOX_DIR "$SANDBOX_DIR"
+fi
+if [[ "$(_existing SANDBOX_ISSUES || true)" != yes ]]; then
   # shellcheck disable=SC2016 # backticks are Markdown here, not command substitution
   sandbox_issue "Add multiply(a, b) to src/math.js" 'Add an exported function `multiply(a, b)` to `src/math.js` that returns `a * b`, and a test for it in `test/math.test.js`. Run the suite with `npm test`.'
   # shellcheck disable=SC2016
   sandbox_issue "Add negate(a) to src/math.js" 'Add an exported function `negate(a)` to `src/math.js` that returns `-a`, and a test for it in `test/math.test.js`. Run the suite with `npm test`.'
-  say "Setting the sandbox up for the kit: wf init (it commits nothing)."
-  wf init --cwd "$SANDBOX_DIR" >/dev/null || die "wf init failed in $SANDBOX_DIR."
-  record SANDBOX_REPO "$SANDBOX_REPO"
-  record SANDBOX_DIR "$SANDBOX_DIR"
+  record SANDBOX_ISSUES yes
+fi
+say "Setting the sandbox up for the kit: wf init (it commits nothing)."
+wf init --cwd "$SANDBOX_DIR" >/dev/null || die "wf init failed in $SANDBOX_DIR. Fix that and run the wizard again: the repository and its issues are already there."
+if [[ "$(_existing SANDBOX_READY || true)" != yes ]]; then
   step "Open $SANDBOX_DIR as a folder in Cursor (File > Open Folder). Scenarios 2 to 6 happen in that window."
   pause "Press Enter when the folder is open."
+  record SANDBOX_READY yes
 fi
 
 # ── Stage 3 · scenario 1 ──────────────────────────────────────────────────
@@ -352,7 +359,7 @@ scenario_stage 3 "/run-workflow smoke finished"
 if ! keep_recorded 3; then
   step "In a new Agent chat of the sandbox window, type:"
   say "    /run-workflow smoke"
-  note "One agent step on composer-2.5, capped at 50k tokens, about 22k used."
+  note "One agent step on composer-2.5, capped at 50k tokens."
   note "Pass: the chat reports the job finished, with the answer pong."
   pause "Press Enter when the chat has answered."
   ask_choice S3_RESULT "Result: pass, fail or skip?" pass fail skip
@@ -367,6 +374,8 @@ if ! keep_recorded 4; then
   note "implement-issue opens no PR unless asked. It takes some minutes and about 340k tokens (measured: 339k)."
   pause "Press Enter when the chat reports the job finished (or failed)."
   open_url "https://github.com/$SANDBOX_REPO/pulls"
+  say "What wf reports for the jobs of the sandbox:"
+  wf jobs --cwd "$SANDBOX_DIR" || true
   say "GitHub lists these pull requests on $SANDBOX_REPO:"
   gh pr list -R "$SANDBOX_REPO" || true
   note "Pass: the job is finished and one pull request exists."
@@ -400,10 +409,17 @@ if ! keep_recorded 5; then
   if [[ -n "$S5_JOB" ]]; then
     say "What wf reports for job $S5_JOB:"
     wf status "$S5_JOB" --cwd "$SANDBOX_DIR" || true
+    step "In a new chat, type:"
+    say "    What is the state of workflow job $S5_JOB?"
+    step "To wait for the job from a terminal instead, repeat until it is no longer running:"
+    say "    wf wait $S5_JOB --cwd $SANDBOX_DIR"
+  else
+    step "In a new chat, ask for the state of the job you started (get_workflow_status)."
   fi
-  step "In a new chat, ask the chat for the state of that job (get_workflow_status)."
-  note "Pass: the job is still running or finished (it outlived Cursor), or it failed with a runId and"
-  note "/run-workflow implement-issue 2 with that resumeRunId finishes it without repeating the finished steps."
+  note "Pass: the job ends finished although Cursor was restarted while it ran. A job still running is not a pass yet: wait for it."
+  step "If it failed instead (the chat shows a runId), type:"
+  say "    /run-workflow implement-issue 2, resuming run <runId> (resumeRunId)"
+  note "Pass then: the resumed run finishes without repeating the steps that had finished."
   ask_choice S5_RESULT "Result: pass, fail or skip?" pass fail skip
   ask_note 5
 fi
@@ -417,6 +433,8 @@ if ! keep_recorded 6; then
   say "    cancel the workflow"
   note "Pass: the job ends cancelled, and the chat gives its runId (the run can be resumed)."
   pause "Press Enter when the chat has answered."
+  say "What wf reports for the jobs of the sandbox:"
+  wf jobs --cwd "$SANDBOX_DIR" || true
   ask_choice S6_RESULT "Result: pass, fail or skip?" pass fail skip
   ask_note 6
 fi
@@ -427,7 +445,7 @@ doctor_args=()
 [[ -s "$REPORT_DIR/doctor.json" ]] && doctor_args=(--doctor "$REPORT_DIR/doctor.json")
 title=$(TSX_TSCONFIG_PATH="$KIT/tsconfig.json" "$KIT/node_modules/.bin/tsx" "$HERE/validation-report.ts" \
   --progress "$ENV_FILE" --out-dir "$REPORT_DIR" --kit "$KIT" ${doctor_args[@]+"${doctor_args[@]}"}) \
-  || die "Could not build the report from $ENV_FILE."
+  || die "Could not build the report from $ENV_FILE. The node on the PATH may be too old for the kit: wf doctor says."
 say "$title"
 say "Written to $REPORT_DIR/validation-report.json (local paths and repository names are anonymized)."
 printf '\n'

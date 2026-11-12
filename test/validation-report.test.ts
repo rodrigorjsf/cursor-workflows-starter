@@ -108,6 +108,12 @@ test("the release criterion is met only when all six scenarios pass", () => {
   assert.equal(r.stdout.trim(), "Cursor IDE validation: 6 of 6 scenarios passed");
 });
 
+test("the release criterion needs all six scenarios on record: five passes out of five is not it", () => {
+  const sixth = (line: string) => !line.startsWith("S6_");
+  const r = run(`${progress([]).split("\n").filter(sixth).join("\n")}\n`);
+  assert.deepEqual(r.report.summary, { pass: 5, fail: 0, skipped: 0, releaseCriterionMet: false });
+});
+
 test("stdout is the issue title and says what did not pass", () => {
   const r = run(progress(["pass", "fail", "pass", "pass", "skip", "fail"]));
   assert.equal(r.stdout.trim(), "Cursor IDE validation: 3 of 6 scenarios passed, 2 failed, 1 not run");
@@ -173,6 +179,17 @@ test("local paths, the sandbox repo, the account and the machine never reach the
   for (const leak of [FAKE_HOME, "acme-corp", "wf-sandbox-77", "dev@example.com", "Alice", "alice", user, hostname()]) {
     assert.ok(!everything.includes(leak), `"${leak}" leaked: ${everything}`);
   }
+});
+
+test("the wizard's own words survive: a scenario title is not anonymized, even when it contains the repository's name", () => {
+  const r = run(progress([], ["", "sandbox is where it ran"], { SANDBOX_REPO: "acme-corp/sandbox" }));
+  assert.equal(r.report.scenarios[3].title, SCENARIOS[3], "the title mentions the sandbox repo in words");
+  assert.equal(r.report.scenarios[1].note, "<sandbox-repo> is where it ran", "what the person wrote is anonymized");
+});
+
+test("a name under four characters is left alone: it would eat ordinary words", () => {
+  const r = run(progress([], ["", "the abc server answered"], { SANDBOX_REPO: "me/abc" }));
+  assert.equal(r.report.scenarios[1].note, "the abc server answered");
 });
 
 test("text that is not a path survives: slash commands, one-segment paths, URLs, dates", () => {
