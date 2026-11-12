@@ -171,6 +171,9 @@ test("the setup skill's config reference names every key the config schema accep
   }
   const shipped = reference.match(/~\/\.cursor-workflows\/kit\/(packages\/runtime\/schema\/config\.schema\.json)/);
   assert.ok(shipped && existsSync(join(ROOT, shipped[1]!)), "config.md must point at the config schema in the installed kit");
+  // The schema's descriptions are pt-BR (they feed the generated docs/reference/config.md): the English skill gives each
+  // key's meaning itself, and never sends an agent to read them.
+  assert.doesNotMatch(reference, /\bdescriptions?\b/, "config.md must not send the agent to the schema's (pt-BR) descriptions");
 });
 
 test("the validate reference names what the kit ships: its scripts exist, the cheap workflow exists, and scenario 4 asks for the PR", () => {

@@ -95,20 +95,21 @@ const ADRS: Array<{ file: string; number: string; topic: RegExp[] }> = [
   { file: "docs/adr/0004-workspaces-and-claude-md-symlink.md", number: "0004", topic: [/workspaces/i, /CLAUDE\.md/, /symlink/i] },
   { file: "docs/adr/0005-cloud-backend-and-location-cap.md", number: "0005", topic: [/cloud/i, /location/i, /\bcap\b/i] },
   { file: "docs/adr/0006-cloud-steps-as-built.md", number: "0006", topic: [/cloud/i, /read-only/, /fast-forward/i, /supersedes/i] },
+  { file: "docs/adr/0007-cancel-stops-cloud-agents.md", number: "0007", topic: [/cloud/i, /read-only/, /fast-forward/i, /supersedes/i, /cancel/i] },
 ];
 
-test("part 7 lists six ADRs, one per load-bearing decision, in order", () => {
+test("part 7 lists seven ADRs, one per load-bearing decision, in order", () => {
   assert.deepEqual(
     indexPart(7),
     ADRS.map((adr) => adr.file),
   );
 });
 
-/** Every ADR on disk, not only the six: the format below binds the ones added later too. */
+/** Every ADR on disk, not only the seven: the format below binds the ones added later too. */
 const adrFiles = () => readdirSync(join(ROOT, "docs/adr")).filter((name) => /^\d{4}-.*\.md$/.test(name)).map((name) => `docs/adr/${name}`);
 
 test("every ADR is titled ADR-NNNN, names its status and records the context, the decision, the consequences and the options considered", () => {
-  assert.ok(adrFiles().length >= ADRS.length, "the six ADRs are on disk");
+  assert.ok(adrFiles().length >= ADRS.length, "the seven ADRs are on disk");
   for (const file of adrFiles()) {
     const number = /\/(\d{4})-/.exec(file)![1]!;
     const doc = parseMarkdown(read(file));
@@ -123,7 +124,7 @@ test("every ADR is titled ADR-NNNN, names its status and records the context, th
   }
 });
 
-test("each of the six ADRs is about its decision", () => {
+test("each of the seven ADRs is about its decision", () => {
   for (const adr of ADRS) for (const pattern of adr.topic) assert.match(read(adr.file), pattern, `${adr.file}: should be about ${pattern}`);
 });
 
@@ -159,5 +160,20 @@ test("a changed decision is a new ADR: ADR-0005 keeps its text and points at ADR
   const old = read("docs/adr/0005-cloud-backend-and-location-cap.md");
   assert.match(old, /^\*\*Status:\*\* superseded by ADR-0006/m);
   assert.match(old, /The config resolver rejects `cloud` on a role declared `never`, and cloud writes on a role\s+declared `read-only`/, "the original decision text");
-  assert.match(read("docs/adr/0006-cloud-steps-as-built.md"), /^\*\*Status:\*\* accepted .*supersedes \[ADR-0005\]/m);
+  assert.match(read("docs/adr/0006-cloud-steps-as-built.md"), /^\*\*Status:\*\* superseded by ADR-0007 .*supersedes \[ADR-0005\]/m);
+});
+
+test("ADR-0006's lifecycle changed, so ADR-0007 supersedes it: 0006 keeps its text, 0007 states the new cancel and resume rules", () => {
+  const old = read("docs/adr/0006-cloud-steps-as-built.md");
+  assert.match(old, /^\*\*Status:\*\* superseded by ADR-0007/m);
+  assert.match(old, /only a "not found" from the cloud\s+means the agent is gone/, "the original decision text");
+  const adr = read("docs/adr/0007-cancel-stops-cloud-agents.md");
+  assert.match(adr, /^\*\*Status:\*\* accepted .*supersedes \[ADR-0006\]/m);
+  const flat = adr.replace(/\s+/g, " ");
+  // the owner's decision (2026-11-12): one rule, whatever state the job is in
+  assert.match(flat, /Cancelling a run cancels its cloud agents, whatever state its job is in/);
+  for (const state of ["executing", "frozen", "already dead"]) assert.ok(flat.includes(state), `ADR-0007 names the ${state} job`);
+  // what the rule costs: the resume that follows pays for a new agent
+  assert.match(flat, /newest run was cancelled/, "a resume does not reattach to an agent whose run was cancelled");
+  assert.match(flat, /pays (again|for a new agent)/i);
 });

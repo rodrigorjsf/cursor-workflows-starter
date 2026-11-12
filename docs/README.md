@@ -59,7 +59,8 @@ As decisões difíceis de reverter, em inglês, uma por arquivo (`docs/adr/NNNN-
 - [7.3 · ADR-0003: Runs are detached processes](adr/0003-detached-jobs.md): `start_workflow` lança um processo destacado; o MCP server só lê o estado
 - [7.4 · ADR-0004: npm workspaces and a canonical CLAUDE.md](adr/0004-workspaces-and-claude-md-symlink.md): runtime em pacote próprio; `CLAUDE.md` canônico e `AGENTS.md` como link simbólico
 - [7.5 · ADR-0005: The cloud backend and the location cap](adr/0005-cloud-backend-and-location-cap.md): etapas na nuvem só com o teto global e a capacidade declarada pelo workflow (substituído pelo ADR-0006)
-- [7.6 · ADR-0006: Cloud steps as built](adr/0006-cloud-steps-as-built.md): o ADR-0005 como foi construído: `read-only` conferido pelo motor, o trabalho que volta por fast-forward ou não volta, `resultVia` e o reanexar sem pagar duas vezes
+- [7.6 · ADR-0006: Cloud steps as built](adr/0006-cloud-steps-as-built.md): o ADR-0005 como foi construído: `read-only` conferido pelo motor, o trabalho que volta por fast-forward ou não volta, `resultVia` e o reanexar sem pagar duas vezes (substituído pelo ADR-0007)
+- [7.7 · ADR-0007: Cancelling a run stops its cloud agents](adr/0007-cancel-stops-cloud-agents.md): o ADR-0006 com o ciclo de vida corrigido: cancelar para os cloud agents em qualquer estado do job, e o resume depois de um cancelamento cria um agente novo e paga de novo
 
 ### Parte 8 · Pesquisa
 
