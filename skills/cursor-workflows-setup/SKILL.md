@@ -13,7 +13,7 @@ If `wf` is not found, the installer's folder is probably off the PATH: run `~/.l
 to add `~/.local/bin` to their PATH. If that file or `~/.cursor-workflows/kit` is missing, the kit is not installed: the
 user installs it with the install guide, `INSTALL-AGENT.md`, in the kit's GitHub repository.
 
-The runtime's messages are in Portuguese. This skill quotes the ones it matches, in code spans.
+The runtime's messages are in English. This skill quotes the ones it matches, in code spans.
 
 Pick the task, then run its steps in order. Each step ends on a stated result.
 
