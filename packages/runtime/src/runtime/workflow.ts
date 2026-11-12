@@ -55,6 +55,14 @@ export interface WorkflowMeta {
   argsSchema?: JsonSchema;
   /** The roles of the workflow's steps. Config sets model, timeouts, retries... per role. */
   roles?: WorkflowRole[];
+  /**
+   * The workflow's own tunable settings, by name, with their code defaults. The config files tune them under
+   * `workflows.<name>.settings` (the global file, then the repo file), and the workflow reads the result from
+   * `ctx.settings`. A name not declared here is a config error, like an unknown role. A value is any JSON value that
+   * survives a copy; the kit validates the types of the settings it ships (see the config schema), not those of a
+   * workflow of your own.
+   */
+  settings?: Record<string, unknown>;
 }
 
 export interface AgentCallOptions {
@@ -116,6 +124,16 @@ export interface AgentCallOptions {
    * chamar a API. Só para etapas sem efeitos: exige `tools` com apenas tools de leitura.
    */
   memo?: boolean;
+  /**
+   * Before each retry of this step (see `retries`), put its directory (`cwd`) back as it was when the step started: the
+   * files the failed attempt created are deleted, the ones it changed are restored, and what it staged is unstaged (the
+   * same undo as a cancel, and only for a step that can write). Default: false, the retry meets what the failed attempt
+   * left. Turn it on for a step that writes in a directory no other step writes in at the same time (a worktree of its own):
+   * the undo restores the whole directory, so a parallel writer's files would go with it. A directory that is not a git
+   * repository cannot be restored: the step is retried anyway, with a warning. The failed attempt's `step-end` says
+   * `reverted: true`.
+   */
+  revertOnRetry?: boolean;
 }
 
 /** Options of one `ctx.exec` call. */
@@ -181,6 +199,12 @@ export interface WorkflowContext<A = unknown> {
   readonly runId: string;
   readonly cwd: string;
   readonly budget: Budget;
+  /**
+   * The workflow's settings (`meta.settings`) as the config resolved them for this run: the code default, or what the
+   * global file or the repo file set. Read fresh at each run start, a resume included. A copy: changing it affects no
+   * other run.
+   */
+  readonly settings: Readonly<Record<string, unknown>>;
   /** Executa uma etapa com um agente novo do Cursor SDK. Lança erro se falhar após as tentativas. */
   agent<T = string>(prompt: string, opts?: AgentCallOptions): Promise<T>;
   /** Barreira: roda tudo em paralelo e espera todos. Thunk que falha vira null. */

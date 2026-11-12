@@ -4,6 +4,18 @@
 
 ### Adicionado
 
+- **Ajustes de um workflow na configuração, e os limites do `implement-issue` entre eles.** Um workflow declara seus
+  ajustes e os padrões em `meta.settings`, lê o resultado em `ctx.settings`, e os arquivos de configuração (global,
+  depois o do repositório) os trocam em `workflows.<nome>.settings`; um nome que o workflow não declara é erro, com o
+  caminho do campo. O `run-start` e o `wf config show` trazem os ajustes em vigor (`config.settings`) e a origem de
+  cada um. O `implement-issue` declara sete: `sliceCaps` (fatias por tier, padrão LOW 1, MED 3, HIGH 5), `extraSlices`
+  (2), `fixRounds` (2), `redGreenAttempts` (2), `maxDiffChars` (40000), `labelTiers` (o mapa label → tier) e
+  `maxStepCrashes` (2). O esquema os valida e a referência da configuração (`docs/reference/config.md`, regerada por
+  `npm run docs:config`) os documenta.
+- **`revertOnRetry` em `agent()`.** Antes de cada nova tentativa de uma etapa que escreve, o motor põe o `cwd` de volta
+  como estava no começo da etapa (o mesmo desfazer do cancelamento). Opt-in: o desfazer restaura o diretório inteiro,
+  então só vale para uma etapa que escreve num diretório só dela. O `step-end` da tentativa que falhou leva
+  `reverted: true`.
 - **`ctx.exec`: comandos do workflow assíncronos, com tempo limite e registrados.** `ctx.exec(comando, args, { label,
   timeoutMs, cwd, env })` roda o comando em um processo assíncrono (o job continua respondendo a status e cancelamento
   durante um teste longo), o mata no `timeoutMs` (`SIGTERM` ao grupo de processos, `SIGKILL` dois segundos depois) e
@@ -118,6 +130,22 @@
 
 ### Mudado
 
+- **O `implement-issue` fica robusto contra três falhas e tem limites configuráveis.**
+  - **O tier vem da label mais alta.** Com `complexity:low` e `complexity:high` na mesma issue, vale HIGH, em qualquer
+    ordem das labels; antes valia a primeira que casava, e a ordem podia rebaixar uma issue difícil. Uma label com o
+    nome de um membro de `Object.prototype` (`constructor`) deixa de ser lida como um tier.
+  - **Um laço de quedas para.** Quando um resume encontra uma etapa de escrita em andamento (o processo caiu no meio
+    dela), soma uma queda a essa etapa; passado o limite (`maxStepCrashes`, 2), o run encerra com
+    `status: "step-crash-loop"` e o id da etapa, em vez de retomá-la de novo. A contagem fica no progresso do run, então
+    o resume seguinte também para; subir o limite na configuração libera. Um cancelamento no meio da etapa não conta.
+    Antes, o contador existia no progresso e nunca era lido nem incrementado.
+  - **Toda nova tentativa de uma etapa de escrita parte de uma árvore limpa.** O worktree volta ao estado de antes da
+    etapa antes de cada nova tentativa (`revertOnRetry`), não só antes da falha final: antes, o que a tentativa que
+    falhou deixou (um arquivo novo, uma edição pela metade) estava lá na seguinte e podia ir para o commit. O desfazer
+    do resume (`revertTo`) também apaga os arquivos novos que ninguém pôs no índice, que o `read-tree` deixava.
+  - **Limites em `workflows.implement-issue.settings`**: tetos de fatias por tier, fatias extras, rodadas de correção,
+    tentativas de red e green, tamanho do diff, mapa label → tier e limite de quedas. A lista e os padrões estão em
+    [`docs/reference/config.md`](docs/reference/config.md#ajustes-de-um-workflow).
 - **O `implement-issue` roda `git`, `gh` e os testes por `ctx.exec`.** Nenhum comando dele trava mais o processo: o
   status e o cancelamento respondem durante uma suíte, e cancelar mata o comando na hora. Cada suíte do laço TDD
   (`suite:baseline`, `suite:red:1`, `suite:green:1`, `suite:final`…) e cada chamada de `git` e `gh` é um nó de comando

@@ -55,6 +55,7 @@ export default defineWorkflow<{ target: string }>({
 | `ctx.phase(title)` / `ctx.log(message)` | Progress, shown by `wait_workflow` and on the CLI. |
 | `ctx.metric(name, value)` | An outcome or difficulty signal of the run, written to the `metrics` table (observability.md). |
 | `ctx.args`, `ctx.cwd`, `ctx.runId` | Input, repository and run id (the same on resume). |
+| `ctx.settings` | The workflow's own tunable settings (`meta.settings`) as the config resolved them for this run: the code default, or what the global or repo file set under `workflows.<name>.settings`. A copy; read fresh at every run start. |
 | `ctx.budget` | `remainingCents()` (`Infinity` without a cents cap), `spentCents()`, `chargedCents()`, `spentTokens()`, `usage()` (tokens by type), `maxCents`, `maxTokens`. Spend is the run's total: a resume starts from what earlier executions spent, failed attempts included. |
 
 ## `agent()` options
@@ -75,6 +76,7 @@ export default defineWorkflow<{ target: string }>({
 | `schemaRetries` | Re-prompts when the agent skips `submit_result` or sends invalid JSON. Default 2. |
 | `settingSources` | Which config layers the step loads: `"project"` (AGENTS.md, rules, skills, hooks, project MCP), `"team"`, `"mdm"`, `"user"`. Default when omitted: `["project","team","mdm"]`. Every layer adds fixed context to every call (cost.md). |
 | `memo` | Result cache across runs, keyed by prompt, model, schema, tools, context and repository state. Accepted only with read-only `tools`. |
+| `revertOnRetry` | Before each retry of a step that can write, puts `cwd` back as it was when the step started (files created are deleted, files changed are restored, the index is unstaged). Default off. Use it only when no other step writes in that directory at the same time (a worktree of the step's own): the undo restores the whole directory. In a directory that is not a git repository the retry runs anyway, with a warning. |
 | `sandbox` | Turns on the SDK's local sandbox for shell calls (Linux needs `bubblewrap`). Untested here; leave it off. |
 
 ## `exec()`: commands the workflow runs itself
@@ -115,7 +117,9 @@ if (!tests.ok) { /* tests.exitCode, tests.timedOut, tests.tail: the last 32768 c
   (`{ name, cloud, defaults?, envAliases?, description? }[]`: the named kinds of step, such as `classify` or
   `implement.low`; their names are the keys users configure under `workflows.<name>.roles`, so choose them as a public
   contract. `cloud` is `ok`, `read-only` or `never`; `defaults` holds the role's `model`, `timeoutMs`, `retries`,
-  `schemaRetries`, `settingSources`).
+  `schemaRetries`, `settingSources`), `settings` (`{ name: codeDefault }`: the workflow's own tunable limits, read
+  from `ctx.settings`; users tune them under `workflows.<name>.settings`, and a name you did not declare is a config
+  error, so choose the names as a public contract).
 - `defaults`: `model`, `timeoutMs`, `retries`, `schemaRetries`, `tools`, `sandbox`, applied to every `agent()` call that
   does not override them.
 - `budget`: `{ maxTokens?, maxCents? }`, the cap when nothing in the config sets one; an explicit `null` turns a cap off.

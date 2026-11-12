@@ -255,32 +255,39 @@ function announceRun<A>(o: {
   if (store.tornTail.journal) emit({ type: "warning", message: "the last line of the journal was incomplete (a crash in the middle of a write): its step runs again" });
 }
 
+/** What puts a write step's directory back as it was before the step. Neither function throws; each returns true when it did. */
+interface StepReverter {
+  /** The run was cancelled in the middle of the step. Once: the first call reverts, later calls share its answer. */
+  onCancel(): Promise<boolean>;
+  /** An attempt failed and the step is retried (`revertOnRetry`). Every call reverts, back to the start of the step. */
+  beforeRetry(): Promise<boolean>;
+}
+
 /** Reverts run one at a time: two steps writing in the same directory must not restore it at once. */
 class RevertQueue {
   private tail: Promise<unknown> = Promise.resolve();
 
-  /** Returns what puts a step's directory back as it was before the step (once). It never throws; true when it did. */
-  forStep(o: { writes: boolean; snapshot: Snapshot | undefined; stepCwd: string; label: string; warn: (message: string) => void }): () => Promise<boolean> {
-    let reverting: Promise<boolean> | undefined;
-    return () => {
+  forStep(o: { writes: boolean; snapshot: Snapshot | undefined; stepCwd: string; label: string; warn: (message: string) => void }): StepReverter {
+    const revert = (why: string): Promise<boolean> => {
       if (!o.writes) return Promise.resolve(false);
-      if (reverting) return reverting;
       const run = this.tail.then(async () => {
         if (!o.snapshot) {
-          o.warn(`step "${o.label}" cancelled: ${o.stepCwd} is not a git repository (or git failed), so the step's changes were not undone`);
+          o.warn(`step "${o.label}" ${why}: ${o.stepCwd} is not a git repository (or git failed), so the step's changes were not undone`);
           return false;
         }
         try {
           await revertToSnapshot(o.snapshot);
           return true;
         } catch (err) {
-          o.warn(`step "${o.label}" cancelled: could not undo the changes in ${o.stepCwd}: ${err instanceof Error ? err.message : String(err)}`);
+          o.warn(`step "${o.label}" ${why}: could not undo the changes in ${o.stepCwd}: ${err instanceof Error ? err.message : String(err)}`);
           return false;
         }
       });
       this.tail = run;
-      return (reverting = run);
+      return run;
     };
+    let cancelled: Promise<boolean> | undefined;
+    return { onCancel: () => (cancelled ??= revert("cancelled")), beforeRetry: () => revert("failed and is retried") };
   }
 }
 
@@ -856,16 +863,17 @@ async function executeRun<A, R>(
 
     await sem.acquire();
     try {
-      // A step that can write is reverted if the run is cancelled in the middle of it, so a resume meets no half-made edits.
+      // A step that can write is reverted if the run is cancelled in the middle of it, so a resume meets no half-made edits,
+      // and, when the call asks (`revertOnRetry`), before each retry, so a retry meets none of the failed attempt's.
       const writes = !isReadOnly(o.tools);
       const snapshot = writes && !signal?.aborted ? await takeSnapshot(stepCwd) : undefined;
-      const revert = reverts.forStep({ writes, snapshot, stepCwd, label, warn: (message) => emit({ type: "warning", message }) });
+      const reverter = reverts.forStep({ writes, snapshot, stepCwd, label, warn: (message) => emit({ type: "warning", message }) });
       const attempts = 1 + (o.retries ?? 1);
       let lastError = "";
       for (let attempt = 1; attempt <= attempts; attempt++) {
         if (signal?.aborted) {
           // Cancelled while queued or between attempts: this attempt never starts (no step-start). The attempts before it may have left edits.
-          if (attempt > 1) await revert();
+          if (attempt > 1) await reverter.onCancel();
           assertNotCancelled();
         }
         assertBudget();
@@ -1016,7 +1024,8 @@ async function executeRun<A, R>(
           live.delete(turnUsage); // idempotent: an attempt that never got to be charged must not keep counting
           step.tokens += turnUsage.totalTokens;
         }
-        if (cancelledBy) reverted = await revert();
+        if (cancelledBy) reverted = await reverter.onCancel();
+        else if (o.revertOnRetry && attempt < attempts) reverted = await reverter.beforeRetry();
         endEvent(false);
         if (cancelledBy) throw cancelledBy;
       }
@@ -1092,6 +1101,7 @@ async function executeRun<A, R>(
     runId,
     cwd: opts.cwd,
     budget,
+    settings: structuredClone(resolved.config.settings),
     agent: agentCall,
     exec: execCall,
     parallel: (thunks) =>

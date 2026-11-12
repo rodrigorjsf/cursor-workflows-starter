@@ -242,13 +242,14 @@ function checkMcpOverrides(overrides: LimitOverrides | undefined, issues: Config
   }
 }
 
-function checkRoleNames(input: ResolveInput, declared: string[], issues: ConfigIssue[]): void {
+/** A role or a setting that a config file names and the workflow does not declare is an error: usually a typo. */
+function checkDeclaredNames(input: ResolveInput, section: "roles" | "settings", noun: "role" | "setting", declared: string[], issues: ConfigIssue[]): void {
   const name = input.workflow.meta.name;
   for (const file of [input.global, input.repo]) {
-    for (const role of Object.keys(file?.data.workflows?.[name]?.roles ?? {})) {
-      if (declared.includes(role)) continue;
-      const known = declared.length ? `workflow ${name} declares: ${declared.join(", ")}` : `workflow ${name} declares no roles`;
-      issues.push({ ref: file!.path, path: pointerOf("workflows", name, "roles", role), message: `unknown role (${known})` });
+    for (const key of Object.keys(file?.data.workflows?.[name]?.[section] ?? {})) {
+      if (declared.includes(key)) continue;
+      const known = declared.length ? `workflow ${name} declares: ${declared.join(", ")}` : `workflow ${name} declares no ${section}`;
+      issues.push({ ref: file!.path, path: pointerOf("workflows", name, section, key), message: `unknown ${noun} (${known})` });
     }
   }
 }
@@ -257,7 +258,8 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
   const { meta, defaults, budget } = input.workflow;
   const roles = meta.roles ?? [];
   const issues: ConfigIssue[] = [];
-  checkRoleNames(input, roles.map((r) => r.name), issues);
+  checkDeclaredNames(input, "roles", "role", roles.map((r) => r.name), issues);
+  checkDeclaredNames(input, "settings", "setting", Object.keys(meta.settings ?? {}), issues);
   const entries = [
     ...(input.global ? fileEntries(input.global, "global", meta.name) : []),
     ...(input.repo ? fileEntries(input.repo, "repo", meta.name) : []),
@@ -310,6 +312,13 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
       applied: caps,
       message: "caps apply only in the global file: the repo file can tighten caps through its preferences, never loosen them; ignored",
     });
+  }
+
+  // The workflow's own settings: the code default, then each file in turn. They live apart from `cells`, whose rules (caps,
+  // chat overrides) go by the last segment of the pointer: a setting named like a limit must not meet them.
+  const settings = new Map<string, Cell>(Object.entries(meta.settings ?? {}).map(([key, value]) => [key, { value, source: fromCode }]));
+  for (const [layer, file] of [["global", input.global], ["repo", input.repo]] as const) {
+    for (const [key, value] of Object.entries(file?.data.workflows?.[meta.name]?.settings ?? {})) settings.set(key, { value, source: { layer, ref: file!.path } });
   }
 
   const dropped = new Set<string>();
@@ -418,11 +427,12 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
     roles: Object.fromEntries(roles.map((r) => [r.name, settingsOf(pointerOf("roles", r.name))])),
     labels: Object.fromEntries([...labels].map((glob) => [glob, settingsOf(pointerOf("labels", glob))])),
     execTimeoutMs: cells.get(pointerOf("execTimeoutMs"))!.value as number,
+    settings: Object.fromEntries([...settings].map(([key, cell]) => [key, cell.value])),
   };
 
   return {
     config,
-    provenance: Object.fromEntries([...cells].map(([at, cell]) => [at, cell.source])),
+    provenance: Object.fromEntries([...cells, ...[...settings].map(([key, cell]) => [pointerOf("settings", key), cell] as const)].map(([at, cell]) => [at, cell.source])),
     violations,
     stepOverrides(role, label) {
       const best = role === undefined ? [...labels].filter((g) => globMatches(g, label)).sort((a, b) => literalLength(b) - literalLength(a))[0] : undefined;

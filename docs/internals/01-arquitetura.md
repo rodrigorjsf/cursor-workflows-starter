@@ -112,6 +112,11 @@ são o que o backend local faz numa tentativa.
    do plano ("Usage limit exceeded"); o SDK marca `isRetryable: true` nos casos transitórios
    [DOC](https://cursor.com/docs/sdk/typescript#errors). O retentável espera com backoff exponencial; o não
    retentável (teto do plano) vira `BudgetExceededError`.
+   - Com `revertOnRetry: true` na chamada, antes de cada nova tentativa de uma etapa que pode escrever o motor põe o `cwd`
+     de volta como estava no começo da etapa (o mesmo desfazer do cancelamento, a partir do snapshot que a etapa já tirou),
+     e o `step-end` da tentativa que falhou leva `reverted: true`. Fora de um repositório git o desfazer não é possível: a
+     nova tentativa roda mesmo assim, com um `warning`. É opt-in porque o desfazer restaura o diretório inteiro: duas
+     etapas escrevendo no mesmo diretório ao mesmo tempo perderiam arquivos uma da outra.
    - Falha por teto de tokens (`errorKind: "budget"`, passo 3) não é repetida: o run do agente já foi cancelado e outra
      tentativa só gastaria mais.
    - Erro de conta (`plan_required`) não é repetido: vira `AccountAccessError`, que encerra o run na primeira
