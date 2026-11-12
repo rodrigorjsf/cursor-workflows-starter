@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { readKitPackage } from "./kit-version.js";
+import { kitFileUrl, readKitPackage } from "./kit-version.js";
 import { writeFileAtomic } from "./runtime/state-files.js";
 
 /** One file `wf init` changed. `before` is undefined for a new file, `after` for a deleted one. */
@@ -19,8 +19,7 @@ export interface FileChange {
 const KIT_FROM_HOME = ".cursor-workflows/kit";
 
 /** Where editors fetch the JSON Schema of the config files: raw JSON at the kit's release tag, so autocomplete matches the kit. */
-const configSchemaUrl = (version: string) =>
-  `https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v${version}/packages/runtime/schema/config.schema.json`;
+const configSchemaUrl = (version: string) => kitFileUrl("packages/runtime/schema/config.schema.json", version, "raw");
 
 type Json = Record<string, unknown>;
 

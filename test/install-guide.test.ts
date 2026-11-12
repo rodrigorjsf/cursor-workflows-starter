@@ -116,3 +116,11 @@ test("every pointer the kit writes into a repo or a config pins the package vers
     `https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/${TAG}/packages/runtime/schema/config.schema.json`,
   );
 });
+
+test("the installer clones the same repository the runtime links to, so one rename cannot leave either behind", async () => {
+  const { KIT_REPO, kitFileUrl } = await import("../packages/runtime/src/kit-version.js");
+  const installer = /default_repo="([^"]+)"/.exec(read("scripts", "install.sh"))?.[1];
+  assert.equal(installer, `https://github.com/${KIT_REPO}.git`);
+  assert.equal(kitFileUrl("INSTALL-AGENT.md", "0.3.0"), `https://github.com/${KIT_REPO}/blob/v0.3.0/INSTALL-AGENT.md`);
+  assert.equal(kitFileUrl("a/b.json", "0.3.0", "raw"), `https://raw.githubusercontent.com/${KIT_REPO}/v0.3.0/a/b.json`);
+});

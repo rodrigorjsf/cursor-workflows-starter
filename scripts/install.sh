@@ -14,6 +14,7 @@
 main() {
   set -euo pipefail
 
+  # Same repository as KIT_REPO in packages/runtime/src/kit-version.ts; test/install-guide.test.ts keeps them equal.
   local default_repo="https://github.com/rodrigorjsf/cursor-workflows-starter.git"
   local tag="" repo="$default_repo" repo_given="" mode=""
   while [ $# -gt 0 ]; do

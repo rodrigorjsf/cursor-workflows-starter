@@ -13,7 +13,7 @@ import semver from "semver";
 import type { ConfigIssue } from "./config/file.js";
 import { ConfigError, type ResolvedConfig, loadEffectiveConfig } from "./config/index.js";
 import { type CheckId, type CheckResult, type DoctorReport, fail, nodeHint, pass, reportOf } from "./doctor-report.js";
-import { kitCompatibility, readKitPackage } from "./kit-version.js";
+import { kitCompatibility, kitFileUrl, readKitPackage } from "./kit-version.js";
 import { MCP_CONFIG_FILES, type McpLaunch, type McpLaunches, readMcpLaunches } from "./mcp-launch.js";
 import { createRedactor } from "./runtime/redaction.js";
 import { loadWorkflows } from "./runtime/registry.js";
@@ -115,7 +115,7 @@ function checkDependencies(mcp: McpLaunches): CheckResult {
   }
   if (absent.length) {
     const where = kitRoot ? ` (${kitRoot})` : "";
-    return fail("dependencies", absent.join("\n"), `Rode \`npm ci\` na pasta do kit${where} para instalar as dependências. Se a pasta não existe, o kit ainda não foi instalado nesse caminho: instale-o com o guia https://github.com/rodrigorjsf/cursor-workflows-starter/blob/v${readKitPackage().version}/INSTALL-AGENT.md`);
+    return fail("dependencies", absent.join("\n"), `Rode \`npm ci\` na pasta do kit${where} para instalar as dependências. Se a pasta não existe, o kit ainda não foi instalado nesse caminho: instale-o com o guia ${kitFileUrl("INSTALL-AGENT.md", readKitPackage().version)}`);
   }
   return pass("dependencies", found.join("\n"));
 }

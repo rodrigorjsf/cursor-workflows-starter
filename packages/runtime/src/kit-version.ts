@@ -10,6 +10,18 @@ import { REPO_CONFIG_FILE, repoConfigPath } from "./config/index.js";
 
 const PACKAGE_JSON = join(import.meta.dirname, "..", "package.json");
 
+/** The kit's GitHub repository. `scripts/install.sh` repeats it (bash cannot import it); a test keeps the two equal. */
+export const KIT_REPO = "rodrigorjsf/cursor-workflows-starter";
+
+/**
+ * A file of the kit at the release tag of `version` (`v<version>`): `blob` for a page a person or agent reads, `raw` for
+ * the file itself (a JSON Schema an editor fetches).
+ */
+export function kitFileUrl(path: string, version: string, kind: "blob" | "raw" = "blob"): string {
+  const tag = `v${version}`;
+  return kind === "raw" ? `https://raw.githubusercontent.com/${KIT_REPO}/${tag}/${path}` : `https://github.com/${KIT_REPO}/blob/${tag}/${path}`;
+}
+
 export interface KitPackage {
   version: string;
   /** The Node versions the kit supports (`engines.node`), as a semver range. */
