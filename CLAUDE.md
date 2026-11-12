@@ -22,8 +22,9 @@ A runtime for **deterministic workflows** on the Cursor SDK (`@cursor/sdk`), as 
 - The repo root is the dev space: this guide, the dogfood MCP config (`.mcp.json`, `.cursor/mcp.json`), `docs/`,
   `scripts/`, repo-level tests (`test/`).
 
-The runtime resolves its own assets relative to its install location, never the repo root. The only repo it reads is
-the target repo it runs in (the cwd). Keep it that way.
+The runtime resolves its own assets relative to its install location, never the repo root. The only repo it runs in
+is the target repo (the cwd). Keep it that way. One exception, for tools beside it: the `observe` entry point finds
+runs of every repo through the global runs index (ADR-0002), reads their logs, and cancels their jobs.
 
 Workflows live in `packages/runtime/workflows/*.ts` (built in) and `.agents/workflows/*.ts` (per repo). The MCP server
 `workflows` or the CLI (`npm run wf -- ...`) runs them. Step agents read this file too (`settingSources: ["project"]`).
