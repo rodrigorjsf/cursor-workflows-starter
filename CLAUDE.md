@@ -83,3 +83,6 @@ When something fails repeatedly, when User has to re-explain, or when a workarou
 - Windows Chrome → WSL dashboard: use `127.0.0.1:4317`; `localhost` is refused.
 - Browser checks: use `chrome-devtools` MCP; `/chrome` fails over Remote Control.
 - `tsx -e` rejects top-level await: write a `.mts` file and run it.
+- Fresh worktree has no node_modules: `mise exec node@22.23.4 -- npm ci --prefer-offline`.
+- Piped `gh issue view --comments` prints only comments: use `--json body,comments`.
+- Test repos: set `core.autocrlf=false`; global git here converts line endings.
