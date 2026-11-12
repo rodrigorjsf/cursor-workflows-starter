@@ -12,9 +12,9 @@
 // and fast-forwards the local worktree to it. The snapshot commit of a worktree that had changes becomes part of the local
 // history that way (it is what the agent built on), and the worktree ends clean at the agent's tree.
 //
-// Limit: a branch left behind (the process died between the push and the deletion, or the remote refused the deletion) is not
-// swept by `wf gc` yet: see #44. One a crash left behind is deleted when the resumed run reattaches to the step's agent: the
-// event log keeps its name with the agent's id.
+// A branch left behind (the process died between the push and the deletion, or the remote refused the deletion) is swept by
+// `wf gc` (`planGc` in workflows/implement-issue/gc.ts). One a crash left behind is also deleted when the resumed run reattaches
+// to the step's agent: the event log keeps its name with the agent's id.
 
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -44,20 +44,35 @@ export interface PushedSnapshot {
   commit: string;
 }
 
+/** How a snapshot branch ends: the 8 hex digits that make two steps of a run meet on different branches. */
+const SNAPSHOT_ID = /^[0-9a-f]{8}$/;
+
 /**
- * The name of a new snapshot branch for a run: unique, so two steps (or two executions of a run) never meet on a branch. The
- * run id is made a valid ref component (a run id can be anything its caller passes): letters, digits, dots and dashes; it
- * starts with a letter or digit, has no `..`, and neither ends with a dot nor with `.lock`.
+ * A run id as it appears in a snapshot branch name. A run id can be anything its caller passes, and the name has to be a valid
+ * ref component: letters, digits, dots and dashes; it starts with a letter or digit, has no `..`, and neither ends with a dot
+ * nor with `.lock`. `wf gc` maps a branch back to its run through this same function.
  */
-export function snapshotBranch(runId: string): string {
-  const safe =
+export function snapshotRunSegment(runId: string): string {
+  return (
     runId
       .replace(/[^A-Za-z0-9._-]+/g, "-")
       .replace(/\.{2,}/g, ".")
       .replace(/^[^A-Za-z0-9]+/, "")
       .replace(/\.+$/, "")
-      .replace(/\.lock$/, "-lock") || "run";
-  return `${SNAPSHOT_BRANCH_PREFIX}${safe}/${randomUUID().slice(0, 8)}`;
+      .replace(/\.lock$/, "-lock") || "run"
+  );
+}
+
+/** The name of a new snapshot branch for a run: unique, so two steps (or two executions of a run) never meet on a branch. */
+export function snapshotBranch(runId: string): string {
+  return `${SNAPSHOT_BRANCH_PREFIX}${snapshotRunSegment(runId)}/${randomUUID().slice(0, 8)}`;
+}
+
+/** The run segment (`snapshotRunSegment` of a run id) of a branch `snapshotBranch` could have built, or undefined for any other name (one a person made, say). */
+export function snapshotBranchSegment(branch: string): string | undefined {
+  if (!branch.startsWith(SNAPSHOT_BRANCH_PREFIX)) return undefined;
+  const [segment, id, ...more] = branch.slice(SNAPSHOT_BRANCH_PREFIX.length).split("/");
+  return segment && id !== undefined && SNAPSHOT_ID.test(id) && more.length === 0 ? segment : undefined;
 }
 
 /** The first line git said on stderr, or the error's own message. */

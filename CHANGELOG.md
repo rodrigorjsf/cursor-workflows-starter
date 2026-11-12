@@ -4,6 +4,17 @@
 
 ### Adicionado
 
+- **`wf gc` varre as branches de snapshot das etapas na nuvem.** Uma etapa na nuvem apaga a sua branch
+  `wf/cloud-snapshot/<run>/<id>` quando termina, mas um crash, um `kill -9` ou um remote que recusou apagar a deixavam
+  para sempre (o gc a mantinha como uma branch de nenhum run, e ainda só olhava o `origin`). Agora `wf gc` lista essas
+  branches no remote do `cloud.remote` e remove a que pertence a um run deste repositório que nenhum processo executa e
+  cujo último evento tem mais de `gcSnapshotGraceHours` horas (ajuste novo do `implement-issue`, padrão 24: o cloud agent
+  que o processo morto iniciou pode ainda estar partindo da branch). Fica, com o motivo no plano, a de um run em execução,
+  de um run que não é deste repositório e de um run dentro da espera, e a de um run cortado no meio da etapa dona dela
+  fica por `gcFailedAfterDays` dias (o resume reanexa ao agente e traz o trabalho dessa branch). Nenhuma delas vai para a
+  busca de PR, e uma recusa do remote entra nos `errors` sem parar o resto da varredura. O plano ganhou a razão
+  `snapshot` e o `remote` de cada ação; `Commands.remoteOwnedHeads` e `deleteOwned` aceitam o remote, e
+  `cloud-snapshot.ts` exporta `snapshotRunSegment` e `snapshotBranchSegment`.
 - **Dashboard: etapas na nuvem.** Na página do run, uma etapa que rodou como cloud agent da Cursor ganha o selo **☁ cloud**
   no nó, e os detalhes (tooltip e dados acima do log da etapa) ganham a linha **Cloud agent** com o id (`bc-…`) como link
   para o agente na Cursor (`https://cursor.com/agents/<id>`), além da localização e do custo. O id vem do evento

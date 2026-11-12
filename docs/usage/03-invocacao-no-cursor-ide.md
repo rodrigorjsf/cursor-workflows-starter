@@ -85,6 +85,7 @@ Por isso `wait` usa um timeout menor que 300 s, e `start` roda destacado.
 
 `wf gc` limpa o que os runs do `implement-issue` deixam no repositório (o worktree, a branch local e a branch do origin
 de cada run) quando o PR do run foi mergeado ou fechado, ou quando o run falhou há mais de `gcFailedAfterDays` dias.
+Também varre as branches de snapshot (`wf/cloud-snapshot/<run>/<id>`) que uma etapa na nuvem deixou no remote `cloud.remote`.
 Escreve o plano no stderr antes de remover e um JSON no stdout (`remove`, `kept`, `errors`); `--dry-run` não muda nada.
 Não é automático: roda quando você o chama. Detalhes e limites em [5.1](../operating/01-governanca-e-custos.md).
 

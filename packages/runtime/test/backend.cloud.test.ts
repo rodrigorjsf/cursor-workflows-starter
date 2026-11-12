@@ -11,7 +11,7 @@ import { afterEach, beforeEach, test } from "node:test";
 import { calls, costConfig, finishCloudRun, lookups, resetCloud, script, seedCloudAgent, stats } from "@cursor/sdk";
 import type { AttemptEvent, AttemptResult, StepOptions } from "../src/runtime/backend.js";
 import { createCloudBackend } from "../src/runtime/backend-cloud.js";
-import { cloudRepoUrl } from "../src/runtime/cloud-snapshot.js";
+import { cloudRepoUrl, snapshotBranch, snapshotBranchSegment, snapshotRunSegment } from "../src/runtime/cloud-snapshot.js";
 import { agentCommits, git, remoteBranches, remoteFiles, repoWithRemote } from "./cloud-fixtures.js";
 
 let root = "";
@@ -316,6 +316,18 @@ test("a run id that is not a valid git ref name still gives a snapshot branch th
     assert.equal(outcomeOf(result).kind, "finished", `run id ${JSON.stringify(runId)}: ${JSON.stringify(outcomeOf(result))}`);
     assert.match(seen[0]!, /^wf\/cloud-snapshot\/[A-Za-z0-9][A-Za-z0-9._-]*\/[0-9a-f]{8}$/, `run id ${JSON.stringify(runId)}`);
     assert.equal(seen[0]!.includes(".."), false);
+  }
+});
+
+test("a snapshot branch names its run by the run id made safe for a ref, and only a name a cloud step builds names a run (what `wf gc` maps a branch back to a run by)", () => {
+  assert.equal(snapshotRunSegment("implement-issue-1a2b3c4d"), "implement-issue-1a2b3c4d");
+  assert.equal(snapshotRunSegment("we..ird.run."), "we.ird.run");
+  assert.equal(snapshotBranchSegment("wf/cloud-snapshot/implement-issue-1a2b3c4d/0badf00d"), "implement-issue-1a2b3c4d");
+  for (const runId of ["implement-issue-1a2b3c4d", "we..ird.run.", ".hidden", "-dash", "has space/and:colon", "ends.lock", "", "ünï"]) {
+    assert.equal(snapshotBranchSegment(snapshotBranch(runId)), snapshotRunSegment(runId), `the branch built for ${JSON.stringify(runId)} maps back to it`);
+  }
+  for (const other of ["wf/cloud-snapshot/", "wf/cloud-snapshot/run", "wf/cloud-snapshot/run/1234", "wf/cloud-snapshot/run/0badf00d/more", "wf/cloud-snapshot//0badf00d", "wf/cloud-snapshot/run/0BADF00D", "wf/issue-7/0badf00d"]) {
+    assert.equal(snapshotBranchSegment(other), undefined, other);
   }
 });
 

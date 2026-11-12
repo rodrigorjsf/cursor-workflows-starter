@@ -11,16 +11,26 @@
 // stays otherwise. The branch `wf/issue-<n>` that every run of an issue shared before runs owned theirs goes, with its
 // worktree, when its PR was merged or closed and no process executes one of those runs. The run's own state
 // (`.workflows/runs/<runId>/`, its event log and journal) stays: it is the history, and the metrics read it.
-import { existsSync, readdirSync, realpathSync, rmSync } from "node:fs";
+//
+// It also sweeps the cloud snapshot branches (`wf/cloud-snapshot/<run>/<id>`) that cloud steps push to the remote `cloud.remote`
+// names and delete when the step ends: the ones a crash, a `kill -9` or a remote that refused the deletion left behind. A snapshot
+// has no PR, so it is judged by its run (`planSnapshots`): it goes when the run is one of this repo's, no process executes it,
+// and its last event is older than the grace period (`gcSnapshotGraceHours`: a cloud agent may still be starting from the ref
+// shortly after the process died). A run cut off in the middle of the cloud step that owns the branch keeps it longer, for as long
+// as gc keeps a failed run (`gcFailedAfterDays`): a resume reattaches to that agent and a write step's work is on that branch.
+import { existsSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { SNAPSHOT_BRANCH_PREFIX, snapshotBranchSegment, snapshotRunSegment } from "../../src/runtime/cloud-snapshot.js";
 import { runCommand, toExecResult } from "../../src/runtime/command-runner.js";
+import type { WorkflowEvent } from "../../src/runtime/events.js";
 import { outcomeClass } from "../../src/runtime/outcome.js";
+import { interruptedCloudSteps } from "../../src/runtime/projection.js";
 import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn, runsDirIn, tryAcquireRunLock } from "../../src/runtime/run-store.js";
 import { type Exec, type PrState, Commands, LOCAL_GIT_TIMEOUT_MS, NETWORK_TIMEOUT_SEC, WORKFLOW_BRANCH_PREFIX, worktreeOf, worktreesDirIn } from "./commands.js";
 import { type Progress, ProgressStore } from "./tdd.js";
 
-/** Why something is cleaned up: its PR was merged or closed, or its run failed longer ago than the limit. */
-export type GcReason = "pr-merged" | "pr-closed" | "failed";
+/** Why something is cleaned up: its PR was merged or closed, its run failed longer ago than the limit, or it is a cloud snapshot branch its step never deleted. */
+export type GcReason = "pr-merged" | "pr-closed" | "failed" | "snapshot";
 
 /** The reason a PR in this state gives to clean its branch up: only a PR that is done (merged or closed) gives one. */
 const DONE_PR: Partial<Record<PrState, GcReason>> = { MERGED: "pr-merged", CLOSED: "pr-closed" };
@@ -31,6 +41,8 @@ export interface GcAction {
   /** The worktree's path, or the branch's name. */
   target: string;
   head?: string;
+  /** The remote a `remote-branch` is on. Absent: the origin. */
+  remote?: string;
   /** Set by `applyGc`. `skipped`: a process started executing the run after the plan was made, so nothing of it was touched. */
   result?: "removed" | "failed" | "skipped";
   error?: string;
@@ -38,7 +50,8 @@ export interface GcAction {
 
 /**
  * What is cleaned up for one run, or (no `runId`) for one origin branch that no run of this repo owns, or for the branch and
- * worktree every run of an issue shared before runs owned theirs (`sharedBy`: those runs, locked while it is removed).
+ * worktree every run of an issue shared before runs owned theirs (`sharedBy`: those runs, locked while it is removed). A cloud
+ * snapshot branch (`reason: "snapshot"`) is cleaned up for the run that made it: `runId`, locked while the branch is deleted.
  */
 export interface GcCleanup {
   runId?: string;
@@ -54,8 +67,8 @@ export interface GcPlan {
   /** A run that failed more days ago than this is cleaned up. */
   failedAfterDays: number;
   remove: GcCleanup[];
-  /** What still exists and is not cleaned up: a run, or an origin branch that no run owns, with why. */
-  kept: Array<{ runId?: string; branch?: string; why: string }>;
+  /** What still exists and is not cleaned up: a run, or a remote branch that no run owns (`remote`: not the origin), with why. */
+  kept: Array<{ runId?: string; branch?: string; remote?: string; why: string }>;
   /** What could not be read or asked, or (after `applyGc`) removed. */
   errors: string[];
 }
@@ -99,9 +112,11 @@ function implementIssueRuns(cwd: string, errors: string[]): Array<{ runId: strin
   return runs;
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 const ago = (ms: number) => (ms < DAY_MS ? "less than a day ago" : `${plural(Math.floor(ms / DAY_MS), "day")} ago`);
+const hoursAgo = (ms: number) => (ms < HOUR_MS ? "less than an hour ago" : ms < DAY_MS ? `${plural(Math.floor(ms / HOUR_MS), "hour")} ago` : ago(ms));
 
 /**
  * How the latest execution of the run ended, and when. An execution that never wrote its end (the process died, the machine
@@ -149,8 +164,8 @@ const SHARED_BRANCH = new RegExp(`^${WORKFLOW_BRANCH_PREFIX}issue-\\d+$`);
  * Looks at every run of the repo and decides what to remove; changes nothing. The runs are the repo's own (`.workflows/runs/`):
  * the global runs index is for tools that are not inside a repo.
  */
-export async function planGc(options: { cwd: string; commands: Commands; failedAfterDays: number }): Promise<GcPlan> {
-  const { cwd, commands, failedAfterDays } = options;
+export async function planGc(options: { cwd: string; commands: Commands; failedAfterDays: number; snapshots: SnapshotSweep }): Promise<GcPlan> {
+  const { cwd, commands, failedAfterDays, snapshots } = options;
   const now = Date.now();
   const plan: GcPlan = { repo: cwd, failedAfterDays, remove: [], kept: [], errors: [] };
   const worktreesDir = worktreesDirIn(cwd);
@@ -218,11 +233,17 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
   }
 
   await planShared(plan, commands, runs, locals, registered, remote);
+  await planSnapshots(plan, commands, snapshots, failedAfterDays, now);
 
   // The origin's `wf/` branches that none of these runs owns: made by a run in another clone, or by one whose state is gone.
   // Nothing says whether that run is still going, so only a PR that is done (merged or closed) says the branch is a leftover.
   const owned = new Set(runs.flatMap((r) => (r.progress.branch ? [r.progress.branch] : [])));
   for (const [branch, head] of remote ?? []) {
+    if (branch.startsWith(SNAPSHOT_BRANCH_PREFIX)) {
+      // A snapshot never has a PR: `planSnapshots` judges those on the remote cloud steps push to, and no other is asked about.
+      if (snapshots.remote !== "origin") plan.kept.push({ branch, why: `a cloud snapshot branch, but cloud steps push to ${snapshots.remote} (cloud.remote), and gc sweeps snapshots only there` });
+      continue;
+    }
     if (owned.has(branch) || SHARED_BRANCH.test(branch)) continue;
     try {
       const state = await commands.prState(cwd, branch);
@@ -234,6 +255,87 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
     }
   }
   return plan;
+}
+
+/** Where cloud steps push their snapshot branches, and how long gc leaves one alone after its run was last active. */
+export interface SnapshotSweep {
+  /** The remote `cloud.remote` names. */
+  remote: string;
+  /** `gcSnapshotGraceHours`. */
+  graceHours: number;
+}
+
+/** The runs of the repo by the run segment `snapshotBranch` puts in a branch name: the sanitized id says which run made the branch. */
+function runsBySegment(cwd: string): Map<string, string[]> {
+  const bySegment = new Map<string, string[]>();
+  const runsDir = runsDirIn(cwd);
+  if (!existsSync(runsDir)) return bySegment;
+  for (const entry of readdirSync(runsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const segment = snapshotRunSegment(entry.name);
+    bySegment.set(segment, [...(bySegment.get(segment) ?? []), entry.name]);
+  }
+  return bySegment;
+}
+
+/** When the run last did anything: its last event (one log holds every execution), or its directory when the log has none. */
+const lastActivity = (events: WorkflowEvent[], runDir: string): number => {
+  const at = Date.parse(events.at(-1)?.ts ?? "");
+  return Number.isFinite(at) ? at : statSync(runDir).mtimeMs;
+};
+
+/**
+ * The cloud snapshot branches of `snapshots.remote`: each is removed when it is the branch of a run of this repo that no process
+ * executes and whose last event is past the grace period, and is kept, with the reason, otherwise. Not one of them is asked
+ * about as a PR: a snapshot has none.
+ */
+async function planSnapshots(plan: GcPlan, commands: Commands, snapshots: SnapshotSweep, failedAfterDays: number, now: number): Promise<void> {
+  const { remote, graceHours } = snapshots;
+  const cwd = plan.repo;
+  let heads: Map<string, string>;
+  try {
+    heads = await commands.remoteOwnedHeads(cwd, remote, SNAPSHOT_BRANCH_PREFIX);
+  } catch (err) {
+    plan.errors.push(`the cloud snapshot branches of ${remote} cannot be listed, so none is removed: ${message(err)}`);
+    return;
+  }
+  const runs = runsBySegment(cwd);
+  for (const [branch, head] of heads) {
+    const keep = (why: string) => void plan.kept.push({ branch, remote, why });
+    const segment = snapshotBranchSegment(branch);
+    if (segment === undefined) {
+      keep(`not a name a cloud step gives its snapshot branch (${SNAPSHOT_BRANCH_PREFIX}<run>/<8 hex digits>): not touched`);
+      continue;
+    }
+    const owners = runs.get(segment) ?? [];
+    if (owners.length === 0) {
+      keep(`no run of this repo made it (there is no run ${segment} here): another clone may own it`);
+      continue;
+    }
+    if (owners.length > 1) {
+      keep(`the runs ${owners.join(" and ")} all appear as ${segment} in a branch name, so gc cannot tell which one made it`);
+      continue;
+    }
+    const runId = owners[0]!;
+    if (isRunExecuting(cwd, runId)) {
+      keep(`a process is executing run ${runId}`);
+      continue;
+    }
+    const runDir = runDirIn(cwd, runId);
+    const { events } = readEventLog(join(runDir, EVENTS_FILE), { content: false });
+    const idle = now - lastActivity(events, runDir);
+    if (idle <= graceHours * HOUR_MS) {
+      keep(`run ${runId} was last active ${hoursAgo(idle)}, and gc waits for more than ${plural(graceHours, "hour")}: a cloud agent may still be starting from it`);
+      continue;
+    }
+    // A step cut off with its agent running is resumed by reattaching to the agent, and a step that writes has its work on this branch.
+    const cutOff = [...interruptedCloudSteps(events).values()].find((step) => step.snapshot?.branch === branch);
+    if (cutOff && idle <= failedAfterDays * DAY_MS) {
+      keep(`run ${runId} was cut off in the middle of the cloud step this branch belongs to (agent ${cutOff.agentId}): a resume reattaches to the agent and takes its work from the branch, and gc waits for more than ${plural(failedAfterDays, "day")} (gcFailedAfterDays) before it gives up on the run`);
+      continue;
+    }
+    plan.remove.push({ runId, reason: "snapshot", actions: [{ kind: "remote-branch", target: branch, head, remote }], notes: [] });
+  }
 }
 
 /**
@@ -299,7 +401,7 @@ export async function applyGc(plan: GcPlan, commands: Commands): Promise<void> {
         try {
           if (action.kind === "worktree") await removeWorktree(commands, cwd, action.target);
           else if (action.kind === "local-branch") await commands.git(cwd, "branch", "-D", action.target);
-          else await commands.deleteOwned(cwd, action.target, action.head!);
+          else await commands.deleteOwned(cwd, action.target, action.head!, action.remote);
           action.result = "removed";
         } catch (err) {
           action.result = "failed";
@@ -340,18 +442,19 @@ async function removeWorktree(commands: Commands, cwd: string, worktree: string)
   await commands.git(cwd, "worktree", "prune"); // a registration whose directory is gone would keep its branch from being deleted
 }
 
-const LABEL: Record<GcAction["kind"], string> = { worktree: "worktree      ", "local-branch": "local branch  ", "remote-branch": "origin branch " };
-const REASON: Record<GcReason, string> = { "pr-merged": "PR merged", "pr-closed": "PR closed", failed: "failed long ago" };
+const LABEL: Record<GcAction["kind"], string> = { worktree: "worktree", "local-branch": "local branch", "remote-branch": "origin branch" };
+const labelOf = (a: GcAction) => (a.kind === "remote-branch" && a.remote ? `${a.remote} branch` : LABEL[a.kind]).padEnd(14);
+const REASON: Record<GcReason, string> = { "pr-merged": "PR merged", "pr-closed": "PR closed", failed: "failed long ago", snapshot: "left behind by its step" };
 
 /** The plan as a person reads it: what will go, and what stays and why. */
 export function formatPlan(plan: GcPlan): string {
   const lines = [plan.remove.length ? `wf gc: ${plural(plan.remove.length, "thing")} to clean up in ${plan.repo}` : `wf gc: nothing to clean up in ${plan.repo}`];
   for (const c of plan.remove) {
-    const what = c.runId !== undefined ? `run ${c.runId}` : c.sharedBy ? "branch the older runs of an issue shared" : "origin branch of no run here";
+    const what = c.reason === "snapshot" ? `cloud snapshot of run ${c.runId}` : c.runId !== undefined ? `run ${c.runId}` : c.sharedBy ? "branch the older runs of an issue shared" : "origin branch of no run here";
     lines.push(`  ${what} (${REASON[c.reason]})`);
-    for (const a of c.actions) lines.push(`    ${LABEL[a.kind]}${a.target}`);
+    for (const a of c.actions) lines.push(`    ${labelOf(a)}${a.target}`);
     for (const note of c.notes) lines.push(`    ${note}`);
   }
-  for (const k of plan.kept) lines.push(`  kept: ${k.runId === undefined ? `branch ${k.branch}` : `run ${k.runId}`}: ${k.why}`);
+  for (const k of plan.kept) lines.push(`  kept: ${k.runId === undefined ? `branch ${k.branch}${k.remote ? ` on ${k.remote}` : ""}` : `run ${k.runId}`}: ${k.why}`);
   return lines.join("\n") + "\n";
 }

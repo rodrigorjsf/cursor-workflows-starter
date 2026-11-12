@@ -14,8 +14,10 @@ import { createCloudBackend } from "../src/runtime/backend-cloud.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import type { WorkflowEvent } from "../src/runtime/events.js";
 import { eventLogPath, readEventLog, runDirIn } from "../src/runtime/run-store.js";
+import { applyGc, directCommands, formatPlan, planGc } from "../workflows/implement-issue/gc.js";
 import { clearConfig, configWorkflow, writeGlobalConfig } from "./config-fixtures.js";
 import { agentCommits, git, remoteBranches, repoWithRemote } from "./cloud-fixtures.js";
+import { ageRunLog } from "./run-fixtures.js";
 
 const root = join(import.meta.dirname, ".tmp", `cloud-lifecycle-${process.pid}`);
 const cwd = join(root, "repo");
@@ -170,6 +172,57 @@ test("a write step that crashed and is resumed takes its agent over and brings t
     assert.equal(readFileSync(join(cwd, "c.txt"), "utf8"), "c\n");
     assert.deepEqual(git(cwd, "log", "--format=%s").trim().split("\n"), ["agent: add c", "init"]);
     assert.deepEqual(remoteBranches(remote), [], "the branch the dead process left goes after the work is fetched");
+  } finally {
+    await crashed.end();
+  }
+});
+
+/** What `wf gc` does with the cloud snapshot branches of `remote` with its defaults: a day of grace, and a failed run kept for 14 days. */
+const gcSnapshots = async () => {
+  const commands = directCommands();
+  const plan = await planGc({ cwd, commands, failedAfterDays: 14, snapshots: { remote: "origin", graceHours: 24 } });
+  await applyGc(plan, commands);
+  return plan;
+};
+
+test("wf gc keeps the snapshot branch of a run cut off in the middle of its cloud step: the resume still needs the agent's work on it", async () => {
+  writeGlobalConfig({ caps: { allowedLocations: ["local", "cloud"] }, workflows: { cfg: { roles: { classify: { location: "cloud" } } } } });
+  const writeStep = () => configWorkflow((ctx) => ctx.agent<string>("write it", { role: "classify", label: "write", retries: 0 }));
+  const crashed = await crashWhileTheAgentRuns("life-gc", writeStep());
+  try {
+    const branch = crashed.agent.snapshot!.branch;
+    agentCommits(remote, branch, { "c.txt": "c\n" }, "agent: add c"); // the agent's work is on the snapshot branch, and nowhere else
+    const stale = "wf/cloud-snapshot/life-gc/00000000"; // a branch of an earlier step of the same run, which the remote refused to delete
+    git(cwd, "push", "-q", "origin", `HEAD:refs/heads/${stale}`);
+    ageRunLog(cwd, "life-gc", 3); // past the grace period: only the cut-off step holds the branch
+
+    const kept = await gcSnapshots();
+    assert.deepEqual(kept.errors, []);
+    assert.deepEqual(kept.remove.map((x) => x.actions.map((a) => a.target)), [[stale]], "the branch of the step that ended is swept, the one of the cut-off step is not");
+    assert.deepEqual(remoteBranches(remote), [branch], "gc left the branch");
+    assert.match(kept.kept.find((k) => k.branch === branch)?.why ?? "", /cut off in the middle of the cloud step this branch belongs to \(agent bc-1\).*reattaches/);
+    assert.match(formatPlan(kept), /kept: branch wf\/cloud-snapshot\/life-gc\/[0-9a-f]{8} on origin: run life-gc was cut off/);
+
+    finishCloudRun("bc-1", { result: "done while away" });
+    const r = await runWorkflow(writeStep(), {}, { cwd, runId: "life-gc" });
+    assert.equal(r.status, "finished", r.error);
+    assert.equal(readFileSync(join(cwd, "c.txt"), "utf8"), "c\n", "the resume still found the agent's work on the branch gc kept");
+    assert.deepEqual(remoteBranches(remote), [], "and deleted the branch itself when the step ended");
+  } finally {
+    await crashed.end();
+  }
+});
+
+test("wf gc sweeps the snapshot branch of a run that was cut off in its cloud step and never resumed, once its last event is older than gcFailedAfterDays", async () => {
+  const crashed = await crashWhileTheAgentRuns("life-gc-old");
+  try {
+    const branch = crashed.agent.snapshot!.branch;
+    ageRunLog(cwd, "life-gc-old", 30);
+
+    const plan = await gcSnapshots();
+    assert.deepEqual(plan.errors, []);
+    assert.deepEqual(plan.remove.map((x) => [x.runId, x.reason, x.actions.map((a) => [a.target, a.remote, a.result])]), [["life-gc-old", "snapshot", [[branch, "origin", "removed"]]]]);
+    assert.deepEqual(remoteBranches(remote), [], "the branch nobody will resume is gone from the remote");
   } finally {
     await crashed.end();
   }

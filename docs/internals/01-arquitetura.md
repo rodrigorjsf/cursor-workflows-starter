@@ -208,7 +208,11 @@ O contrato, além da tabela:
   a tentativa termina, de qualquer jeito que termine. Um cancelamento ou um timeout que chega com o push em andamento não o
   corta: um remote que já tem os objetos aceita a branch depois que o cliente sumiu, e um push morto deixaria uma branch que
   ninguém conhece. O push termina (o limite de rede o limita), e a limpeza da tentativa apaga a branch, então um cancelamento
-  nesse instante espera o push. O `warning` não conta como "o agente existe": o teto de tokens segue esperando o evento
+  nesse instante espera o push. Uma branch que ficou para trás (um crash, um `kill -9`, um remote que recusou apagar) é
+  varrida pelo `wf gc` (`planSnapshots`, em `workflows/implement-issue/gc.ts`): o `SNAPSHOT_BRANCH_PREFIX` e
+  `snapshotBranchSegment` (`cloud-snapshot.ts`) ligam o nome ao run, e o resto é o plano do gc (o run é deste repositório, nenhum
+  processo o executa, o último evento passou da espera `gcSnapshotGraceHours`, e uma etapa cortada no meio guarda a branch por
+  `gcFailedAfterDays`). O `warning` não conta como "o agente existe": o teto de tokens segue esperando o evento
   `agent`.
 - Uma etapa na nuvem não usa o memo. A que escreve (`writes: true`) roda ali também, desde que o papel não seja declarado
   `read-only`: o agente trabalha na própria branch de snapshot (`workOnCurrentBranch`) e commita nela, e, quando o run

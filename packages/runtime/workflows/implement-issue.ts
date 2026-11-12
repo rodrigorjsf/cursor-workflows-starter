@@ -91,7 +91,7 @@ import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import { NamedLockedError, acquireNamedLock } from "../src/runtime/run-store.js";
 import { defineWorkflow, type AgentCallOptions, type WorkflowCard } from "../src/runtime/workflow.js";
 import { buildPrBody, type PrText } from "./implement-issue/pr-body.js";
-import { CommandError, Commands, NETWORK_TIMEOUT_SEC, WORKFLOW_BRANCH_PREFIX, worktreeOf } from "./implement-issue/commands.js";
+import { CommandError, Commands, NETWORK_TIMEOUT_SEC, SNAPSHOT_GRACE_HOURS, WORKFLOW_BRANCH_PREFIX, worktreeOf } from "./implement-issue/commands.js";
 import * as P from "./implement-issue/prompts.js";
 import { AXES, AXIS_SCHEMAS, blockingAxes, blockingOf, type Axis, type ReviewReports } from "./implement-issue/review.js";
 import {
@@ -146,6 +146,8 @@ type Settings = {
   maxStepCrashes: number;
   /** `wf gc`: o run que falhou há mais dias que isto perde o worktree e as branches. Quem o lê é o `wf gc`, não o run. */
   gcFailedAfterDays: number;
+  /** `wf gc`: a branch de snapshot de uma etapa na nuvem só é varrida quando o run dela não teve evento nenhum há mais horas que isto (o agente na nuvem pode ainda estar partindo dela). Quem o lê é o `wf gc`, não o run. */
+  gcSnapshotGraceHours: number;
   /** Teto de tempo de cada rodada de testes (e do `setupCommand`), em segundos. */
   testTimeoutSec: number;
   /** Teto de tempo de cada comando de rede (`git push` e `gh`), em segundos: uma credencial pedida ou uma conexão parada falha a etapa. */
@@ -166,6 +168,7 @@ const SETTINGS: Settings = {
   },
   maxStepCrashes: 2,
   gcFailedAfterDays: 14,
+  gcSnapshotGraceHours: SNAPSHOT_GRACE_HOURS,
   testTimeoutSec: 600,
   networkTimeoutSec: NETWORK_TIMEOUT_SEC,
 };

@@ -36,7 +36,10 @@ enforced before any cloud code exists.
 - **The cloud sees a snapshot.** Before a cloud step the engine commits the worktree state to a throwaway branch under the
   workflow's prefix and pushes it to a configurable remote (default `origin`). After a write step it fetches the cloud
   agent's commits and fast-forwards the local worktree; tests keep running locally. Snapshot branches are deleted when the
-  step ends and swept by `wf gc`.
+  step ends and swept by `wf gc`. The sweep judges a branch by the run that made it (a snapshot has no PR): it goes when
+  the run is one of the repo's, no process executes it, and its last event is older than a grace period (a cloud agent
+  may still be starting from the ref after the process died); the branch of a run cut off in the middle of its cloud step
+  stays as long as gc keeps a failed run, because a resume reattaches to that agent and fetches its work from it.
 - **A write step works on the snapshot branch and its work comes back by fast-forward or not at all.** The cloud agent is
   created to work on the current branch (the snapshot branch) and told to commit there. When its run finishes the engine
   fetches the branch and moves the worktree's branch, index and working files to it, then deletes the snapshot. It refuses,
