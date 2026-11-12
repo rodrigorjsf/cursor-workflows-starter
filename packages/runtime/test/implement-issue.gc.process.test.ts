@@ -528,6 +528,17 @@ test("a snapshot branch of a run a process is executing stays, whatever the age 
   assert.deepEqual(snapshotsOn(), []);
 });
 
+test("a snapshot branch of a run whose directory has no event log stays: the log is the only record of when a run was last active", async () => {
+  mkdirSync(join(fx.repo, ".workflows", "runs", "implement-issue-no-log"), { recursive: true });
+  const branch = leaveSnapshot("implement-issue-no-log");
+
+  const r = gc();
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(snapshotsOn(), [branch]);
+  assert.deepEqual(r.out.remove, []);
+  assert.match(r.out.kept.find((k) => k.branch === branch)?.why ?? "", /run implement-issue-no-log has no event log/);
+});
+
 test("a snapshot branch of a run that starts executing between the plan and the removal is skipped, not removed", async () => {
   const d = await delivered();
   age(d.runId, 2);

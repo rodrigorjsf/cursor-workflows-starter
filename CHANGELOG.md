@@ -11,7 +11,7 @@
   cujo último evento tem mais de `gcSnapshotGraceHours` horas (ajuste novo do `implement-issue`, padrão 24: o cloud agent
   que o processo morto iniciou pode ainda estar partindo da branch). Fica, com o motivo no plano, a de um run em execução,
   de um run que não é deste repositório e de um run dentro da espera, e a de um run cortado no meio da etapa dona dela
-  fica por `gcFailedAfterDays` dias (o resume reanexa ao agente e traz o trabalho dessa branch). Nenhuma delas vai para a
+  fica por `gcFailedAfterDays` dias, e a de um run cancelado sem limite, como o próprio run (o resume reanexa ao agente e traz o trabalho dessa branch). Nenhuma delas vai para a
   busca de PR, e uma recusa do remote entra nos `errors` sem parar o resto da varredura. O plano ganhou a razão
   `snapshot` e o `remote` de cada ação; `Commands.remoteOwnedHeads` e `deleteOwned` aceitam o remote, e
   `cloud-snapshot.ts` exporta `snapshotRunSegment` e `snapshotBranchSegment`.

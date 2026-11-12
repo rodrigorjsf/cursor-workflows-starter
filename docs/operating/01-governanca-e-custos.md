@@ -114,8 +114,9 @@ contexto que as etapas carregam (`settingSources`):
   evento dele tem mais de `gcSnapshotGraceHours` horas (padrão 24, em `workflows.implement-issue.settings`: o cloud agent
   que o processo morto iniciou pode ainda estar partindo da branch, e ninguém mediu na API real quanto ele demora a lê-la).
   Fica, com o motivo no plano, a branch de um run que um processo executa, de um run que não é deste repositório (feita em
-  outro clone), de um run dentro da espera, e a de um run cortado no meio da etapa dona dela, por `gcFailedAfterDays` dias:
-  o resume reanexa ao agente e busca o trabalho de uma etapa que escreve nessa branch. `wf gc` não pergunta de PR para
+  outro clone), de um run dentro da espera, e a de um run cortado no meio da etapa dona dela, por `gcFailedAfterDays` dias
+  (a de um run cancelado, sem limite, como o próprio run): o resume reanexa ao agente e busca o trabalho de uma etapa que
+  escreve nessa branch. `wf gc` não pergunta de PR para
   nenhuma delas, e só olha o remote `cloud.remote`.
 - **Uma guarda evita que uma etapa dispare outro workflow por acidente**; ela não é uma fronteira de segurança
   (ver acima, "Workflow disparando workflow").

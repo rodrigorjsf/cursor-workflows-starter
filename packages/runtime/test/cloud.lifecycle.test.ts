@@ -13,7 +13,7 @@ import { calls, cloudRunsOf, costConfig, finishCloudRun, forgetCloudAgent, killC
 import { createCloudBackend } from "../src/runtime/backend-cloud.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import type { WorkflowEvent } from "../src/runtime/events.js";
-import { eventLogPath, readEventLog, runDirIn } from "../src/runtime/run-store.js";
+import { abortOpenRuns, eventLogPath, readEventLog, runDirIn } from "../src/runtime/run-store.js";
 import { applyGc, directCommands, formatPlan, planGc } from "../workflows/implement-issue/gc.js";
 import { clearConfig, configWorkflow, writeGlobalConfig } from "./config-fixtures.js";
 import { agentCommits, git, remoteBranches, repoWithRemote } from "./cloud-fixtures.js";
@@ -223,6 +223,25 @@ test("wf gc sweeps the snapshot branch of a run that was cut off in its cloud st
     assert.deepEqual(plan.errors, []);
     assert.deepEqual(plan.remove.map((x) => [x.runId, x.reason, x.actions.map((a) => [a.target, a.remote, a.result])]), [["life-gc-old", "snapshot", [[branch, "origin", "removed"]]]]);
     assert.deepEqual(remoteBranches(remote), [], "the branch nobody will resume is gone from the remote");
+  } finally {
+    await crashed.end();
+  }
+});
+
+test("wf gc keeps, however old, the snapshot branch of a run that was cancelled in the middle of its cloud step: gc keeps a cancelled run because it can be resumed", async () => {
+  const crashed = await crashWhileTheAgentRuns("life-gc-cancelled");
+  try {
+    const branch = crashed.agent.snapshot!.branch;
+    abortOpenRuns(() => "cancelled by a second signal", "cancelled"); // the forced stop of a job: the log ends with the run and without the step's end
+    assert.deepEqual(ofType(logOf("life-gc-cancelled"), "run-end").map((e) => e.status), ["cancelled"]);
+    assert.equal(ofType(logOf("life-gc-cancelled"), "step-end").length, 0, "the step never ended");
+    ageRunLog(cwd, "life-gc-cancelled", 60);
+
+    const plan = await gcSnapshots();
+    assert.deepEqual(plan.errors, []);
+    assert.deepEqual(plan.remove, []);
+    assert.deepEqual(remoteBranches(remote), [branch]);
+    assert.match(plan.kept.find((k) => k.branch === branch)?.why ?? "", /run life-gc-cancelled was cancelled in the middle of the cloud step this branch belongs to \(agent bc-1\).*can be resumed/);
   } finally {
     await crashed.end();
   }

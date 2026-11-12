@@ -54,6 +54,9 @@ function failureMessage(line: string, r: ExecResult, timeoutMs: number | undefin
   return `${line} ${r.exitCode === null ? "was killed" : `exited with code ${r.exitCode}`}${output ? `: ${output}` : ""}`;
 }
 
+/** The remote the workflow pushes its branches to, and the default of the others its commands take. */
+export const ORIGIN = "origin";
+
 /** Every branch the workflow creates starts with this, and it force-pushes no other (`Commands.pushOwned`). */
 export const WORKFLOW_BRANCH_PREFIX = "wf/";
 
@@ -126,7 +129,7 @@ export class Commands {
    * Every branch `remote` (the origin by default) has under `prefix` (the workflow's own by default), by name, with the commit each
    * points at. A network command. Empty when the repository has no such remote: there is no remote branch to find.
    */
-  async remoteOwnedHeads(cwd: string, remote = "origin", prefix = WORKFLOW_BRANCH_PREFIX): Promise<Map<string, string>> {
+  async remoteOwnedHeads(cwd: string, remote = ORIGIN, prefix = WORKFLOW_BRANCH_PREFIX): Promise<Map<string, string>> {
     if (!(await this.gitIs(cwd, "config", "--get", `remote.${remote}.url`))) return new Map();
     const out = await this.succeedRead("git", ["ls-remote", "--heads", remote, `refs/heads/${prefix}*`], cwd, this.timeouts.networkMs);
     const heads = new Map<string, string>();
@@ -141,7 +144,7 @@ export class Commands {
    * Deletes `branch` from `remote` (the origin by default), but only if it still points at `expected` (a lease, like `pushOwned`):
    * a commit pushed since is not deleted. Like the push, it is restricted to the branches the workflow owns.
    */
-  async deleteOwned(cwd: string, branch: string, expected: string, remote = "origin"): Promise<void> {
+  async deleteOwned(cwd: string, branch: string, expected: string, remote = ORIGIN): Promise<void> {
     assertOwned(branch, `delete ${branch} from ${remote}`, "deletes");
     await this.push(cwd, `--force-with-lease=${branch}:${expected}`, remote, `:refs/heads/${branch}`);
   }

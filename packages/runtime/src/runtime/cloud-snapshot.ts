@@ -13,7 +13,7 @@
 // history that way (it is what the agent built on), and the worktree ends clean at the agent's tree.
 //
 // A branch left behind (the process died between the push and the deletion, or the remote refused the deletion) is swept by
-// `wf gc` (`planGc` in workflows/implement-issue/gc.ts). One a crash left behind is also deleted when the resumed run reattaches
+// `wf gc` (`planSnapshots` in workflows/implement-issue/gc.ts). One a crash left behind is also deleted when the resumed run reattaches
 // to the step's agent: the event log keeps its name with the agent's id.
 
 import { execFile } from "node:child_process";

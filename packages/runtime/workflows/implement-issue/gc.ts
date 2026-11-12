@@ -17,8 +17,9 @@
 // has no PR, so it is judged by its run (`planSnapshots`): it goes when the run is one of this repo's, no process executes it,
 // and its last event is older than the grace period (`gcSnapshotGraceHours`: a cloud agent may still be starting from the ref
 // shortly after the process died). A run cut off in the middle of the cloud step that owns the branch keeps it longer, for as long
-// as gc keeps a failed run (`gcFailedAfterDays`): a resume reattaches to that agent and a write step's work is on that branch.
-import { existsSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
+// as gc keeps a failed run (`gcFailedAfterDays`), and for ever when the run was cancelled, which gc keeps too: a resume reattaches to
+// that agent and a write step's work is on that branch.
+import { existsSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { SNAPSHOT_BRANCH_PREFIX, snapshotBranchSegment, snapshotRunSegment } from "../../src/runtime/cloud-snapshot.js";
 import { runCommand, toExecResult } from "../../src/runtime/command-runner.js";
@@ -26,7 +27,7 @@ import type { WorkflowEvent } from "../../src/runtime/events.js";
 import { outcomeClass } from "../../src/runtime/outcome.js";
 import { interruptedCloudSteps } from "../../src/runtime/projection.js";
 import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn, runsDirIn, tryAcquireRunLock } from "../../src/runtime/run-store.js";
-import { type Exec, type PrState, Commands, LOCAL_GIT_TIMEOUT_MS, NETWORK_TIMEOUT_SEC, WORKFLOW_BRANCH_PREFIX, worktreeOf, worktreesDirIn } from "./commands.js";
+import { type Exec, type PrState, Commands, LOCAL_GIT_TIMEOUT_MS, NETWORK_TIMEOUT_SEC, ORIGIN, WORKFLOW_BRANCH_PREFIX, worktreeOf, worktreesDirIn } from "./commands.js";
 import { type Progress, ProgressStore } from "./tdd.js";
 
 /** Why something is cleaned up: its PR was merged or closed, its run failed longer ago than the limit, or it is a cloud snapshot branch its step never deleted. */
@@ -96,12 +97,23 @@ const normal = (path: string) => {
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** The runs of the repo that have a progress file. A run with no (or an unreadable) progress file is not an implement-issue run. */
-function implementIssueRuns(cwd: string, errors: string[]): Array<{ runId: string; progress: Progress }> {
+/** The ids of the repo's runs: the directories of `.workflows/runs/`. */
+function runIdsOf(cwd: string): string[] {
   const runsDir = runsDirIn(cwd);
   if (!existsSync(runsDir)) return [];
+  return readdirSync(runsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+}
+
+/** The events of a run's log, in order, without the `content` ones (the bulk of a log, which gc never reads). */
+const runEvents = (cwd: string, runId: string): WorkflowEvent[] => readEventLog(join(runDirIn(cwd, runId), EVENTS_FILE), { content: false }).events;
+
+/** The runs of the repo that have a progress file. A run with no (or an unreadable) progress file is not an implement-issue run. */
+function implementIssueRuns(cwd: string, errors: string[]): Array<{ runId: string; progress: Progress }> {
   const runs: Array<{ runId: string; progress: Progress }> = [];
-  for (const runId of readdirSync(runsDir).sort()) {
+  for (const runId of runIdsOf(cwd)) {
     try {
       const store = new ProgressStore(cwd, runId);
       if (existsSync(store.file)) runs.push({ runId, progress: store.data });
@@ -122,8 +134,7 @@ const hoursAgo = (ms: number) => (ms < HOUR_MS ? "less than an hour ago" : ms < 
  * How the latest execution of the run ended, and when. An execution that never wrote its end (the process died, the machine
  * went down) counts as failed, at its last event: that is what `wf status` calls it. Undefined when the log has no execution.
  */
-function lastEnd(cwd: string, runId: string): { how: "failed" | "cancelled" | "other"; at: number } | undefined {
-  const { events } = readEventLog(join(runDirIn(cwd, runId), EVENTS_FILE), { content: false });
+function lastEnd(events: WorkflowEvent[]): { how: "failed" | "cancelled" | "other"; at: number } | undefined {
   const start = events.findLastIndex((e) => e.type === "run-start");
   if (start < 0) return undefined;
   const end = events.slice(start).find((e) => e.type === "run-end");
@@ -211,7 +222,7 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
       plan.errors.push(`run ${runId}: the state of its PR cannot be read, so it is kept: ${message(err)}`);
       continue;
     }
-    const end = lastEnd(cwd, runId);
+    const end = lastEnd(runEvents(cwd, runId));
     const failedFor = end?.how === "failed" ? now - end.at : undefined;
     const failedLongAgo = failedFor !== undefined && failedFor > failedAfterDays * DAY_MS;
     const reason: GcReason | undefined = (state && DONE_PR[state]) ?? (failedLongAgo ? "failed" : undefined);
@@ -233,7 +244,7 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
   }
 
   await planShared(plan, commands, runs, locals, registered, remote);
-  await planSnapshots(plan, commands, snapshots, failedAfterDays, now);
+  await planSnapshots(plan, commands, snapshots, now);
 
   // The origin's `wf/` branches that none of these runs owns: made by a run in another clone, or by one whose state is gone.
   // Nothing says whether that run is still going, so only a PR that is done (merged or closed) says the branch is a leftover.
@@ -241,7 +252,7 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
   for (const [branch, head] of remote ?? []) {
     if (branch.startsWith(SNAPSHOT_BRANCH_PREFIX)) {
       // A snapshot never has a PR: `planSnapshots` judges those on the remote cloud steps push to, and no other is asked about.
-      if (snapshots.remote !== "origin") plan.kept.push({ branch, why: `a cloud snapshot branch, but cloud steps push to ${snapshots.remote} (cloud.remote), and gc sweeps snapshots only there` });
+      if (snapshots.remote !== ORIGIN) plan.kept.push({ branch, why: `a cloud snapshot branch, but cloud steps push to ${snapshots.remote} (cloud.remote), and gc sweeps snapshots only there` });
       continue;
     }
     if (owned.has(branch) || SHARED_BRANCH.test(branch)) continue;
@@ -268,28 +279,19 @@ export interface SnapshotSweep {
 /** The runs of the repo by the run segment `snapshotBranch` puts in a branch name: the sanitized id says which run made the branch. */
 function runsBySegment(cwd: string): Map<string, string[]> {
   const bySegment = new Map<string, string[]>();
-  const runsDir = runsDirIn(cwd);
-  if (!existsSync(runsDir)) return bySegment;
-  for (const entry of readdirSync(runsDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const segment = snapshotRunSegment(entry.name);
-    bySegment.set(segment, [...(bySegment.get(segment) ?? []), entry.name]);
+  for (const runId of runIdsOf(cwd)) {
+    const segment = snapshotRunSegment(runId);
+    bySegment.set(segment, [...(bySegment.get(segment) ?? []), runId]);
   }
   return bySegment;
 }
-
-/** When the run last did anything: its last event (one log holds every execution), or its directory when the log has none. */
-const lastActivity = (events: WorkflowEvent[], runDir: string): number => {
-  const at = Date.parse(events.at(-1)?.ts ?? "");
-  return Number.isFinite(at) ? at : statSync(runDir).mtimeMs;
-};
 
 /**
  * The cloud snapshot branches of `snapshots.remote`: each is removed when it is the branch of a run of this repo that no process
  * executes and whose last event is past the grace period, and is kept, with the reason, otherwise. Not one of them is asked
  * about as a PR: a snapshot has none.
  */
-async function planSnapshots(plan: GcPlan, commands: Commands, snapshots: SnapshotSweep, failedAfterDays: number, now: number): Promise<void> {
+async function planSnapshots(plan: GcPlan, commands: Commands, snapshots: SnapshotSweep, now: number): Promise<void> {
   const { remote, graceHours } = snapshots;
   const cwd = plan.repo;
   let heads: Map<string, string>;
@@ -321,17 +323,25 @@ async function planSnapshots(plan: GcPlan, commands: Commands, snapshots: Snapsh
       keep(`a process is executing run ${runId}`);
       continue;
     }
-    const runDir = runDirIn(cwd, runId);
-    const { events } = readEventLog(join(runDir, EVENTS_FILE), { content: false });
-    const idle = now - lastActivity(events, runDir);
+    // The log is the one source of when a run last did anything (ADR-0002): a run with no event gives gc nothing to wait on, so it stays.
+    const events = runEvents(cwd, runId);
+    const lastEvent = Date.parse(events.at(-1)?.ts ?? "");
+    if (!Number.isFinite(lastEvent)) {
+      keep(`run ${runId} has no event log, so gc cannot tell when it was last active`);
+      continue;
+    }
+    const idle = now - lastEvent;
     if (idle <= graceHours * HOUR_MS) {
       keep(`run ${runId} was last active ${hoursAgo(idle)}, and gc waits for more than ${plural(graceHours, "hour")}: a cloud agent may still be starting from it`);
       continue;
     }
     // A step cut off with its agent running is resumed by reattaching to the agent, and a step that writes has its work on this branch.
+    // The run is given up on like gc gives up on a failed one; a cancelled run is never given up on: gc keeps it because it can be resumed.
     const cutOff = [...interruptedCloudSteps(events).values()].find((step) => step.snapshot?.branch === branch);
-    if (cutOff && idle <= failedAfterDays * DAY_MS) {
-      keep(`run ${runId} was cut off in the middle of the cloud step this branch belongs to (agent ${cutOff.agentId}): a resume reattaches to the agent and takes its work from the branch, and gc waits for more than ${plural(failedAfterDays, "day")} (gcFailedAfterDays) before it gives up on the run`);
+    const cancelled = lastEnd(events)?.how === "cancelled";
+    if (cutOff && (cancelled || idle <= plan.failedAfterDays * DAY_MS)) {
+      const wait = cancelled ? "it was cancelled, and a cancelled run can be resumed" : `gc waits for more than ${plural(plan.failedAfterDays, "day")} (gcFailedAfterDays) before it gives up on the run`;
+      keep(`run ${runId} was ${cancelled ? "cancelled" : "cut off"} in the middle of the cloud step this branch belongs to (agent ${cutOff.agentId}): a resume reattaches to the agent and takes its work from the branch, and ${wait}`);
       continue;
     }
     plan.remove.push({ runId, reason: "snapshot", actions: [{ kind: "remote-branch", target: branch, head, remote }], notes: [] });
