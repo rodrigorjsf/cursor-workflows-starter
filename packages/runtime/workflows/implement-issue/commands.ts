@@ -50,6 +50,11 @@ function failureMessage(line: string, r: ExecResult, timeoutMs: number): string 
 /** Every branch the workflow creates starts with this, and it force-pushes no other (`Commands.pushOwned`). */
 export const WORKFLOW_BRANCH_PREFIX = "wf/";
 
+/** Throws unless `branch` is one the workflow owns: it never force-pushes or deletes any other. */
+function assertOwned(branch: string, action: string, verb: string): void {
+  if (!branch.startsWith(WORKFLOW_BRANCH_PREFIX)) throw new Error(`refusing to ${action}: the workflow only ${verb} branches under ${WORKFLOW_BRANCH_PREFIX}`);
+}
+
 /** A command's output is read whole, but not without limit: this is what the old synchronous calls allowed (`maxBuffer`). */
 const MAX_STDOUT_BYTES = 64 * 1024 * 1024;
 
@@ -100,7 +105,7 @@ export class Commands {
    * refuses ("stale info") and the push fails.
    */
   async pushOwned(cwd: string, branch: string, expected: string | undefined): Promise<void> {
-    if (!branch.startsWith(WORKFLOW_BRANCH_PREFIX)) throw new Error(`refusing to force-push ${branch}: the workflow only pushes branches under ${WORKFLOW_BRANCH_PREFIX}`);
+    assertOwned(branch, `force-push ${branch}`, "pushes");
     await this.push(cwd, `--force-with-lease=${branch}:${expected ?? ""}`, "-u", "origin", branch);
   }
 
@@ -124,7 +129,7 @@ export class Commands {
    * since is not deleted. Like the push, it is restricted to the branches the workflow owns.
    */
   async deleteOwned(cwd: string, branch: string, expected: string): Promise<void> {
-    if (!branch.startsWith(WORKFLOW_BRANCH_PREFIX)) throw new Error(`refusing to delete ${branch} from the origin: the workflow only deletes branches under ${WORKFLOW_BRANCH_PREFIX}`);
+    assertOwned(branch, `delete ${branch} from the origin`, "deletes");
     await this.push(cwd, `--force-with-lease=${branch}:${expected}`, "origin", `:refs/heads/${branch}`);
   }
 
