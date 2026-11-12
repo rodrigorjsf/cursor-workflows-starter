@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildRunGraph } from "../run-view/run-graph.js";
-import { headerStatus, offeredActions } from "../run-view/run-status.js";
+import { headerStatus, offeredActions, runElapsed } from "../run-view/run-status.js";
 import { cloudAgent, phase, runStart, stamp, step, stepEnd, stepStart, type Draft } from "./run-log.js";
 
 const DEAD_ERROR = 'the process executing the run ended without finishing it; relaunch with resumeRunId="wf-aaaa0001"';
@@ -55,4 +55,13 @@ test("a run whose process died with a cloud agent still working offers to cancel
   assert.deepEqual(offeredActions("failed", graphOf(deadLocal)), { cancelRun: false, leftCloudAgents: [] }, "no agent in the cloud");
   assert.deepEqual(offeredActions("running", graphOf(deadInCloud, false)), { cancelRun: true, leftCloudAgents: [] }, "a live process cancels its own agents");
   assert.deepEqual(offeredActions(undefined, graphOf(deadInCloud)), { cancelRun: false, leftCloudAgents: [] }, "nothing before the API answers");
+});
+
+test("the header's duration follows the Runs table's rule: to the run-end, to now while it runs, and none for a run over without a run-end", () => {
+  const start = "2026-01-10T10:00:00.000Z";
+  const now = Date.parse("2026-01-10T10:05:00.000Z");
+  assert.equal(runElapsed({ startedAt: start, endedAt: "2026-01-10T10:01:00.000Z" }, true, now), 60_000, "a run that ended");
+  assert.equal(runElapsed({ startedAt: start }, false, now), 300_000, "a live run, or a replay part-way through, runs to now");
+  assert.equal(runElapsed({ startedAt: start }, true, now), undefined, "a run whose process died did not record its end: the Runs table writes — for it");
+  assert.equal(runElapsed({}, false, now), undefined, "no start yet");
 });

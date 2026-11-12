@@ -25,6 +25,11 @@ export function boundsOf(boxes: Box[]): Box {
   return { x, y, width: Math.max(...boxes.map((b) => b.x + b.width)) - x, height: Math.max(...boxes.map((b) => b.y + b.height)) - y };
 }
 
+/** Red stub: never pans. */
+export function panTarget(_box: Box, _viewport: { x: number; y: number; zoom: number }, _pane: { width: number; height: number }): { x: number; y: number } | undefined {
+  return undefined;
+}
+
 /**
  * How to frame the run in a pane of `pane` pixels: all of it when that stays readable; otherwise as many nodes as fit at a
  * readable zoom around a focus, the nearest first. The focus is the node whose log is open; else, in a run that is over, the

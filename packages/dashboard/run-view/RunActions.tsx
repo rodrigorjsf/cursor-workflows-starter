@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { copyText } from "./clipboard.js";
 import { ARGS_PLACEHOLDER, canResume, resumeCommand } from "./resume-command.js";
-import { cancelRun } from "./run-actions.js";
+import { cancelResult, cancelRun } from "./run-actions.js";
 import type { OfferedActions } from "./run-status.js";
 import type { ApiStatus, RunInfo } from "./use-run-events.js";
 
@@ -20,9 +20,6 @@ export interface RunActionsProps {
   /** Asks the feed to look at the run's status now. */
   onChanged(): void;
 }
-
-/** The server's sentence, as a sentence: a capital first letter and a full stop. */
-const sentence = (text: string): string => `${text.charAt(0).toUpperCase()}${text.slice(1)}${/[.!?]$/.test(text) ? "" : "."}`;
 
 export function RunActions({ runId, status, offered, info, argsHash, onChanged }: RunActionsProps) {
   const [cancel, setCancel] = useState<CancelState>({ step: "idle" });
@@ -41,9 +38,7 @@ export function RunActions({ runId, status, offered, info, argsHash, onChanged }
     setCancel({ step: "sending" });
     const outcome = await cancelRun(runId);
     onChanged();
-    if (!outcome.ok) setCancel({ step: "failed", message: sentence(outcome.error) });
-    else if (cloudOnly) setCancel({ step: /could not reach cloud agent/.test(outcome.note) ? "failed" : "done", message: sentence(outcome.note.replace(/^the run is not running \(\w+\); /, "")) });
-    else setCancel({ step: "done", message: outcome.status === "cancelled" ? "Cancelled." : `Cancelling: ${outcome.note}` });
+    setCancel(cancelResult(outcome, cloudOnly));
   };
 
   const command = info && canResume(status) ? resumeCommand({ workflow: info.workflow, runId, repo: info.repo, argsHash, start: info.start }) : undefined;

@@ -58,3 +58,8 @@ export function offeredActions(status: ApiStatus | undefined, graph: RunGraph): 
       : [];
   return { cancelRun: status === "running", leftCloudAgents };
 }
+
+/** Red stub: the old rule, to its run-end or to `now`. */
+export function runElapsed(run: { startedAt?: string; endedAt?: string }, _settled: boolean, now: number): number | undefined {
+  return run.startedAt === undefined ? undefined : Math.max(0, (run.endedAt !== undefined ? Date.parse(run.endedAt) : now) - Date.parse(run.startedAt));
+}
