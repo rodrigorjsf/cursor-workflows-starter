@@ -129,11 +129,18 @@ export interface InitResult {
   notes: string[];
 }
 
-/** Claude Code reads CLAUDE.md, not AGENTS.md (ADR-0004): says so unless CLAUDE.md is AGENTS.md or imports it. */
+/** The files that make Claude Code read them instead of AGENTS.md (docs/usage/03-invocacao-no-cursor-ide.md). */
+const CLAUDE_MEMORY_FILES = ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"];
+
+/**
+ * Claude Code reads AGENTS.md only when the repo has none of its own memory files (ADR-0004): says so when the repo has one
+ * and none of them is AGENTS.md or imports it. Only the repo root is looked at, not the directories above it.
+ */
 function claudeCodeNote(cwd: string): string | undefined {
-  const [agents, claude] = [join(cwd, "AGENTS.md"), join(cwd, "CLAUDE.md")];
-  if (existsSync(claude) && (realpathSync(claude) === realpathSync(agents) || readFileSync(claude, "utf8").includes("@AGENTS.md"))) return undefined;
-  return "O Claude Code lê o CLAUDE.md, não o AGENTS.md: para ele ver o bloco do kit, importe o AGENTS.md no CLAUDE.md (a linha `@AGENTS.md`). O wf init não edita o CLAUDE.md.";
+  const agents = realpathSync(join(cwd, "AGENTS.md"));
+  const present = CLAUDE_MEMORY_FILES.filter((file) => existsSync(join(cwd, file)));
+  if (present.length === 0 || present.some((file) => realpathSync(join(cwd, file)) === agents || readFileSync(join(cwd, file), "utf8").includes("@AGENTS.md"))) return undefined;
+  return `Claude Code reads ${present.join(" and ")}, not AGENTS.md: for it to see the kit block, import AGENTS.md there (the line \`@AGENTS.md\`). wf init does not edit ${present.length > 1 ? "those files" : "that file"}.`;
 }
 
 /** Plans the files, writes them, and returns what changed (nothing when the repo is already set up). */
