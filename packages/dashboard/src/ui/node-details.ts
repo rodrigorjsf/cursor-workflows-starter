@@ -1,5 +1,5 @@
 // What hovering a node says, as rows of text. Pure: the caller gives it the clock.
-import type { GraphNode } from "./run-graph.js";
+import { type GraphNode, isWork } from "./run-graph.js";
 
 /** `0.4¢`, `3.5¢`, `$12.35`: a cost under a dollar stays in cents. */
 export function formatCents(cents: number): string {
@@ -19,7 +19,7 @@ const tokens = new Intl.NumberFormat("en-US");
 
 /** The rows of the tooltip of a step or command, as `[label, value]`; none for the start, a fork or a join. `now` is the time in ms, to time a node that is still running. */
 export function describeNode(node: GraphNode, now: number): Array<[string, string]> {
-  if (node.kind !== "step" && node.kind !== "command") return [];
+  if (!isWork(node.kind)) return [];
   const d = node.detail;
   const elapsed = node.state === "running" && d.runningSince !== undefined ? Math.max(0, now - Date.parse(d.runningSince)) : 0;
   const rows: Array<[string, string]> = [["State", node.state]];

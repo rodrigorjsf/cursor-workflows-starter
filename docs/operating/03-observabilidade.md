@@ -319,9 +319,11 @@ tela) e `GET /api/runs/<runId>` para o status, que ela consulta a cada poucos se
 (logo depois do `start_workflow` ele ainda pode não estar), fecha o stream quando o run termina e o reabre se um resume o
 põe de volta em andamento. Eventos de outra versão do esquema ou de tipo desconhecido são ignorados, não derrubam a tela.
 
-O app é empacotado pelo próprio dashboard: o `esbuild` junta React, React Flow e elkjs na primeira vez que alguém abre uma
-página (cerca de meio segundo), e os arquivos saem da memória com o hash do conteúdo no nome (`/assets/run-<hash>.js`),
-com cache de um ano. Não há passo de build para o usuário.
+O app é empacotado pelo próprio dashboard: o `esbuild` junta React, React Flow e elkjs quando o dashboard sobe (cerca de
+meio segundo; uma página pedida antes disso espera o mesmo build), e os arquivos saem da memória com o hash do conteúdo no
+nome (`/assets/run-<hash>.js`), com cache de um ano. Não há passo de build para o usuário. Se o build falha (por exemplo,
+numa instalação sem as dependências do app), o dashboard registra o motivo em `dashboard.log` e as páginas do run
+respondem `500` com ele; a API e as métricas continuam funcionando.
 
 Hoje a página inicial (`/`) é a das métricas:
 

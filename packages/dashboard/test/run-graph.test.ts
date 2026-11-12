@@ -129,7 +129,7 @@ test("a retried step keeps one node: attempts, tokens, cost and time add up, and
   const graph = buildRunGraph(
     stamp([
       runStart,
-      stepStart("s-a", "flaky", {}, { role: "coder" }),
+      stepStart("s-a", "flaky"),
       stepEnd("s-a", "flaky", {}, { attemptId: "s-a#1", ok: false, errorKind: "timeout", error: "no answer in 60s", usage: { inputTokens: 400, outputTokens: 100, totalTokens: 500 }, rawCents: 5, chargedCents: 0, durationMs: 60000 }),
       stepStart("s-a", "flaky", {}, { attemptId: "s-a#2", attempt: 2 }),
       stepEnd("s-a", "flaky", {}, { attemptId: "s-a#2", attempt: 2, usage: { inputTokens: 800, outputTokens: 200, totalTokens: 1000 }, rawCents: 3, chargedCents: 4, durationMs: 9000, resolvedModel: "composer-2.5" }),
@@ -139,7 +139,6 @@ test("a retried step keeps one node: attempts, tokens, cost and time add up, and
   assert.equal(stateOf(graph, "s-a"), "ok");
   assert.deepEqual(nodeOf(graph, "s-a").detail, {
     model: "composer-2.5",
-    role: "coder",
     location: "local",
     attempts: 2,
     tokens: 1500,
@@ -296,4 +295,25 @@ test("any prefix of a log is a graph of its own, which is what lets a replay ste
 
   const sizes = Array.from({ length: events.length + 1 }, (_, n) => buildRunGraph(events.slice(0, n)).nodes.length);
   assert.deepEqual(sizes, [0, 1, 2, 2, 3, 4, 4, 5, 5, 6]);
+});
+
+test("a resume runs its groups again: the fork and the join show the latest execution, and what follows the group stays on its join", () => {
+  const inG1 = { groupId: "g1" };
+  const firstExecution: Draft[] = [
+    runStart,
+    groupStart("g1", "parallel", 2, null),
+    ...step("s-b", "left", { parentId: "g1", ...inG1 }),
+    groupEnd("g1", false), // a fatal error aborted the group
+    ...step("s-after", "after", { parentId: "g1" }),
+    { type: "run-end", status: "failed", error: "budget" },
+  ];
+
+  const midResume = buildRunGraph(stamp([...firstExecution, runStart, groupStart("g1", "parallel", 2, null), { ...stepStart("s-b", "left", { parentId: "g1", ...inG1 }), attemptId: "s-b#2", attempt: 2 }]));
+  assert.deepEqual(["g1", joinIdOf("g1")].map((id) => stateOf(midResume, id)), ["running", "running"], "the group is going again");
+  assert.ok(arrows(midResume).includes(`${joinIdOf("g1")}>s-after`), "the step after the group still continues from the join");
+  assert.ok(!arrows(midResume).includes("g1>s-after"));
+
+  const resumed = buildRunGraph(stamp([...firstExecution, runStart, groupStart("g1", "parallel", 2, null), ...step("s-b", "left", { parentId: "g1", ...inG1 }), groupEnd("g1")]));
+  assert.deepEqual(["g1", joinIdOf("g1")].map((id) => stateOf(resumed, id)), ["ok", "ok"], "the aborted group finished well the second time");
+  assert.equal(resumed.nodes.filter((n) => n.kind === "fork").length, 1, "one fork, not one per execution");
 });

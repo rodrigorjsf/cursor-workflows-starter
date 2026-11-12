@@ -21,6 +21,9 @@ export interface RunEvent {
 }
 
 export type NodeKind = "start" | "step" | "command" | "fork" | "join";
+
+/** A node that stands for work (an agent step or a command), as opposed to the start and the forks and joins of groups. */
+export const isWork = (kind: NodeKind): boolean => kind === "step" || kind === "command";
 /** `interrupted`: the run stopped (or its process died) with this node still going. */
 export type NodeState = "running" | "ok" | "failed" | "cancelled" | "cached" | "interrupted";
 
@@ -28,8 +31,6 @@ export type NodeState = "running" | "ok" | "failed" | "cancelled" | "cached" | "
 export interface NodeDetail {
   /** The model asked for (agent steps). */
   model?: string;
-  /** The role the step declared. */
-  role?: string;
   /** The program a `ctx.exec` command runs, without its arguments. */
   command?: string;
   /** Where the step ran. Events carry it from the cloud backend on; before that every step ran `local`. */
@@ -145,7 +146,6 @@ interface Attempt {
 /** What is known about a step or command across its attempts. */
 interface Work {
   model?: string;
-  role?: string;
   command?: string;
   location?: string;
   attempts: Map<string, Attempt>;
@@ -170,14 +170,14 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
   const placed = new Map<string, Placement>();
   const groups = new Map<string, GroupInfo>();
   const work = new Map<string, Work>();
-  const detailOf = (): NodeDetail => ({ location: "local", attempts: 0, tokens: 0, costCents: 0, costFinal: true, durationMs: 0 });
+  const emptyDetail = (): NodeDetail => ({ location: "local", attempts: 0, tokens: 0, costCents: 0, costFinal: true, durationMs: 0 });
   let currentPhase = "";
   /** The phase each node names (the title, "" for none), and the order in which phases first show up. */
   const phaseOf = new Map<string, string>();
   const phases: string[] = [];
   const add = (node: Omit<GraphNode, "detail" | "lane">, placement: Placement | null, phase = currentPhase) => {
     if (nodes.has(node.id)) return;
-    nodes.set(node.id, { ...node, lane: 0, detail: detailOf() });
+    nodes.set(node.id, { ...node, lane: 0, detail: emptyDetail() });
     if (placement) placed.set(node.id, placement);
     if (node.kind === "start") return;
     phaseOf.set(node.id, phase);
@@ -192,8 +192,9 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
     const found = stepId === undefined ? undefined : work.get(stepId);
     if (!found) return undefined;
     const attemptId = str(event.attemptId);
-    let attempt = attemptId === undefined && !starting ? [...found.attempts.values()].at(-1) : found.attempts.get(attemptId ?? `${stepId}#${found.attempts.size + 1}`);
-    if (!attempt && starting) found.attempts.set(attemptId ?? `${stepId}#${found.attempts.size + 1}`, (attempt = { ended: false, ok: false, cached: false, turnTokens: 0, costCents: 0, costFinal: true, durationMs: 0 }));
+    const key = attemptId ?? `${stepId}#${found.attempts.size + 1}`;
+    let attempt = attemptId === undefined && !starting ? [...found.attempts.values()].at(-1) : found.attempts.get(key);
+    if (!attempt && starting) found.attempts.set(key, (attempt = { ended: false, ok: false, cached: false, turnTokens: 0, costCents: 0, costFinal: true, durationMs: 0 }));
     return attempt && { work: found, attempt };
   };
   const begin = (event: RunEvent, kind: "step" | "command") => {
@@ -205,7 +206,6 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
     at.attempt.startedAt = str(event.ts);
     at.attempt.cached = cachedOf(event.cached);
     at.work.model ??= str(event.model);
-    at.work.role ??= str(event.role);
     at.work.command ??= str(event.command);
     at.work.location ??= str(event.location);
   };
@@ -236,7 +236,14 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
         break;
       case "group-start": {
         const id = str(event.groupId);
-        if (id === undefined || groups.has(id)) break;
+        if (id === undefined) break;
+        // A resume runs the same group again, with the same id: the group is going again, and the nodes it had stay.
+        const again = groups.get(id);
+        if (again) {
+          again.ended = false;
+          again.ok = true;
+          break;
+        }
         const kind = str(event.kind) ?? "parallel";
         const size = num(event.size) ?? 0;
         groups.set(id, { ended: false, ok: true });
@@ -249,7 +256,7 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
         if (id === undefined || !group || group.ended) break;
         group.ended = true;
         group.ok = event.ok !== false;
-        add({ id: joinIdOf(id), kind: "join", label: "join", state: "running" }, null);
+        add({ id: joinIdOf(id), kind: "join", label: "join", state: "running" }, null); // already there after a resume
         break;
       }
       case "step-start":
@@ -305,7 +312,6 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
     node.state = state;
     node.detail = {
       ...(w.model !== undefined && { model: w.model }),
-      ...(w.role !== undefined && { role: w.role }),
       ...(w.command !== undefined && { command: w.command }),
       location: w.location ?? "local",
       attempts: real.length,
@@ -320,10 +326,10 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
     };
   }
   for (const [id, group] of groups) {
-    const ended: NodeState = group.ok ? "ok" : "failed";
-    nodes.get(id)!.state = group.ended ? ended : "running";
+    const state: NodeState = !group.ended ? "running" : group.ok ? "ok" : "failed";
+    nodes.get(id)!.state = state;
     const join = nodes.get(joinIdOf(id));
-    if (join) join.state = ended;
+    if (join) join.state = state;
   }
   if (options.settled) {
     for (const node of nodes.values()) if (node.state === "running") node.state = "interrupted";
@@ -333,7 +339,7 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
   /** Where a node that names `parentId` as its parent continues from. */
   const sourceOf = (parentId: string | null, inGroup: string | null): string => {
     if (parentId === null) return START;
-    if (groups.has(parentId)) return inGroup === parentId || !groups.get(parentId)!.ended ? parentId : joinIdOf(parentId);
+    if (groups.has(parentId)) return inGroup === parentId || !nodes.has(joinIdOf(parentId)) ? parentId : joinIdOf(parentId);
     return nodes.has(parentId) ? parentId : START;
   };
   const edges: GraphEdge[] = [];
@@ -341,8 +347,8 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
   for (const [id, where] of placed) link(sourceOf(where.parentId, where.inGroup), id);
 
   // The branches of an ended group flow into its join: from every node inside it that nothing else inside it continues from.
-  for (const [groupId, group] of groups) {
-    if (!group.ended) continue;
+  for (const groupId of groups.keys()) {
+    if (!nodes.has(joinIdOf(groupId))) continue;
     const members = [...placed].filter(([, where]) => where.inGroup === groupId).map(([id]) => id);
     const outputOf = (id: string) => (nodes.get(id)?.kind === "fork" && nodes.has(joinIdOf(id)) ? joinIdOf(id) : id);
     const continued = new Set(edges.filter((e) => members.includes(e.target)).map((e) => e.source));

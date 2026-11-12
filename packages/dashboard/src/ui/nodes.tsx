@@ -1,6 +1,7 @@
 // The node components of the Run view: a step or command (with its tooltip), the start, a fork or join, and a lane's band.
 import { Handle, type Node, type NodeProps, Position } from "@xyflow/react";
 import { describeNode } from "./node-details.js";
+import { NODE_SIZE } from "./run-layout.js";
 import type { GraphNode, NodeState } from "./run-graph.js";
 
 export interface WorkNodeData extends Record<string, unknown> {
@@ -38,7 +39,7 @@ export function WorkNode({ data }: NodeProps<Node<WorkNodeData, "work">>) {
   const rows = describeNode(node, now);
   const what = node.kind === "command" ? node.detail.command : node.detail.model;
   return (
-    <div className={`work ${node.kind} state-${node.state}`} tabIndex={0} aria-label={`${node.label}: ${node.state}`}>
+    <div className={`work ${node.kind} state-${node.state}`} style={NODE_SIZE[node.kind]} tabIndex={0} aria-label={`${node.label}: ${node.state}`}>
       <Handles />
       <div className="title">
         <Glyph state={node.state} />
@@ -61,7 +62,7 @@ export function WorkNode({ data }: NodeProps<Node<WorkNodeData, "work">>) {
 export function JunctionNode({ data }: NodeProps<Node<WorkNodeData, "junction">>) {
   const { node } = data;
   return (
-    <div className={`junction ${node.kind} state-${node.state}`} aria-label={`${node.label}: ${node.state}`}>
+    <div className={`junction ${node.kind} state-${node.state}`} style={NODE_SIZE[node.kind]} aria-label={`${node.label}: ${node.state}`}>
       <Handles />
       {node.kind === "fork" && <span className="label">{node.label}</span>}
     </div>
@@ -70,7 +71,7 @@ export function JunctionNode({ data }: NodeProps<Node<WorkNodeData, "junction">>
 
 export function StartNode({ data }: NodeProps<Node<WorkNodeData, "start">>) {
   return (
-    <div className="start" aria-label={`start of ${data.node.label}`}>
+    <div className="start" style={NODE_SIZE.start} aria-label={`start of ${data.node.label}`}>
       <Handles />
       <span className="label">{data.node.label}</span>
     </div>

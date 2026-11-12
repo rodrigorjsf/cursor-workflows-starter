@@ -19,7 +19,7 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 ├── packages/
 │   ├── dashboard/          # o dashboard local (workspace npm @cursor-workflows/dashboard): servidor HTTP só de leitura sobre os runs e as métricas
 │   │   ├── src/            # server.ts (API JSON, stream SSE e páginas), main.ts (o processo), metrics-page.ts (a página das métricas),
-│   │   │   │               # ui-bundle.ts (o esbuild que empacota o app web ao primeiro uso), run-page.ts (o HTML da página do run)
+│   │   │   │               # ui-bundle.ts (o esbuild que empacota o app web quando o dashboard sobe), run-page.ts (o HTML da página do run)
 │   │   │   └── ui/         # o app web, que roda no navegador (React, React Flow, elkjs; tsconfig próprio, sem Node nem runtime):
 │   │   │                   # run-graph.ts (eventos → nós, arestas e raias), run-layout.ts (posições, elkjs), RunView.tsx (a tela)
 │   │   └── test/           # testes do servidor por HTTP, do grafo e do layout (puros) e um contrato com o engine de verdade

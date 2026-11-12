@@ -2,7 +2,8 @@
 import "@xyflow/react/dist/style.css";
 import { createRoot } from "react-dom/client";
 import "./run-view.css";
+import { runIdOf } from "./location.js";
 import { RunView } from "./RunView.js";
 
-const runId = decodeURIComponent(location.pathname.split("/")[2] ?? "");
+const runId = runIdOf(location.pathname);
 createRoot(document.getElementById("root")!).render(<RunView runId={runId} />);

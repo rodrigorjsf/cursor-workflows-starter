@@ -6,6 +6,7 @@
 // other program is an error that names the variable to change.
 import { defaultDbPath, dashboardPort, probeDashboard, removeInstance, writeInstance } from "@cursor-workflows/runtime/observe";
 import { startDashboard } from "./server.js";
+import { uiBundle } from "./ui-bundle.js";
 
 const say = (line: string) => process.stderr.write(`${line}\n`);
 const port = dashboardPort();
@@ -25,6 +26,13 @@ try {
 
 writeInstance({ pid: process.pid, port, startedAt: new Date().toISOString() });
 say(`dashboard listening on ${dashboard.url} (metrics database: ${defaultDbPath()})`);
+
+// Build the web app now, so the first page does not wait for it. A page asked for sooner shares this build. A failure is
+// reported, and the next page tries again.
+uiBundle().then(
+  (ui) => say(`web app built (${ui.script.name}, ${ui.style.name})`),
+  (err: unknown) => say(`the web app could not be built: ${err instanceof Error ? err.message : String(err)}`),
+);
 
 let stopping = false;
 const stop = () => {

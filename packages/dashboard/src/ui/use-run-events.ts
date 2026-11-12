@@ -11,10 +11,13 @@ import type { RunEvent } from "./run-graph.js";
 /** `waiting`: the API does not know the run yet. `closed`: the stream was read to the end and shut. */
 export type Connection = "waiting" | "live" | "reconnecting" | "closed" | "not-found";
 
+/** The status the API gives a run (`GET /api/runs/<runId>`): `missing` is a run the index knows and whose log cannot be read. */
+export type ApiStatus = "running" | "finished" | "failed" | "cancelled" | "missing";
+
 export interface RunFeed {
   events: RunEvent[];
-  /** The run's status as the API gives it (`running`, `finished`, `failed`, `cancelled`, `missing`); undefined until it answers. */
-  status?: string;
+  /** Undefined until the API answers. */
+  status?: ApiStatus;
   connection: Connection;
 }
 
@@ -28,24 +31,28 @@ const QUIET_MS = 1500;
 
 export function useRunEvents(runId: string): RunFeed {
   const [events, setEvents] = useState<RunEvent[]>([]);
-  const [status, setStatus] = useState<string>();
+  const [status, setStatus] = useState<ApiStatus>();
   const [connection, setConnection] = useState<Connection>("waiting");
   const lastId = useRef(0);
   const running = status === "running";
   const readable = status !== undefined && status !== "missing";
 
   useEffect(() => {
+    if (runId === "") {
+      setConnection("not-found"); // an address that names no run
+      return;
+    }
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const since = Date.now();
-    let latest: string | undefined;
+    let latest: ApiStatus | undefined;
     const poll = async () => {
       if (!document.hidden) {
         try {
           const reply = await fetch(`/api/runs/${encodeURIComponent(runId)}`);
           if (stopped) return;
           if (reply.ok) {
-            latest = ((await reply.json()) as { status: string }).status;
+            latest = ((await reply.json()) as { status: ApiStatus }).status;
             setStatus(latest);
             if (latest === "missing") setConnection("not-found");
           } else if (reply.status === 404 && Date.now() - since > NOT_FOUND_AFTER_MS) setConnection("not-found");

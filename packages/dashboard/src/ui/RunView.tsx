@@ -1,13 +1,13 @@
 // The Run view: a run drawn as a graph that grows as its events arrive, with the phases as lanes, and a replay of a finished
 // run. The data comes from `useRunEvents`, the graph from `buildRunGraph` and the positions from `layoutRunGraph`; this file
 // puts them on a React Flow canvas.
-import { Background, Controls, type Edge, type Node, ReactFlow, ReactFlowProvider, useReactFlow, useStore } from "@xyflow/react";
+import { Background, Controls, type Edge, type FitViewOptions, type Node, ReactFlow, ReactFlowProvider, useReactFlow, useStore } from "@xyflow/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { JunctionNode, LaneNode, type LaneNodeData, StartNode, WorkNode, type WorkNodeData } from "./nodes.js";
 import { formatCents, formatDuration } from "./node-details.js";
-import { type RunGraph, buildRunGraph } from "./run-graph.js";
+import { type ProgressStatus, type RunGraph, buildRunGraph, isWork } from "./run-graph.js";
 import { type RunLayout, layoutRunGraph } from "./run-layout.js";
-import { useRunEvents } from "./use-run-events.js";
+import { type Connection, useRunEvents } from "./use-run-events.js";
 
 // `group` is a node type of React Flow's own (a grey box): the fork and the join are `junction`s.
 const NODE_TYPES = { work: WorkNode, junction: JunctionNode, start: StartNode, lane: LaneNode };
@@ -22,21 +22,22 @@ const SPEEDS: Array<[label: string, intervalMs: number]> = [["1×", 500], ["2×"
 /** What makes two graphs need two layouts: the nodes, their lanes and their edges. A node changing state does not. */
 const structureOf = (graph: RunGraph): string => `${graph.nodes.map((n) => `${n.id}:${n.kind}:${n.lane}`).join(",")}|${graph.edges.map((e) => e.id).join(",")}`;
 
-/** The layout of `graph`, computed again whenever its structure changes. The previous layout stays up meanwhile. */
-function useLayout(graph: RunGraph): RunLayout | undefined {
-  const [layout, setLayout] = useState<RunLayout>();
+/** The layout of `graph`, computed again whenever its structure changes. The previous layout stays up meanwhile; a layout that fails is reported. */
+function useLayout(graph: RunGraph): { layout?: RunLayout; error?: string } {
+  const [state, setState] = useState<{ layout?: RunLayout; error?: string }>({});
   const structure = structureOf(graph);
   useEffect(() => {
     let stale = false;
-    layoutRunGraph(graph).then((next) => {
-      if (!stale) setLayout(next);
-    }, () => undefined);
+    layoutRunGraph(graph).then(
+      (layout) => !stale && setState({ layout }),
+      (err: unknown) => !stale && setState((before) => ({ ...before, error: err instanceof Error ? err.message : String(err) })),
+    );
     return () => {
       stale = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the layout depends on the structure only
+    // `graph` is read when the structure changes, not when a node merely changes state.
   }, [structure]);
-  return layout;
+  return state;
 }
 
 /** The ticking clock of a view of a live run; a replay passes its own. */
@@ -67,7 +68,7 @@ function toFlow(graph: RunGraph, layout: RunLayout, now: number): { nodes: Node[
   const placed = graph.nodes.filter((n) => layout.nodes[n.id]);
   const work: Node<WorkNodeData>[] = placed.map((node) => ({
     id: node.id,
-    type: node.kind === "step" || node.kind === "command" ? "work" : node.kind === "start" ? "start" : "junction",
+    type: isWork(node.kind) ? "work" : node.kind === "start" ? "start" : "junction",
     position: { x: layout.nodes[node.id]!.x, y: layout.nodes[node.id]!.y },
     data: { node, now: node.state === "running" ? now : 0 },
     draggable: false,
@@ -81,36 +82,51 @@ function toFlow(graph: RunGraph, layout: RunLayout, now: number): { nodes: Node[
 
 /** The smallest zoom at which a node's text can still be read. A run that would need less to fit on screen is framed in part. */
 const READABLE_ZOOM = 0.45;
-const FRAME = { padding: 0.15, maxZoom: 1, minZoom: READABLE_ZOOM };
 /** How many nodes a partial frame holds. */
 const FRAME_NODES = 5;
+/** The height the page's header takes, to guess the size of the canvas before it is measured. */
+const HEADER_PX = 70;
+
+/** How to frame the run: all of it when that stays readable, otherwise the latest nodes of a live run, or the first ones of a run that is over (to be read from the start). */
+function frameOf(graph: RunGraph, layout: RunLayout, pane: { width: number; height: number }): FitViewOptions {
+  const size = pane.width > 0 && pane.height > 0 ? pane : { width: window.innerWidth, height: window.innerHeight - HEADER_PX };
+  const options: FitViewOptions = { padding: 0.15, maxZoom: 1, minZoom: READABLE_ZOOM };
+  if (Math.min(size.width / layout.width, size.height / layout.height) >= READABLE_ZOOM) return options;
+  const settled = graph.nodes.every((n) => n.state !== "running");
+  const work = graph.nodes.filter((n) => n.kind !== "start");
+  return { ...options, nodes: (settled ? work.slice(0, FRAME_NODES) : work.slice(-FRAME_NODES)).map((n) => ({ id: n.id })) };
+}
 
 /**
- * The canvas. It keeps the run in view as it grows, until the user moves the view themselves: all of it when that stays
- * readable, otherwise the latest nodes of a live run, or the first ones of a run that is over (to be read from the start).
+ * The canvas. It keeps the run in view as it grows, until the user moves the view themselves. The first drawing is framed
+ * by React Flow itself, which waits for the nodes to be measured; later ones are framed by hand, a moment after the layout
+ * (or what is framed) changes.
  */
 function Canvas({ graph, layout, now }: { graph: RunGraph; layout: RunLayout; now: number }) {
   const { nodes, edges } = useMemo(() => toFlow(graph, layout, now), [graph, layout, now]);
   const { fitView } = useReactFlow();
   const pane = useStore((s) => ({ width: s.width, height: s.height }), (a, b) => a.width === b.width && a.height === b.height);
   const userMoved = useRef(false);
+  const firstFrame = useRef(frameOf(graph, layout, pane));
   const settled = graph.nodes.every((n) => n.state !== "running");
-  const frame = (duration: number) => {
-    const fits = Math.min(pane.width / layout.width, pane.height / layout.height) >= READABLE_ZOOM;
-    const work = graph.nodes.filter((n) => n.kind !== "start");
-    const part = settled ? work.slice(0, FRAME_NODES) : work.slice(-FRAME_NODES);
-    void fitView({ ...FRAME, duration, ...(fits ? {} : { nodes: part.map((n) => ({ id: n.id })) }) });
-  };
-  const firstDrawing = useRef(true);
+  const drawn = useRef(false);
   useEffect(() => {
-    if (!firstDrawing.current && userMoved.current) return;
-    // The nodes are measured by the browser after this render: frame the run once they are.
-    const timer = setTimeout(() => {
-      frame(firstDrawing.current ? 0 : 250);
-      firstDrawing.current = false;
-    }, 80);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-frame when the layout or what is framed changes, not on every tick of the clock
+    if (!drawn.current) {
+      drawn.current = true;
+      return;
+    }
+    if (userMoved.current) return;
+    let cancelled = false;
+    const attempt = async (tries: number) => {
+      if (cancelled) return;
+      if (!(await fitView({ ...frameOf(graph, layout, pane), duration: 250 })) && tries < 10) setTimeout(() => void attempt(tries + 1), 60);
+    };
+    const timer = setTimeout(() => void attempt(0), 80); // the new nodes are measured by the browser after this render
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // Frame again when the layout or what is framed changes, not on every tick of the clock.
   }, [layout, settled]);
   return (
     <ReactFlow
@@ -118,6 +134,8 @@ function Canvas({ graph, layout, now }: { graph: RunGraph; layout: RunLayout; no
       edges={edges}
       nodeTypes={NODE_TYPES}
       colorMode="system"
+      fitView
+      fitViewOptions={firstFrame.current}
       nodesDraggable={false}
       nodesConnectable={false}
       zoomOnDoubleClick={false}
@@ -138,13 +156,15 @@ function Canvas({ graph, layout, now }: { graph: RunGraph; layout: RunLayout; no
   );
 }
 
-const STATUS_TEXT: Record<string, string> = {
+const STATUS_TEXT: Record<ProgressStatus, string> = {
   running: "running",
   finished: "finished",
   failed: "failed",
   cancelled: "cancelled",
   interrupted: "stopped without finishing",
 };
+
+const CONNECTION_TEXT: Record<Connection, string> = { waiting: "waiting for the run", live: "live", reconnecting: "reconnecting…", closed: "", "not-found": "" };
 
 export function RunView({ runId }: { runId: string }) {
   const { events, status, connection } = useRunEvents(runId);
@@ -153,10 +173,10 @@ export function RunView({ runId }: { runId: string }) {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(0);
   const replaying = replayAt !== null;
-  const shown = replaying ? events.slice(0, replayAt) : events;
+  const shown = useMemo(() => (replayAt === null ? events : events.slice(0, replayAt)), [events, replayAt]);
   const settled = replaying ? replayAt >= events.length : status !== undefined && status !== "running";
   const graph = useMemo(() => buildRunGraph(shown, { settled }), [shown, settled]);
-  const layout = useLayout(graph);
+  const { layout, error: layoutError } = useLayout(graph);
   const clock = useClock(!replaying && !settled);
   const now = replaying ? Date.parse(String(shown.at(-1)?.ts ?? "")) || 0 : clock;
 
@@ -186,7 +206,7 @@ export function RunView({ runId }: { runId: string }) {
 
   const { run } = graph;
   const counts = { steps: graph.nodes.filter((n) => n.kind === "step").length, commands: graph.nodes.filter((n) => n.kind === "command").length };
-  const shownStatus = replaying && !settled ? "replaying" : STATUS_TEXT[run.status] ?? run.status;
+  const shownStatus = replaying && !settled ? "replaying" : STATUS_TEXT[run.status];
   const elapsed = run.startedAt === undefined ? undefined : Math.max(0, (run.endedAt !== undefined ? Date.parse(run.endedAt) : now) - Date.parse(run.startedAt));
 
   if (connection === "not-found") {
@@ -214,7 +234,7 @@ export function RunView({ runId }: { runId: string }) {
           {run.executions > 1 && ` · ${run.executions} executions`}
         </span>
         <span className={`conn conn-${connection}`} title="connection to the dashboard">
-          {connection === "live" ? "live" : connection === "waiting" ? "waiting for the run" : connection === "reconnecting" ? "reconnecting…" : ""}
+          {CONNECTION_TEXT[connection]}
         </span>
         <div className="replay">
           {!replaying && status !== undefined && status !== "running" && events.length > 0 && (
@@ -264,8 +284,17 @@ export function RunView({ runId }: { runId: string }) {
           )}
         </div>
       </header>
+      {run.error !== undefined && (
+        <p className="run-error" role="alert">
+          {run.error}
+        </p>
+      )}
       <div className="canvas">
-        {layout && status !== undefined ? (
+        {layoutError !== undefined ? (
+          <p className="notice" role="alert">
+            The run could not be drawn: {layoutError}
+          </p>
+        ) : layout && status !== undefined ? (
           <ReactFlowProvider>
             <Canvas graph={graph} layout={layout} now={now} />
           </ReactFlowProvider>

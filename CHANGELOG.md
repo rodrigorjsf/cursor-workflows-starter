@@ -40,7 +40,7 @@
   modelo, onde rodou, as tentativas, os tokens, o custo, a duração e o tipo do erro. Um run que terminou pode ser refeito
   evento a evento (**Replay**, de 1× a 20×, com pausa e barra de posição). O grafo vem só dos eventos (React Flow para
   desenhar, elkjs para o layout), tolera eventos de outra versão do esquema e de tipo desconhecido, e um run que parou com
-  um nó em andamento o mostra como interrompido. O app é empacotado pelo próprio dashboard com o `esbuild` no primeiro uso e
+  um nó em andamento o mostra como interrompido. O app é empacotado pelo próprio dashboard com o `esbuild` quando ele sobe e
   servido da memória (`/assets/run-<hash>.js`), sem CDN e sob uma política de conteúdo que só permite scripts e conexões da
   própria origem. As bibliotecas do app são dependências do pacote do dashboard, nunca do runtime.
 - **`wf gc`: limpa o que os runs do `implement-issue` deixam.** Cada run tem o seu worktree, a sua branch local e, depois

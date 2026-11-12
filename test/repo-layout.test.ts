@@ -209,6 +209,10 @@ test("the dashboard is its own workspace package: its dependencies never enter t
     const text = read("packages", "dashboard", "src", file);
     assert.doesNotMatch(text, /from "(\.\.\/)+runtime\/|from "@cursor-workflows\/runtime\/(?!observe")/, `${file} reaches into the runtime's sources`);
   }
+  // The dashboard's tests go through HTTP and the fake SDK. One contract test runs the real engine to check that the graph the
+  // Run view derives is the structure the engine writes; it is the only test that reaches into the runtime's sources.
+  const reaching = readdirSync(join(ROOT, "packages", "dashboard", "test")).filter((f) => /from "(\.\.\/)+runtime\/src\//.test(read("packages", "dashboard", "test", f)));
+  assert.deepEqual(reaching, ["engine-log.test.ts"], "a dashboard test reaches into the runtime's sources: only the engine contract test may");
   // The web app runs in the browser: it reads the API, never the runtime.
   const ui = join("packages", "dashboard", "src", "ui");
   const uiSources = readdirSync(join(ROOT, ui)).filter((f) => /\.tsx?$/.test(f));
