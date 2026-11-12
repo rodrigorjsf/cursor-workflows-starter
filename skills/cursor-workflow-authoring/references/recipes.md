@@ -13,7 +13,8 @@ hard issue. Keep the label map in `meta.settings`, so a repo can change it in it
 
 ```ts
 const RANK = { LOW: 0, MED: 1, HIGH: 2 };
-const matched = issue.labels.map((l) => LABEL_TIERS[l.name.toLowerCase()]).filter(Boolean);
+const known = new Map(Object.entries(ctx.settings.labelTiers as Record<string, Tier>).map(([label, t]) => [label.toLowerCase(), t]));
+const matched = issue.labels.flatMap((l) => known.get(l.name.toLowerCase()) ?? []); // a Map: a label named "constructor" is only a label
 const tier = matched.sort((a, b) => RANK[b] - RANK[a])[0]
   ?? (await ctx.agent<{ tier: Tier }>(`${CLASSIFY_INSTRUCTIONS}\n\n${issueBlock(issue)}`, {
     label: "classify", model: MODELS.CLASSIFY, tools: [], settingSources: [], memo: true, schema: TIER_SCHEMA,

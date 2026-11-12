@@ -242,25 +242,14 @@ function checkMcpOverrides(overrides: LimitOverrides | undefined, issues: Config
   }
 }
 
-/** A setting that a config file sets and the workflow does not declare is an error, like an unknown role: usually a typo. */
-function checkSettingNames(input: ResolveInput, declared: string[], issues: ConfigIssue[]): void {
+/** A role or a setting that a config file names and the workflow does not declare is an error: usually a typo. */
+function checkDeclaredNames(input: ResolveInput, section: "roles" | "settings", noun: "role" | "setting", declared: string[], issues: ConfigIssue[]): void {
   const name = input.workflow.meta.name;
   for (const file of [input.global, input.repo]) {
-    for (const setting of Object.keys(file?.data.workflows?.[name]?.settings ?? {})) {
-      if (declared.includes(setting)) continue;
-      const known = declared.length ? `workflow ${name} declares: ${declared.join(", ")}` : `workflow ${name} declares no settings`;
-      issues.push({ ref: file!.path, path: pointerOf("workflows", name, "settings", setting), message: `unknown setting (${known})` });
-    }
-  }
-}
-
-function checkRoleNames(input: ResolveInput, declared: string[], issues: ConfigIssue[]): void {
-  const name = input.workflow.meta.name;
-  for (const file of [input.global, input.repo]) {
-    for (const role of Object.keys(file?.data.workflows?.[name]?.roles ?? {})) {
-      if (declared.includes(role)) continue;
-      const known = declared.length ? `workflow ${name} declares: ${declared.join(", ")}` : `workflow ${name} declares no roles`;
-      issues.push({ ref: file!.path, path: pointerOf("workflows", name, "roles", role), message: `unknown role (${known})` });
+    for (const key of Object.keys(file?.data.workflows?.[name]?.[section] ?? {})) {
+      if (declared.includes(key)) continue;
+      const known = declared.length ? `workflow ${name} declares: ${declared.join(", ")}` : `workflow ${name} declares no ${section}`;
+      issues.push({ ref: file!.path, path: pointerOf("workflows", name, section, key), message: `unknown ${noun} (${known})` });
     }
   }
 }
@@ -269,8 +258,8 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
   const { meta, defaults, budget } = input.workflow;
   const roles = meta.roles ?? [];
   const issues: ConfigIssue[] = [];
-  checkRoleNames(input, roles.map((r) => r.name), issues);
-  checkSettingNames(input, Object.keys(meta.settings ?? {}), issues);
+  checkDeclaredNames(input, "roles", "role", roles.map((r) => r.name), issues);
+  checkDeclaredNames(input, "settings", "setting", Object.keys(meta.settings ?? {}), issues);
   const entries = [
     ...(input.global ? fileEntries(input.global, "global", meta.name) : []),
     ...(input.repo ? fileEntries(input.repo, "repo", meta.name) : []),

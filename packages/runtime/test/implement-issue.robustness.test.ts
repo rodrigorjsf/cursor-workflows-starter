@@ -2,7 +2,7 @@
 // implement-issue.fixture.ts). The tier comes from the highest matching label, a step that crashes the process again and
 // again stops being resumed, and every retry of a write step starts from a clean tree.
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { runWorkflow } from "../src/runtime/engine.js";
@@ -98,6 +98,24 @@ test("a step that crashed the process more than the limit fails instead of resum
   };
   const resumed = await run({}, first.runId);
   assert.equal(res(resumed).status, "done", JSON.stringify(res(resumed)));
+});
+
+test("while a write step runs, the progress on disk says it is in flight (what a crash leaves for the resume to count) and it is cleared when the step ends", async () => {
+  issue(["complexity:low"]);
+  let inFlight: { id: string; before: string; interrupted?: boolean } | undefined;
+  fx.handlers["codigo-1"] = (o) => {
+    const runs = join(fx.repo, ".workflows", "runs");
+    const dir = readdirSync(runs).find((d) => existsSync(join(runs, d, "tdd-progress.json")))!;
+    inFlight = JSON.parse(readFileSync(join(runs, dir, "tdd-progress.json"), "utf8")).inFlight;
+    write(o, "src/math.js", SUB_CODE);
+    submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
+  };
+  const r = await run({});
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  assert.match(inFlight!.id, /^green:/);
+  assert.match(inFlight!.before, /^[0-9a-f]{40}$/, "the tree to go back to");
+  assert.equal(inFlight!.interrupted, undefined, "a step that is still running was not interrupted");
+  assert.equal(progressOf(r.runId).inFlight, undefined);
 });
 
 test("a limit of 0 stops the step at the first crash", async () => {

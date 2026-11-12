@@ -88,7 +88,8 @@ Quando várias labels casam, vale o tier mais alto: a ordem das labels nunca reb
 
 ```ts
 const RANK = { LOW: 0, MED: 1, HIGH: 2 };
-const matched = issue.labels.map((l) => LABEL_TIERS[l.name.toLowerCase()]).filter(Boolean);
+const known = new Map(Object.entries(ctx.settings.labelTiers as Record<string, Tier>).map(([label, t]) => [label.toLowerCase(), t]));
+const matched = issue.labels.flatMap((l) => known.get(l.name.toLowerCase()) ?? []); // um Map: uma label "constructor" é só uma label
 const tier = matched.sort((a, b) => RANK[b] - RANK[a])[0]
   ?? (await ctx.agent<{ tier: Tier }>(`${CLASSIFY_INSTRUCTIONS}\n\n${issueBlock(issue)}`, {
     label: "classificar", model: MODELS.CLASSIFY, tools: [], settingSources: [], memo: true, schema: TIER_SCHEMA,

@@ -154,7 +154,7 @@ const SETTINGS: Settings = {
 };
 const READ_ONLY = ["read", "grep", "glob", "ls", "semSearch"];
 const REVIEW_TOOLS = ["read", "grep", "glob", "ls"];
-const NO_SETTINGS: SettingSource[] = [];
+const NO_SETTING_SOURCES: SettingSource[] = [];
 /** Teto de tempo do `git` local (add, diff, commit com hooks…): passado disso há um hook ou um lock parado. */
 const LOCAL_GIT_TIMEOUT_MS = 5 * 60_000;
 const NETWORK_TIMEOUT_SEC = 120;
@@ -336,14 +336,14 @@ export default defineWorkflow<Args>({
     // `cloud`: steps that write to the local worktree never go to a cloud agent; read-only ones may, once the cloud
     // spec lands (they read the run's worktree, hence `read-only`).
     roles: [
-      { name: "classify", description: "Classifies the complexity when the issue has no label.", cloud: "ok", defaults: { model: COMPOSER, settingSources: NO_SETTINGS } },
+      { name: "classify", description: "Classifies the complexity when the issue has no label.", cloud: "ok", defaults: { model: COMPOSER, settingSources: NO_SETTING_SOURCES } },
       { name: "implement.low", description: "Writes test and code in the LOW tier (and the refactor).", cloud: "never", envAliases: ["LOW"], defaults: { model: COMPOSER } },
       { name: "implement.med", description: "Writes test and code in the MED tier (and the refactor).", cloud: "never", envAliases: ["MED"], defaults: { model: GROK } },
       { name: "implement.high", description: "Writes test and code in the HIGH tier (and the refactor).", cloud: "never", envAliases: ["HIGH"], defaults: { model: GROK_HIGH } },
-      { name: "review", description: "Reviews the diff on three axes (Standards, Spec, Security).", cloud: "read-only", defaults: { model: GROK_HIGH, settingSources: NO_SETTINGS } },
+      { name: "review", description: "Reviews the diff on three axes (Standards, Spec, Security).", cloud: "read-only", defaults: { model: GROK_HIGH, settingSources: NO_SETTING_SOURCES } },
       { name: "fix", description: "Fixes a slice's red suite; the model steps up with the tier.", cloud: "never" },
-      { name: "design", description: "Plans the slices (MED) or designs and judges the interface (HIGH).", cloud: "read-only", defaults: { settingSources: NO_SETTINGS } },
-      { name: "pr-text", description: "Writes the PR body text.", cloud: "read-only", defaults: { model: COMPOSER, settingSources: NO_SETTINGS } },
+      { name: "design", description: "Plans the slices (MED) or designs and judges the interface (HIGH).", cloud: "read-only", defaults: { settingSources: NO_SETTING_SOURCES } },
+      { name: "pr-text", description: "Writes the PR body text.", cloud: "read-only", defaults: { model: COMPOSER, settingSources: NO_SETTING_SOURCES } },
     ],
     // The tunable limits; the config files change them (see `Settings`). Copied: the config layer never edits the constant.
     settings: structuredClone(SETTINGS),
@@ -401,6 +401,7 @@ export default defineWorkflow<Args>({
       tier = c.tier;
     }
     const base = { issue: issue.number, tier };
+    const sliceCap = settings.sliceCaps[tier];
     ctx.log(`Issue #${issue.number} → tier ${tier} (role ${implementRole(tier)})`);
     ctx.metric("tier", tier); // covariável de dificuldade: compare modelos dentro do mesmo tier
     ctx.metric("tier_source", labelTier ? "label" : "classifier");
@@ -426,7 +427,7 @@ export default defineWorkflow<Args>({
       const approved = listBlock("Approved seams (use exactly these)", ctx.args.seams ?? []);
       // O planejador sabe o teto: sem isso, propôs 5 fatias para um tier de 3 na issue #8, e o PR saiu parcial.
       const capBlock =
-        `## Slice cap\nThis tier does up to ${settings.sliceCaps[tier]} slices. To fit the whole issue, one slice may cover ` +
+        `## Slice cap\nThis tier does up to ${sliceCap} slices. To fit the whole issue, one slice may cover ` +
         "cases of one behaviour that are tested together (the odd and the even case of a function; the value and the error). " +
         "If it still does not fit, put last what can wait.";
       const planData = `${issueBlock(issue)}\n\n${capBlock}\n\n${contextBlock}${approved ? `\n\n${approved}` : ""}`;
@@ -479,10 +480,10 @@ export default defineWorkflow<Args>({
           "### Slices (one per red → green cycle)",
           "",
           ...plan.slices.map(
-            (s, i) => `${i + 1}. ${s.behavior} (seam: ${s.seam}; test: ${s.testIdea})${i >= settings.sliceCaps[tier] ? " (deferred)" : ""}`,
+            (s, i) => `${i + 1}. ${s.behavior} (seam: ${s.seam}; test: ${s.testIdea})${i >= sliceCap ? " (deferred)" : ""}`,
           ),
-          ...(plan.slices.length > settings.sliceCaps[tier]
-            ? ["", `The slices marked deferred are left out by the tier ${tier} slice cap (${settings.sliceCaps[tier]} slices): the PR only references the issue, without closing it.`]
+          ...(plan.slices.length > sliceCap
+            ? ["", `The slices marked deferred are left out by the tier ${tier} slice cap (${sliceCap} slices): the PR only references the issue, without closing it.`]
             : []),
           "",
           `Test command: \`${ctx.args.testCommand ?? plan.testCommand}\``,
@@ -739,9 +740,9 @@ export default defineWorkflow<Args>({
     /** Falha de fatia: o worktree volta ao estado do começo dela (verde), para o resume e para quem inspeciona. */
     const sliceStart = () => snapshotTree(cmd, worktree);
 
-    const planned = plan.slices.slice(0, settings.sliceCaps[tier]);
-    const deferred = plan.slices.slice(settings.sliceCaps[tier]).map((s) => `${s.behavior} (seam: ${s.seam})`);
-    if (deferred.length) ctx.log(`cap of ${settings.sliceCaps[tier]} slices at tier ${tier}: ${deferred.length} deferred`);
+    const planned = plan.slices.slice(0, sliceCap);
+    const deferred = plan.slices.slice(sliceCap).map((s) => `${s.behavior} (seam: ${s.seam})`);
+    if (deferred.length) ctx.log(`cap of ${sliceCap} slices at tier ${tier}: ${deferred.length} deferred`);
     ctx.metric("slices_planned", plan.slices.length);
     for (const [i, sl] of planned.entries()) {
       const start = await sliceStart();
