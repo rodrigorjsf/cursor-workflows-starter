@@ -30,7 +30,7 @@ O servidor `workflows` é registrado em `.cursor/mcp.json` (Cursor) e em `.mcp.j
 | `start_workflow` | `{ name, args, resumeRunId?, overrides? }` | `{ jobId, runId }`, mais `dashboardUrl` (o link da página do run no dashboard, [5.3 §5](../operating/03-observabilidade.md#5-dashboard), que o `start_workflow` inicia se nada responde na porta; `dashboardWarning` traz o motivo quando não sobe, e nenhum dos dois aparece com o início automático desligado). O workflow roda em segundo plano, em um processo destacado: reiniciar o servidor ou o Cursor não o interrompe |
 | `wait_workflow` | `{ jobId, timeoutSec ≤ 50 }` | Estado do job, projetado do log de eventos do run: `status`, `phase`, `recent` (até 20 linhas de resumo, uma linha cada, nunca texto de prompt ou de saída de agente; o custo de cada etapa é o maior entre bruto e cobrado), `result` (o que o workflow devolveu), `error`, `spentCents` (custo que o teto usa; acumula entre resumes), `chargedCents` (só o valor cobrado), `spentTokens` |
 | `get_workflow_status` | `{ jobId }` | Estado, sem esperar |
-| `cancel_workflow` | `{ jobId }` | Cancela o job: para os agentes ativos, desfaz a etapa que estava escrevendo e devolve o estado com `status: "cancelled"`. O run continua retomável. Um processo travado (vivo, sem heartbeat; o job já aparece `failed`) é encerrado com `SIGKILL`, sem desfazer a etapa, e os cloud agents dele seguem rodando: um resume reanexa a eles. Num job cujo processo já morreu (uma queda, ou uma segunda chamada depois desse `SIGKILL`), cancela os cloud agents que o run deixou rodando, a nota os nomeia e o job continua `failed`; um resume depois cria agentes novos. O agente do chat só chama quando o usuário pede para parar |
+| `cancel_workflow` | `{ jobId }` | Cancela o job: para os agentes ativos, desfaz a etapa que estava escrevendo e devolve o estado com `status: "cancelled"`. O run continua retomável. Um processo travado (vivo, sem heartbeat; o job já aparece `failed`) é encerrado com `SIGKILL`, sem desfazer a etapa. Depois desse `SIGKILL`, e num job cujo processo já morreu (uma queda), cancela os cloud agents que o run deixou rodando, a nota os nomeia e o job continua `failed`; um resume depois cria agentes novos no lugar deles, que custam de novo. O agente do chat só chama quando o usuário pede para parar |
 
 **Por que start/wait e não uma tool que bloqueia até o fim?** Um workflow de implementação leva minutos, e a
 doc do Cursor não dá o timeout de uma chamada de tool MCP no IDE. O FAQ de MCP só diz que, se o servidor cai ou
@@ -47,7 +47,9 @@ dura no máximo 50 s e o agente do chat repete a espera.
 
 **Se o processo do job morrer** (ou parar de dar sinal de vida: o heartbeat dele fica mais de 30 s sem atualizar),
 o job aparece como `failed` com o `runId`. Chame `start_workflow` com o mesmo `name` e `args` e com
-`resumeRunId: "<runId>"`; as etapas já concluídas saem do journal.
+`resumeRunId: "<runId>"`; as etapas já concluídas saem do journal. Se o resume volta `already running`, o processo
+travado ainda segura o run: `cancel_workflow` o encerra e cancela os cloud agents que o run deixou rodando, e o resume
+seguinte cria agentes novos no lugar deles, que custam de novo.
 
 **Para parar um run:** `cancel_workflow` (ou `wf cancel <jobId>`, ou Ctrl-C / `SIGTERM` no processo do run). O job
 termina como `cancelled`, com o `runId` para retomar.
