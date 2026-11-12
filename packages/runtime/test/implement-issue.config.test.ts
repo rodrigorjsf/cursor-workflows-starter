@@ -72,7 +72,7 @@ const settings = (value: Record<string, unknown>) => writeRepoConfig(fx.repo, { 
 const slice = (n: number) => ({ behavior: `comportamento ${n}`, seam: "math.subtract", testIdea: `ideia ${n}` });
 const WRONG_CODE = SUB_CODE.replace("a - b", "a + b");
 
-test("implement-issue declares its seven settings with the code defaults; each is in the config schema, and the defaults pass it", () => {
+test("implement-issue declares its eight settings with the code defaults; each is in the config schema, and the defaults pass it", () => {
   assert.deepEqual(implementIssue.meta.settings, {
     sliceCaps: { LOW: 1, MED: 3, HIGH: 5 },
     extraSlices: 2,
@@ -81,6 +81,7 @@ test("implement-issue declares its seven settings with the code defaults; each i
     maxDiffChars: 40_000,
     labelTiers: { "complexity:low": "LOW", "good first issue": "LOW", "complexity:medium": "MED", "complexity:high": "HIGH", security: "HIGH" },
     maxStepCrashes: 2,
+    gcFailedAfterDays: 14,
   });
   assert.deepEqual(validateConfigData({ workflows: { "implement-issue": { settings: implementIssue.meta.settings } } }), []);
   const schema = JSON.parse(readFileSync(CONFIG_SCHEMA_PATH, "utf8")) as { definitions: { workflowSettings: { properties: Record<string, unknown> } } };

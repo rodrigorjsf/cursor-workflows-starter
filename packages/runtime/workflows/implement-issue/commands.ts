@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExecOptions, ExecResult } from "../../src/runtime/workflow.js";
 
+/** The state of a pull request, as `gh` reports it. */
+export type PrState = "OPEN" | "MERGED" | "CLOSED";
+
 /** `ctx.exec`. */
 export type Exec = (command: string, args?: string[], opts?: ExecOptions) => Promise<ExecResult>;
 
@@ -15,6 +18,11 @@ export interface CommandTimeouts {
   /** `git push` and every `gh` call: a credential prompt or a stalled connection must fail the step, not hang the run. */
   networkMs: number;
 }
+
+/** How long local `git` (add, diff, commit with hooks…) may run: past this a hook or a lock is stuck. */
+export const LOCAL_GIT_TIMEOUT_MS = 5 * 60_000;
+/** The default for how long `git push`, `git ls-remote` and every `gh` call may run, in seconds. */
+export const NETWORK_TIMEOUT_SEC = 120;
 
 /** What a command that had to succeed did instead. `result` is what `ctx.exec` handed back. */
 export class CommandError extends Error {
@@ -96,6 +104,30 @@ export class Commands {
     await this.push(cwd, `--force-with-lease=${branch}:${expected ?? ""}`, "-u", "origin", branch);
   }
 
+  /**
+   * Every branch the origin has under the workflow's prefix, by name, with the commit each points at. A network command.
+   * Empty when the repository has no `origin`: there is no remote branch to find.
+   */
+  async remoteOwnedHeads(cwd: string): Promise<Map<string, string>> {
+    if (!(await this.gitIs(cwd, "config", "--get", "remote.origin.url"))) return new Map();
+    const out = await this.succeedRead("git", ["ls-remote", "--heads", "origin", `refs/heads/${WORKFLOW_BRANCH_PREFIX}*`], cwd, this.timeouts.networkMs);
+    const heads = new Map<string, string>();
+    for (const line of out.split("\n")) {
+      const [sha, ref] = line.trim().split(/\s+/);
+      if (sha && ref?.startsWith("refs/heads/")) heads.set(ref.slice("refs/heads/".length), sha);
+    }
+    return heads;
+  }
+
+  /**
+   * Deletes `branch` from the origin, but only if it still points at `expected` (a lease, like `pushOwned`): a commit pushed
+   * since is not deleted. Like the push, it is restricted to the branches the workflow owns.
+   */
+  async deleteOwned(cwd: string, branch: string, expected: string): Promise<void> {
+    if (!branch.startsWith(WORKFLOW_BRANCH_PREFIX)) throw new Error(`refusing to delete ${branch} from the origin: the workflow only deletes branches under ${WORKFLOW_BRANCH_PREFIX}`);
+    await this.push(cwd, `--force-with-lease=${branch}:${expected}`, "origin", `:refs/heads/${branch}`);
+  }
+
   /** `gh` in `cwd`, which has to succeed; returns all of its stdout. */
   async gh(cwd: string, ...args: string[]): Promise<string> {
     return this.succeedRead("gh", args, cwd, this.timeouts.networkMs);
@@ -110,6 +142,18 @@ export class Commands {
     if (r.ok) return r.stdout;
     if (r.exitCode === 1 && nothing.test(r.tail)) return undefined;
     throw new CommandError("gh", args, r, this.timeouts.networkMs);
+  }
+
+  /**
+   * The state of the pull request whose head is `branch` (the latest one, when there are several), or undefined when the
+   * branch has none. Any other `gh` failure (an auth error, a network stall) is an error, never "no PR".
+   */
+  async prState(cwd: string, branch: string): Promise<PrState | undefined> {
+    const out = await this.ghOrNothing(cwd, /no pull requests? found/i, "pr", "view", branch, "--json", "state", "-q", ".state");
+    const state = out?.trim().toUpperCase();
+    if (state === undefined || state === "") return undefined;
+    if (state !== "OPEN" && state !== "MERGED" && state !== "CLOSED") throw new Error(`gh pr view ${branch}: unexpected state ${JSON.stringify(out?.trim())}`);
+    return state;
   }
 
   private options(command: string, args: string[], cwd: string, timeoutMs: number): ExecOptions {
