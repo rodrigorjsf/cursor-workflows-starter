@@ -108,6 +108,17 @@ test("custo por entrega conta o gasto dos runs que falharam", async () => {
   db.close();
 });
 
+test("o total de runs conta todo run da janela, também o que só roda comandos, como a soma dos runs por workflow", async () => {
+  const commandsOnly = defineWorkflow({ meta: { name: "cmds", description: "x" }, defaults: { model: { id: "m" } }, run: async () => ({ status: "done" }) });
+  await runWorkflow(commandsOnly, {}, { cwd, metricsDb: dbPath });
+  await runWorkflow(wf, { n: 1 }, { cwd, metricsDb: dbPath });
+  const db = await openDb(dbPath);
+  const s = summary(db, 30);
+  assert.equal(s.workflows.reduce((n, w) => n + Number(w.runs), 0), 2);
+  assert.equal(s.totals[0]!.runs, 2, "o run sem tentativa de agente entra no total, como entra na linha do workflow dele");
+  db.close();
+});
+
 test("sem custo do Cursor: estimativa pela tabela pricing, com faixa de contexto", async () => {
   Object.assign(costConfig, { raw: undefined });
   const haiku = defineWorkflow({ meta: { name: "h", description: "h" }, defaults: { model: { id: "claude-haiku-5-5" }, retries: 0 }, run: (ctx) => ctx.agent("x") });
