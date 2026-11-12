@@ -188,6 +188,7 @@ export interface SliceRecord {
   greenAttempt?: number;
   /** A etapa de código passou nas checagens de escopo; falta a suíte (e as correções). */
   greenDone?: boolean;
+  /** Rodadas de correção cuja etapa chegou ao fim (gravado no settle dela): o resume segue da próxima, e refaz uma interrompida. */
   fixRound?: number;
   done: boolean;
 }

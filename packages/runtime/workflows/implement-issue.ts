@@ -510,6 +510,8 @@ export default defineWorkflow<Args>({
     const cmd = new Commands((command, args, opts) => ctx.exec(command, args, opts), {
       networkMs: settings.networkTimeoutSec * 1000,
     });
+    // Lido antes do lock: só lê o arquivo (o engine já trava o run), e um progresso ilegível falha o run sem segurar a issue.
+    const progress = new ProgressStore(ctx.cwd, ctx.runId);
     // Uma issue tem no máximo um run ativo: dois runs na mesma issue brigariam pelo mesmo trabalho e abririam dois PRs. O lock
     // fica no run store (`.workflows/locks/issue-<n>.lock`, ou `issue-<n>-<hash do repositório>.lock` quando o `--repo` é outro
     // repositório que não o do cwd: a issue #5 de outro repositório é outra issue) e vale até o run terminar, qualquer que seja
@@ -527,7 +529,6 @@ export default defineWorkflow<Args>({
         lock: err.message,
       };
     }
-    const progress = new ProgressStore(ctx.cwd, ctx.runId);
     /** A ordem desta execução no log de eventos do run; lida na primeira etapa de escrita. */
     let execution: number | undefined;
     try {
@@ -898,10 +899,12 @@ export default defineWorkflow<Args>({
           if (!rec.greenDone) return "tdd-violation";
         }
         let res = await suite(`green:${sfx}`);
+        // Uma rodada só conta quando a etapa de correção dela chega ao fim (`fixRound` é gravado depois do settle). Interrompida
+        // antes (cancelamento, queda, falha do agente), o resume desfaz a etapa e refaz a MESMA rodada, como o red e o green
+        // refazem a mesma tentativa; com o mesmo id, uma etapa que derruba o processo chega ao `maxStepCrashes`. Interrompida
+        // na suíte depois do settle, a correção fica no worktree e a suíte do green do resume é a desta rodada.
         for (let round = (rec.fixRound ?? 0) + 1; res.kind === "failed" && round <= settings.fixRounds; round++) {
           ctx.log(`slice ${sfx}: tests failed; fix ${round}/${settings.fixRounds}`);
-          rec.fixRound = round;
-          progress.upsert(rec);
           const { before } = await writeStep<Impl>(`fix:${key}:${round}`, `${P.FIX_INSTRUCTIONS}\n\n${sliceBlock(sl)}\n\n## Test output\n${res.output}`, {
             label: `corrigir-${sfx}-${round}`,
             role: "fix",
@@ -914,7 +917,10 @@ export default defineWorkflow<Args>({
             settle();
             return "tdd-violation";
           }
-          settle();
+          // settle e rodada contada numa só gravação: nenhuma queda entre as duas desfaz uma correção já contada.
+          progress.data.inFlight = undefined;
+          rec.fixRound = round;
+          progress.upsert(rec);
           res = await suite(`fix:${sfx}:${round}`);
         }
         if (res.kind === "timeout" || res.kind === "killed") return `tests-${res.kind}`;
