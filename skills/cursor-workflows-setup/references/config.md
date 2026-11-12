@@ -48,8 +48,8 @@ Under `workflows.<name>`:
 
 - `maxTokens`, `maxTokensPerStep`, `maxCents`, `concurrency`: limits for that workflow, held under the caps.
 - `execTimeoutMs`: the default time limit of a command the workflow runs with `ctx.exec`.
-- `roles.<role>`: `model` (`id`, `params` such as `reasoning_effort`, `maxMode`), `timeoutMs`, `retries`,
-  `schemaRetries`, `maxTokensPerStep`, `settingSources`, and for cloud steps:
+- `roles.<role>`: `model` (`id`; `params`, a list of `{ id, value }` such as `reasoning_effort`; `maxMode`),
+  `timeoutMs`, `retries`, `schemaRetries`, `maxTokensPerStep`, `settingSources`, and for cloud steps:
   - `location`: `local` (default) or `cloud`. `cloud` runs the role's steps on a Cursor cloud agent, against a snapshot
     of the worktree pushed to `cloud.remote`. It applies only when the global cap `allowedLocations` includes `cloud`
     (otherwise the step runs locally and the request is a violation), and a role the workflow marks `never` is refused.
@@ -59,10 +59,10 @@ Under `workflows.<name>`:
 - `labels.<glob>`: the same preferences for steps that have no role, matched against the step's label (`location` and
   `resultVia` apply to roles only).
 - `settings`: the workflow's own settings, by the names it declares in `meta.settings`, set only in the two files; a
-  name it does not declare is an error. `implement-issue`'s: `sliceCaps`, `extraSlices`, `fixRounds`,
-  `redGreenAttempts`, `maxDiffChars`, `labelTiers`, `maxStepCrashes`, `testTimeoutSec`, `networkTimeoutSec`, and the
-  `wf gc` ages `gcFailedAfterDays` and `gcSnapshotGraceHours`. A setting set in a higher layer replaces the lower one
-  whole.
+  name it does not declare is an error. `implement-issue`'s: `sliceCaps` (per tier: `LOW`, `MED`, `HIGH`),
+  `extraSlices`, `fixRounds`, `redGreenAttempts`, `maxDiffChars`, `labelTiers`, `maxStepCrashes`, `testTimeoutSec`,
+  `networkTimeoutSec`, and the `wf gc` ages `gcFailedAfterDays` and `gcSnapshotGraceHours`. A setting set in a higher
+  layer replaces the lower one whole.
 
 `WF_MODEL_<ROLE>` environment variables (`WF_MODEL_REVIEW`, `WF_MODEL_IMPLEMENT_LOW`) set a role's model without a
 file edit.

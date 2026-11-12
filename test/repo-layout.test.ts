@@ -161,11 +161,13 @@ test("the setup skill's config reference names every key the config schema accep
   const schema = JSON.parse(read("packages", "runtime", "schema", "config.schema.json"));
   const keys = (properties: Record<string, unknown>) => Object.keys(properties).filter((key) => !key.startsWith("$"));
   const groups: Record<string, string[]> = { "top level": keys(schema.properties) };
-  for (const name of ["caps", "rolePrefs", "workflowPrefs", "workflowSettings", "cloudPrefs", "dashboardPrefs"]) {
-    groups[name] = keys(schema.definitions[name].properties);
+  for (const [name, definition] of Object.entries<{ properties?: Record<string, unknown> }>(schema.definitions)) {
+    if (definition.properties) groups[name] = keys(definition.properties);
   }
+  // A key counts as named only inside a code span, never in the prose between two spans.
+  const spans = [...reference.matchAll(/`([^`]+)`/g)].map((m) => m[1]!);
   for (const [group, names] of Object.entries(groups)) {
-    for (const key of names) assert.ok(new RegExp("`[^`]*\\b" + key + "\\b[^`]*`").test(reference), `config.md never names ${group} key \`${key}\``);
+    for (const key of names) assert.ok(spans.some((span) => new RegExp(`\\b${key}\\b`).test(span)), `config.md never names ${group} key \`${key}\``);
   }
   const shipped = reference.match(/~\/\.cursor-workflows\/kit\/(packages\/runtime\/schema\/config\.schema\.json)/);
   assert.ok(shipped && existsSync(join(ROOT, shipped[1]!)), "config.md must point at the config schema in the installed kit");
