@@ -8,6 +8,7 @@
 import { statSync } from "node:fs";
 import { join } from "node:path";
 import type { RunStatus } from "./events.js";
+import { type JobStart, readJobStart } from "./job-state.js";
 import type { OutcomeClass } from "./outcome.js";
 import { type ExecutionState, type RunCard, boundedPhase, latestCard, projectLatestExecution, resumeHint, runPhases, withRatio } from "./projection.js";
 import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn } from "./run-store.js";
@@ -52,6 +53,8 @@ export interface RunDetail extends RunSummary {
   /** What the workflow returned, once the latest execution finished. */
   result?: unknown;
   usage: UsageTotals & { cacheHitRatio: number | null };
+  /** How the latest execution's job was started (args and limit flags), from its record in the run's repo: what an exact resume repeats. Absent for a `wf run` in a terminal (no job), and for a record an older kit wrote. */
+  start?: JobStart;
 }
 
 const NO_USAGE: UsageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0 };
@@ -60,7 +63,7 @@ const NO_USAGE: UsageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens
 const logOf = (entry: RunsIndexEntry): string => join(runDirIn(entry.repo, entry.runId), EVENTS_FILE);
 
 /** What a run's event log says, projected: the part of `detailOf` that costs a read of the whole log. */
-type Projected = { execution: ExecutionState; executions: number; phases: string[]; card?: RunCard } | { error: string };
+type Projected = { execution: ExecutionState; executions: number; phases: string[]; card?: RunCard; jobId?: string } | { error: string };
 
 /** The projections of the logs read so far, by the log's size and modification time. */
 const projections = new Map<string, { stamp: string; projected: Projected }>();
@@ -88,8 +91,10 @@ function projectLog(log: string): Projected {
   try {
     const events = readEventLog(log, { content: false }).events;
     const execution = projectLatestExecution(events);
+    const latestStart = events.findLast((e) => e.type === "run-start");
+    const jobId = latestStart?.type === "run-start" && typeof latestStart.jobId === "string" ? latestStart.jobId : undefined;
     projected = execution
-      ? { execution, executions: events.filter((e) => e.type === "run-start").length, phases: runPhases(events), card: latestCard(events) }
+      ? { execution, executions: events.filter((e) => e.type === "run-start").length, phases: runPhases(events), card: latestCard(events), jobId }
       : { error: `no run-start in ${log}` };
   } catch (err) {
     projected = { error: `could not read ${log}: ${err instanceof Error ? err.message : String(err)}` };
@@ -171,7 +176,11 @@ function indexedRun(runId: string): RunsIndexEntry | undefined {
 /** One run with its progress lines, result and token usage. Undefined when the runs index has no such run. */
 export function readRun(runId: string): RunDetail | undefined {
   const entry = indexedRun(runId);
-  return entry && detailOf(entry);
+  if (!entry) return undefined;
+  const detail = detailOf(entry);
+  const projected = projectLog(logOf(entry)); // already projected by `detailOf`: no second read of the log
+  const start = "jobId" in projected && projected.jobId !== undefined ? readJobStart(entry.repo, projected.jobId) : undefined;
+  return start ? { ...detail, start } : detail;
 }
 
 /** Where the event log of an indexed run is, whether or not the file exists. Undefined when the runs index has no such run. */

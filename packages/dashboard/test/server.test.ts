@@ -2,7 +2,7 @@
 // (`WF_HOME`) and throwaway repos holding run directories written the way the runtime writes them. Every assertion is on a
 // status code, a header or a response body.
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { openDb } from "@cursor-workflows/runtime/observe";
@@ -165,6 +165,21 @@ test("a run that was resumed is one run: the first start, the latest execution's
   assert.equal(run.error, undefined, "the failure belongs to the earlier execution");
   assert.equal(run.phase, "second try");
   assert.equal(run.spentCents, 7);
+});
+
+test("GET /api/runs/:runId says how the latest execution's job was started, from the job record in the run's repo", async () => {
+  const repo = box.repo("repo-started");
+  const jobs = join(repo, ".workflows", "jobs");
+  mkdirSync(jobs, { recursive: true });
+  const start = { args: { issue: 42 }, maxCents: 300, overrides: { maxTokens: 9000 } };
+  writeFileSync(join(jobs, "job00001.json"), JSON.stringify({ jobId: "job00001", runId: "implement-issue-ffff0006", pid: 1, heartbeat: at(0), start }));
+  writeRun(box.home, repo, { runId: "implement-issue-ffff0006", workflow: "implement-issue", startedAt: at(0), jobId: "job00001", events: [{ type: "run-end", status: "cancelled" }] });
+  assert.deepEqual((await http(dash.url, "/api/runs/implement-issue-ffff0006")).json.start, start);
+
+  // a `wf run` in a terminal has no job; a job id that is not a plain name is never a path
+  writeRun(box.home, repo, { runId: "smoke-ffff0007", workflow: "smoke", startedAt: at(1), events: [{ type: "run-end", status: "failed" }] });
+  writeRun(box.home, repo, { runId: "smoke-ffff0008", workflow: "smoke", startedAt: at(2), jobId: "../jobs/job00001", events: [{ type: "run-end", status: "failed" }] });
+  for (const runId of ["smoke-ffff0007", "smoke-ffff0008"]) assert.equal((await http(dash.url, `/api/runs/${runId}`)).json.start, undefined, runId);
 });
 
 test("a run the index does not know is a 404, and the run id is never a path", async () => {

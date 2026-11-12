@@ -37,7 +37,7 @@ export function RunActions({ runId, status, info, argsHash, onChanged }: RunActi
     else setCancel({ step: "done", message: outcome.status === "cancelled" ? "Cancelled." : `Cancelling: ${outcome.note}` });
   };
 
-  const command = info && canResume(status) ? resumeCommand({ workflow: info.workflow, runId, repo: info.repo, argsHash }) : undefined;
+  const command = info && canResume(status) ? resumeCommand({ workflow: info.workflow, runId, repo: info.repo, argsHash, start: info.start }) : undefined;
   const copy = async () => {
     if (!command) return;
     setShown(true);
@@ -104,8 +104,10 @@ export function RunActions({ runId, status, info, argsHash, onChanged }: RunActi
             <>
               <input className="command" readOnly aria-label="Resume command" value={command} onFocus={(e) => e.currentTarget.select()} onClick={(e) => e.currentTarget.select()} />
               <span className="hint">
-                {command.includes(ARGS_PLACEHOLDER) ? "The log keeps only a hash of the args: put the args of the first start in place of the placeholder. " : ""}
-                Add the same <code>--max-cents</code> and <code>--max-tokens</code> if the first start had them.
+                {info?.start
+                  ? "The same args and limits as the run's latest start."
+                  : (command.includes(ARGS_PLACEHOLDER) ? "No job record says how this run was started, and its log keeps only a hash of the args: put the args of the first start in place of the placeholder. " : "") +
+                    "Add the same --max-cents and --max-tokens if the first start had them."}
               </span>
             </>
           )}

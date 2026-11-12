@@ -356,13 +356,14 @@ No cabeçalho da página do run:
   do que a espera (20 s) para parar, a resposta diz que ele ainda está parando. Um run que não foi iniciado como job (`wf run`
   num terminal) não tem processo registrado para sinalizar: o dashboard responde `409` e diz para dar Ctrl-C naquele terminal.
 - **Copy resume command** (num run `failed` ou `cancelled`) copia
-  `wf start <workflow> --args '<os args do primeiro start, em JSON>' --resume <runId> --cwd <repositório>`. O log guarda só o
-  hash dos args (`argsHash` do `run-start`), nunca eles, então o comando traz um marcador no lugar: colado sem edição, o `wf`
-  recusa o `--args` (não é JSON) antes de iniciar qualquer coisa, em vez de retomar com outros args. A exceção são os args
-  vazios, como os do `smoke`: o hash da última execução é o de `{}`, e o comando já sai com `--args '{}'`, completo. O
-  comando não traz os tetos (`--max-cents`, `--max-tokens`) do primeiro start, que o log também não guarda: um aviso ao lado do
-  campo lembra de repô-los. O comando aparece num campo de texto, para copiar à mão quando o navegador não deixa escrever na
-  área de transferência.
+  `wf start <workflow> --args '<args>' --resume <runId> --cwd <repositório>`, com os mesmos `--max-cents`, `--max-tokens` e
+  `--overrides` do start. O registro do job da última execução (`.workflows/jobs/<jobId>.json`, campo `start`) guarda os
+  args e os tetos com que o job foi iniciado, e o comando os repete: colado como está, retoma o run. Sem esse registro (um
+  `wf run` num terminal, ou um job de uma versão antiga do kit) o dashboard só tem o hash dos args (`argsHash` do
+  `run-start`), e o comando traz um marcador no lugar deles: colado sem edição, o `wf` recusa o `--args` (não é JSON) antes
+  de iniciar qualquer coisa, em vez de retomar com outros args. A exceção são os args vazios, como os do `smoke`: o hash é o
+  de `{}`, e o comando já sai com `--args '{}'`. Nesse caso um aviso ao lado do campo lembra de repor os tetos.
+  O comando aparece num campo de texto, para copiar à mão quando o navegador não deixa escrever na área de transferência.
 
 O cancelamento exige o token CSRF (veja [Segurança](#segurança-do-dashboard)): a página lê o token em `/api/csrf` a cada
 cancelamento e o manda em `X-CSRF-Token`.

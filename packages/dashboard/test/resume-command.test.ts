@@ -41,6 +41,29 @@ test("the args that count are those of the latest execution: a resume may have b
   assert.equal(argsHashOf([]), undefined);
 });
 
+test("with how the job was started, the command is exact: the same args and the same caps, ready to paste", () => {
+  const command = resumeCommand({
+    workflow: "implement-issue",
+    runId: "implement-issue-97f23b02",
+    repo: "/home/me/code/app",
+    argsHash: "0123456789abcdef",
+    start: { args: { issue: 42, note: "it's" }, maxCents: 300, maxTokens: 200000, overrides: { maxCents: 150 } },
+  });
+  assert.equal(
+    command,
+    `wf start implement-issue --args '{"issue":42,"note":"it'\\''s"}' --resume implement-issue-97f23b02 --cwd /home/me/code/app --max-cents 300 --max-tokens 200000 --overrides '{"maxCents":150}'`,
+  );
+  assert.ok(!command.includes(ARGS_PLACEHOLDER));
+  const words = execFileSync("sh", ["-c", `set -- ${command.slice("wf ".length)}; printf '%s\\n' "$@"`], { encoding: "utf8" }).trimEnd().split("\n");
+  assert.deepEqual(JSON.parse(words[words.indexOf("--args") + 1]!), { issue: 42, note: "it's" });
+
+  assert.equal(
+    resumeCommand({ workflow: "smoke", runId: "smoke-1", repo: "/r", start: { args: {} } }),
+    "wf start smoke --args '{}' --resume smoke-1 --cwd /r",
+    "no caps at the first start, none in the command",
+  );
+});
+
 test("a path with spaces or quotes stays one word for the shell, and means the same path", () => {
   const repos = ["/home/me/my code/app", "/home/me/it's here", "/srv/$HOME/`x`/a;b", "/tmp/a b/c\"d"];
   for (const repo of repos) {

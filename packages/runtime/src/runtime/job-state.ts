@@ -2,19 +2,32 @@
 // the engine. The dashboard cancels a run through this module (`observe`), so it must stay free of the engine and, with it,
 // of the Cursor SDK: `jobs.ts` adds what starts a job. See there for what a job is.
 //
-// The job record (`.workflows/jobs/<jobId>.json`) holds identity only: job id, run id, pid and heartbeat. Everything else
+// The job record (`.workflows/jobs/<jobId>.json`) holds identity only: job id, run id, pid and heartbeat, plus how the job
+// was started (args and limit flags), so a resume can repeat it exactly. Everything else
 // (status, phase, recent lines, spend, result) is a projection of the run's event log
 // (`.workflows/runs/<runId>/events.jsonl`), computed on every read: one source of truth, and no state file to be left
 // half-written.
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import type { LimitOverrides } from "../config/index.js";
 import type { RunStatus } from "./events.js";
 import { type ExecutionState, type Ledger, projectExecution, replayLedger, resumeHint, withRatio } from "./projection.js";
 import { commandLineHas, isAlive } from "./pid.js";
 import { eventLogPath, readEventLog } from "./run-store.js";
 import { stateDir } from "./state.js";
 import { writeFileAtomic } from "./state-files.js";
+
+/** How a job was started: what `wf start` (or `start_workflow`) was given, which a resume of its run gives again. */
+export interface JobStart {
+  /** The workflow's args. */
+  args: unknown;
+  /** The flag layer of the config (`--max-cents`, `--max-tokens`). */
+  maxCents?: number;
+  maxTokens?: number;
+  /** The tighten-only overrides (`--overrides`, `start_workflow`'s `overrides`). */
+  overrides?: LimitOverrides;
+}
 
 /** What is on disk: the identity of the job. */
 export interface JobRecord {
@@ -30,6 +43,8 @@ export interface JobRecord {
    * run's log is not the job's to write in that case (it may belong to another execution), so the reason is kept here.
    */
   refused?: string;
+  /** How the job was started. Absent in records an older kit wrote. */
+  start?: JobStart;
 }
 
 /** What `wf status`, `wf jobs`, `get_workflow_status` and `wait_workflow` return: the record plus the projection of the log. */
@@ -87,6 +102,13 @@ function parseJobRecord(file: string): JobRecord | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** How job `jobId` of `repo` was started, from its record. Only reads: nothing is created. Undefined when the id is not a plain name, or the record is not there or has no `start`. */
+export function readJobStart(repo: string, jobId: string): JobStart | undefined {
+  if (!/^[A-Za-z0-9_-]+$/.test(jobId)) return undefined;
+  const start = parseJobRecord(join(jobsDirIn(repo), `${jobId}.json`))?.start;
+  return start && typeof start === "object" && "args" in start ? start : undefined;
 }
 
 /** The job record on disk (identity only), without the projection. */
@@ -180,8 +202,8 @@ export function runningJobOf(cwd: string, runId: string): JobState | undefined {
 
 /** Writes the record. Only the identity fields reach the disk, even when `record` is a `JobState`. */
 export function writeJob(cwd: string, record: JobRecord): void {
-  const { jobId, runId, pid, heartbeat, refused } = record;
-  writeFileAtomic(join(jobsDir(cwd), `${jobId}.json`), JSON.stringify({ jobId, runId, pid, heartbeat, ...(refused === undefined ? {} : { refused }) }, null, 2));
+  const { jobId, runId, pid, heartbeat, refused, start } = record;
+  writeFileAtomic(join(jobsDir(cwd), `${jobId}.json`), JSON.stringify({ jobId, runId, pid, heartbeat, ...(refused === undefined ? {} : { refused }), ...(start === undefined ? {} : { start }) }, null, 2));
 }
 
 /** True when `record.pid` is the process of this job and not another one that got the number: its command line carries the job id. */

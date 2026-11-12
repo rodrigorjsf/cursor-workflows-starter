@@ -5,6 +5,7 @@
 // - While the run is running the stream stays open; otherwise it is read until it goes quiet and closed (the server never ends
 //   a stream: a resumed run adds to the same log). The status is polled, so a resume of a finished run reopens the stream.
 // - Events are handed over in batches, so a burst (the replay of a long log) is one render, not one per event.
+import type { JobStart } from "./resume-command.js";
 import { useEffect, useRef, useState } from "react";
 import { batcher } from "./batch.js";
 import type { RunEvent } from "./run-graph.js";
@@ -19,6 +20,8 @@ export type ApiStatus = "running" | "finished" | "failed" | "cancelled" | "missi
 export interface RunInfo {
   workflow: string;
   repo: string;
+  /** How the latest execution's job was started, when the API knows (see `JobStart` in the runtime). */
+  start?: JobStart;
 }
 
 export interface RunFeed {
@@ -66,11 +69,13 @@ export function useRunEvents(runId: string): RunFeed {
           const reply = await fetch(`/api/runs/${encodeURIComponent(runId)}`);
           if (stopped) return;
           if (reply.ok) {
-            const detail = (await reply.json()) as { status: ApiStatus; workflow?: string; repo?: string };
+            const detail = (await reply.json()) as { status: ApiStatus; workflow?: string; repo?: string; start?: JobStart };
             latest = detail.status;
             setStatus(latest);
             const { workflow, repo } = detail;
-            if (typeof workflow === "string" && typeof repo === "string") setInfo((before) => (before && before.workflow === workflow && before.repo === repo ? before : { workflow, repo }));
+            const start = detail.start && typeof detail.start === "object" && "args" in detail.start ? detail.start : undefined;
+            if (typeof workflow === "string" && typeof repo === "string")
+              setInfo((before) => (before && before.workflow === workflow && before.repo === repo && JSON.stringify(before.start) === JSON.stringify(start) ? before : { workflow, repo, start }));
             if (latest === "missing") setConnection("not-found");
           } else if (reply.status === 404 && Date.now() - since > NOT_FOUND_AFTER_MS) setConnection("not-found");
         } catch {

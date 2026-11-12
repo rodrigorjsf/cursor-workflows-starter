@@ -16,15 +16,15 @@ import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import type { LimitOverrides } from "../config/index.js";
 import { type RunOptions, newRunId, runWorkflow } from "./engine.js";
-import { HEARTBEAT_MS, type JobRecord, type JobState, fromEnv, jobLogPath, jobsDir, readJob, writeJob } from "./job-state.js";
+import { HEARTBEAT_MS, type JobRecord, type JobStart, type JobState, fromEnv, jobLogPath, jobsDir, readJob, writeJob } from "./job-state.js";
 import { resumeHint } from "./projection.js";
 import { abortOpenRuns } from "./run-store.js";
 import type { WorkflowDefinition } from "./workflow.js";
 
 /** Creates the job record before the run (the CLI `start` writes it in the parent, before the spawn). */
-export function createJob(cwd: string, workflow: string, runId?: string, jobId: string = randomUUID().slice(0, 8), pid = process.pid): JobRecord {
+export function createJob(cwd: string, workflow: string, runId?: string, jobId: string = randomUUID().slice(0, 8), pid = process.pid, start?: JobStart): JobRecord {
   // Date and time stay in the record, not in the workflow: the script must be deterministic for the resume.
-  const record: JobRecord = { jobId, runId: runId ?? newRunId(workflow), pid, heartbeat: new Date().toISOString() };
+  const record: JobRecord = { jobId, runId: runId ?? newRunId(workflow), pid, heartbeat: new Date().toISOString(), ...(start ? { start } : {}) };
   writeJob(cwd, record);
   return record;
 }
@@ -129,7 +129,13 @@ export interface SpawnJobOptions {
  * job's log file. Where it cannot be started, the job is recorded as refused, with the reason.
  */
 export function spawnJob(o: SpawnJobOptions): { job: JobRecord; log: string } {
-  const job = createJob(o.cwd, o.workflow, o.resumeRunId);
+  const start: JobStart = {
+    args: o.args ?? {},
+    ...(o.maxCents === undefined ? {} : { maxCents: o.maxCents }),
+    ...(o.maxTokens === undefined ? {} : { maxTokens: o.maxTokens }),
+    ...(o.overrides && Object.keys(o.overrides).length ? { overrides: o.overrides } : {}),
+  };
+  const job = createJob(o.cwd, o.workflow, o.resumeRunId, undefined, undefined, start);
   const log = jobLogPath(o.cwd, job.jobId);
   const cli = fileURLToPath(new URL("../cli.ts", import.meta.url)); // the runtime's own CLI, wherever the kit is installed
   const flags = [
