@@ -11,7 +11,8 @@ import { join } from "node:path";
 import { after, afterEach, test } from "node:test";
 import { calls, costConfig, script, stats } from "@cursor/sdk";
 import { type WorkflowEvent, runWorkflow } from "../src/runtime/engine.js";
-import { startJob, readJob } from "../src/runtime/jobs.js";
+import { startJob } from "../src/runtime/jobs.js";
+import { readJob } from "../src/runtime/job-state.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { defineWorkflow } from "../src/runtime/workflow.js";
 

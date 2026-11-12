@@ -52,6 +52,19 @@ Inclui os campos de [`EventBase`](#eventbase).
 | --- | --- | --- | --- |
 | `title` | `string` | sim | O título passado a `ctx.phase`. |
 
+### `card`
+
+O cartão do run no quadro do dashboard (`ctx.card`). O quadro mostra o último cartão de cada run: chamar `ctx.card` de novo atualiza o cartão.
+
+Inclui os campos de [`EventBase`](#eventbase).
+
+| Campo | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `title` | `string` | sim | O título do cartão. |
+| `subtitle` | `string` | não | Uma linha abaixo do título. |
+| `links` | `CardLink[]` | não | Links do cartão, como o da pull request. |
+| `badges` | `string[]` | não | Rótulos curtos do cartão, como o tier. |
+
 ### `run-start`
 
 O run começou (ou foi retomado: cada execução emite o seu).
@@ -64,6 +77,7 @@ Inclui os campos de [`EventBase`](#eventbase).
 | `workflowHash` | `string` | sim | Hash do código e da meta do workflow: compare métricas só entre versões iguais. |
 | `argsHash` | `string` | sim | Hash dos args: dá para ver que dois runs tiveram a mesma entrada sem guardar a entrada. |
 | `repo` | `{ name: string; hash: string }` | sim | O repositório do run: nome da pasta raiz do git e um hash curto do remote `origin` (ou do caminho). |
+| `phases` | `string[]` | não | As fases que o workflow declara em `meta.phases`, na ordem: os títulos que `ctx.phase` usa. O dashboard monta as colunas do quadro com elas. Ausente em logs de versões antigas e em workflow que não declara fases. |
 | `jobId` | `string` | não | O job (`wf start`, `start_workflow`) que iniciou esta execução. Ausente em `wf run`. O estado de um job é a projeção das execuções que levam o id dele. |
 | `config` | `EffectiveConfig` | sim | A configuração efetiva desta execução, lida dos arquivos e do ambiente no início. Um resume lê de novo. |
 | `provenance` | `Record<string, ConfigSource>` | sim | De onde veio cada valor de `config`: ponteiro JSON em `config` (`/limits/maxTokens`, `/roles/review/model/id`) → origem. |
@@ -252,6 +266,15 @@ Inclui os campos de [`EventBase`](#eventbase).
 | `message` | `string` | sim | O texto do aviso, para quem lê o run. |
 
 ## Tipos auxiliares
+
+### CardLink
+
+Um link do cartão de um run.
+
+| Campo | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `label` | `string` | sim | O texto do link. |
+| `url` | `string` | sim | O endereço. Só `http:` e `https:` aparecem no dashboard; um link de pull request do GitHub mostra também o estado dele (aberto, mesclado ou fechado). |
 
 ### EffectiveConfig
 

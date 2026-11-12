@@ -8,7 +8,7 @@ um link quebrado, um rodapé errado ou um capítulo fora do índice reprova o PR
 
 ## Onde fica cada coisa
 
-O repositório é um produto (`packages/runtime/`, `skills/`, `templates/`) mais um espaço de desenvolvimento (a raiz). O
+O repositório é um produto (`packages/runtime/`, `packages/dashboard/`, `skills/`, `templates/`) mais um espaço de desenvolvimento (a raiz). O
 `CLAUDE.md` (guia canônico do mantenedor; `AGENTS.md` é um link para ele) tem as regras para quem edita o código. Ele é
 carregado no contexto de todo agente e por isso tem limite de linhas: guarda o essencial, e o detalhe fica neste livro. A
 decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-claude-md-symlink.md).
@@ -17,6 +17,13 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 .
 ├── CLAUDE.md               # guia canônico do mantenedor, em inglês (AGENTS.md é um link simbólico para ele)
 ├── packages/
+│   ├── dashboard/          # o dashboard local (workspace npm @cursor-workflows/dashboard): servidor HTTP sobre os runs e as métricas, que só lê, a não ser para cancelar um run
+│   │   ├── src/            # server.ts (API JSON, stream SSE e páginas), main.ts (o processo), board.ts (as colunas do quadro), pr-state.ts (estado das PRs, pelo `gh`),
+│   │   │                   # web-bundle.ts (o esbuild que empacota as duas páginas quando o dashboard sobe, com cache por hash), pages.ts (o HTML delas)
+│   │   ├── app/            # a página `/`, em React (menus Runs, Board e Metrics); o esbuild a empacota quando o dashboard sobe
+│   │   ├── run-view/       # a página do run, `/runs/<runId>` (React, React Flow, elkjs; tsconfig próprio, sem Node nem runtime):
+│   │   │                   # run-graph.ts (eventos → nós, arestas e raias), run-layout.ts (posições, elkjs), RunView.tsx (a tela)
+│   │   └── test/           # testes do servidor por HTTP, do grafo e do layout (puros) e um contrato com o engine de verdade
 │   └── runtime/            # o produto (workspace npm @cursor-workflows/runtime)
 │       ├── src/
 │       │   ├── runtime/
@@ -28,12 +35,18 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   │   ├── run-store.ts    # log de eventos, journal, lock de cada run e locks nomeados do repositório (`.workflows/locks/`)
 │       │   │   ├── structured.ts   # saída estruturada via custom tool submit_result + Ajv
 │       │   │   ├── journal.ts      # resume sem repetir etapas concluídas
-│       │   │   ├── jobs.ts         # jobs: processo destacado, heartbeat, cancelamento e estado projetado do log
+│       │   │   ├── jobs.ts         # jobs: o que inicia um job (processo destacado, heartbeat)
+│       │   │   ├── job-state.ts    # o registro de um job, o estado projetado do log e o cancelamento, sem o engine (o dashboard o usa)
+│       │   │   ├── run-view.ts     # os runs de todos os repositórios, lidos do índice global e do log, para quem observa de fora (o dashboard)
+│       │   │   ├── run-tail.ts     # o log de eventos de um run lido por posição (cada linha tem um id): o stream ao vivo e o conteúdo de uma etapa
+│       │   │   ├── run-cancel.ts   # cancela um run de fora do processo que o executa (o botão Cancel do dashboard), pelo mesmo `cancelJob` do `wf cancel`
+│       │   │   ├── dashboard-instance.ts  # onde o dashboard escuta, o pid file e o `ensureDashboard` que o `start_workflow` chama
 │       │   │   ├── heartbeat-worker.mjs  # thread que atualiza o heartbeat do job mesmo com a principal bloqueada
 │       │   │   ├── worktree-snapshot.ts  # registra e restaura os arquivos de uma etapa que escreve (cancelamento)
 │       │   │   ├── registry.ts     # descobre workflows/*.ts
 │       │   │   └── nested-mcp-guard.mjs  # servidor MCP sem tools que barra workflow dentro de etapa
-│       │   ├── observability/      # banco SQLite de métricas, recorder, consultas, dashboard localhost
+│       │   ├── observability/      # banco SQLite de métricas, recorder, consultas
+│       │   ├── observe.ts          # a única entrada que outro pacote importa do runtime (`@cursor-workflows/runtime/observe`)
 │       │   ├── init.ts             # wf init: planeja e grava os arquivos do kit no repositório alvo (sem commit)
 │       │   ├── doctor.ts           # wf doctor: as verificações do ambiente
 │       │   ├── doctor-report.ts    # o formato do relatório do doctor (só a biblioteca padrão: o node-check.ts o usa num Node antigo)

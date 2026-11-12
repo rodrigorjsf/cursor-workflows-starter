@@ -10,6 +10,9 @@ A runtime for **deterministic workflows** on the Cursor SDK (`@cursor/sdk`), as 
 
 - `packages/runtime/`: the product. Engine, CLI (`src/cli.ts`), MCP server (`src/mcp-server.ts`), built-in
   workflows (`workflows/`) and their offline tests (`test/`).
+- `packages/dashboard/`: the local dashboard (`npm run dash`), its own package so its web dependencies (React, React
+  Flow, elkjs, esbuild) never enter the runtime. Server in `src/`, browser code bundled by the server when it starts.
+  It reaches the runtime only through `@cursor-workflows/runtime/observe` (`npm test` checks it).
 - `skills/`: the skills distributed to users. `.agents/skills/` symlinks to them for dogfooding; never copy them.
 - `templates/`: files the kit's setup writes: the `AGENTS.md` rules block (`templates/agents-md-block.md`) that `wf init`
   (`packages/runtime/src/init.ts`) appends to a target repo, and the default global config
@@ -20,8 +23,9 @@ A runtime for **deterministic workflows** on the Cursor SDK (`@cursor/sdk`), as 
 - The repo root is the dev space: this guide, the dogfood MCP config (`.mcp.json`, `.cursor/mcp.json`), `docs/`,
   `scripts/`, repo-level tests (`test/`).
 
-The runtime resolves its own assets relative to its install location, never the repo root. The only repo it reads is
-the target repo it runs in (the cwd). Keep it that way.
+The runtime resolves its own assets relative to its install location, never the repo root. The only repo it runs in
+is the target repo (the cwd). Keep it that way. One exception, for tools beside it: the `observe` entry point finds
+runs of every repo through the global runs index (ADR-0002), reads their logs, and cancels their jobs.
 
 Workflows live in `packages/runtime/workflows/*.ts` (built in) and `.agents/workflows/*.ts` (per repo). The MCP server
 `workflows` or the CLI (`npm run wf -- ...`) runs them. Step agents read this file too (`settingSources: ["project"]`).

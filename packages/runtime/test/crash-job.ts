@@ -13,4 +13,4 @@ const held = defineWorkflow({
   defaults: { model: { id: "m" } },
   run: (ctx) => ctx.agent("hold", { label: "hold", retries: 0, timeoutMs: 10 * 60_000 }),
 });
-startJob(held, {}, { cwd, onEvent: (e) => e.type === "step-start" && setTimeout(() => { throw new Error("boom"); }, 0) }, createJob(cwd, "crashing", runId, jobId));
+startJob(held, {}, { cwd, onEvent: (e) => e.type === "step-start" && setTimeout(() => { throw new Error("boom"); }, 0) }, createJob(cwd, "crashing", { runId, jobId }));

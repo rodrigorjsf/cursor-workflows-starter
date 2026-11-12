@@ -52,7 +52,7 @@ test("a relocated install serves its own built-in workflows and version, plus th
     command: join(kit, "node_modules", ".bin", "tsx"),
     args: [join(kit, "src", "mcp-server.ts")],
     cwd: targetRepo,
-    env: { ...getDefaultEnvironment(), TSX_TSCONFIG_PATH: join(kit, "tsconfig.test.json"), WF_METRICS: "off" },
+    env: { ...getDefaultEnvironment(), TSX_TSCONFIG_PATH: join(kit, "tsconfig.test.json"), WF_METRICS: "off", WF_DASH_AUTOSTART: "off" },
   });
   try {
     await client.connect(transport);
@@ -78,7 +78,7 @@ test("a relocated install validates the config with the JSON Schema of its own i
     command: join(kit, "node_modules", ".bin", "tsx"),
     args: [join(kit, "src", "mcp-server.ts")],
     cwd: targetRepo,
-    env: { ...getDefaultEnvironment(), TSX_TSCONFIG_PATH: join(kit, "tsconfig.test.json"), WF_METRICS: "off", WF_HOME: join(sandbox, "home") },
+    env: { ...getDefaultEnvironment(), TSX_TSCONFIG_PATH: join(kit, "tsconfig.test.json"), WF_METRICS: "off", WF_DASH_AUTOSTART: "off", WF_HOME: join(sandbox, "home") },
   });
   try {
     await client.connect(transport);

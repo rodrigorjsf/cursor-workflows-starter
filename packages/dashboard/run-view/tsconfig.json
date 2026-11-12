@@ -1,0 +1,5 @@
+{
+  "extends": "../../runtime/tsconfig.json",
+  "compilerOptions": { "lib": ["ES2023", "DOM", "DOM.Iterable"], "jsx": "react-jsx", "types": [], "moduleResolution": "Bundler", "module": "ESNext", "noEmit": true },
+  "include": ["./**/*.ts", "./**/*.tsx"]
+}

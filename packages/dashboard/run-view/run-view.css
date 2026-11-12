@@ -1,0 +1,165 @@
+/* The Run view. Colours are tokens on :root, redefined for the dark scheme; React Flow's own stylesheet comes first. */
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --text: #1c2330;
+  --muted: #5d6b7e;
+  --line: #d5dbe4;
+  --lane: rgba(90, 110, 140, 0.07);
+  --lane-alt: rgba(90, 110, 140, 0.13);
+  --running: #2563eb;
+  --ok: #15803d;
+  --failed: #c42b2b;
+  --cancelled: #b45309;
+  --cached: #6b7a90;
+  --interrupted: #92400e;
+  --accent: #2563eb;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #11151c;
+    --panel: #1a212c;
+    --text: #e6ebf2;
+    --muted: #98a6ba;
+    --line: #2f3a4b;
+    --lane: rgba(160, 180, 210, 0.06);
+    --lane-alt: rgba(160, 180, 210, 0.12);
+    --running: #5b9bff;
+    --ok: #4ade80;
+    --failed: #ff7b7b;
+    --cancelled: #f5b04c;
+    --cached: #8fa0b8;
+    --interrupted: #e0a070;
+    --accent: #5b9bff;
+  }
+}
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+code { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); }
+a { color: var(--accent); }
+
+.page { display: flex; flex-direction: column; height: 100%; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.bar h1 { margin: 0; font-size: 16px; font-weight: 600; }
+.bar .workflow { margin-right: 6px; }
+.back { text-decoration: none; color: var(--muted); }
+.totals { color: var(--muted); }
+.badge { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; font-weight: 600; }
+.status-running, .status-replaying { color: var(--running); border-color: var(--running); }
+.status-finished { color: var(--ok); border-color: var(--ok); }
+.status-failed { color: var(--failed); border-color: var(--failed); }
+.status-cancelled { color: var(--cancelled); border-color: var(--cancelled); }
+.status-interrupted { color: var(--interrupted); border-color: var(--interrupted); }
+.conn { color: var(--muted); font-size: 12px; }
+.conn-live::before { content: "● "; color: var(--ok); }
+.replay { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.replay input[type="range"] { width: 180px; }
+button, select { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+.workspace { flex: 1; min-height: 0; display: flex; }
+.canvas { flex: 1; min-width: 0; min-height: 0; position: relative; }
+.notice { margin: 24px 16px; color: var(--muted); }
+.run-error { margin: 0; padding: 6px 16px; color: var(--failed); border-bottom: 1px solid var(--line); background: var(--panel); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+
+/* React Flow */
+.react-flow { background: var(--bg); }
+.react-flow__node { transition: transform 0.25s ease; }
+.react-flow__node:hover { z-index: 10000 !important; }
+.react-flow__handle { opacity: 0; pointer-events: none; }
+.react-flow__edge-path { stroke: var(--cached); stroke-width: 1.5; }
+.react-flow__edge.animated .react-flow__edge-path { stroke: var(--running); }
+.react-flow__edge.edge-failed .react-flow__edge-path { stroke: var(--failed); }
+
+/* lanes */
+.lane { width: 100%; height: 100%; background: var(--lane); border-left: 1px dashed var(--line); }
+.react-flow__node-lane:nth-of-type(even) .lane { background: var(--lane-alt); }
+.lane-title { position: absolute; top: 8px; left: 12px; font-weight: 600; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+
+/* nodes: their sizes are set from NODE_SIZE (run-layout.ts), the sizes the layout assumes */
+.work { position: relative; padding: 8px 10px; background: var(--panel); border: 1.5px solid var(--line); border-left-width: 5px; border-radius: 8px; outline: none; }
+.work.command { padding-top: 6px; }
+.work { cursor: pointer; }
+.work:focus-visible, .work.selected { box-shadow: 0 0 0 2px var(--accent); }
+.work .title { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.work .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work .sub { margin-top: 2px; color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work .glyph { flex: none; width: 1em; text-align: center; }
+.state-running { border-color: var(--running); }
+.state-ok { border-color: var(--ok); }
+.state-failed { border-color: var(--failed); }
+.state-cancelled { border-color: var(--cancelled); }
+.state-cached { border-color: var(--cached); }
+.state-interrupted { border-color: var(--interrupted); border-style: dashed; }
+.state-running .glyph { color: var(--running); }
+.state-ok .glyph { color: var(--ok); }
+.state-failed .glyph { color: var(--failed); }
+.state-cancelled .glyph { color: var(--cancelled); }
+.state-cached .glyph { color: var(--cached); }
+.state-interrupted .glyph { color: var(--interrupted); }
+.work.state-running { animation: pulse 1.6s ease-in-out infinite; }
+.work.state-running .glyph { animation: blink 1.1s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--running) 28%, transparent); } }
+@keyframes blink { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .work.state-running, .work.state-running .glyph { animation: none; } .react-flow__node { transition: none; } }
+
+.junction.fork { display: flex; align-items: center; justify-content: center; border: 1.5px solid var(--line); border-radius: 999px; background: var(--panel); font-size: 12px; color: var(--muted); white-space: nowrap; }
+.junction.join { border: 1.5px solid var(--line); border-radius: 50%; background: var(--panel); }
+.junction.state-running { border-color: var(--running); }
+.junction.state-ok { border-color: var(--ok); }
+.junction.state-failed { border-color: var(--failed); }
+.junction.state-interrupted { border-color: var(--interrupted); border-style: dashed; }
+.start { display: flex; align-items: center; justify-content: center; border: 1.5px solid var(--line); border-radius: 999px; background: var(--panel); font-size: 12px; font-weight: 600; white-space: nowrap; }
+
+/* tooltip */
+.tip { display: none; position: absolute; left: 0; top: calc(100% + 6px); z-index: 10; min-width: 220px; max-width: 320px; margin: 0; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25); pointer-events: none; font-size: 12px; font-weight: 400; }
+.work:hover .tip, .work:focus-visible .tip { display: block; }
+.tip div { display: flex; gap: 10px; justify-content: space-between; padding: 1px 0; }
+.tip dt { color: var(--muted); }
+.tip dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+
+/* the actions of the header: cancel, copy the resume command */
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.actions .confirm { display: inline-flex; align-items: center; gap: 8px; }
+.actions .command { width: min(560px, 90vw); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+.actions .copied { color: var(--ok); font-size: 12px; }
+.actions .hint { flex-basis: 100%; color: var(--muted); font-size: 12px; }
+.actions .hint code { font-size: 11px; }
+.cancel-result { font-size: 12px; }
+.cancel-result.failed { color: var(--failed); }
+button.danger { color: var(--failed); border-color: var(--failed); }
+button.danger:hover { background: color-mix(in srgb, var(--failed) 12%, var(--panel)); }
+button:disabled { opacity: 0.6; cursor: default; }
+
+/* the log of a step, beside the canvas */
+.step-panel { flex: 0 0 min(46%, 680px); min-width: 0; display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line); }
+.step-panel > header { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.step-panel > header h2 { margin: 0; font-size: 14px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step-panel .close { font-size: 18px; line-height: 1; padding: 0 8px; }
+.step-panel .tail { font-size: 12px; color: var(--muted); }
+.step-panel .tail.live { color: var(--running); }
+.step-panel .tail.live::before { content: "● "; }
+.facts { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.facts div { display: flex; gap: 6px; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+.log { flex: 1; min-height: 0; overflow: auto; padding: 8px 12px 16px; outline: none; }
+.log:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.log .attempt > h2 { margin: 14px 0 4px; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.entry { margin: 10px 0; }
+.entry h3 { margin: 0 0 3px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.entry h3 .kind { text-transform: uppercase; letter-spacing: 0.04em; }
+.entry h3 code { color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+.entry pre { margin: 0; padding: 6px 8px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.entry.prompt pre { border-left: 3px solid var(--accent); max-height: 16em; overflow: auto; }
+.entry.message pre { border-left: 3px solid var(--ok); }
+.entry.tool pre.args { color: var(--muted); }
+.output { margin-top: 4px; }
+.output .stream { display: block; margin-bottom: 1px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.output.stderr pre { border-left: 3px solid var(--failed); }
+.gone { margin: 3px 0 0; font-size: 12px; font-style: italic; color: var(--muted); }
+@media (max-width: 800px) {
+  .workspace { flex-direction: column; }
+  .step-panel { flex: 0 0 48%; border-left: none; border-top: 1px solid var(--line); }
+}

@@ -1,6 +1,7 @@
 // The cheapest workflow that proves the whole path: chat -> MCP -> detached job -> Cursor SDK -> structured result.
 // One step, no tools, no project context, a model the paid plans include, and a low token cap. It is the third of the
-// six Cursor IDE validation scenarios (`scripts/verify/validate-cursor-ide.sh`, skills/cursor-workflows-setup).
+// seven Cursor IDE validation scenarios (`scripts/verify/validate-cursor-ide.sh`, skills/cursor-workflows-setup); the
+// seventh watches a `smoke` run in the dashboard.
 //
 // The answer is fixed (`pong`) and checked by the schema, not by the workflow: `submit_result` refuses any other value
 // to the agent, so a run that finishes has really gone through the SDK and back. A run that cannot (no login, a model

@@ -9,7 +9,8 @@ import { join } from "node:path";
 import { after, afterEach, before, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { createJob, writeJob } from "../src/runtime/jobs.js";
+import { createJob } from "../src/runtime/jobs.js";
+import { writeJob } from "../src/runtime/job-state.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 
 const PACKAGE = join(import.meta.dirname, "..");
@@ -40,6 +41,7 @@ before(() => {
     TSX_TSCONFIG_PATH: join(PACKAGE, "tsconfig.test.json"),
     WF_HOME: join(sandbox, "home"),
     WF_METRICS: "off",
+    WF_DASH_AUTOSTART: "off", // the tests must not leave a dashboard behind
     WF_CWD: repo,
   };
 });
@@ -164,7 +166,7 @@ test("cancelling a job that already ended changes nothing and says so; an unknow
 test("cancel does not signal a process that is not the job's (a recycled pid)", async () => {
   const bystander = spawn("sleep", ["60"], { stdio: "ignore" });
   strays.push(bystander.pid!);
-  const record = createJob(repo, "hold", "run-recycled", "recycled"); // fresh heartbeat, a live pid... that is not a job process
+  const record = createJob(repo, "hold", { runId: "run-recycled", jobId: "recycled" }); // fresh heartbeat, a live pid... that is not a job process
   writeJob(repo, { ...record, pid: bystander.pid! });
 
   const result = wf("cancel", "recycled");

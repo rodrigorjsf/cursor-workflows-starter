@@ -17,6 +17,10 @@
       "$ref": "#/definitions/caps",
       "description": "Tetos rígidos. Só valem no arquivo global: o arquivo do repositório e o chat só podem apertá-los, nunca afrouxar. Um `caps` no arquivo do repositório é registrado como violação e não tem efeito."
     },
+    "dashboard": {
+      "$ref": "#/definitions/dashboardPrefs",
+      "description": "O dashboard local. Só vale no arquivo global: ele é um só por usuário, para os runs de todos os repositórios. Um `dashboard` no arquivo do repositório é registrado como violação e não tem efeito."
+    },
     "workflows": {
       "type": "object",
       "description": "Preferências por workflow, pelo `meta.name` dele. Uma preferência acima de um teto global é reduzida ao teto e registrada como violação.",
@@ -176,6 +180,17 @@
         "gcFailedAfterDays": { "type": "integer", "minimum": 0, "description": "`implement-issue`: o `wf gc` remove o worktree e as branches (local e do origin) de um run que falhou há mais dias que isto. Falhou quer dizer terminou com erro ou com um status de falha (`tests-failed`, `baseline-red`…), ou o processo caiu sem terminar; um run cancelado não conta. A branch do origin só sai se o PR não está aberto e o commit nela é de um push do próprio run. Um run cujo PR foi mergeado ou fechado sai antes, sem esperar. Padrão: 14." },
         "testTimeoutSec": { "type": "number", "exclusiveMinimum": 0, "description": "`implement-issue`: tempo máximo, em segundos, de cada rodada de testes (e do `setupCommand`). Passado esse tempo o comando é morto e o run encerra com `tests-timeout`. Padrão: 600." },
         "networkTimeoutSec": { "type": "number", "exclusiveMinimum": 0, "description": "`implement-issue` e `wf gc`: tempo máximo, em segundos, de cada comando de rede (`git push`, `git ls-remote` e todo `gh`): uma credencial pedida ou uma conexão parada falha a etapa em vez de travar o run. O git local usa o `execTimeoutMs` do workflow. Padrão: 120." }
+      }
+    },
+    "dashboardPrefs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "$comment": { "$ref": "#/definitions/comment" },
+        "autoStart": {
+          "type": "boolean",
+          "description": "`false` impede o `start_workflow` de iniciar o dashboard quando ele não está rodando (a variável de ambiente `WF_DASH_AUTOSTART=off` faz o mesmo). Um dashboard que já está de pé continua sendo informado na resposta (`dashboardUrl`). Padrão: `true`."
+        }
       }
     },
     "sliceCaps": {

@@ -27,6 +27,7 @@ const SCENARIOS = [
   "implement-issue opens a pull request on the sandbox repo",
   "A run survives restarting Cursor",
   "A run cancels from the chat",
+  "The dashboard shows the run live",
 ];
 
 /** A progress file: the facts, then one title/result/note triple per scenario (`results[i]` is `pass`, `fail` or `skip`). */
@@ -80,7 +81,7 @@ function run(progressText: string, { doctor, extra = [] }: { doctor?: unknown; e
 }
 
 test("the report has one entry per scenario with its result and note, the environment facts and a summary", () => {
-  const r = run(progress(["pass", "pass", "pass", "fail", "skip", "pass"], ["", "five tools listed", "answered pong", "no PR appeared", "", "cancelled in 4 s"]));
+  const r = run(progress(["pass", "pass", "pass", "fail", "skip", "pass", "pass"], ["", "five tools listed", "answered pong", "no PR appeared", "", "cancelled in 4 s", "card moved to Done"]));
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(
     r.report.scenarios.map((s: { id: number; title: string; result: string; note: string }) => [s.id, s.title, s.result, s.note]),
@@ -91,9 +92,10 @@ test("the report has one entry per scenario with its result and note, the enviro
       [4, SCENARIOS[3], "fail", "no PR appeared"],
       [5, SCENARIOS[4], "skipped", ""],
       [6, SCENARIOS[5], "pass", "cancelled in 4 s"],
+      [7, SCENARIOS[6], "pass", "card moved to Done"],
     ],
   );
-  assert.deepEqual(r.report.summary, { pass: 4, fail: 1, skipped: 1, releaseCriterionMet: false });
+  assert.deepEqual(r.report.summary, { pass: 5, fail: 1, skipped: 1, releaseCriterionMet: false });
   assert.equal(r.report.environment.cursorVersion, "3.26.1");
   assert.equal(r.report.environment.ideTerminal, true);
   assert.equal(r.report.environment.node, process.version);
@@ -102,21 +104,21 @@ test("the report has one entry per scenario with its result and note, the enviro
   assert.match(r.report.createdAt, /^\d{4}-\d{2}-\d{2}T/);
 });
 
-test("the release criterion is met only when all six scenarios pass", () => {
+test("the release criterion is met only when all seven scenarios pass", () => {
   const r = run(progress([]));
-  assert.deepEqual(r.report.summary, { pass: 6, fail: 0, skipped: 0, releaseCriterionMet: true });
-  assert.equal(r.stdout.trim(), "Cursor IDE validation: 6 of 6 scenarios passed");
+  assert.deepEqual(r.report.summary, { pass: 7, fail: 0, skipped: 0, releaseCriterionMet: true });
+  assert.equal(r.stdout.trim(), "Cursor IDE validation: 7 of 7 scenarios passed");
 });
 
-test("the release criterion needs all six scenarios on record: five passes out of five is not it", () => {
-  const sixth = (line: string) => !line.startsWith("S6_");
-  const r = run(`${progress([]).split("\n").filter(sixth).join("\n")}\n`);
-  assert.deepEqual(r.report.summary, { pass: 5, fail: 0, skipped: 0, releaseCriterionMet: false });
+test("the release criterion needs all seven scenarios on record: six passes out of six is not it", () => {
+  const seventh = (line: string) => !line.startsWith("S7_");
+  const r = run(`${progress([]).split("\n").filter(seventh).join("\n")}\n`);
+  assert.deepEqual(r.report.summary, { pass: 6, fail: 0, skipped: 0, releaseCriterionMet: false });
 });
 
 test("stdout is the issue title and says what did not pass", () => {
-  const r = run(progress(["pass", "fail", "pass", "pass", "skip", "fail"]));
-  assert.equal(r.stdout.trim(), "Cursor IDE validation: 3 of 6 scenarios passed, 2 failed, 1 not run");
+  const r = run(progress(["pass", "fail", "pass", "pass", "skip", "fail", "pass"]));
+  assert.equal(r.stdout.trim(), "Cursor IDE validation: 4 of 7 scenarios passed, 2 failed, 1 not run");
 });
 
 test("a scenario with no recorded answer is reported as skipped, not as passed", () => {
@@ -159,6 +161,7 @@ test("local paths, the sandbox repo, the account and the machine never reach the
     `mail dev@example.com about it`,
     `windows side C:\\Users\\Alice\\Desktop\\log.txt and /mnt/c/Users/alice/log.txt`,
     `ran as ${user} on ${hostname()}`,
+    `the dashboard at http://127.0.0.1:4317/runs/smoke-1 showed the card`, // a local address that is not a place on this machine's disk
   ];
   const doctor = { ok: true, checks: [{ id: "node", title: "Node.js", status: "pass", message: `${FAKE_HOME}/.cursor-workflows/kit/node is v22` }] };
   const r = run(progress([], notes), { doctor });
@@ -173,6 +176,7 @@ test("local paths, the sandbox repo, the account and the machine never reach the
       "mail <email> about it",
       "windows side <path> and <path>",
       "ran as <user> on <host>",
+      "the dashboard at http://127.0.0.1:4317/runs/smoke-1 showed the card",
     ],
   );
   assert.equal(r.report.doctor.checks[0].message, "~/.cursor-workflows/kit/node is v22");

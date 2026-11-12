@@ -46,9 +46,15 @@ export interface WorkflowPrefs {
   labels?: Record<string, RolePrefs>;
 }
 
+export interface DashboardPrefs {
+  /** `false` keeps `start_workflow` from starting the dashboard. */
+  autoStart?: boolean;
+}
+
 export interface ConfigFile {
   kit?: string;
   caps?: ConfigCaps;
+  dashboard?: DashboardPrefs;
   workflows?: Record<string, WorkflowPrefs>;
 }
 

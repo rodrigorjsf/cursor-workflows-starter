@@ -1,5 +1,7 @@
 // Fake mínimo do @cursor/sdk: testa o controle de fluxo do engine sem rede nem conta Cursor.
 // Ativado por tsconfig.test.json (paths: "@cursor/sdk" -> este arquivo).
+/** Set when this module is loaded: lets a test prove that a module graph never imports the SDK. */
+(globalThis as { __fakeSdkLoaded?: boolean }).__fakeSdkLoaded = true;
 export const calls: any[] = [];
 /** Comportamento de cada send(), em ordem. Sem entrada: run "finished" com result "ok". */
 export const script: Array<(o: any, msg: string, n: number) => any> = [];

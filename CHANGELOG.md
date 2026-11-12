@@ -4,6 +4,69 @@
 
 ### Adicionado
 
+- **Dashboard: log da etapa, cancelar um run, comando de resume e o cenário 7 da validação.** Clicar num nó do grafo (ou
+  Enter nele) abre ao lado dele o log da etapa, ao vivo: por tentativa, o prompt, o que o agente disse, as chamadas de tool
+  com a saída de cada uma, ou, num comando de `ctx.exec`, a linha de comando e a saída com `stdout` e `stderr` apartados; a
+  vista acompanha o fim do log até o leitor rolar para cima, e no replay o painel mostra o log como estava naquele ponto. O
+  cabeçalho da página do run ganha **Cancel run**, que cancela pelo mesmo caminho do `wf cancel` (`POST
+  /api/runs/<runId>/cancel`, a única escrita do dashboard: exige o token CSRF de `/api/csrf` no cabeçalho `X-CSRF-Token` e
+  recusa uma origem de outro site), e **Copy resume command** num run `failed` ou `cancelled`
+  (`wf start <workflow> --args '<args>' --resume <runId> --cwd <repositório>`; o log guarda só o hash dos args, então o
+  comando traz um marcador no lugar deles, salvo quando eram vazios, como no `smoke`). Os cartões do Board e as linhas da tabela Runs passam a abrir a página do run. O
+  assistente de validação no Cursor IDE ganha o cenário 7, "o dashboard mostra o run ao vivo", e o critério de release
+  (`releaseCriterionMet`) passa a pedir os sete em `pass`. No runtime, o que lê e cancela jobs sem precisar do engine foi para
+  `job-state.ts` (o `jobs.ts` reexporta), para o dashboard cancelar sem carregar o `@cursor/sdk`.
+- **Dashboard: o app, o quadro (Board) e `ctx.card`.** A página inicial do dashboard passa a ser um app em React com três
+  menus, Runs, Board e Metrics (o painel de métricas de antes, no menu Metrics). O app é empacotado com o esbuild quando o
+  dashboard sobe, guardado por hash do conteúdo em `~/.cursor-workflows/dashboard-cache/` e servido pelo próprio
+  dashboard: sem CDN, sem passo de build, com a política de conteúdo `script-src 'self'`. O Board tem um quadro por
+  workflow, com as fases do workflow (agora declaradas no `run-start`, campo `phases`) e as colunas Awaiting approval, Done,
+  Failed e Cancelled, e um cartão por run, que muda de coluna sozinho enquanto o run anda (`GET /api/board`). Um workflow
+  decide o que o cartão mostra com `ctx.card({ title, subtitle, links, badges })` (novo evento `card`; o quadro mostra o
+  último de cada run). O `implement-issue` põe o cartão no ar depois da triagem, com `#<n> <título>` e o tier, e o atualiza
+  na entrega, com a branch e o link da PR; o link da PR mostra se ela está aberta, mesclada ou fechada, perguntado ao `gh` em
+  segundo plano e guardado em cache (o quadro nunca espera pelo GitHub). `GET /api/runs` traz agora `phases`, `outcome` e
+  `card` de cada run, e o servidor só relê o log de um run quando ele cresceu. O pacote do dashboard ganha as dependências
+  `react`, `react-dom` e `esbuild`; o runtime não ganha nenhuma.
+- **Dashboard local: servidor, API de runs e início automático.** O dashboard agora é o pacote `packages/dashboard/`
+  (`@cursor-workflows/dashboard`), separado do runtime: as dependências dele nunca entram nele, e ele só importa do runtime
+  `@cursor-workflows/runtime/observe`. É um só por usuário, para os runs de todos os repositórios: `GET /api/runs` lista os
+  runs do índice global (`~/.cursor-workflows/runs.jsonl`) com o status lido do log de eventos de cada um, `GET
+  /api/runs/<runId>` traz a projeção de um run (linhas de andamento, resultado, tokens) e `/api/summary` mantém o resumo
+  de métricas. Um run sem `run-end` e sem processo segurando o lock aparece como `failed`, com o comando para retomar.
+  Ele sobe numa máquina sem histórico (antes saía com `banco de métricas não encontrado`): sem índice de runs e sem banco
+  a API devolve listas vazias, e o banco passa a ser lido assim que o primeiro run o cria. Escuta só em `127.0.0.1`, recusa
+  `Host` que não seja `127.0.0.1` ou `localhost`, aceita só `GET` e `HEAD`. O `start_workflow` inicia o dashboard
+  destacado quando nada responde na porta (`WF_DASH_PORT`, padrão 4317; um só processo, mesmo com chamadas simultâneas;
+  pid em `~/.cursor-workflows/dashboard.pid`, saída em `dashboard.log`) e devolve `dashboardUrl`
+  (`http://127.0.0.1:<porta>`, o endereço que o navegador do Windows alcança quando o kit roda no WSL2); se não consegue
+  subir, devolve `dashboardWarning` com o motivo e o job começa do mesmo jeito. `dashboard.autoStart: false` no arquivo
+  global de configuração, ou `WF_DASH_AUTOSTART=off`, desliga o início (um `dashboard` no arquivo do repositório é
+  violação e não tem efeito). A skill `run-workflow` abre o `dashboardUrl` no navegador embutido do Cursor. `npm run dash`
+  continua iniciando o dashboard à mão. O processo do dashboard não carrega o `@cursor/sdk` (o `reconcile` das métricas o
+  importa só quando roda): 86 MB de memória em vez de 315 MB, e a subida cai de 0,7 s para 0,1 s no import.
+- **Dashboard: stream de eventos ao vivo e conteúdo das etapas.** `GET /api/runs/<runId>/events` é um stream de
+  Server-Sent Events do log do run: reenvia o que já está no log e depois cada evento que o run acrescenta, cada um com o
+  número da linha dele no log como `id`. O `Last-Event-ID` (o `EventSource` reconecta com ele sozinho) ou `?lastEventId=`
+  retoma de onde o cliente parou, sem lacuna e sem repetição, mesmo se a retenção reescreveu o log nesse meio-tempo;
+  `?content=false` deixa o conteúdo das etapas de fora e `?stepId=` deixa só os eventos de uma etapa (o log ao vivo de uma
+  etapa é o conteúdo dela mais um stream aberto a partir do `lastEventId` que ele devolve). Uma linha só sai quando está
+  completa, e as linhas danificadas ou em branco só gastam o número delas. Eventos de outra versão do esquema ou de tipo
+  desconhecido passam sem alteração.
+  `GET /api/runs/<runId>/steps/<stepId>/content` devolve o conteúdo de uma etapa (prompt, mensagens do agente, chamadas de
+  tool e saída de comandos, como o log os guardou, já sem segredos) e o `id` da última linha lida, para abrir o stream a
+  partir dele. Um log que a projeção não consegue ler derrubava `GET /api/runs` inteiro com `500`; agora só aquele run
+  aparece como `missing`, com o motivo. O runtime expõe `tailRun` e `readStepContent` em
+  `@cursor-workflows/runtime/observe`.
+- **Dashboard: o run como grafo ao vivo.** `http://127.0.0.1:<porta>/runs/<runId>` desenha o run como um grafo que cresce
+  enquanto os eventos chegam: as etapas de agente e os comandos de `ctx.exec` são nós, ligados pelo `parentId`; um `parallel`
+  ou `pipeline` abre num nó e fecha num círculo; cada fase é uma raia. Um nó em andamento pisca, e passar o mouse mostra o
+  modelo, onde rodou, as tentativas, os tokens, o custo, a duração e o tipo do erro. Um run que terminou pode ser refeito
+  evento a evento (**Replay**, de 1× a 20×, com pausa e barra de posição). O grafo vem só dos eventos (React Flow para
+  desenhar, elkjs para o layout), tolera eventos de outra versão do esquema e de tipo desconhecido, e um run que parou com
+  um nó em andamento o mostra como interrompido. O app é empacotado pelo próprio dashboard com o `esbuild` quando ele sobe e
+  servido da memória (`/assets/run-<hash>.js`), sem CDN e sob uma política de conteúdo que só permite scripts e conexões da
+  própria origem. As bibliotecas do app são dependências do pacote do dashboard, nunca do runtime.
 - **`wf gc`: limpa o que os runs do `implement-issue` deixam.** Cada run tem o seu worktree, a sua branch local e, depois
   do push, a sua branch no origin, e nada as removia. `wf gc` lista o que vai remover e remove: o worktree, a branch
   local e a branch do origin de um run cujo PR foi mergeado ou fechado, e os de um run que falhou há mais de

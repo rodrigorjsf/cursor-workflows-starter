@@ -39,7 +39,8 @@ import { assertKitCompatible } from "./kit-version.js";
 import { unifiedDiff } from "./unified-diff.js";
 import { upgradeKit } from "./upgrade.js";
 import { INSIDE_WORKFLOW_ENV, type RunStatus, runWorkflow } from "./runtime/engine.js";
-import { cancelJob, cancelOnSignals, installCrashHandlers, listJobs, readJob, readJobRecord, spawnJob, startJob, waitJob } from "./runtime/jobs.js";
+import { cancelOnSignals, installCrashHandlers, spawnJob, startJob } from "./runtime/jobs.js";
+import { cancelJob, listJobs, readJob, readJobRecord, waitJob } from "./runtime/job-state.js";
 import { loadWorkflows } from "./runtime/registry.js";
 import { applyGc, directCommands, formatPlan, planGc } from "../workflows/implement-issue/gc.js";
 

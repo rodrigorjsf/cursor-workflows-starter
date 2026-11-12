@@ -314,6 +314,17 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
     });
   }
 
+  if (input.repo?.data.dashboard) {
+    violations.push({
+      layer: "repo",
+      ref: input.repo.path,
+      path: "/dashboard",
+      requested: input.repo.data.dashboard,
+      applied: input.global?.data.dashboard ?? null,
+      message: "the dashboard is one per user, for the runs of every repo: its settings apply only in the global file; ignored",
+    });
+  }
+
   // The workflow's own settings: the code default, then each file in turn. They live apart from `cells`, whose rules (caps,
   // chat overrides) go by the last segment of the pointer: a setting named like a limit must not meet them.
   const settings = new Map<string, Cell>(Object.entries(meta.settings ?? {}).map(([key, value]) => [key, { value, source: fromCode }]));

@@ -124,8 +124,8 @@ const fiveResumed = (result: string, note = "") => [result, note];
 const fileIssue = (yn: "y" | "n") => [yn];
 const noSandboxPrompts = [""]; // a sandbox that exists but was never opened in Cursor: only the "folder opened" pause is asked
 
-const NOTES = ["five tools listed", "answered pong", "PR opened", "still running after the restart", "cancelled in 4 s"];
-/** A whole run outside the IDE's terminal, scenarios 2 to 6 answered; `results` default to pass. */
+const NOTES = ["five tools listed", "answered pong", "PR opened", "still running after the restart", "cancelled in 4 s", "the card moved to Done"];
+/** A whole run outside the IDE's terminal, scenarios 2 to 7 answered; `results` default to pass. */
 const wholeRunOutside = (results: string[] = [], notes: string[] = NOTES, answer: "y" | "n" = "n") => [
   ...start("no"),
   ...newSandbox(),
@@ -135,26 +135,28 @@ const wholeRunOutside = (results: string[] = [], notes: string[] = NOTES, answer
   ...asked(results[2] ?? "pass", notes[2]),
   ...fiveOutsideIde("ab12cd34", results[3] ?? "pass", notes[3]),
   ...asked(results[4] ?? "pass", notes[4]),
+  ...asked(results[5] ?? "pass", notes[5]),
   ...fileIssue(answer),
 ];
 /** The first run inside the IDE's terminal: scenarios 2 to 4, then the start of 5, where the wizard ends. */
 const firstRunInside = [...start("yes"), ...newSandbox(), ...doctorRead, ...asked("pass", NOTES[0]), ...asked("pass", NOTES[1]), ...asked("pass", NOTES[2]), ...startsFive("ab12cd34")];
-/** The run after Cursor came back: the earlier answers kept, scenario 5 and 6 answered. */
-const secondRunInside = (answer: "y" | "n") => [...start("yes"), ...doctorRead, ...keep, ...keep, ...keep, ...fiveResumed("pass", "finished after the restart"), ...asked("pass", NOTES[4]), ...fileIssue(answer)];
+/** The run after Cursor came back: the earlier answers kept, scenarios 5, 6 and 7 answered. */
+const secondRunInside = (answer: "y" | "n") => [...start("yes"), ...doctorRead, ...keep, ...keep, ...keep, ...fiveResumed("pass", "finished after the restart"), ...asked("pass", NOTES[4]), ...asked("pass", NOTES[5]), ...fileIssue(answer)];
 
 test("outside the IDE's terminal: scenario 1 is not run, the others are recorded as answered, nothing is filed on a 'no'", () => {
   const m = machine();
-  const r = m.run(wholeRunOutside(["pass", "pass", "fail", "pass", "p"], ["five tools listed", "answered pong", "no PR appeared", "still running", "cancelled"]));
+  const r = m.run(wholeRunOutside(["pass", "pass", "fail", "pass", "p"], ["five tools listed", "answered pong", "no PR appeared", "still running", "cancelled", "the card moved to Done"]));
   assert.equal(r.status, 0, r.out);
 
   const report = m.report();
   assert.deepEqual(
     report.scenarios.map((s: { id: number; result: string }) => [s.id, s.result]),
-    [[1, "skipped"], [2, "pass"], [3, "pass"], [4, "fail"], [5, "pass"], [6, "pass"]],
+    [[1, "skipped"], [2, "pass"], [3, "pass"], [4, "fail"], [5, "pass"], [6, "pass"], [7, "pass"]],
   );
   assert.match(report.scenarios[0].note, /outside/i, "scenario 1 says why it was not run");
   assert.equal(report.scenarios[3].note, "no PR appeared");
-  assert.deepEqual(report.summary, { pass: 4, fail: 1, skipped: 1, releaseCriterionMet: false });
+  assert.equal(report.scenarios[6].note, "the card moved to Done");
+  assert.deepEqual(report.summary, { pass: 5, fail: 1, skipped: 1, releaseCriterionMet: false });
   assert.equal(report.environment.ideTerminal, false);
   assert.equal(report.environment.cursorVersion, "3.26.1");
   assert.equal(report.doctor.ok, true);
@@ -187,6 +189,22 @@ test("it tells the person exactly what to type in the chat for each scenario, an
   assert.ok(m.calls().includes(`open https://github.com/${REPO}/pulls`), "the PR page is opened for the person");
 });
 
+test("scenario 7 says what to look at in the dashboard: the link in the built-in browser, the card moving on the Board, the DAG, the step log", () => {
+  const m = machine();
+  const r = m.run(wholeRunOutside());
+  const stage = r.stdout.slice(r.stdout.indexOf("Scenario 7 of 7"), r.stdout.indexOf("Report"));
+  assert.ok(stage.includes("/run-workflow smoke"), "a cheap run to watch");
+  assert.match(stage, /built-in browser/i, "the chat opens the dashboard link there");
+  assert.match(stage, /http:\/\/127\.0\.0\.1:4317/, "the address the run-workflow skill returns; `localhost` fails from Windows");
+  assert.match(stage, /Board/);
+  assert.match(stage, /Ping/, "the column of smoke's only phase");
+  assert.match(stage, /Done/);
+  assert.match(stage, /without reloading/i, "the card moves on its own");
+  assert.match(stage, /hover/i);
+  assert.match(stage, /log/i);
+  assert.equal(m.report().scenarios[6].title, "the dashboard shows the run live");
+});
+
 test("scenario 5 gives the text to paste for the job the person noted, and a job still running is not yet a pass", () => {
   const m = machine();
   const r = m.run(wholeRunOutside());
@@ -205,7 +223,7 @@ test("a setup that stopped half way is picked up where it stopped: the repo is n
   assert.match(broken.stderr, /wf init failed/);
   assert.match(readFileSync(join(m.reportDir, "progress.env"), "utf8"), /^SANDBOX_REPO=acme-corp\/wf-sandbox-77$/m, "the repo that now exists on GitHub is remembered");
 
-  const again = m.run([...start("no"), ...noSandboxPrompts, ...doctorRead, ...asked("pass"), ...asked("pass"), ...asked("pass"), ...fiveOutsideIde("j", "pass"), ...asked("pass"), ...fileIssue("n")]);
+  const again = m.run([...start("no"), ...noSandboxPrompts, ...doctorRead, ...asked("pass"), ...asked("pass"), ...asked("pass"), ...fiveOutsideIde("j", "pass"), ...asked("pass"), ...asked("pass"), ...fileIssue("n")]);
   assert.equal(again.status, 0, again.out);
   const calls = m.calls();
   assert.equal(calls.filter((c) => c.startsWith("gh repo create")).length, 1);
@@ -235,7 +253,7 @@ test("inside the IDE's terminal: the run stops at scenario 5 (quitting Cursor en
   assert.ok(m.calls().includes(`wf status ab12cd34 --cwd ${m.sandboxDir}`), "scenario 5 shows the state of the job the person noted");
 
   const report = m.report();
-  assert.deepEqual(report.summary, { pass: 6, fail: 0, skipped: 0, releaseCriterionMet: true });
+  assert.deepEqual(report.summary, { pass: 7, fail: 0, skipped: 0, releaseCriterionMet: true });
   assert.equal(report.scenarios[0].result, "pass", "doctor exit 0 inside the IDE's terminal is a pass for scenario 1");
   assert.equal(report.scenarios[1].note, "five tools listed", "kept from the first run");
   assert.equal(report.scenarios[4].note, "finished after the restart");
@@ -268,7 +286,7 @@ test("nothing is filed before the person has seen the issue body and said yes; t
 
   const filed = m.calls().filter((c) => c.startsWith(`gh issue create -R ${KIT_REPO}`));
   assert.equal(filed.length, 1, m.calls().join("\n"));
-  assert.match(filed[0]!, /--title Cursor IDE validation: 6 of 6 scenarios passed/);
+  assert.match(filed[0]!, /--title Cursor IDE validation: 7 of 7 scenarios passed/);
   assert.equal(readFileSync(join(m.state, "body-4.md"), "utf8"), body, "gh got the body file that was shown");
   assert.match(second.stdout, new RegExp(`https://github.com/${KIT_REPO}/issues/4`), "the person gets the issue's address");
 });

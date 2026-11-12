@@ -14,10 +14,10 @@
   "scripts": {
     "wf": "tsx packages/runtime/src/cli.ts",
     "mcp": "tsx packages/runtime/src/mcp-server.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p packages/dashboard/app && tsc --noEmit -p packages/dashboard/run-view",
     "models": "tsx packages/runtime/src/cli.ts models",
     "test": "npm run test --workspaces --if-present && tsx --test test/*.test.ts",
-    "dash": "tsx packages/runtime/src/observability/dashboard.ts",
+    "dash": "tsx packages/dashboard/src/main.ts",
     "stats": "tsx packages/runtime/src/cli.ts stats",
     "docs:check": "tsx scripts/check-docs.ts",
     "docs:mermaid": "tsx scripts/check-mermaid.ts",

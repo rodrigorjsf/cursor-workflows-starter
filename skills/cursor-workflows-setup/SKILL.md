@@ -63,7 +63,7 @@ Pick the task, then run its steps in order. Each step ends on a stated result.
 
 ## Validate the kit in the Cursor IDE
 
-Follow [references/validate.md](references/validate.md): the kit's validation wizard for the user to run, or the six
+Follow [references/validate.md](references/validate.md): the kit's validation wizard for the user to run, or the seven
 scenarios by hand. Done when the user has the wizard's command, or each scenario is recorded as pass or fail with a
 note.
 

@@ -45,7 +45,7 @@ before(() => {
 });
 after(() => rmSync(sandbox, { recursive: true, force: true }));
 
-const childEnv = () => ({ ...getDefaultEnvironment(), WF_HOME: home, TSX_TSCONFIG_PATH: join(PACKAGE, "tsconfig.test.json"), WF_METRICS: "off", WF_CWD: repo });
+const childEnv = () => ({ ...getDefaultEnvironment(), WF_HOME: home, TSX_TSCONFIG_PATH: join(PACKAGE, "tsconfig.test.json"), WF_METRICS: "off", WF_DASH_AUTOSTART: "off", WF_CWD: repo });
 const tsxArgs = (script: string) => ["--import", import.meta.resolve("tsx"), join(PACKAGE, "src", script)];
 
 function wf(...args: string[]) {

@@ -9,7 +9,8 @@ import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { calls, costConfig, script, stats } from "@cursor/sdk";
 import { runWorkflow } from "../src/runtime/engine.js";
-import { readJob, startJob } from "../src/runtime/jobs.js";
+import { startJob } from "../src/runtime/jobs.js";
+import { readJob } from "../src/runtime/job-state.js";
 import { defineWorkflow } from "../src/runtime/workflow.js";
 
 const cwd = join(import.meta.dirname, ".tmp", `budget-resume-${process.pid}`); // one directory per test process

@@ -1,5 +1,5 @@
 // Seam: the process. `npm run wf`, `npm run mcp`, `npm run dash` and `npm run stats` keep working from the repo root now
-// that the runtime is a workspace package. Each script's command line is run the way npm runs it (shell, with
+// that the runtime and the dashboard are workspace packages. Each script's command line is run the way npm runs it (shell, with
 // node_modules/.bin on PATH, cwd = repo root), offline: the fake Cursor SDK replaces `@cursor/sdk`.
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
@@ -41,15 +41,39 @@ test("npm run mcp: the MCP server runs from the repo root and answers tools/list
   assert.deepEqual(tools, MCP_TOOLS);
 });
 
-test("npm run stats and npm run dash: the metrics summary and the dashboard run from the repo root", async () => {
+test("npm run stats: the metrics summary runs from the repo root", () => {
   const stats = spawnSync("sh", ["-c", scripts.stats!], { cwd: ROOT, env: scriptEnv(), encoding: "utf8" });
-  assert.equal(stats.status, 0, stats.stderr); // also creates the (empty) metrics database that the dashboard opens read-only
+  assert.equal(stats.status, 0, stats.stderr);
+});
 
+test("npm run dash: the dashboard runs from the repo root and starts on a machine with no metrics database", async () => {
   const port = await freePort();
-  const dash: ChildProcess = spawn("sh", ["-c", `exec ${scripts.dash}`], { cwd: ROOT, env: scriptEnv({ WF_DASH_PORT: String(port) }), stdio: "ignore" });
+  const fresh = join(home, "no-history"); // neither a runs index nor a metrics database
+  const env = scriptEnv({ WF_HOME: fresh, WF_METRICS_DB: join(fresh, "metrics.db"), WF_DASH_PORT: String(port) });
+  const dash: ChildProcess = spawn("sh", ["-c", `exec ${scripts.dash}`], { cwd: ROOT, env, stdio: "ignore" });
   try {
     const summary = await fetchWhenUp(`http://127.0.0.1:${port}/api/summary`);
-    assert.ok(Array.isArray(summary.totals), "the dashboard API answers a summary");
+    assert.deepEqual(summary.totals, [], "no database yet: an empty state, not a failure");
+    assert.deepEqual((await (await fetch(`http://127.0.0.1:${port}/api/runs`)).json()), { runs: [] });
+  } finally {
+    dash.kill("SIGTERM");
+  }
+});
+
+test("npm run dash: the dashboard builds its web app as it starts, before any page asks for it", async () => {
+  const port = await freePort();
+  const fresh = join(home, "builds");
+  const env = scriptEnv({ WF_HOME: fresh, WF_METRICS_DB: join(fresh, "metrics.db"), WF_DASH_PORT: String(port) });
+  const dash: ChildProcess = spawn("sh", ["-c", `exec ${scripts.dash}`], { cwd: ROOT, env, stdio: ["ignore", "ignore", "pipe"] });
+  let log = "";
+  dash.stderr!.on("data", (chunk: Buffer) => (log += chunk));
+  try {
+    const deadline = Date.now() + 30_000;
+    while (!/web app built/.test(log)) {
+      assert.ok(Date.now() < deadline, `the dashboard never said its web app was built; it said: ${log}`);
+      await new Promise((r) => setTimeout(r, 100)); // no request is made meanwhile: nothing but the start asked for the build
+    }
+    assert.equal((await fetch(`http://127.0.0.1:${port}/runs/any`)).status, 200);
   } finally {
     dash.kill("SIGTERM");
   }

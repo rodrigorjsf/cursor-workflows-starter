@@ -5,8 +5,10 @@
 //
 // Tools:
 //   list_workflows                                  → name, description, when to use, args schema; broken files with their error
-//   start_workflow {name, args, resumeRunId?, overrides?} → {jobId, runId, violations?}
+//   start_workflow {name, args, resumeRunId?, overrides?} → {jobId, runId, dashboardUrl?, dashboardWarning?, violations?}
 //                                                   overrides: limits for this run, tighten-only
+//                                                   dashboardUrl: the run's page on the local dashboard, started detached if it was not running
+//                                                   (once, for every repo); dashboardWarning: why it could not be
 //   wait_workflow  {jobId, timeoutSec}              → state (status, phase, recent summary lines, spend, result)
 //   get_workflow_status {jobId}                     → state, without waiting
 //   cancel_workflow {jobId}                         → cancel the job and return its state (the run stays resumable)
@@ -27,8 +29,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { type LimitOverrides, limitOverridesSchema, loadEffectiveConfig, parseLimitOverrides } from "./config/index.js";
 import { assertKitCompatible, readKitPackage } from "./kit-version.js";
+import { type DashboardStatus, ensureDashboard, runPageUrl } from "./runtime/dashboard-instance.js";
 import { INSIDE_WORKFLOW_ENV } from "./runtime/engine.js";
-import { cancelJob, installCrashHandlers, readJob, spawnJob, waitJob } from "./runtime/jobs.js";
+import { installCrashHandlers, spawnJob } from "./runtime/jobs.js";
+import { cancelJob, readJob, waitJob } from "./runtime/job-state.js";
 import { type BrokenWorkflow, discoverWorkflows } from "./runtime/registry.js";
 
 installCrashHandlers();
@@ -60,7 +64,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           name: "start_workflow",
           description:
             "Starts a workflow by name. The workflow runs to the end on its own (steps, models and reviews are " +
-            "defined in code). Returns a jobId; then call wait_workflow until status != running. Available: " +
+            "defined in code). Returns a jobId; then call wait_workflow until status != running. When the local " +
+            "dashboard is running it also returns dashboardUrl, where the user can watch the run. Available: " +
             [...workflows.values()].map((w) => `${w.meta.name} (${w.meta.whenToUse ?? w.meta.description})`).join("; "),
           inputSchema: {
             type: "object",
@@ -98,6 +103,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       ],
 }));
 
+/** What `start_workflow` says about the dashboard: the link to the run's page (the Board is one menu away), or why there is none. Nothing when auto-start is off. */
+const dashboardFields = (d: DashboardStatus, runId: string) =>
+  d.status === "running" ? { dashboardUrl: runPageUrl(d.url, runId) } : d.status === "unavailable" ? { dashboardWarning: d.reason } : {};
+
 const text = (v: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(v, null, 2) }] });
 const fail = (v: unknown) => ({ ...text(v), isError: true });
 
@@ -123,8 +132,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         if (err instanceof Error) return fail({ error: err.message });
         throw err;
       }
+      // The dashboard starts while the job's process does: the link is live by the time the chat has it.
+      const dashboard = ensureDashboard();
       const { job } = spawnJob({ cwd, workflow: def.meta.name, args: a.args ?? {}, resumeRunId: runId, overrides: mcpOverrides });
-      return text({ jobId: job.jobId, runId: job.runId, next: "call wait_workflow with this jobId", ...(violations.length ? { violations } : {}) });
+      return text({ jobId: job.jobId, runId: job.runId, next: "call wait_workflow with this jobId", ...dashboardFields(await dashboard, job.runId), ...(violations.length ? { violations } : {}) });
     }
     case "wait_workflow": {
       const secs = Math.min(Number(a.timeoutSec ?? 45), 50);

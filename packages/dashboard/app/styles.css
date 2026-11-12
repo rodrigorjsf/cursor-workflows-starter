@@ -1,0 +1,114 @@
+/* The dashboard's styles. Colours are tokens: light by default, dark under prefers-color-scheme. No fonts or images are fetched. */
+:root {
+  color-scheme: light dark;
+  --bg: #fff;
+  --fg: #1b1f24;
+  --muted: #5b6470;
+  --line: #e3e6ea;
+  --card: #f7f8fa;
+  --raised: #fff;
+  --a: #2f6fdf;
+  --b: #d9822b;
+  --c: #2e9e6b;
+  --d: #b94a8c;
+  --e: #6b6fd6;
+  --f: #8a8f2b;
+  --running: #2f6fdf;
+  --ok: #2e9e6b;
+  --bad: #c8453a;
+  --wait: #b9801f;
+  --off: #7a838e;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121417;
+    --fg: #e6e8eb;
+    --muted: #9aa3ad;
+    --line: #2a2f36;
+    --card: #1a1d21;
+    --raised: #20242a;
+    --a: #6ea0ff;
+    --running: #6ea0ff;
+    --ok: #4fbf8b;
+    --bad: #ef7b70;
+    --wait: #e0a94c;
+    --off: #98a1ab;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, sans-serif; }
+a { color: var(--a); }
+code { font-size: 12px; }
+h1 { font-size: 16px; margin: 0; }
+h2 { font-size: 15px; margin: 0 0 8px; }
+h3 { font-size: 13px; margin: 0 0 8px; }
+h4 { font-size: 13px; margin: 10px 0 6px; }
+
+.bar { display: flex; align-items: center; gap: 24px; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--card); position: sticky; top: 0; z-index: 1; }
+.bar nav { display: flex; gap: 4px; }
+.bar nav a { color: var(--muted); text-decoration: none; padding: 4px 12px; border-radius: 6px; }
+.bar nav a:hover { color: var(--fg); }
+.bar nav a[aria-current="page"] { background: var(--raised); color: var(--fg); font-weight: 600; box-shadow: inset 0 0 0 1px var(--line); }
+main { padding: 16px; }
+.note { color: var(--muted); font-size: 12px; margin: 6px 0; }
+.note.error { color: var(--bad); font-size: 13px; }
+.count { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 4px; }
+
+/* Board */
+.board { margin-bottom: 28px; }
+.columns { display: flex; gap: 12px; overflow-x: auto; align-items: flex-start; padding-bottom: 8px; }
+.column { flex: 1 0 200px; max-width: 300px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-height: 90px; }
+.column h3 { display: flex; align-items: baseline; gap: 4px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; font-size: 11px; }
+.column-awaiting-approval { border-top: 3px solid var(--wait); }
+.column-done { border-top: 3px solid var(--ok); }
+.column-failed { border-top: 3px solid var(--bad); }
+.column-cancelled { border-top: 3px solid var(--off); }
+.column ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.card { background: var(--raised); border: 1px solid var(--line); border-left: 3px solid var(--off); border-radius: 6px; padding: 8px 10px; font-size: 13px; overflow-wrap: anywhere; }
+.card.status-running { border-left-color: var(--running); }
+.card.status-finished { border-left-color: var(--ok); }
+.card.status-failed { border-left-color: var(--bad); }
+.card-title { font-weight: 600; }
+.card-title a { color: inherit; text-decoration: none; }
+.card-title a:hover, .card-title a:focus-visible { text-decoration: underline; }
+.card-sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.chip { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 0 7px; font-size: 11px; }
+.card-link { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; }
+.pr { border-radius: 10px; padding: 0 7px; font-size: 11px; border: 1px solid currentColor; }
+.pr-open { color: var(--ok); }
+.pr-merged { color: var(--d); }
+.pr-closed { color: var(--bad); }
+.card-error { color: var(--bad); font-size: 12px; margin-top: 6px; max-height: 4.4em; overflow: hidden; }
+.card-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.card.status-running .card-foot::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--running); align-self: center; animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .card.status-running .card-foot::before { animation: none; } }
+
+/* Runs, tables */
+.table-wrap, section { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; }
+td.n { text-align: right; font-variant-numeric: tabular-nums; }
+.pill { border-radius: 10px; padding: 1px 8px; font-size: 11px; border: 1px solid currentColor; color: var(--off); }
+.pill.status-running { color: var(--running); }
+.pill.status-finished { color: var(--ok); }
+.pill.status-failed { color: var(--bad); }
+
+/* Metrics */
+.metrics { max-width: 1200px; margin: 0 auto; }
+.metrics h2 { font-size: 20px; margin-bottom: 4px; }
+.sub { color: var(--muted); margin-bottom: 16px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 16px; }
+.kpi { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+.kpi b { display: block; font-size: 20px; }
+.kpi span { color: var(--muted); font-size: 12px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); gap: 12px; }
+@media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+.metrics section { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.metrics section.wide { grid-column: 1 / -1; }
+.legend span { display: inline-block; margin-right: 10px; font-size: 12px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+select { background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
+svg text { fill: var(--muted); font-size: 11px; }
