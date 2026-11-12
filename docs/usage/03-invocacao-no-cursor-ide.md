@@ -28,7 +28,7 @@ O servidor `workflows` é registrado em `.cursor/mcp.json` (Cursor) e em `.mcp.j
 |---|---|---|
 | `list_workflows` | — | `name`, `description`, `whenToUse`, `phases`, `argsSchema` de cada workflow |
 | `start_workflow` | `{ name, args, resumeRunId? }` | `{ jobId, runId }`. O workflow roda em segundo plano dentro do processo do servidor |
-| `wait_workflow` | `{ jobId, timeoutSec ≤ 50 }` | Estado do job: `status`, `phase`, `recent` (últimos eventos; o custo de cada etapa é o maior entre bruto e cobrado), `result`, `error`, `spentCents` (custo que o teto usa), `chargedCents` (só o valor cobrado), `spentTokens` |
+| `wait_workflow` | `{ jobId, timeoutSec ≤ 50 }` | Estado do job, projetado do log de eventos do run: `status`, `phase`, `recent` (até 20 linhas de resumo, uma linha cada, nunca texto de prompt ou de saída de agente; o custo de cada etapa é o maior entre bruto e cobrado), `result` (o que o workflow devolveu), `error`, `spentCents` (custo que o teto usa; acumula entre resumes), `chargedCents` (só o valor cobrado), `spentTokens` |
 | `get_workflow_status` | `{ jobId }` | Estado, sem esperar |
 
 **Por que start/wait e não uma tool que bloqueia até o fim?** Um workflow de implementação leva minutos, e a

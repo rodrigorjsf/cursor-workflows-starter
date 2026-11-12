@@ -7,15 +7,20 @@
 //   run.lock       present while a process executes the run: who holds it
 import { randomUUID } from "node:crypto";
 import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import type { RunStartEvent, WorkflowEvent } from "./events.js";
+import { dirname, join } from "node:path";
+import { EVENT_SCHEMA_VERSION, type RunStartEvent, type WorkflowEvent, isContentLine } from "./events.js";
 import { Journal } from "./journal.js";
+import { type Ledger, replayLedger } from "./projection.js";
+import { type Redactor, createRedactor } from "./redaction.js";
+import { type RetentionPolicy, pruneContent } from "./retention.js";
 import { stateDir } from "./state.js";
 import { appendJsonl, hasTornTail, readJsonl } from "./state-files.js";
 
 export const EVENTS_FILE = "events.jsonl";
 export const JOURNAL_FILE = "journal.jsonl";
 export const LOCK_FILE = "run.lock";
+/** The longest content text a log event keeps. A transcript is not a log line: the rest is cut and `truncated` says so. */
+export const CONTENT_MAX_CHARS = 32_768;
 
 /** Another process (or another execution in this one) is already executing the run. */
 export class RunLockedError extends Error {}
@@ -134,46 +139,133 @@ export function eventLogPath(cwd: string, runId: string): string {
 const isEvent = (v: unknown): v is WorkflowEvent =>
   typeof v === "object" && v !== null && typeof (v as { type?: unknown }).type === "string";
 
-/** Reads an event log. A torn last line, or any line that is not an event, is skipped and counted. */
-export function readEventLog(file: string): { events: WorkflowEvent[]; skipped: number } {
-  const { records, skipped } = readJsonl(file, isEvent);
+/**
+ * Reads an event log. A torn last line, or any line that is not an event, is skipped and counted. `content: false` leaves
+ * the `content` events out without parsing them: they are the bulk of a log, and status, projection and the budget
+ * ledger never need them.
+ */
+export function readEventLog(file: string, options: { content?: boolean } = {}): { events: WorkflowEvent[]; skipped: number } {
+  const { records, skipped } = readJsonl(file, isEvent, options.content === false ? isContentLine : undefined);
   return { events: records, skipped };
+}
+
+/** Stores that are open in this process. A crash handler uses it to end their runs. */
+const openStores = new Set<RunStore>();
+
+/**
+ * Ends every run this process is executing, in its event log: a `run-end` with status `failed` and this error. For a
+ * crash handler (`uncaughtException`): the process is about to exit, and the log must say why, since a job's state is read
+ * from it. A run that already wrote its `run-end` is left as it is.
+ */
+export function abortOpenRuns(error: (runId: string) => string): void {
+  for (const store of [...openStores]) store.abort(error(store.runId));
+}
+
+export interface RunStoreOptions {
+  /** Secrets to keep out of the log that are not in the environment: the API key handed to the run. */
+  secrets?: ReadonlyArray<string | undefined>;
 }
 
 export class RunStore {
   readonly journal: Journal;
   /** The run-start of the latest earlier execution of this run, or undefined when the run is new. */
   readonly previousStart: RunStartEvent | undefined;
+  /**
+   * What the run has spent so far, replayed from its event log when the store was opened: every execution before this one,
+   * failed attempts included. The budget starts from here, so a resume never starts from zero.
+   */
+  readonly ledger: Ledger;
   /** Which files ended in a torn line (a crash mid-append) when the run was opened. */
   readonly tornTail: { events: boolean; journal: boolean };
+  private readonly dir: string;
   private readonly eventsFile: string;
+  readonly runId: string;
+  private readonly redactor: Redactor;
   private readonly releaseLock: () => void;
+  private ended = false;
 
-  private constructor(dir: string, runId: string) {
+  private constructor(dir: string, runId: string, options: RunStoreOptions) {
     mkdirSync(dir, { recursive: true });
     this.releaseLock = acquireLock(dir, runId);
+    this.dir = dir;
+    this.runId = runId;
+    this.redactor = createRedactor({ extra: options.secrets });
     this.eventsFile = join(dir, EVENTS_FILE);
     try {
       this.journal = new Journal(join(dir, JOURNAL_FILE));
       this.tornTail = { events: hasTornTail(this.eventsFile), journal: hasTornTail(join(dir, JOURNAL_FILE)) };
-      this.previousStart = readEventLog(this.eventsFile).events.findLast((e): e is RunStartEvent => e.type === "run-start");
+      const { events } = readEventLog(this.eventsFile, { content: false });
+      this.previousStart = events.findLast((e): e is RunStartEvent => e.type === "run-start");
+      this.ledger = replayLedger(events);
     } catch (err) {
       this.releaseLock();
       throw err;
     }
+    openStores.add(this);
   }
 
   /** Opens the state of the run in `dir` (created when new) and locks it. Throws `RunLockedError` when another execution holds it. */
-  static open(dir: string, runId: string): RunStore {
-    return new RunStore(dir, runId);
+  static open(dir: string, runId: string, options: RunStoreOptions = {}): RunStore {
+    return new RunStore(dir, runId, options);
+  }
+
+  /**
+   * The event with every secret in it replaced (see redaction.ts). Every event goes through this before it is written or
+   * delivered to anyone: the log, the metrics recorder and the listeners all get the redacted one.
+   */
+  redact<E extends WorkflowEvent>(event: E): E {
+    return this.redactor.value(event);
   }
 
   appendEvent(event: WorkflowEvent): void {
     appendJsonl(this.eventsFile, event);
+    if (event.type === "run-end") this.ended = true;
+  }
+
+  /** Writes the failed `run-end` of an execution that cannot finish (see `abortOpenRuns`). Never throws. */
+  abort(error: string): void {
+    if (this.ended) return;
+    try {
+      this.appendEvent(this.redact({ v: EVENT_SCHEMA_VERSION, ts: new Date().toISOString(), runId: this.runId, type: "run-end", status: "failed", error }));
+    } catch {
+      /* the process is going down and the disk refused: nothing else to do */
+    }
+  }
+
+  /**
+   * Content ready to be written to the log: secrets replaced first, then cut at `CONTENT_MAX_CHARS` (the other way round
+   * could cut a secret in half and leave its start behind). `chars` is the size before the cut.
+   */
+  prepareContent(raw: string): { text: string; chars: number; truncated: boolean } {
+    const clean = this.redactor.text(raw);
+    const truncated = clean.length > CONTENT_MAX_CHARS;
+    return { text: truncated ? clean.slice(0, CONTENT_MAX_CHARS) : clean, chars: clean.length, truncated };
+  }
+
+  /**
+   * Prunes the content of the repo's other runs that fall outside `policy` (see retention.ts). Call it when the run starts.
+   * A run another process is executing is skipped. Never throws.
+   */
+  pruneOldContent(policy?: RetentionPolicy): ReturnType<typeof pruneContent> {
+    return pruneContent({
+      runsDir: dirname(this.dir),
+      logFile: EVENTS_FILE,
+      current: this.runId,
+      policy,
+      tryLock: (dir, runId) => {
+        try {
+          return acquireLock(dir, runId);
+        } catch (err) {
+          if (err instanceof RunLockedError) return undefined;
+          throw err;
+        }
+      },
+    });
   }
 
   /** Releases the lock. */
   close(): void {
+    openStores.delete(this);
     this.releaseLock();
   }
 }

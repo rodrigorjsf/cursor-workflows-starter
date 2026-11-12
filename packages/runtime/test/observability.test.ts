@@ -202,7 +202,7 @@ test("estimativa usa o modelo resolvido: alias sem preço próprio ganha o preç
   db.close();
 });
 
-test("banco na versão 1 migra para a 2 sem perder linhas", async () => {
+test("banco na versão 1 migra para a versão atual sem perder linhas", async () => {
   const { DatabaseSync } = await import("node:sqlite");
   const { MIGRATIONS } = await import("../src/observability/schema.js");
   const { mkdirSync } = await import("node:fs");
@@ -216,9 +216,31 @@ test("banco na versão 1 migra para a 2 sem perder linhas", async () => {
             VALUES ('v1', 'e', 'k', 1, 'composer-2.5', 'composer-2.5', 1, 1, 1000, 10, '2026-11-10T00:00:00Z')`);
   old.close();
   const db = await openDb(dbPath);
-  assert.equal((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version, 2);
+  assert.equal((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version, 3);
   const a = db.prepare("SELECT resolved_model_id, cost_source FROM v_attempts WHERE attempt_id = 'v1'").get() as Record<string, string | null>;
   assert.equal(a.resolved_model_id, null);
   assert.equal(a.cost_source, "estimate");
+  db.close();
+});
+
+test("prompts gravados por versões antigas (WF_METRICS_STORE_PROMPTS) são apagados do banco ao abrir, e o resto da linha fica", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { MIGRATIONS } = await import("../src/observability/schema.js");
+  const { mkdirSync } = await import("node:fs");
+  const { dirname } = await import("node:path");
+  mkdirSync(dirname(dbPath), { recursive: true });
+  const old = new DatabaseSync(dbPath);
+  old.exec(MIGRATIONS[1]!);
+  old.exec(MIGRATIONS[2]!);
+  old.exec("PRAGMA user_version = 2");
+  old.exec(`INSERT INTO runs (exec_id, run_id, workflow, workflow_hash, started_at) VALUES ('e', 'r', 'w', 'h', '2026-11-10T00:00:00Z')`);
+  old.exec(`INSERT INTO attempts (attempt_id, exec_id, step_key, attempt, model_id, model_key, ok, steps, input_tokens, output_tokens, started_at, prompt_hash, prompt_chars, prompt_text)
+            VALUES ('v2', 'e', 'k', 1, 'composer-2.5', 'composer-2.5', 1, 1, 1000, 10, '2026-11-10T00:00:00Z', 'abc', 21, 'PROMPT-TEXT-FROM-THE-OLD-DAYS')`);
+  old.close();
+
+  const db = await openDb(dbPath);
+  const row = db.prepare("SELECT prompt_text, prompt_hash, prompt_chars, input_tokens FROM attempts WHERE attempt_id = 'v2'").get() as Record<string, unknown>;
+  assert.deepEqual({ ...row }, { prompt_text: null, prompt_hash: "abc", prompt_chars: 21, input_tokens: 1000 });
+  assert.doesNotMatch(JSON.stringify(exportRows(db, 3650, false)), /PROMPT-TEXT-FROM-THE-OLD-DAYS/, "not even the export that skips anonymizing has it");
   db.close();
 });

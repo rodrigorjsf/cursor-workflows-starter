@@ -45,7 +45,13 @@ global index `~/.cursor-workflows/runs.jsonl` (run id, repo path, workflow, star
   rebuild the run's structure from the log alone.
 - A step served from the journal or the memo emits `step-start` and `step-end` with `cached` set to `"journal"` or
   `"memo"`. Its `stepId` is the same on every execution of the run.
-- Prompts are in the log only with `WF_METRICS_STORE_PROMPTS=1`.
+- Step content (prompts, what the agent said, tool calls, shell output) is in the log as `content` events, and nowhere
+  else: not in the metrics database or its exports, and not in what `wait_workflow` shows. Known secret formats and the
+  values of environment variables named like `KEY`, `TOKEN`, `SECRET` or `PASSWORD` are replaced with `[REDACTED]`
+  before it is written. When a run starts, the `text` of the content of runs beyond the last 30 or older than 14 days is
+  deleted; the events around it stay.
+- `wait_workflow` and `wf status` are projections of the log: `recent` holds at most 20 one-line summaries, never prompt or
+  output text. `result` is whatever the workflow returned, so return structured facts, not raw agent text.
 - Warnings to relay on a resume: `o código do workflow mudou` (the resumed run mixes two versions of the workflow) and
   `linha incompleta` (a crash tore the last line of the log or the journal; the affected step runs again).
 - One process executes a run id at a time: starting it again while it runs fails with `já está em execução`.

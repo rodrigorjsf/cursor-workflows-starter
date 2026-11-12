@@ -32,7 +32,6 @@ Configuração por variáveis de ambiente:
 |---|---|
 | `WF_METRICS=off` | Desliga a gravação. O `node:sqlite` nem é carregado |
 | `WF_METRICS_DB` | Muda o caminho do banco |
-| `WF_METRICS_STORE_PROMPTS=1` | Grava também o texto dos prompts. **Só para depuração local**: o banco passa a conter código e dados de issues |
 | `WF_DASH_PORT` | Porta do dashboard (default 4317) |
 
 ## 2. O que é medido, e o que não dá para medir
@@ -275,10 +274,25 @@ Para validar a entrega depois, por exemplo quando o PR é aceito ou recusado, us
 ## 7. Privacidade e uso no time
 
 - **O que fica no banco:**
-  - prompts só como **hash e tamanho**;
+  - prompts só como **hash e tamanho**, sempre: não existe mais opção para gravar o texto no banco;
   - args como hash;
   - repositório como nome da pasta + hash do remote;
   - **nenhum e-mail**: o banco é do próprio usuário.
+- **O conteúdo das etapas fica só no log de eventos local** (`.workflows/runs/<runId>/events.jsonl`, fora do git):
+  - o texto dos prompts, o que o agente disse, as chamadas de tool e a saída dos comandos de shell, em eventos
+    `content` ([6.1](../reference/events.md#content));
+  - nada disso vai para o banco, para os exports dele, para os ouvintes de eventos nem para as linhas de progresso de
+    `wf status` e `wait_workflow`;
+  - antes de gravar, o runtime troca por `[REDACTED]` os formatos conhecidos de segredo (chaves e tokens do GitHub,
+    AWS, Slack, Google, npm, Stripe e dos provedores de modelo, JWT, `Bearer`, blocos de chave privada) e o valor de
+    toda variável de ambiente com `KEY`, `TOKEN`, `SECRET` ou `PASSWORD` no nome (valores com menos de 8 caracteres
+    ficam de fora, para não apagar palavras comuns), além da chave de API passada ao run. É um esforço, não uma
+    garantia: um segredo de outro formato, numa variável com outro nome, passa;
+  - cada texto é cortado em 32768 caracteres (`truncated` e `chars` dizem o quanto havia);
+  - **retenção:** ao iniciar um run, o `text` dos runs do repositório fora dos 30 mais recentes (contando o que
+    começa) ou sem atividade há mais de 14 dias é apagado. O evento fica, com tipo, ids e tamanho. O journal não
+    entra: é o estado do resume. O `result` do `run-end` (o que o workflow devolveu) também não é conteúdo de etapa e
+    fica, mas passa pela redação como todo evento. `RunOptions.retention` muda os limites (`null` desliga um deles).
 - **Permissões:** pasta `0700`, arquivo `0600`.
 - **Export anonimizado por padrão:** sem nome de repositório, sem `agent_id`, sem prompt, com erros redigidos. Use
   `--no-anonymize` só para análise local.

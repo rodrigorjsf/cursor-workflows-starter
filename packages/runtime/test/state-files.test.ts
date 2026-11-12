@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { defaultDbPath } from "../src/observability/db.js";
-import { type JobState, jobsDir, writeJob } from "../src/runtime/jobs.js";
+import { type JobRecord, jobsDir, writeJob } from "../src/runtime/jobs.js";
 import { MemoStore } from "../src/runtime/memo.js";
 import { stateDir, userDir } from "../src/runtime/state.js";
 import { appendJsonl, readJsonl, writeFileAtomic } from "../src/runtime/state-files.js";
@@ -44,13 +44,13 @@ test("writeFileAtomic that fails keeps the old content and leaves no temp file",
 
 test("job records are replaced atomically", () => {
   const cwd = join(dir, "job-repo");
-  const job: JobState = { jobId: "j1", workflow: "w", status: "running", runId: "r1", pid: process.pid, startedAt: "2026-01-01T00:00:00.000Z", recent: [] };
+  const job: JobRecord = { jobId: "j1", runId: "r1", pid: process.pid, heartbeat: "2026-01-01T00:00:00.000Z" };
   writeJob(cwd, job);
   const file = join(jobsDir(cwd), "j1.json");
   const first = inode(file);
-  writeJob(cwd, { ...job, recent: ["x"] });
+  writeJob(cwd, { ...job, heartbeat: "2026-01-01T00:00:05.000Z" });
   assert.notEqual(inode(file), first);
-  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).recent, ["x"]);
+  assert.equal(JSON.parse(readFileSync(file, "utf8")).heartbeat, "2026-01-01T00:00:05.000Z");
   assert.deepEqual(strayFiles(jobsDir(cwd)), []);
 });
 

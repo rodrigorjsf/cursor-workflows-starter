@@ -54,7 +54,7 @@ export default defineWorkflow<{ target: string }>({
 | `ctx.phase(title)` / `ctx.log(message)` | Progress, shown by `wait_workflow` and on the CLI. |
 | `ctx.metric(name, value)` | An outcome or difficulty signal of the run, written to the `metrics` table (observability.md). |
 | `ctx.args`, `ctx.cwd`, `ctx.runId` | Input, repository and run id (the same on resume). |
-| `ctx.budget` | `remainingCents()` (`Infinity` without a cents cap), `spentCents()`, `chargedCents()`, `spentTokens()`, `usage()` (tokens by type), `maxCents`, `maxTokens`. |
+| `ctx.budget` | `remainingCents()` (`Infinity` without a cents cap), `spentCents()`, `chargedCents()`, `spentTokens()`, `usage()` (tokens by type), `maxCents`, `maxTokens`. Spend is the run's total: a resume starts from what earlier executions spent, failed attempts included. |
 
 ## `agent()` options
 
@@ -90,6 +90,8 @@ export default defineWorkflow<{ target: string }>({
   a short `timeoutMs` on steps that write.
 - `maxCents` is compared with `spentCents()`: per attempt, the larger of the raw cost and the charged cost. The charged
   cost alone is 0 for usage included in the plan, bring-your-own-key and credits.
+- A cap is a total for the run. A resume passed a cap (`--max-cents`, `--max-tokens`) sets the new total, so extending a
+  run that stopped on its cap takes a cap above what it already spent.
 - The cents cap goes **blind** when the cost never arrives: `getUsage()` failing (`403 feature_unavailable` on local
   agents of some plans), a cost still unsettled after the step, or per-request billing (raw cost 0). The engine then
   emits a warning and counts the attempt's tokens from the `turn-ended` events, so the tokens cap keeps working.

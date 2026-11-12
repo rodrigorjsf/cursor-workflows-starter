@@ -8,6 +8,16 @@
 import type { ModelSelection, RunUsage, SettingSource } from "@cursor/sdk";
 import type { UsageTotals } from "./workflow.js";
 
+/**
+ * True when a line of the event log is a `content` event, decided from the start of the line, without parsing it: the log
+ * writes `v`, `ts`, `runId` and `type`, in that order, ahead of every other field (see `stamp` in engine.ts). Readers that
+ * never need content skip such lines to avoid parsing the bulk of a log. Matching the top-level key only matters: a `type`
+ * key inside a nested value (a workflow result, say) must not look like an event type.
+ */
+export function isContentLine(line: string): boolean {
+  return /^\{"v":\d+,"ts":"[^"\\]*","runId":"(?:[^"\\]|\\.)*","type":"content"/.test(line);
+}
+
 /** Versão atual do esquema dos eventos. Suba quando um campo mudar de sentido ou for removido (campos novos opcionais não exigem). */
 export const EVENT_SCHEMA_VERSION = 1;
 
@@ -79,6 +89,8 @@ export interface RunStartEvent extends EventBase {
   argsHash: string;
   /** O repositório do run: nome da pasta raiz do git e um hash curto do remote `origin` (ou do caminho). */
   repo: { name: string; hash: string };
+  /** O job (`wf start`, `start_workflow`) que iniciou esta execução. Ausente em `wf run`. O estado de um job é a projeção das execuções que levam o id dele. */
+  jobId?: string;
 }
 
 /** O run terminou. */
@@ -88,6 +100,8 @@ export interface RunEndEvent extends EventBase {
   status: "finished" | "failed";
   /** O campo `status` do resultado do workflow, quando ele devolve um objeto com esse campo (por exemplo `done`). */
   outcomeStatus?: string;
+  /** O valor que o workflow retornou. É o que `wait_workflow` e `wf status` devolvem como `result`. Não é conteúdo de etapa: a retenção não o apaga (o workflow decide o que devolve), mas a redação de segredos vale para ele. */
+  result?: unknown;
   /** A mensagem do erro que encerrou o run. */
   error?: string;
 }
@@ -144,12 +158,10 @@ export interface StepStartEvent extends EventBase, StepRef {
   tools?: string[];
   /** As camadas de configuração que a etapa carrega. */
   settingSources: SettingSource[];
-  /** Hash do prompt: o conteúdo não vai para o log por padrão. */
+  /** Hash do prompt. O texto fica nos eventos `content` do log local, nunca aqui nem no banco de métricas. */
   promptHash: string;
   /** Tamanho do prompt em caracteres. */
   promptChars: number;
-  /** Só quando WF_METRICS_STORE_PROMPTS=1. */
-  prompt?: string;
 }
 
 /** Um turno do agente terminou (pode ter vários passos/chamadas ao modelo). */
@@ -220,6 +232,34 @@ export interface StepEndEvent extends EventBase, StepRef {
   durationMs?: number;
 }
 
+/** O que um `content` guarda: o que foi enviado ao agente, o que ele disse, as tools que chamou, a saída dos comandos. */
+export type ContentKind = "prompt" | "agent-message" | "tool-call" | "command-output";
+
+/**
+ * O conteúdo de uma etapa, que não cabe nos outros eventos: o texto dos prompts, do que o agente disse, das chamadas de
+ * tool e da saída de comandos. Só o log de eventos local guarda isto. Não vai para o banco de métricas, nem para os
+ * exports dele, nem para os ouvintes de `onEvent`, nem para as linhas de progresso de `wf status` e `wait_workflow`.
+ * Chaves e tokens conhecidos já saem do `text` trocados por `[REDACTED]`. O conteúdo de um run velho é apagado ao
+ * iniciar outro run (retenção); o evento fica, sem o `text`.
+ */
+export interface ContentEvent extends EventBase, StepRef {
+  type: "content";
+  /** A tentativa a que o conteúdo pertence (o `attemptId` do `step-start`). */
+  attemptId: string;
+  /** O que o `text` guarda. */
+  kind: ContentKind;
+  /** O nome da tool (`shell`, `read`…), em `tool-call` e `command-output`. */
+  tool?: string;
+  /** O id da chamada de tool no stream do agente: liga o `tool-call` ao `command-output` dela. */
+  callId?: string;
+  /** O conteúdo, já sem segredos e cortado em 32768 caracteres. Ausente depois que a retenção o apagou. */
+  text?: string;
+  /** Tamanho do conteúdo em caracteres antes do corte. Fica depois que a retenção apaga o `text`. */
+  chars: number;
+  /** true quando o `text` é só o começo do conteúdo. */
+  truncated?: boolean;
+}
+
 /** Métrica de negócio do run (`ctx.metric`). */
 export interface MetricEvent extends EventBase {
   type: "metric";
@@ -245,6 +285,7 @@ export type WorkflowEvent =
   | GroupEndEvent
   | StepStartEvent
   | TurnEvent
+  | ContentEvent
   | StepEndEvent
   | MetricEvent
   | WarningEvent;

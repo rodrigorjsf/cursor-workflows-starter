@@ -42,7 +42,7 @@ LEFT JOIN pricing p ON p.rowid = (
 `;
 }
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const MIGRATIONS: Record<number, string> = {
   1: `
@@ -80,7 +80,7 @@ CREATE TABLE attempts (
   tools             TEXT,                   -- JSON (allowlist) ou NULL = padrão
   prompt_hash       TEXT,
   prompt_chars      INTEGER,
-  prompt_text       TEXT,                   -- só com WF_METRICS_STORE_PROMPTS=1
+  prompt_text       TEXT,                   -- legado: nunca mais gravado (o texto dos prompts fica só no log de eventos local)
   ok                INTEGER NOT NULL,
   error_kind        TEXT,                   -- timeout | run-error | schema | rate-limit | exception
   schema_reprompts  INTEGER DEFAULT 0,
@@ -243,4 +243,8 @@ SELECT attempt_id, agent_id, started_at FROM attempts WHERE cached IS NULL AND c
 ALTER TABLE attempts ADD COLUMN resolved_model_id TEXT;
 DROP VIEW v_attempts;
 ${vAttempts("COALESCE(a.resolved_model_id, a.model_id)")}`,
+  // 3: prompt text no longer goes to the database (it lives only in the local event log). Deletes what older versions
+  // stored with WF_METRICS_STORE_PROMPTS=1, so that not even an export without anonymizing carries it away.
+  3: `
+UPDATE attempts SET prompt_text = NULL WHERE prompt_text IS NOT NULL;`,
 };

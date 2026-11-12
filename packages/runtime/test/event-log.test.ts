@@ -45,14 +45,15 @@ test("every event of a run is appended to the run's event log with schema versio
   assert.equal(skipped, 0);
   assert.deepEqual(
     events.map((e) => e.type),
-    ["run-start", "phase", "log", "metric", "step-start", "turn", "step-end", "run-end"],
+    ["run-start", "phase", "log", "metric", "step-start", "content", "content", "turn", "step-end", "run-end"],
   );
   for (const e of events) {
     assert.equal(e.v, 1, `${e.type}: schema version`);
     assert.match(e.ts, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/, `${e.type}: timestamp`);
     assert.equal(e.runId, r.runId, `${e.type}: run id`);
   }
-  assert.deepEqual(events, roundTrip(seen), "the log holds exactly what listeners received");
+  assert.deepEqual(events.filter((e) => e.type !== "content"), roundTrip(seen), "the log holds exactly what listeners received, plus the step content that only the log keeps");
+  assert.ok(events.some((e) => e.type === "content"), "the step's prompt is in the log");
 });
 
 type Of<T extends WorkflowEvent["type"]> = Extract<WorkflowEvent, { type: T }>;

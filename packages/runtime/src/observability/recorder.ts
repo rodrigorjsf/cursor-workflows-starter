@@ -4,7 +4,8 @@
 //  - Só insere (tentativas, turnos, usage_runs, métricas); `runs` recebe o fechamento no fim. Um resume do mesmo
 //    run_id é uma nova execução (exec_id), então somar as tentativas nunca conta duas vezes.
 //  - Hits de journal/memo viram tentativas de custo zero com `cached`, para a view de economia.
-//  - Nada de conteúdo: prompts só como hash e tamanho (texto só com WF_METRICS_STORE_PROMPTS=1).
+//  - No content: prompts only as a hash and a size. Prompt text, agent messages, tool calls and command output live in
+//    the run's local event log (`content` events) and never reach this recorder.
 
 import { randomUUID } from "node:crypto";
 import type { WorkflowEvent } from "../runtime/events.js";
@@ -44,10 +45,10 @@ export async function createRecorder(path?: string): Promise<Recorder> {
   );
   const insAttempt = db.prepare(
     `INSERT INTO attempts (attempt_id, exec_id, step_key, label, phase, attempt, cached, model_id, model_key, model_params,
-       setting_sources, tools, prompt_hash, prompt_chars, prompt_text, ok, error_kind, schema_reprompts, turns, steps,
+       setting_sources, tools, prompt_hash, prompt_chars, ok, error_kind, schema_reprompts, turns, steps,
        tool_calls, summaries, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
        raw_cents, charged_cents, cost_final, agent_id, started_at, duration_ms, resolved_model_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insTurn = db.prepare(
     `INSERT OR REPLACE INTO turns (attempt_id, idx, steps, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens)
@@ -87,7 +88,7 @@ export async function createRecorder(path?: string): Promise<Recorder> {
             insAttempt.run(
               e.attemptId, execId, e.stepKey, e.label, e.phase ?? null, e.attempt ?? 1, e.cached || null,
               e.model ?? null, e.modelKey ?? null, json(s?.modelParams), json(s?.settingSources), json(s?.tools),
-              s?.promptHash ?? null, s?.promptChars ?? null, s?.prompt ?? null,
+              s?.promptHash ?? null, s?.promptChars ?? null,
               e.ok ? 1 : 0, e.errorKind ?? null, e.schemaReprompts ?? 0, e.turns ?? 0, e.steps ?? 0,
               json(e.toolCalls), e.summaries ?? 0,
               u?.inputTokens ?? 0, u?.outputTokens ?? 0, u?.cacheReadTokens ?? 0, u?.cacheWriteTokens ?? 0, e.reasoningTokens ?? 0,

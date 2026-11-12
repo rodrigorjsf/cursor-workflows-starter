@@ -11,12 +11,13 @@ flowchart TB
   end
   CREG -->|MCP stdio| MCP[packages/runtime/src/mcp-server.ts]
   CCREG -->|MCP stdio| MCP
-  MCP --> JOBS[jobs.ts<br/>.workflows/jobs/*.json]
+  MCP --> JOBS[jobs.ts<br/>.workflows/jobs/*.json<br/>só a identidade do job]
   CLI --> JOBS
   CLI --> ENG
   JOBS --> ENG[engine.ts<br/>agent · parallel · pipeline · phase]
   REG[registry.ts<br/>workflows/ + .agents/workflows/] --> ENG
   ENG --> JR[run-store.ts<br/>.workflows/runs/&lt;runId&gt;/<br/>events.jsonl · journal.jsonl · run.lock]
+  JOBS -.->|"estado do job: projeção do log"| JR
   ENG -->|1 linha por run| IDX[("~/.cursor-workflows/runs.jsonl")]
   ENG --> ST[structured.ts<br/>submit_result + Ajv]
   ENG -->|"Agent.create({model, local:{cwd, settingSources, customTools}})"| SDK["@cursor/sdk<br/>(loop local)"]
@@ -46,6 +47,9 @@ flowchart TB
    - Em uso cobrado por request (planos legados e alguns Enterprise por request), `rawCostCents` vale 0
      [DOC](https://cursor.com/docs/sdk/typescript#agentgetusage). Aí o teto em centavos fica cego e só
      `--max-tokens` / `WF_MAX_TOKENS` protege. Configure sempre os dois tetos.
+   - O gasto é do run, não da execução: ao abrir o run, o engine o recompõe a partir do log de eventos (todas as
+     execuções anteriores, tentativas que falharam inclusive), então um resume nunca recomeça do zero. `--max-cents` e
+     `--max-tokens` num resume são o novo teto **total**; com o mesmo teto, o resume para no mesmo ponto.
    - O teto não interrompe uma tentativa que já começou, e ela não tem teto de tokens próprio: só o `timeoutMs` de
      cada envio a limita (o pedido e cada re-prompt de schema têm o seu). Medido em 2026-11-11: uma etapa começou abaixo de `--max-tokens 300000` e o run fechou em 344 mil
      ([verificações locais](../research/verificacoes-locais.md) §9).
@@ -107,6 +111,12 @@ flowchart TB
 11. **Métricas:** cada tentativa emite `step-start`, `turn` (via `onDelta`) e `step-end` (tokens, `raw_cents`,
     passos, tool calls, tipo de erro e `resolvedModel`, o ID que o Cursor resolveu). O recorder grava no SQLite do usuário. Falha ao gravar vira `warning`,
     nunca falha do workflow (ver [5.3](../operating/03-observabilidade.md)).
+12. **Conteúdo:** o texto do prompt, o que o agente disse (uma mensagem por turno), cada chamada de tool e a saída dos
+    comandos de shell vão para o log de eventos como eventos `content`, e só para ele: nem o recorder, nem os ouvintes
+    de `onEvent`, nem o estado do job os recebem. Antes de gravar, o engine troca por `[REDACTED]` os formatos
+    conhecidos de segredo e o valor de toda variável de ambiente com KEY, TOKEN, SECRET ou PASSWORD no nome; depois corta
+    cada texto em 32768 caracteres. Ao iniciar um run, o `text` dos runs do repositório fora da retenção (os últimos 30
+    runs ou 14 dias) é apagado; o resto do log fica.
 
 ## O que o runtime garante
 
@@ -118,6 +128,9 @@ flowchart TB
 | O modelo de cada etapa é o do código, e um ID não liberado falha | Validação do SDK contra o catálogo da conta |
 | Teto de gasto checado antes de cada tentativa (não é gasto máximo) | Teto por run (centavos e tokens) + `RateLimitError`. Etapa iniciada não é interrompida e não tem teto de tokens próprio, só o `timeoutMs` de cada envio: a ultrapassagem chega a concorrência × uma etapa sem limite (medido: 344 mil tokens com `--max-tokens 300000`, [verificações locais](../research/verificacoes-locais.md) §9). O teto em centavos depende do custo do `getUsage()`: em uso cobrado por request (passo 3) e quando o `getUsage()` falha (passo 7), só o de tokens vale, contado pelos eventos `turn-ended` |
 | Retomar sem repetir etapas | Journal + `runId` gravado no job desde o início |
+| O orçamento acumula entre resumes | O gasto parte do que o log do run já registra (tentativas que falharam inclusive), e o teto de um resume é o novo teto total |
+| O estado de um job tem uma só fonte | O registro do job (`.workflows/jobs/<jobId>.json`) guarda só id do job, id do run, pid e heartbeat. Status, fase, últimas linhas, gasto e resultado são projetados do log de eventos a cada leitura (`wf status`, `wf jobs`, `get_workflow_status`, `wait_workflow`). Não há arquivo de estado para ficar pela metade, e as linhas de `recent` são resumos de uma linha, nunca texto de prompt ou de saída |
+| O conteúdo das etapas fica só no log local, sem segredos, por tempo limitado | Eventos `content` + redação antes da gravação + retenção ao iniciar o run (ver passo 12). O banco de métricas e os exports dele nunca recebem conteúdo |
 | Todo evento do run fica registrado, e a estrutura do run dá para refazer só com o log | Log de eventos por run (`events.jsonl`): `v`, `ts` e `runId` em todo evento; `stepId`, `parentId` e `groupId` nas etapas; `group-start`/`group-end` em `parallel` e `pipeline`. Campos em [6.1 · Referência de eventos](../reference/events.md), gerada do tipo |
 | Uma queda no meio de uma gravação não impede o resume | Log e journal em JSON Lines: a última linha incompleta é ignorada, e a seguinte começa em linha nova. Os demais arquivos de estado (job, memo, progresso do workflow) são trocados por inteiro (arquivo temporário + `rename`) |
 | Um run não roda duas vezes ao mesmo tempo | `run.lock` no diretório do run: o segundo processo é recusado com `já está em execução`; o lock de um processo que morreu é retomado |
@@ -152,8 +165,8 @@ flowchart TB
   `wf run --resume <runId>`; o journal evita refazer o que já terminou. Para runs longos, use `wf start`, que roda
   destacado e grava o log em `.workflows/jobs/<jobId>.log`.
 - **Imunidade a promises rejeitadas do SDK.** O cookbook avisa que o SDK dispara promises não aguardadas na
-  inicialização. O kit instala `unhandledRejection` (registra e segue) e `uncaughtException` (marca os jobs
-  ativos como `failed` e sai).
+  inicialização. O kit instala `unhandledRejection` (registra e segue) e `uncaughtException` (grava um `run-end`
+  `failed` com o motivo no log de cada run em execução, o que faz os jobs aparecerem como `failed`, e sai).
 - **Pausar para perguntar ao humano.** Igual ao Claude Code: divida em dois workflows ou receba a decisão por
   `args`.
 

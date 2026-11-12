@@ -25,7 +25,7 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { Cursor } from "@cursor/sdk";
 import { INSIDE_WORKFLOW_ENV, runWorkflow } from "./runtime/engine.js";
-import { createJob, installCrashHandlers, jobLogPath, listJobs, readJob, startJob, waitJob, writeJob } from "./runtime/jobs.js";
+import { createJob, installCrashHandlers, jobLogPath, listJobs, readJob, readJobRecord, startJob, waitJob, writeJob } from "./runtime/jobs.js";
 import { loadWorkflows } from "./runtime/registry.js";
 
 const { positionals, values } = parseArgs({
@@ -94,10 +94,12 @@ async function main(): Promise<number> {
       const args = JSON.parse(values.args!);
       if (values.job) {
         // Modo filho de `wf start`: o pai já criou o job.
-        const existing = readJob(cwd, values.job);
+        const existing = readJobRecord(cwd, values.job);
         if (!existing) throw new Error(`job ${values.job} não encontrado`);
         const { done } = startJob(def, args, runOpts(), existing);
-        return (await done).status === "finished" ? 0 : 1;
+        const state = await done;
+        if (state.status !== "finished" && state.error) process.stderr.write(`${state.error}\n`); // goes to the job's log (.workflows/jobs/<jobId>.log)
+        return state.status === "finished" ? 0 : 1;
       }
       const outcome = await runWorkflow(def, args, runOpts());
       out(outcome);
@@ -117,7 +119,7 @@ async function main(): Promise<number> {
         { detached: true, stdio: ["ignore", log, log], env: process.env },
       );
       // O job nasceu com o pid do pai (que sai já); aponta para o filho, que também grava o próprio pid ao iniciar.
-      const current = readJob(cwd, job.jobId);
+      const current = readJobRecord(cwd, job.jobId);
       if (current && child.pid) writeJob(cwd, { ...current, pid: child.pid });
       child.unref();
       out({ jobId: job.jobId, runId: job.runId, log: jobLogPath(cwd, job.jobId), next: `wf wait ${job.jobId}` });
