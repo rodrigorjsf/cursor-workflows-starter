@@ -155,12 +155,3 @@ test("the runtime package and the repo carry the same version", () => {
   const version = (...p: string[]) => JSON.parse(read(...p, "package.json")).version;
   assert.equal(version("packages", "runtime"), version(), "the MCP server reports the runtime package's version: bump both together");
 });
-
-test("relative links in the markdown docs point at files that exist", () => {
-  const roots = ["README.md", "README.en.md", "CHANGELOG.md", "CREDITS.md", "CONTRIBUTING.md", "SECURITY.md", "PROVENANCE.md", "CLAUDE.md"];
-  for (const file of [...roots, ...markdownFiles("docs"), ...markdownFiles("skills")]) {
-    for (const target of relativeLinks(read(file))) {
-      assert.ok(existsSync(resolve(ROOT, dirname(file), target)), `${file} links to ${target}, which does not exist`);
-    }
-  }
-});

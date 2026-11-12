@@ -1,3 +1,11 @@
+// WHAT: Workflow with three steps that exercise structured output: a plain schema, an invalid answer the agent must
+//   correct, and a missing submit_result.
+// WHY: Structured output goes through a custom submit_result tool and engine re-prompts; this checks both against
+//   the real API.
+// WHEN: On a new account or after an SDK upgrade, to re-check structured output.
+// HOW: `WORKFLOWS_DIR=scripts/verify npm run wf -- run verify-structured --cwd <probe-repo> --max-tokens 150000`
+//   (see scripts/verify/README.md).
+
 // Verificação real: saída estruturada via submit_result (ver docs/research/verificacoes-locais.md §7).
 import { defineWorkflow } from "../../packages/runtime/src/runtime/workflow.js";
 

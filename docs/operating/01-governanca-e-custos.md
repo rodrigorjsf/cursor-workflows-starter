@@ -1,12 +1,12 @@
-# 07 · Governança e custos (Cursor Teams/Enterprise)
+# 5.1 · Governança e custos (Cursor Teams/Enterprise)
 
 ## Orçamento por usuário
 
 | Pergunta | Resposta (nov/2026) | Confiança |
 |---|---|---|
 | O workflow pode rodar com a conta do próprio usuário? | Sim: `wf login` (browser) cria uma chave de usuário de 90 dias por padrão | Alta (pacote do SDK) |
-| Que plano dá acesso ao SDK? | Um plano pago. No Free, o `Agent.create` local, `Cursor.me()` e `Cursor.models.list()` falham com `UnknownAgentError` `plan_required` (403); o kit encerra o run na primeira tentativa. No Premium da The X Subscription, funciona. O plano legado Start não inclui o SDK; o Plus não foi testado | Alta para Free e Premium: medido em 2026-11-11 ([verificações locais](research/verificacoes-locais.md) §4–5). [DOC] para Start ([planos legados](https://cursor.com/docs/account/pricing/legacy-cursor-plans)) |
-| Pode reaproveitar o login da IDE sem novo login? | **Não.** O SDK não descobre credenciais de uma instalação local do Cursor. O login interativo da CLI (`agent login`) também fica de fora, pela ordem de resolução da chave, embora a doc do SDK não o cite. Já uma mesma chave de usuário em `CURSOR_API_KEY` serve à CLI e ao SDK | Alta [DOC] para a IDE ([SDK TypeScript](https://cursor.com/docs/sdk/typescript#cursorauth)); para a CLI, decorre da ordem de resolução ([02 §1](02-configuracao-inicial.md#1-autenticação-de-quem-é-o-uso)) |
+| Que plano dá acesso ao SDK? | Um plano pago. No Free, o `Agent.create` local, `Cursor.me()` e `Cursor.models.list()` falham com `UnknownAgentError` `plan_required` (403); o kit encerra o run na primeira tentativa. No Premium da The X Subscription, funciona. O plano legado Start não inclui o SDK; o Plus não foi testado | Alta para Free e Premium: medido em 2026-11-11 ([verificações locais](../research/verificacoes-locais.md) §4–5). [DOC] para Start ([planos legados](https://cursor.com/docs/account/pricing/legacy-cursor-plans)) |
+| Pode reaproveitar o login da IDE sem novo login? | **Não.** O SDK não descobre credenciais de uma instalação local do Cursor. O login interativo da CLI (`agent login`) também fica de fora, pela ordem de resolução da chave, embora a doc do SDK não o cite. Já uma mesma chave de usuário em `CURSOR_API_KEY` serve à CLI e ao SDK | Alta [DOC] para a IDE ([SDK TypeScript](https://cursor.com/docs/sdk/typescript#cursorauth)); para a CLI, decorre da ordem de resolução ([2.2 §1](../usage/02-configuracao-inicial.md#1-autenticação-de-quem-é-o-uso)) |
 | De quem é a cobrança? | "Service account API keys bill to the team that owns the service account. User API keys bill to that user's plan." O gasto aparece com a tag SDK no dashboard de uso do time, e as páginas de Usage do time e da organização têm a opção SDK no filtro de cliente | Alta [DOC]: [SDK TypeScript](https://cursor.com/docs/sdk/typescript#usage-and-billing) (acesso em 2026-11-11), [release notes](https://cursor.com/docs/release-notes) |
 | O uso segue as mesmas regras de preço, pools e Privacy Mode do IDE? | Sim: "SDK runs follow the same pricing, request pools, and Privacy Mode rules as runs from the IDE and Cloud Agents." Vale para preço e cobrança, não para o que o plano inclui: o plano legado Start inclui o IDE, mas não o Cursor SDK | Alta [DOC]: [SDK TypeScript](https://cursor.com/docs/sdk/typescript#usage-and-billing), [planos legados](https://cursor.com/docs/account/pricing/legacy-cursor-plans) |
 | Entra no **limite individual em dólares** do membro? | A doc não diz. Ela confirma que a chave de usuário cobra o plano do usuário e que o admin define um limite mensal por membro (default do time e override por membro), mas nenhuma página liga o uso do SDK a esse limite | Em aberto: a doc não cobre ([SDK TypeScript](https://cursor.com/docs/sdk/typescript#usage-and-billing), [preços de Teams](https://cursor.com/docs/account/teams/pricing)). Valide com o admin |
@@ -19,13 +19,13 @@ gasto aparece no membro, com a tag SDK, e se o limite por membro é respeitado.
 ## Controles de custo no kit
 
 Para as práticas de implementação (cache, contexto, prompts, memo), veja
-[08 · Custos, cache e boas práticas](08-custos-e-cache.md). Os controles abaixo são os de governança.
+[5.2 · Custos, cache e boas práticas](02-custos-e-cache.md). Os controles abaixo são os de governança.
 
 1. **Teto por run:** `--max-cents`, `--max-tokens`, `WF_MAX_CENTS` ou `WF_MAX_TOKENS`. Não é garantia de gasto
    máximo. É checado antes de cada tentativa, e uma etapa não tem teto de tokens próprio (só o `timeoutMs` de cada envio), então a
    ultrapassagem pode chegar a concorrência × uma etapa sem limite. Medido em 2026-11-11: 344 mil tokens com
-   `--max-tokens 300000` ([verificações locais](research/verificacoes-locais.md) §9; ver
-   [02 §3](02-configuracao-inicial.md#3-teto-de-custo)). Use `timeoutMs` curto nas etapas que escrevem. O teto em
+   `--max-tokens 300000` ([verificações locais](../research/verificacoes-locais.md) §9; ver
+   [2.2 §3](../usage/02-configuracao-inicial.md#3-teto-de-custo)). Use `timeoutMs` curto nas etapas que escrevem. O teto em
    centavos compara `maxCents` com `spentCents`: a soma, por tentativa, do maior entre `rawCostCents` (custo bruto)
    e `chargedCents` (cobrado). Ele depende do custo do `getUsage()`, que o Premium testado não devolveu. Defina
    sempre os dois tetos (ver a nota abaixo).
@@ -45,7 +45,7 @@ Para as práticas de implementação (cache, contexto, prompts, memo), veja
      acima de 0 nesses casos [I]. O bruto é 0 em uso cobrado por request (planos legados e alguns Enterprise
      por request) ([DOC](https://cursor.com/docs/sdk/typescript#agentgetusage));
    - custo por entrega e faixa de contexto × custo;
-   - export anonimizado para consolidar no time ([09](09-observabilidade.md)).
+   - export anonimizado para consolidar no time ([5.3](03-observabilidade.md)).
 
 > **Teto em centavos e tipo de cobrança.** `chargedCents` é 0 para uso incluído no plano, BYOK e créditos
 > ([DOC](https://cursor.com/docs/sdk/typescript#agentgetusage)). Por isso o teto soma o maior entre bruto e
@@ -60,7 +60,7 @@ Para as práticas de implementação (cache, contexto, prompts, memo), veja
 >   [DOC]. Nesse caso o engine conta os tokens da tentativa pelos eventos `turn-ended`, e o teto de tokens vale.
 >   O custo fica desconhecido, e o teto em centavos não conta a tentativa. Isso aconteceu em plano pago: num
 >   Premium, em 2026-11-11, toda chamada deu `feature_unavailable`, inclusive o `Agent.getUsage(agentId)` estático
->   ([verificações locais](research/verificacoes-locais.md) §5). Nessa conta `spentCents` fica em 0, o teto em
+>   ([verificações locais](../research/verificacoes-locais.md) §5). Nessa conta `spentCents` fica em 0, o teto em
 >   centavos nunca dispara, e o custo só sai da estimativa da tabela `pricing` e do dashboard de uso.
 >
 > Defina sempre os dois tetos.
@@ -70,9 +70,9 @@ Para as práticas de implementação (cache, contexto, prompts, memo), veja
 | Risco | Fato | Mitigação no kit / recomendação |
 |---|---|---|
 | Tools sem aprovação | Runs locais do SDK executam shell, edit e write sem pedir aprovação, e as custom tools nunca pedem aprovação interativa; regras de deny e o sandbox ainda valem para elas ([DOC](https://cursor.com/docs/sdk/typescript#custom-tools)) | Allowlist de `tools` por etapa: no exemplo, classificar e planejar só leem. Implementar e corrigir recebem todas as tools, shell incluído, porque precisam rodar testes. O sandbox (`sandbox: true`) **não foi testado neste kit** e não é mitigação comprovada. Ele vem desligado por padrão e, no Linux, exige `bubblewrap` (sem ele, o SDK lança `ConfigurationError`). Segundo a doc, restringe as chamadas de shell e os processos que elas disparam: escrita só no cwd, em diretórios temporários e nos caminhos liberados no `sandbox.json`; leitura **não** restrita; rede de saída negada, salvo os hosts listados em `.cursor/sandbox.json` do workspace ou em `~/.cursor/sandbox.json` ([DOC](https://cursor.com/docs/sdk/typescript#sandbox-options)). A doc não diz que ele restringe as tools `edit` e `write`. Testes que baixam pacotes podem falhar |
-| Etapa que escreve fora do repositório (medido) | No teste ponta a ponta de 2026-11-11, a `corrigir-1` (`grok-4.7`, todas as tools, sem sandbox) editou um arquivo fora do repositório: o wrapper `npm` de um gerenciador de versões, na home do usuário, para "consertar" o ambiente. A falha de teste vinha do shell de login que rodava os testes. O arquivo foi revertido ([verificações locais](research/verificacoes-locais.md) §9) | Os testes rodam com `bash -c`, no ambiente de quem chamou. As instruções das etapas que escrevem levam a `SCOPE_RULE` ("altere apenas arquivos dentro deste repositório..."). A regra é **só um pedido no prompt**, não uma barreira: nada no kit impede a escrita fora do repositório. Onde isso importa, rode o workflow numa máquina ou container descartável |
+| Etapa que escreve fora do repositório (medido) | No teste ponta a ponta de 2026-11-11, a `corrigir-1` (`grok-4.7`, todas as tools, sem sandbox) editou um arquivo fora do repositório: o wrapper `npm` de um gerenciador de versões, na home do usuário, para "consertar" o ambiente. A falha de teste vinha do shell de login que rodava os testes. O arquivo foi revertido ([verificações locais](../research/verificacoes-locais.md) §9) | Os testes rodam com `bash -c`, no ambiente de quem chamou. As instruções das etapas que escrevem levam a `SCOPE_RULE` ("altere apenas arquivos dentro deste repositório..."). A regra é **só um pedido no prompt**, não uma barreira: nada no kit impede a escrita fora do repositório. Onde isso importa, rode o workflow numa máquina ou container descartável |
 | Segredo no commit | Issues LOW e MED com diff de até 300 linhas pulam o review. Um corpo de issue com prompt injection pode levar uma etapa a copiar `~/.cursor/sdk/auth.json` para o worktree, e o sandbox não restringe leitura | Antes do commit, o `implement-issue` examina as linhas adicionadas no diff staged (`git diff --cached`) atrás de formatos de segredo (chaves `crsr_`, chaves `sk-`, a própria chave salva do SDK ou a de `CURSOR_API_KEY`) e os arquivos staged chamados `auth.json`, `.env` ou `.env.*`. Num acerto, não faz commit, push nem PR e devolve `status: "secret-blocked"`, com `reason` dizendo só a regra que disparou, nunca o trecho encontrado. O worktree fica para inspeção: apague o arquivo e trate a chave como exposta |
-| Repositório não confiável | `settingSources: ["project"]` carrega regras e hooks do repositório. Medido em 2026-11-11: com `"project"`, a etapa roda os hooks de `.cursor/hooks.json` e os `PreToolUse` de `.claude/settings.json` (comandos do repositório na sua máquina) e sobe os servidores do `.cursor/mcp.json`; com `[]`, nada disso ([verificações locais](research/verificacoes-locais.md) §7) | Para repositórios de terceiros, remova `"project"` em `engine.ts` |
+| Repositório não confiável | `settingSources: ["project"]` carrega regras e hooks do repositório. Medido em 2026-11-11: com `"project"`, a etapa roda os hooks de `.cursor/hooks.json` e os `PreToolUse` de `.claude/settings.json` (comandos do repositório na sua máquina) e sobe os servidores do `.cursor/mcp.json`; com `[]`, nada disso ([verificações locais](../research/verificacoes-locais.md) §7) | Para repositórios de terceiros, remova `"project"` em `engine.ts` |
 | Chave em disco | `~/.cursor/sdk/auth.json` em texto puro, 90 dias por padrão | Em máquinas compartilhadas, use `CURSOR_API_KEY` vinda de um gerenciador de segredos |
 | Efeitos externos | Commit, push e PR | Feitos só pelo código, depois das verificações e da varredura de segredos; push e PR só com `openPr: true` |
 | Prompt injection via issue | O corpo da issue entra no prompt de classificar, planejar e implementar | Classificar e planejar não têm `shell` nem `edit`. **Implementar tem**, então um corpo de issue malicioso pode induzir comandos e leituras fora do repositório. Restrinja quem pode rotular issues para o workflow. O review com lente de segurança só roda em HIGH ou com diff acima de 300 linhas, e a varredura de segredos antes do commit (linha "Segredo no commit") cobre só o que iria para o commit. O sandbox não foi testado e não restringe leitura. Revisores têm `shell` para ler o `git diff`; troque por um diff passado no prompt se quiser tirar o shell deles |
@@ -136,4 +136,8 @@ Para as práticas de implementação (cache, contexto, prompts, memo), veja
 - [ ] Sandbox (`sandbox: true`) testado no ambiente do time antes de contar com ele: exige `bubblewrap` no Linux,
   não foi testado neste kit e, segundo a doc, não restringe leitura.
 - [ ] Service account (só Enterprise) criada para uso em CI.
-- [ ] Teste de fumaça ([01 §5](01-instalacao.md#5-teste-de-fumaça-real)) executado com sucesso.
+- [ ] Teste de fumaça ([2.1 §5](../usage/01-instalacao.md#5-teste-de-fumaça-real)) executado com sucesso.
+
+---
+
+[← Anterior: 4.2 · Convertendo skills e subagents em workflows](../authoring/02-convertendo-skills-e-subagents.md) · [Índice](../README.md) · [Próximo: 5.2 · Custos, cache e boas práticas →](02-custos-e-cache.md)

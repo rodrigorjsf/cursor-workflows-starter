@@ -1,4 +1,4 @@
-# 03 · Arquitetura
+# 3.1 · Arquitetura
 
 ## Visão geral
 
@@ -47,27 +47,27 @@ flowchart TB
      `--max-tokens` / `WF_MAX_TOKENS` protege. Configure sempre os dois tetos.
    - O teto não interrompe uma tentativa que já começou, e ela não tem teto de tokens próprio: só o `timeoutMs` de
      cada envio a limita (o pedido e cada re-prompt de schema têm o seu). Medido em 2026-11-11: uma etapa começou abaixo de `--max-tokens 300000` e o run fechou em 344 mil
-     ([verificações locais](research/verificacoes-locais.md) §9).
+     ([verificações locais](../research/verificacoes-locais.md) §9).
 4. **Agente novo:** `Agent.create` com o modelo da etapa, a allowlist de tools, os subagents e MCP servers
    inline, o sandbox (se pedido) e `settingSources: ["project","team","mdm"]`.
    - Com `schema`, registra a custom tool `submit_result` e garante `"mcp"` na allowlist.
    - Quando a etapa carrega camadas de arquivo (`project`, `user`, `plugins` ou `all`), registra também um MCP
      inline `workflows` (ou `WF_MCP_SERVER_NAME`) sem tools, `packages/runtime/src/runtime/nested-mcp-guard.mjs`. Ele vence o
      servidor de mesmo nome do `.cursor/mcp.json`, e a etapa não vê `start_workflow` (medido em 2026-11-11; ver
-     [02 §5](02-configuracao-inicial.md#5-contexto-do-projeto-nos-agentes)).
+     [2.2 §5](../usage/02-configuracao-inicial.md#5-contexto-do-projeto-nos-agentes)).
    - O SDK valida o modelo contra o catálogo da conta; um ID inválido faz a etapa falhar ("Cannot use this
      model"). A tabela de erros do SDK põe `model.id` inválido em `ConfigurationError` e manda conferir o ID com
      `Cursor.models.list()`, que lista os modelos liberados para a conta e o time da API key
      [DOC](https://cursor.com/docs/sdk/typescript#errors) [DOC](https://cursor.com/docs/sdk/typescript#cursormodelslist).
    - No plano Free, o `Agent.create` já falha com `UnknownAgentError` `plan_required` (403): a validação local do
      modelo consulta o catálogo (`GET /v1/models`), bloqueado no Free (medido em 2026-11-11,
-     [verificações locais](research/verificacoes-locais.md) §4).
+     [verificações locais](../research/verificacoes-locais.md) §4).
 5. **Run:** `send(prompt)` (tolera `AgentBusyError` com espera curta; nenhum apareceu nas 3 etapas com schema
    medidas em 2026-11-11) e `wait()` com timeout. Ao estourar o timeout, o engine **aguarda** `run.cancel()` antes
    de seguir, para a próxima tentativa não editar o mesmo cwd em paralelo.
 6. **Schema:** se a run terminou e o agente não chamou `submit_result` com JSON válido, o engine reenvia o
    pedido na mesma conversa (`schemaRetries`, default 2). O Ajv valida dentro do `execute()`, e o erro volta para
-   o modelo corrigir. Medido em 2026-11-11 ([verificações locais](research/verificacoes-locais.md) §7): o
+   o modelo corrigir. Medido em 2026-11-11 ([verificações locais](../research/verificacoes-locais.md) §7): o
    `submit_result` aparece e é chamado, e uma submissão inválida foi corrigida dentro do mesmo turno (2 chamadas,
    `schemaReprompts: 0`). O re-prompt do engine não foi exercitado ao vivo, porque o modelo chamou `submit_result`
    até num prompt que pedia só texto; ele está coberto só pelos testes offline.
@@ -77,7 +77,7 @@ flowchart TB
    [DOC](https://cursor.com/docs/sdk/typescript#agentgetusage). Cada tentativa soma o maior entre bruto e cobrado
    em `spentCents`, e só o cobrado em `chargedCents`; `RunOutcome`, o estado do job e `ctx.budget` expõem os
    dois. O resultado do run traz `usage.cacheHitRatio` = cache read ÷ input (medido: `inputTokens` já inclui cache
-   read e cache write; ver [08 §3](08-custos-e-cache.md#3-medir-antes-de-otimizar)).
+   read e cache write; ver [5.2 §3](../operating/02-custos-e-cache.md#3-medir-antes-de-otimizar)).
    - Se o `getUsage()` responde sem `cost` (custo ainda não assentado), os tokens vêm dele e o teto de tokens
      conta a tentativa. O teto em centavos não a conta, e o engine emite `warning` ("custo da tentativa ainda não
      reportado ...").
@@ -87,10 +87,10 @@ flowchart TB
      (`UnknownAgentError` com `code === "feature_unavailable"`): o uso de agentes locais é liberado por conta
      [DOC](https://cursor.com/docs/sdk/typescript#agentgetusage). Nesse caso o engine não tenta de novo. Turno sem
      uso reportado, como o de uma run cancelada antes de fechar o turno, fica fora da soma
-     [DOC](https://cursor.com/docs/sdk/typescript#token-usage) (ver [09](09-observabilidade.md)).
+     [DOC](https://cursor.com/docs/sdk/typescript#token-usage) (ver [5.3](../operating/03-observabilidade.md)).
    - Num Premium, em 2026-11-11, foi o caso de toda chamada, inclusive do `Agent.getUsage(agentId)` estático
      depois do descarte. Os tokens dos `turn-ended` bateram com os de `RunResult.usage`
-     ([verificações locais](research/verificacoes-locais.md) §5–6).
+     ([verificações locais](../research/verificacoes-locais.md) §5–6).
 8. **Sucesso:** grava no journal e devolve o valor.
 9. **Falha** (status `error`/`cancelled`, timeout, schema não entregue): repete até `retries` (default 1) com
    um agente novo e então lança `StepFailedError`. `RateLimitError` cobre o limite de rajada e o teto mensal de uso
@@ -105,7 +105,7 @@ flowchart TB
 10. **Descarte:** o agente é fechado com `await agent[Symbol.asyncDispose]()`, como no cookbook oficial.
 11. **Métricas:** cada tentativa emite `step-start`, `turn` (via `onDelta`) e `step-end` (tokens, `raw_cents`,
     passos, tool calls, tipo de erro e `resolvedModel`, o ID que o Cursor resolveu). O recorder grava no SQLite do usuário. Falha ao gravar vira `warning`,
-    nunca falha do workflow (ver [09](09-observabilidade.md)).
+    nunca falha do workflow (ver [5.3](../operating/03-observabilidade.md)).
 
 ## O que o runtime garante
 
@@ -115,7 +115,7 @@ flowchart TB
 | Etapa concluída tem saída no formato esperado | `submit_result` + Ajv + re-prompt; senão a etapa falha |
 | Falha é explícita | `agent()` lança erro. `parallel`/`pipeline` transformam a falha de um item em `null` e registram `warning`, mas o teto de custo e o erro de conta (`plan_required`) sempre abortam |
 | O modelo de cada etapa é o do código, e um ID não liberado falha | Validação do SDK contra o catálogo da conta |
-| Teto de gasto checado antes de cada tentativa (não é gasto máximo) | Teto por run (centavos e tokens) + `RateLimitError`. Etapa iniciada não é interrompida e não tem teto de tokens próprio, só o `timeoutMs` de cada envio: a ultrapassagem chega a concorrência × uma etapa sem limite (medido: 344 mil tokens com `--max-tokens 300000`, [verificações locais](research/verificacoes-locais.md) §9). O teto em centavos depende do custo do `getUsage()`: em uso cobrado por request (passo 3) e quando o `getUsage()` falha (passo 7), só o de tokens vale, contado pelos eventos `turn-ended` |
+| Teto de gasto checado antes de cada tentativa (não é gasto máximo) | Teto por run (centavos e tokens) + `RateLimitError`. Etapa iniciada não é interrompida e não tem teto de tokens próprio, só o `timeoutMs` de cada envio: a ultrapassagem chega a concorrência × uma etapa sem limite (medido: 344 mil tokens com `--max-tokens 300000`, [verificações locais](../research/verificacoes-locais.md) §9). O teto em centavos depende do custo do `getUsage()`: em uso cobrado por request (passo 3) e quando o `getUsage()` falha (passo 7), só o de tokens vale, contado pelos eventos `turn-ended` |
 | Retomar sem repetir etapas | Journal + `runId` gravado no job desde o início |
 | Workflow não dispara workflow por acidente | MCP inline `workflows` sem tools nas etapas, que encobre o do `.cursor/mcp.json` (passo 4), + `WF_INSIDE_WORKFLOW` herdado pelo shell, com recusa no CLI. Medido em 2026-11-11: sem o inline, a etapa via `start_workflow`; com ele, só `FetchMcpResource` e `submit_result`. Não é fronteira de segurança (ver abaixo) |
 
@@ -133,12 +133,12 @@ flowchart TB
   vem desligado [DOC](https://cursor.com/docs/sdk/typescript#sandbox-options). Custom tools, como `submit_result`,
   nunca pedem aprovação; regras de deny e o sandbox ainda valem para elas
   [DOC](https://cursor.com/docs/sdk/typescript#custom-tools). Medido em 2026-11-11: uma etapa de correção editou
-  um arquivo fora do repositório ([verificações locais](research/verificacoes-locais.md) §9). A regra de escopo
+  um arquivo fora do repositório ([verificações locais](../research/verificacoes-locais.md) §9). A regra de escopo
   nas instruções das etapas que escrevem é só um pedido no prompt, e o sandbox não foi testado neste kit. Veja
-  [07 · Governança](07-governanca-e-custos.md#segurança).
+  [5.1 · Governança](../operating/01-governanca-e-custos.md#segurança).
 - **Gasto máximo.** O teto é checado antes de cada tentativa, e uma tentativa só é limitada pelo `timeoutMs` de
   cada envio. Uma
-  etapa pode passar do teto sozinha (passo 3; [02 §3](02-configuracao-inicial.md#3-teto-de-custo)).
+  etapa pode passar do teto sozinha (passo 3; [2.2 §3](../usage/02-configuracao-inicial.md#3-teto-de-custo)).
 - **Barreira contra recursão.** A guarda do passo 4 e o `WF_INSIDE_WORKFLOW` evitam o disparo acidental. Uma etapa
   com `shell` ainda pode contorná-los, por exemplo rodando o CLI sem a variável.
 - **Sobreviver a reinício do MCP server.** O job em andamento morre junto e, na próxima consulta, aparece como
@@ -159,3 +159,7 @@ flowchart TB
 | Chave de resume | Maior prefixo inalterado na ordem de início [DOC](https://code.claude.com/docs/en/workflows#which-agents-run-again) | Hash de prompt e opções + ocorrência | `pipeline` muda a ordem de conclusão; o hash tolera isso |
 | `agent()` com falha | Devolve `null` só se você interromper o agente ou num erro de API irrecuperável; schema contraditório, validação que falha 5 vezes e agente travado em todas as tentativas lançam erro ([DOC](https://code.claude.com/docs/en/workflows)) | **Lança erro** | "Garantir execução completa": falha precisa ser visível. Em `parallel`/`pipeline` vira `null`, como no Claude Code |
 | Concorrência | 16 por padrão, ajustável [DOC](https://code.claude.com/docs/en/workflows#behavior-and-limits) | 4 (configurável) | O Cursor não documenta o rate limit por usuário |
+
+---
+
+[← Anterior: 2.3 · Invocação no Cursor IDE (e no Claude Code)](../usage/03-invocacao-no-cursor-ide.md) · [Índice](../README.md) · [Próximo: 4.1 · Escrevendo workflows →](../authoring/01-escrevendo-workflows.md)

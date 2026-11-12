@@ -1,4 +1,4 @@
-# 02 · Configuração inicial
+# 2.2 · Configuração inicial
 
 ## 1. Autenticação: de quem é o uso?
 
@@ -9,7 +9,7 @@ O SDK procura a chave nesta ordem: opção `apiKey` → variável `CURSOR_API_KE
 | Cenário | Configuração | Cobrança |
 |---|---|---|
 | **Desenvolvedor usando pelo chat** (recomendado) | `npm run wf -- login` uma vez por máquina | Conta do próprio usuário. Coerente com o orçamento individual do Enterprise |
-| Desenvolvedor sem navegador (SSH, devcontainer) | Gerar uma chave de usuário no dashboard e exportar `CURSOR_API_KEY`, ou `npm run wf -- login` e abrir em outra máquina a URL que ele imprime no stderr. Em sessão SSH o SDK já não abre o navegador; nos outros casos, use `NO_OPEN_BROWSER=1` ([DOC](https://cursor.com/docs/sdk/typescript#cursorauth)). Medido em 2026-11-11 com `NO_OPEN_BROWSER=1 npm run wf -- login`: a URL vai para o stderr, funciona aberta em outro dispositivo e expira em poucos minutos se o login não for concluído ([verificações locais](research/verificacoes-locais.md) §4) | Conta do usuário |
+| Desenvolvedor sem navegador (SSH, devcontainer) | Gerar uma chave de usuário no dashboard e exportar `CURSOR_API_KEY`, ou `npm run wf -- login` e abrir em outra máquina a URL que ele imprime no stderr. Em sessão SSH o SDK já não abre o navegador; nos outros casos, use `NO_OPEN_BROWSER=1` ([DOC](https://cursor.com/docs/sdk/typescript#cursorauth)). Medido em 2026-11-11 com `NO_OPEN_BROWSER=1 npm run wf -- login`: a URL vai para o stderr, funciona aberta em outro dispositivo e expira em poucos minutos se o login não for concluído ([verificações locais](../research/verificacoes-locais.md) §4) | Conta do usuário |
 | CI / GitHub Actions / Automations | Chave de **service account** (Enterprise) como secret `CURSOR_API_KEY` | Pool do time, sem atribuição por pessoa |
 | Usuário em mais de um time | Passar `teamId` (o kit ainda não expõe a opção; adicione em `RunOptions` se precisar) | O time indicado |
 
@@ -56,7 +56,7 @@ Os IDs dependem do plano e das restrições do admin. Liste com `npm run models`
 
 Os defaults são modelos do Cursor (Composer e Grok), que os planos pagos da The X Subscription incluem na franquia
 semanal. Eles mudaram depois de um teste num Premium em 2026-11-11
-([verificações locais](research/verificacoes-locais.md) §5–6):
+([verificações locais](../research/verificacoes-locais.md) §5–6):
 
 - `auto-low`, que vinha do `dag-task-runner` do cookbook, não existe no catálogo. O Auto é `default` (alias `auto`).
 - `composer-2` e `composer-2.5` existem; os aliases `composer` e `composer-latest` apontam para `composer-2.5`.
@@ -65,7 +65,7 @@ semanal. Eles mudaram depois de um teste num Premium em 2026-11-11
 
 Nos testes, o `composer-2.5` rodou nas sondas e na etapa `implementar` do teste ponta a ponta. O `grok-4.7` rodou
 uma vez, sem `params`, como MED na etapa `corrigir-1` desse teste, e essa etapa editou um arquivo fora do
-repositório ([07 · Segurança](07-governanca-e-custos.md#segurança); [verificações locais](research/verificacoes-locais.md)
+repositório ([5.1 · Segurança](../operating/01-governanca-e-custos.md#segurança); [verificações locais](../research/verificacoes-locais.md)
 §9). A variante com `reasoning_effort=high` (HIGH e REVIEW) não foi testada: confira em `npm run models` que o
 `grok-4.7` oferece `reasoning_effort` antes de usar esses defaults.
 
@@ -94,7 +94,7 @@ Como funciona:
   Etapas que já começaram não são interrompidas, e uma etapa não tem teto de tokens próprio: só o `timeoutMs` de
   cada envio a limita (o pedido e até `schemaRetries` re-prompts, cada um com o seu). A ultrapassagem pode chegar a **concorrência × uma etapa sem limite** (ex.: 4 etapas em `parallel`).
   Medido em 2026-11-11: com `--max-tokens 300000`, o `implement-issue` gastou 344.376 tokens. A `corrigir-1`
-  começou com 74,9 mil gastos e sozinha usou 269 mil ([verificações locais](research/verificacoes-locais.md) §9).
+  começou com 74,9 mil gastos e sozinha usou 269 mil ([verificações locais](../research/verificacoes-locais.md) §9).
   Para tetos apertados, use `concurrency` baixa e um `timeoutMs` curto nas etapas que escrevem (o exemplo usa
   30 min; sem valor na etapa, o engine usa 20 min).
 - O teto em centavos depende do custo que o `getUsage()` devolve. O Premium testado não devolveu custo nenhum
@@ -112,9 +112,9 @@ Como funciona:
   antes de fechar o turno, fica fora da soma ([DOC](https://cursor.com/docs/sdk/typescript#token-usage)).
 - Isso acontece em plano pago. Num Premium, em 2026-11-11, toda chamada ao `getUsage()` de agente local deu
   `UnknownAgentError [feature_unavailable] This feature is not available for your account`, também o
-  `Agent.getUsage(agentId)` estático depois do descarte ([verificações locais](research/verificacoes-locais.md)
+  `Agent.getUsage(agentId)` estático depois do descarte ([verificações locais](../research/verificacoes-locais.md)
   §5). Nessa conta, `spentCents` fica em 0 e o `--max-cents` nunca dispara: só o `--max-tokens` protege. O custo
-  só sai da estimativa da tabela `pricing` ([09 §3](09-observabilidade.md#3-modelo-de-dados)) e do dashboard de uso
+  só sai da estimativa da tabela `pricing` ([5.3 §3](../operating/03-observabilidade.md#3-modelo-de-dados)) e do dashboard de uso
   da conta.
 - O teto compara `maxCents` com `spentCents`: a soma, por tentativa, do maior entre `rawCostCents` (custo bruto, sem
   descontos) e `chargedCents` (o cobrado). `chargedCents` sozinho é **0 para uso incluído no plano, BYOK e
@@ -134,7 +134,7 @@ Como funciona:
   franquia para um modelo (`gpt-5.3-codex` num Premium sem crédito pré-pago) veio como run com `status: "error"` e
   mensagem, não como `RateLimitError`. O engine trata isso como falha de run: tenta de novo (`retries`, default 1) e
   depois falha a etapa com a mensagem do SDK. O teto mensal do plano não foi atingido, então o caminho dele segue sem teste
-  ([verificações locais](research/verificacoes-locais.md) §6).
+  ([verificações locais](../research/verificacoes-locais.md) §6).
 - A doc não liga a nenhuma classe de erro do SDK os limites de gasto do time ou do membro. A service account
   recebe um erro próprio, "Service account spend limit reached", também sem classe de erro do SDK
   ([DOC](https://cursor.com/docs/account/enterprise/service-accounts)).
@@ -161,7 +161,7 @@ O engine cria os agentes com `settingSources: ["project", "team", "mdm"]`, o que
   compatibilidade), hooks e `.cursor/mcp.json` do projeto;
 - regras e hooks do time e hooks Enterprise (MDM).
 
-Medido em 2026-11-11 em runs locais ([verificações locais](research/verificacoes-locais.md) §7):
+Medido em 2026-11-11 em runs locais ([verificações locais](../research/verificacoes-locais.md) §7):
 
 | `settingSources` | O que a etapa recebeu |
 |---|---|
@@ -183,7 +183,7 @@ MDM.
 > `sandbox.json`; leitura **não** restrita; rede de saída negada, salvo os hosts listados em `.cursor/sandbox.json`
 > (ou `~/.cursor/sandbox.json`) ([DOC](https://cursor.com/docs/sdk/typescript#sandbox-options)). A doc não diz que
 > ele restringe as tools `edit` e `write`. Não o trate como mitigação comprovada
-> ([07 · Segurança](07-governanca-e-custos.md#segurança)).
+> ([5.1 · Segurança](../operating/01-governanca-e-custos.md#segurança)).
 
 > **Recursão:** com `"project"`, o SDK sobe os servidores do `.cursor/mcp.json` para a etapa **sem repassar o
 > ambiente do processo**. Medido em 2026-11-11: o servidor `workflows` subia com `WF_INSIDE_WORKFLOW` vazio, e a
@@ -196,3 +196,7 @@ MDM.
 >
 > A guarda evita a recursão **acidental**. Ela não é fronteira de segurança: uma etapa com `shell` pode
 > contorná-la, por exemplo rodando o CLI sem a variável.
+
+---
+
+[← Anterior: 2.1 · Instalação](01-instalacao.md) · [Índice](../README.md) · [Próximo: 2.3 · Invocação no Cursor IDE (e no Claude Code) →](03-invocacao-no-cursor-ide.md)

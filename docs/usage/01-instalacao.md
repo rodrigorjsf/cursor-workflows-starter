@@ -1,12 +1,12 @@
-# 01 · Instalação
+# 2.1 · Instalação
 
 ## 1. Requisitos
 
 | Item | Versão | Por quê |
 |---|---|---|
 | Node.js | **≥ 22.13** | Exigência do `@cursor/sdk` (`engines.node`; [DOC](https://cursor.com/docs/sdk/typescript#runtime-support), acesso em 2026-11-11) |
-| Sistema | Testado só em Linux x64 (WSL2). macOS (arm64/x64), Linux arm64 e Windows x64 têm binários do SDK, mas o kit não foi testado neles. No Windows nativo, o `implement-issue` precisa de `bash` (roda os testes com `bash -c`) | O SDK traz binários por plataforma como dependências opcionais (`@cursor/sdk-<os>-<arch>`). Ambiente dos testes: [verificações locais](research/verificacoes-locais.md) §1 |
-| Conta Cursor | Plano pago com acesso ao SDK. Testado: Premium da The X Subscription | Medido em 2026-11-11 ([verificações locais](research/verificacoes-locais.md) §4–5): no Free o SDK não funciona. O `Agent.create` local falha com `UnknownAgentError` `plan_required` (403, `GET /v1/models` na validação local do modelo), e `wf whoami` e `wf models` também. O engine encerra o run na primeira tentativa (`AccountAccessError`). No Premium, funciona. O plano legado Start não inclui o SDK ([DOC](https://cursor.com/docs/account/pricing/legacy-cursor-plans)); o Plus não foi testado |
+| Sistema | Testado só em Linux x64 (WSL2). macOS (arm64/x64), Linux arm64 e Windows x64 têm binários do SDK, mas o kit não foi testado neles. No Windows nativo, o `implement-issue` precisa de `bash` (roda os testes com `bash -c`) | O SDK traz binários por plataforma como dependências opcionais (`@cursor/sdk-<os>-<arch>`). Ambiente dos testes: [verificações locais](../research/verificacoes-locais.md) §1 |
+| Conta Cursor | Plano pago com acesso ao SDK. Testado: Premium da The X Subscription | Medido em 2026-11-11 ([verificações locais](../research/verificacoes-locais.md) §4–5): no Free o SDK não funciona. O `Agent.create` local falha com `UnknownAgentError` `plan_required` (403, `GET /v1/models` na validação local do modelo), e `wf whoami` e `wf models` também. O engine encerra o run na primeira tentativa (`AccountAccessError`). No Premium, funciona. O plano legado Start não inclui o SDK ([DOC](https://cursor.com/docs/account/pricing/legacy-cursor-plans)); o Plus não foi testado |
 | Cursor IDE | Atual | Para usar pelo chat (MCP e skills). Terminal e CI não precisam da IDE |
 | `git` | qualquer recente | O workflow de exemplo cria worktrees e commits |
 | `gh` (GitHub CLI) | autenticado (`gh auth login`) | O exemplo lê a issue e, opcionalmente, abre o PR |
@@ -18,7 +18,7 @@
 
 | Pacote | Uso |
 |---|---|
-| `@cursor/sdk` (fixado em `1.3.1`) | Criar agentes, enviar prompts, consultar custo. **Fixe a versão** e atualize de forma deliberada. O npm publica `1.3.1` (2026-11-03; ver [verificações locais](research/verificacoes-locais.md)), mas as notas de versão do SDK listam `1.0.40` como a mais recente, sem data ([DOC](https://cursor.com/docs/release-notes/sdk)). Nenhuma página da doc chama o SDK de beta ou de GA |
+| `@cursor/sdk` (fixado em `1.3.1`) | Criar agentes, enviar prompts, consultar custo. **Fixe a versão** e atualize de forma deliberada. O npm publica `1.3.1` (2026-11-03; ver [verificações locais](../research/verificacoes-locais.md)), mas as notas de versão do SDK listam `1.0.40` como a mais recente, sem data ([DOC](https://cursor.com/docs/release-notes/sdk)). Nenhuma página da doc chama o SDK de beta ou de GA |
 | `@modelcontextprotocol/sdk` | MCP server (stdio) para o Cursor IDE |
 | `ajv` | Validação de JSON Schema da saída estruturada |
 | `tsx` | Roda os `.ts` direto, sem build. O `mcp.json` aponta para `node_modules/.bin/tsx` (sem `npx`, para não baixar nada na hora) |
@@ -44,14 +44,14 @@ npm run models          # = wf models: id, displayName, aliases e params de cada
 
 Sem navegador local (SSH, WSL sem navegador), rode `NO_OPEN_BROWSER=1 npm run wf -- login`: a URL vai para o stderr
 e pode ser aberta em outro dispositivo. Gere a URL só quando for concluir o login: ela expira em poucos minutos
-(medido em 2026-11-11, [verificações locais](research/verificacoes-locais.md) §4).
+(medido em 2026-11-11, [verificações locais](../research/verificacoes-locais.md) §4).
 
 `whoami` é o primeiro teste do plano. No Free, o login funciona, mas `whoami` já responde
 `[plan_required] Cloud Agent is not available for free users. Please upgrade to Pro.`, e `models` dá o mesmo erro
 (medido em 2026-11-11).
 
 Ajuste os IDs do mapa de modelos em `packages/runtime/workflows/implement-issue.ts` ou nas variáveis `WF_MODEL_*`
-([02 · Configuração](02-configuracao-inicial.md)).
+([2.2 · Configuração](02-configuracao-inicial.md)).
 
 ## 5. Teste de fumaça real
 
@@ -63,7 +63,7 @@ npm run wf -- run implement-issue --cwd /caminho/do/repo-de-teste --args '{"issu
 ```
 
 Passe sempre os dois tetos: em uso cobrado por request, o teto em centavos fica cego
-([02 §3](02-configuracao-inicial.md#3-teto-de-custo)).
+([2.2 §3](02-configuracao-inicial.md#3-teto-de-custo)).
 
 O que conferir:
 
@@ -80,15 +80,15 @@ O que conferir:
    o aviso `getUsage() falhou (...)` (provavelmente `403 feature_unavailable`), o custo ficou desconhecido e só o
    teto de tokens protege. Ele conta pelos eventos `turn-ended`: confira que `spentTokens` saiu maior que 0.
    Isso não é hipótese: num Premium, em 2026-11-11, toda chamada ao `getUsage()` deu `feature_unavailable`
-   ([verificações locais](research/verificacoes-locais.md) §5). Com isso, `spentCents` fica em 0 e o
-   `--max-cents` não dispara. Veja [02 §3](02-configuracao-inicial.md#3-teto-de-custo).
+   ([verificações locais](../research/verificacoes-locais.md) §5). Com isso, `spentCents` fica em 0 e o
+   `--max-cents` não dispara. Veja [2.2 §3](02-configuracao-inicial.md#3-teto-de-custo).
 4. Em `/caminho/do/repo-de-teste/.workflows/worktrees/` existe a branch `wf/issue-1` com o commit.
 5. Rodando de novo com `--resume <runId>`, as etapas de agente concluídas aparecem como "(cache)", e o commit
    não é repetido. Exceção esperada: as etapas `corrigir-N` embutem a saída dos testes no prompt, e essa saída
    costuma mudar (tempos de execução), então elas rodam de novo se os testes falharem outra vez.
 
 Se algo divergir, anote em um issue do seu fork. Os pontos marcados "a validar" em
-[`research/relatorio-pesquisa.md` §8](research/relatorio-pesquisa.md#8-o-que-foi-refutado-e-o-que-segue-incerto)
+[`research/relatorio-pesquisa.md` §8](../research/relatorio-pesquisa.md#8-o-que-foi-refutado-e-o-que-segue-incerto)
 são os candidatos mais prováveis.
 
 ## 6. Habilitar no Cursor IDE
@@ -116,7 +116,7 @@ são os candidatos mais prováveis.
    (verificado em 2026-11-11). Em `claude -p`, no Agent SDK e em sessões na nuvem fora de um projeto, o Claude Code carrega os
    servidores do `.mcp.json` sem perguntar ([DOC](https://code.claude.com/docs/en/mcp)); num `claude -p` em 2026-11-11 as
    quatro tools apareceram como `mcp__workflows__*` e o `CLAUDE.md` (na época, só `@AGENTS.md`) foi lido
-   ([verificações §10](research/verificacoes-locais.md)).
+   ([verificações §10](../research/verificacoes-locais.md)).
 2. O Claude Code não lê nada sob `.agents/`. Para ter as skills lá também, rode `scripts/link-claude-skills.sh`,
    que cria links em `.claude/skills/`. O Cursor também lê `.claude/skills/`, então a mesma skill pode aparecer
    duas vezes no Cursor. A skill de autoria se chama `cursor-workflow-authoring` porque o Claude Code tem uma
@@ -129,4 +129,8 @@ são os candidatos mais prováveis.
    ([DOC](https://code.claude.com/docs/en/mcp)).
 
 Para usar os workflows **em outros repositórios** sem copiar o kit para dentro deles, veja
-[04 · Invocação](04-invocacao-no-cursor-ide.md#usar-o-kit-em-outros-repositórios).
+[2.3 · Invocação](03-invocacao-no-cursor-ide.md#usar-o-kit-em-outros-repositórios).
+
+---
+
+[Índice](../README.md) · [Próximo: 2.2 · Configuração inicial →](02-configuracao-inicial.md)

@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
+# WHAT: Creates a private GitHub repo with a tiny Node project and one complexity:low issue, and prints the
+#   implement-issue command to run on it.
+# WHY: The end-to-end check of implement-issue (docs/research/verificacoes-locais.md section 9) needs a disposable
+#   repo with a real issue.
+# WHEN: Before an end-to-end run of implement-issue, including the Cursor IDE validation. Never against a repo you
+#   care about.
+# HOW: `scripts/verify/setup-sandbox-repo.sh <owner/new-repo> [local-dir]`; needs an authenticated `gh`.
+#   GH_VISIBILITY=--public makes it public.
+
 # Reproduz o teste ponta a ponta de docs/research/verificacoes-locais.md §9: um projeto Node mínimo, uma issue
 # rotulada `complexity:low` e o comando exato do `implement-issue`.
 #

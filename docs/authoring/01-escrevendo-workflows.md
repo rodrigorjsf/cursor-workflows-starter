@@ -1,7 +1,7 @@
-# 05 · Escrevendo workflows
+# 4.1 · Escrevendo workflows
 
 A referência operacional, que o agente do Cursor também usa, está na skill
-[`skills/cursor-workflow-authoring/SKILL.md`](../skills/cursor-workflow-authoring/SKILL.md). Este
+[`skills/cursor-workflow-authoring/SKILL.md`](../../skills/cursor-workflow-authoring/SKILL.md). Este
 documento explica o *porquê* das regras e traz as receitas, que a skill aponta.
 
 ## Princípio
@@ -38,17 +38,17 @@ documento explica o *porquê* das regras e traz as receitas, que a skill aponta.
   de segurança é uma segunda camada, não a única.
 - **Regra de escopo.** Medido em 2026-11-11, antes dela: uma etapa de correção editou um arquivo fora do
   repositório para "consertar" o ambiente depois de uma falha causada pelo shell de login dos testes
-  ([verificações locais](research/verificacoes-locais.md) §9). A `SCOPE_RULE` reduz a chance, mas nada impede a
-  escrita. Ver [07 · Segurança](07-governanca-e-custos.md#segurança).
+  ([verificações locais](../research/verificacoes-locais.md) §9). A `SCOPE_RULE` reduz a chance, mas nada impede a
+  escrita. Ver [5.1 · Segurança](../operating/01-governanca-e-custos.md#segurança).
 - **Sandbox.** No Linux exige `bubblewrap`. Segundo a doc, restringe só as chamadas de shell e os processos que
   elas disparam (escrita no cwd, em temporários e nos caminhos do `sandbox.json`; leitura livre; rede só pela
-  allowlist) e não diz que restringe `edit` e `write` ([02 §5](02-configuracao-inicial.md#5-contexto-do-projeto-nos-agentes)).
+  allowlist) e não diz que restringe `edit` e `write` ([2.2 §5](../usage/02-configuracao-inicial.md#5-contexto-do-projeto-nos-agentes)).
 - **`timeoutMs` curto nas etapas que escrevem.** Uma etapa não tem teto de tokens próprio, o teto do run só é
-  checado antes de cada tentativa, e cada envio (o pedido e cada re-prompt de schema) tem o seu `timeoutMs` ([02 §3](02-configuracao-inicial.md#3-teto-de-custo)).
+  checado antes de cada tentativa, e cada envio (o pedido e cada re-prompt de schema) tem o seu `timeoutMs` ([2.2 §3](../usage/02-configuracao-inicial.md#3-teto-de-custo)).
 
 ## Custo
 
-Toda receita abaixo deve passar pelo [checklist de custo](08-custos-e-cache.md#6-checklist-de-custo). As
+Toda receita abaixo deve passar pelo [checklist de custo](../operating/02-custos-e-cache.md#6-checklist-de-custo). As
 práticas que mais pesam:
 
 - decidir por código em vez de chamar o modelo;
@@ -148,13 +148,13 @@ const model = ctx.budget.remainingCents() < 100 ? MODELS.MED : MODELS.HIGH;
 `remainingCents()` é o teto em centavos menos `spentCents()`, e `Infinity` sem teto em centavos (`--max-cents`,
 `WF_MAX_CENTS` ou `budget.maxCents` do workflow). Onde o custo não chega ao kit (`getUsage()` com
 `feature_unavailable`, uso cobrado por request), `remainingCents()` não cai
-([02 §3](02-configuracao-inicial.md#3-teto-de-custo)): escalone por `ctx.budget.spentTokens()`.
+([2.2 §3](../usage/02-configuracao-inicial.md#3-teto-de-custo)): escalone por `ctx.budget.spentTokens()`.
 
 ### Invariantes entre etapas
 
 Uma regra do processo que o modelo policiaria sozinho ("red antes de green", "só toque arquivos de teste", "o teste
 é a especificação") vira uma **invariante** que o código confere entre duas etapas. As peças estão em
-[`packages/runtime/workflows/implement-issue/tdd.ts`](../packages/runtime/workflows/implement-issue/tdd.ts):
+[`packages/runtime/workflows/implement-issue/tdd.ts`](../../packages/runtime/workflows/implement-issue/tdd.ts):
 
 - **Quem tocou o quê:** `snapshotTree` (uma árvore git do worktree, que enxerga também `git add`, `stash`,
   `commit` e `skip-worktree` feitos pelo agente) antes e depois da etapa, e `changesBetween`, sem detecção de
@@ -205,7 +205,7 @@ combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
 
 1. O run 1 vai até o resultado a aprovar, guarda-o no progresso do run e devolve um status pendente (no
    `implement-issue`, `seams-proposed`) com `runId` e `next`, o comando de retomada. O status entra em `PENDING`
-   ([`packages/runtime/src/observability/recorder.ts`](../packages/runtime/src/observability/recorder.ts)); fora dele, o run contaria como falha no
+   ([`packages/runtime/src/observability/recorder.ts`](../../packages/runtime/src/observability/recorder.ts)); fora dele, o run contaria como falha no
    custo por entrega.
 2. O código publica o resultado onde o humano decide: no `implement-issue`, um comentário na issue com um marcador
    e o `runId` (uma vez por run), o comando pelo CLI (`--resume <runId>`, com os args entre aspas simples
@@ -216,7 +216,7 @@ combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
    mesmo `runId` e o mesmo repositório, porque o progresso fica em `<cwd>/.workflows/runs/<runId>/`: rode o run 2 do
    mesmo diretório (ou com o mesmo `--cwd`) do run 1. Sem o resultado guardado, o `implement-issue` para com
    `seams-not-proposed` em vez de aprovar um plano que ninguém viu.
-4. A skill [`run-workflow`](../skills/run-workflow/SKILL.md) trata qualquer resultado com `next`: mostra o
+4. A skill [`run-workflow`](../../skills/run-workflow/SKILL.md) trata qualquer resultado com `next`: mostra o
    resultado, pergunta ao usuário e relança só com a aprovação dele.
 
 ## Escrevendo bons prompts de etapa
@@ -239,11 +239,11 @@ combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
    - `() => ({ hang: true })` simula uma run que não termina (para testar `timeoutMs`).
    `stats` (concorrência, descarte, leituras de custo), `calls` (as opções de cada `Agent.create`) e `costConfig`
    (custo ausente, `getUsage()` com `feature_unavailable`, conta sem acesso) estão comentados em
-   [`packages/runtime/test/fake-sdk.ts`](../packages/runtime/test/fake-sdk.ts).
+   [`packages/runtime/test/fake-sdk.ts`](../../packages/runtime/test/fake-sdk.ts).
 3. A cobertura exigida (ramos, `status` de retorno, invariantes, resume) é a de "Antes de entregar" da skill
-   [`cursor-workflow-authoring`](../skills/cursor-workflow-authoring/SKILL.md).
+   [`cursor-workflow-authoring`](../../skills/cursor-workflow-authoring/SKILL.md).
 4. Para fluxos com `ctx.parallel`, `gh` ou `git`, copie o arnês de
-   [`packages/runtime/test/implement-issue.fixture.ts`](../packages/runtime/test/implement-issue.fixture.ts):
+   [`packages/runtime/test/implement-issue.fixture.ts`](../../packages/runtime/test/implement-issue.fixture.ts):
    - um despachante por `label` no fake SDK, porque com `ctx.parallel` a ordem dos `send()` varia e a fila
      `script` segue a ordem;
    - `gh` falso no `PATH` (script Node com estado em JSON);
@@ -254,9 +254,13 @@ combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
    - em `labelOf`, o prefixo `implement-issue:` trocado pelo nome do seu workflow (o nome do agente é
      `<workflow>:<label>`).
 5. Para cada defeito que um review encontrar, escreva o teste que o reproduz antes da correção e confirme que ele
-   falha no código antigo ([`packages/runtime/test/implement-issue.hardening.test.ts`](../packages/runtime/test/implement-issue.hardening.test.ts)).
+   falha no código antigo ([`packages/runtime/test/implement-issue.hardening.test.ts`](../../packages/runtime/test/implement-issue.hardening.test.ts)).
 
 ```bash
 npm test && npm run typecheck
 npm run wf -- run <nome> --args '{...}' --max-cents 100 --max-tokens 2000000   # primeiro run real: --cwd e critério de pronto em "Antes de entregar" da skill
 ```
+
+---
+
+[← Anterior: 3.1 · Arquitetura](../internals/01-arquitetura.md) · [Índice](../README.md) · [Próximo: 4.2 · Convertendo skills e subagents em workflows →](02-convertendo-skills-e-subagents.md)
