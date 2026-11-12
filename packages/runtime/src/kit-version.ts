@@ -6,7 +6,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import semver from "semver";
-import { repoConfigPath } from "./config/index.js";
+import { REPO_CONFIG_FILE, repoConfigPath } from "./config/index.js";
 
 const PACKAGE_JSON = join(import.meta.dirname, "..", "package.json");
 
@@ -22,7 +22,7 @@ export function readKitPackage(): KitPackage {
 }
 
 export interface KitCompatibility {
-  /** The version of the kit that is running. */
+  /** The version that was tested. */
   version: string;
   /** The range the repo declares; undefined when it declares none. */
   range: string | undefined;
@@ -44,10 +44,8 @@ function declaredRange(cwd: string): unknown {
   }
 }
 
-const REPO_CONFIG = ".agents/workflows/config.json";
-
-export function kitCompatibility(cwd: string): KitCompatibility {
-  const { version } = readKitPackage();
+/** Whether `version` (default: the running kit's) fits the range the repo at `cwd` declares. */
+export function kitCompatibility(cwd: string, version: string = readKitPackage().version): KitCompatibility {
   const declared = declaredRange(cwd);
   if (declared === undefined) return { version, range: undefined };
   const range = String(declared);
@@ -56,13 +54,13 @@ export function kitCompatibility(cwd: string): KitCompatibility {
       version,
       range,
       problem: {
-        message: `a faixa "kit" de ${REPO_CONFIG} (${JSON.stringify(declared)}) não é uma faixa semver válida`,
+        message: `a faixa "kit" de ${REPO_CONFIG_FILE} (${JSON.stringify(declared)}) não é uma faixa semver válida`,
         hint: `Escreva uma faixa semver em "kit", por exemplo ">=1.0.0 <2.0.0" (o \`wf init\` escreve a do kit que o rodou).`,
       },
     };
   }
   if (semver.satisfies(version, range)) return { version, range };
-  const where = `o kit instalado é a versão ${version}, fora da faixa "${range}" que o repositório declara em ${REPO_CONFIG} ("kit")`;
+  const where = `o kit instalado é a versão ${version}, fora da faixa "${range}" que o repositório declara em ${REPO_CONFIG_FILE} ("kit")`;
   if (semver.ltr(version, range)) {
     return { version, range, problem: { message: `${where}: ele é mais antigo que a faixa`, hint: `Atualize o kit para uma versão dentro de "${range}".` } };
   }
@@ -72,11 +70,11 @@ export function kitCompatibility(cwd: string): KitCompatibility {
       range,
       problem: {
         message: `${where}: ele é mais novo que a faixa`,
-        hint: `Instale um kit dentro de "${range}" ou, depois de conferir que o repositório funciona com o kit ${version}, atualize "kit" em ${REPO_CONFIG}.`,
+        hint: `Instale um kit dentro de "${range}" ou, depois de conferir que o repositório funciona com o kit ${version}, atualize "kit" em ${REPO_CONFIG_FILE}.`,
       },
     };
   }
-  return { version, range, problem: { message: where, hint: `Instale um kit dentro de "${range}" ou ajuste "kit" em ${REPO_CONFIG}.` } };
+  return { version, range, problem: { message: where, hint: `Instale um kit dentro de "${range}" ou ajuste "kit" em ${REPO_CONFIG_FILE}.` } };
 }
 
 /** Throws when the running kit is outside the repo's declared range. Called before a run starts. */

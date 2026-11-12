@@ -73,8 +73,10 @@
 - **`wf doctor` confere o ambiente que o IDE usa.** Roda oito verificações, cada falha com a dica de como corrigir:
   o `node` do PATH (o que o IDE usa para iniciar o servidor, mínimo 22.13), as dependências do kit (o comando do
   `mcp.json`), o login no SDK, os modelos da configuração contra o catálogo da conta, o `gh`, o servidor MCP (ele é
-  iniciado como o IDE o inicia e precisa responder `tools/list`), a configuração e a versão do kit. Sai com 1 quando
-  alguma falha e, com `--json`, imprime o relatório em JSON. O `wf doctor`, o `wf run`, o `wf start` e o
+  iniciado como o IDE o inicia e precisa responder `tools/list`), a configuração e a versão do kit (a do `wf` e a que
+  cada servidor MCP diz ser). O `node` segue o `env.PATH` da entrada do `mcp.json`, quando ela define um. Num Node
+  antigo demais para carregar o kit, o próprio `wf doctor` ainda entrega o relatório, só com a falha do Node. O relatório
+  passa pela redação de segredos dos logs. Sai com 1 quando alguma falha e, com `--json`, imprime o relatório em JSON. O `wf doctor`, o `wf run`, o `wf start` e o
   `start_workflow` recusam um kit fora da faixa semver que o `kit` do `.agents/workflows/config.json` declara, com a
   versão do kit, a faixa e o que fazer; um `kit` que não é uma faixa semver também é recusado. A dependência `semver`
   entra no pacote do runtime.

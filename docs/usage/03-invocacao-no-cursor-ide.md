@@ -198,19 +198,20 @@ O servidor MCP que não sobe deixa pistas só no log do MCP do IDE. O `wf doctor
 
 | `id` | O que confere | Falha típica |
 |---|---|---|
-| `node` | O `node` do PATH, que é quem o IDE usa: o comando do `mcp.json` é o `tsx` do kit, cujo shebang é `env node`. Mínimo: o `engines.node` do kit (22.13) | O Node do IDE é o 22.11 |
+| `node` | O `node` do PATH, que é quem o IDE usa: o comando do `mcp.json` é o `tsx` do kit, cujo shebang é `env node`. Se a entrada do `mcp.json` define `env.PATH`, vale esse PATH. Mínimo: o `engines.node` do kit (22.13) | O Node do IDE é o 22.11 |
 | `dependencies` | O comando e o script que o `.cursor/mcp.json` e o `.mcp.json` mandam rodar existem | `node_modules/.bin/tsx` não existe (`ENOENT`): rode `npm ci` na pasta do kit |
 | `login` | Uma chamada autenticada ao Cursor (`Cursor.me()`); o relatório mostra o nome da chave, nunca a chave nem o e-mail | Sem login: `wf login` ou `CURSOR_API_KEY` |
 | `models` | Cada modelo que a configuração faz os workflows usarem (papéis, rótulos e o `defaults` do workflow) está no catálogo da conta, por id ou alias | O modelo de um papel não existe na conta: `wf models` |
 | `gh` | `gh auth status` | `gh` ausente ou sem login: `gh auth login` |
-| `mcp-server` | Inicia o servidor como o IDE (comando, args e env da entrada `workflows`, no repositório), pede `tools/list` e espera até 20 s | O servidor morre ao iniciar; o relatório traz o que ele escreveu no stderr |
+| `mcp-server` | Inicia o servidor como o IDE (comando, args e env da entrada `workflows`, no repositório), pede `tools/list` e espera até 20 s (`WF_DOCTOR_TIMEOUT_MS` muda o limite, em milissegundos) | O servidor morre ao iniciar; o relatório traz o que ele escreveu no stderr |
 | `config` | Os dois arquivos de [configuração](../reference/config.md) são válidos e todos os workflows resolvem, com o caminho do campo errado | Papel desconhecido, JSON inválido |
-| `kit-version` | A versão do kit contra a faixa semver `kit` do `.agents/workflows/config.json` | Kit fora da faixa |
+| `kit-version` | A faixa semver `kit` do `.agents/workflows/config.json` contra o kit que roda o `wf` e contra o kit que cada servidor MCP diz ser (a versão que ele devolve no `initialize`): é este o que o `start_workflow` recusa, e nem sempre é o primeiro | Kit fora da faixa |
 
 O `PATH` que o `wf doctor` vê é o do terminal onde ele roda. Um IDE aberto pelo menu do sistema pode ter outro `PATH`
 que o de um terminal (um gerenciador de versões, como o mise ou o nvm, costuma ativar o Node só no shell): rode o
-`wf doctor` num terminal aberto pelo próprio IDE. Se o Node que roda o próprio `wf` for mais antigo que o mínimo, o
-comando sai antes de qualquer verificação, com a mensagem do Node antigo.
+`wf doctor` num terminal aberto pelo próprio IDE. Se o Node que roda o próprio `wf` for mais antigo que o mínimo, nada
+mais do kit carrega nele: o relatório (em texto ou em `--json`) traz só a verificação `node`, com falha e a dica. Todo o
+relatório passa pela mesma redação de segredos dos logs de run (`[REDACTED]`), inclusive o stderr do servidor.
 
 **A faixa de versão do kit.** O `kit` do `.agents/workflows/config.json` (o `wf init` escreve a do kit que o rodou, como
 `>=0.2.0 <0.3.0`) aceita qualquer faixa semver, como `^0.2.0`. O `wf doctor`, o `wf run`, o `wf start` e o

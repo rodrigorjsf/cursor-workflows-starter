@@ -4,7 +4,7 @@
 // messages; they never import the doctor.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
@@ -78,25 +78,39 @@ const repoConfigPath = (repo: string) => join(repo, ".agents", "workflows", "con
 /** A copy of the kit at `version`: the runtime of a doctor or a server run that is not this checkout's own version. */
 const kitAt = (version: string): string => copyKit(join(sandbox, `kit-${++counter}`), version);
 
+/** A user's home whose `~/.cursor-workflows/kit` is `kit`: what an IDE launches when that kit is the installed one. */
+function homeWithKit(kit: string): string {
+  const userHome = join(sandbox, `home-${++counter}`);
+  mkdirSync(join(userHome, ".cursor-workflows"), { recursive: true });
+  symlinkSync(kit, join(userHome, ".cursor-workflows", "kit"));
+  return userHome;
+}
+
 interface DoctorOptions {
   /** Directories ahead of the real node's on the PATH. Default: a `gh` that is logged in. */
   bins?: string[];
   env?: Record<string, string>;
+  /** The user's home. Default: the one whose installed kit is `kit`. */
   home?: string;
   args?: string[];
   /** The kit whose `wf` runs. Default: this checkout. */
   kit?: string;
+  /** The directory `wf` is started from (it is pointed at the repo with `--cwd`). Default: the test's own. */
+  from?: string;
+  /** Node options ahead of the script, e.g. `--import <file>` to run something before the CLI does. */
+  nodeArgs?: string[];
 }
 
 /** Runs `wf doctor` against `repo`. */
-function doctor(repo: string, { bins = [ghLoggedIn], env: extra, home: userHome, args = ["--json"], kit = KIT_ROOT }: DoctorOptions = {}) {
-  return wf(repo, ["doctor", ...args], { bins, env: extra, home: userHome, kit });
+function doctor(repo: string, { args = ["--json"], ...rest }: DoctorOptions = {}) {
+  return wf(repo, ["doctor", ...args], rest);
 }
 
 /** Runs `wf <args>` of the kit at `kit` against `repo`. */
-function wf(repo: string, args: string[], { bins = [ghLoggedIn], env: extra, home: userHome, kit = KIT_ROOT }: Omit<DoctorOptions, "args"> = {}) {
-  const r = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), join(kit, "packages", "runtime", "src", "cli.ts"), ...args, "--cwd", repo], {
+function wf(repo: string, args: string[], { bins = [ghLoggedIn], env: extra, kit = KIT_ROOT, home: userHome = kit === KIT_ROOT ? home : homeWithKit(kit), from, nodeArgs = [] }: Omit<DoctorOptions, "args"> = {}) {
+  const r = spawnSync(process.execPath, [...nodeArgs, "--import", import.meta.resolve("tsx"), join(kit, "packages", "runtime", "src", "cli.ts"), ...args, "--cwd", repo], {
     env: env(bins, extra, userHome, kit),
+    cwd: from,
     encoding: "utf8",
   });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
@@ -423,4 +437,110 @@ test("the CLI's run and start refuse the same way, with exit 1 and no job; the c
   assert.ok(!existsSync(join(repo, ".workflows", "jobs")));
   assert.equal(wf(repo, ["list"], { kit }).status, 0);
   assert.equal(wf(repo, ["config", "show"], { kit }).status, 0);
+});
+
+// ── Findings of the review ─────────────────────────────────────────────────────────────────────────────────────────────
+
+test("relative paths in the MCP entry are the repo's, wherever `wf doctor --cwd` is started from", () => {
+  const repo = repoCopy();
+  rmSync(join(repo, ".cursor"), { recursive: true });
+  symlinkSync(KIT_ROOT, join(repo, "kit"));
+  // Like the dogfood `.mcp.json`: the IDE runs these in the repo, so they mean files of the repo.
+  put(join(repo, ".mcp.json"), { mcpServers: { workflows: { command: "kit/node_modules/.bin/tsx", args: ["kit/packages/runtime/src/mcp-server.ts"] } } });
+  const report = reportOf(doctor(repo, { from: sandbox }));
+  const deps = checkOf(report, "dependencies");
+  assert.equal(deps.status, "pass", deps.message);
+  const server = checkOf(report, "mcp-server");
+  assert.equal(server.status, "pass", server.message);
+});
+
+test("a check that throws is a failed check naming the workflow, not a crashed doctor: the others still report", () => {
+  // A workflow whose roles are not a list: resolving its config throws a TypeError, which is not a ConfigError.
+  const repo = repoCopy();
+  put(join(repo, ".agents", "workflows", "bad-roles.mjs"), 'export default { meta: { name: "bad-roles", description: "malformed", roles: "oops" }, async run() { return "ok"; } };\n');
+  const r = doctor(repo);
+  assert.equal(r.status, 1, r.stderr);
+  const report = reportOf(r);
+  assert.equal(report.checks.length, 8);
+  const config = checkOf(report, "config");
+  assert.equal(config.status, "fail");
+  assert.match(config.message, /bad-roles/);
+  assert.equal(checkOf(report, "node").status, "pass");
+  assert.equal(checkOf(report, "gh").status, "pass");
+});
+
+test("what a failing server printed is redacted like everything else in the report", () => {
+  const repo = repoCopy();
+  const secret = "crsr_fedcba9876543210";
+  breakClaudeCodeServer(repo, 'echo "the key is $CURSOR_API_KEY" >&2; exit 3');
+  const r = doctor(repo, { env: { CURSOR_API_KEY: secret } });
+  const server = checkOf(reportOf(r), "mcp-server");
+  assert.equal(server.status, "fail");
+  assert.match(server.message, /the key is \[REDACTED\]/);
+  assert.ok(!r.stdout.includes(secret) && !r.stderr.includes(secret), "the key must not appear in the report");
+});
+
+/** Gives the `workflows` entry of one of the repo's MCP configs the environment `entryEnv`, as a user fixing the IDE's PATH would. */
+function setEntryEnv(repo: string, file: string, entryEnv: Record<string, string>): void {
+  const config = JSON.parse(readFileSync(join(repo, file), "utf8"));
+  config.mcpServers.workflows.env = { ...config.mcpServers.workflows.env, ...entryEnv };
+  put(join(repo, file), config);
+}
+
+test("the node check uses the PATH the mcp.json entry gives the server, which is how the IDE resolves node", () => {
+  const oldNode = fakeBin("node", `if [ "$1" = "--version" ]; then echo v22.11.0; exit 0; fi\nexec "${process.execPath}" "$@"`);
+
+  // The shell finds an old node first, but the entry puts a good one on the server's PATH: the fix a user applies.
+  const fixed = repoCopy();
+  rmSync(join(fixed, ".mcp.json"));
+  setEntryEnv(fixed, ".cursor/mcp.json", { PATH: NODE_DIR });
+  const ok = checkOf(reportOf(doctor(fixed, { bins: [oldNode, ghLoggedIn] })), "node");
+  assert.equal(ok.status, "pass", ok.message);
+  assert.ok(ok.message.includes(".cursor/mcp.json") && ok.message.includes(process.version), ok.message);
+
+  // The other way round: the shell is fine, the entry's PATH is where the old node is.
+  const worse = repoCopy();
+  rmSync(join(worse, ".mcp.json"));
+  setEntryEnv(worse, ".cursor/mcp.json", { PATH: `${oldNode}:${NODE_DIR}` });
+  const old = checkOf(reportOf(doctor(worse)), "node");
+  assert.equal(old.status, "fail");
+  assert.ok(old.message.includes(".cursor/mcp.json") && old.message.includes("22.11.0"), old.message);
+});
+
+test("an old node running `wf doctor` itself still gets the report, as a node failure with its hint; other commands keep the plain message", () => {
+  const preload = join(sandbox, "old-node.mjs");
+  writeFileSync(preload, 'Object.defineProperty(process.versions, "node", { value: "22.11.0" });\n'); // the version node-check reads
+  const nodeArgs = ["--import", preload];
+
+  const json = doctor(repoCopy(), { nodeArgs });
+  assert.equal(json.status, 1, json.stderr);
+  const report = reportOf(json);
+  assert.equal(report.ok, false);
+  const node = checkOf(report, "node");
+  assert.equal(node.status, "fail");
+  assert.match(node.message, /22\.11\.0/);
+  assert.match(node.hint ?? "", /22\.13/);
+
+  const text = doctor(repoCopy(), { nodeArgs, args: [] });
+  assert.equal(text.status, 1);
+  assert.match(text.stdout, /\[FALHA\] Node\.js: /);
+
+  const list = wf(repoCopy(), ["list"], { nodeArgs });
+  assert.equal(list.status, 1);
+  assert.equal(list.stdout, "");
+  assert.match(list.stderr, /antigo demais/);
+});
+
+test("the kit-version check also tests the kit the IDE would start, which is not always the one running wf", () => {
+  const running = kitAt("1.4.0");
+  const installed = kitAt("2.0.0");
+  const diverging = checkOf(reportOf(doctor(repoAccepting(">=1.0.0 <2.0.0"), { kit: running, home: homeWithKit(installed) })), "kit-version");
+  assert.equal(diverging.status, "fail");
+  assert.ok(diverging.message.includes(".cursor/mcp.json") && diverging.message.includes("2.0.0"), diverging.message);
+  assert.match(diverging.message, /mais novo/);
+
+  // The same kit on both sides: one verdict that names both.
+  const same = checkOf(reportOf(doctor(repoAccepting(">=1.0.0 <2.0.0"), { kit: running })), "kit-version");
+  assert.equal(same.status, "pass", same.message);
+  assert.ok(same.message.includes("wf") && same.message.includes(".cursor/mcp.json") && same.message.includes("1.4.0"), same.message);
 });

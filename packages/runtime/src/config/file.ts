@@ -108,4 +108,6 @@ export function loadConfigFile(path: string): LoadedConfig | undefined {
 }
 
 export const globalConfigPath = (): string => join(userDir(), "config.json");
-export const repoConfigPath = (cwd: string): string => join(cwd, ".agents", "workflows", "config.json");
+/** The repo config, relative to the repo root. */
+export const REPO_CONFIG_FILE = join(".agents", "workflows", "config.json");
+export const repoConfigPath = (cwd: string): string => join(cwd, REPO_CONFIG_FILE);

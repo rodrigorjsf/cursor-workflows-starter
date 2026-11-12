@@ -5,7 +5,7 @@ import type { WorkflowDefinition } from "../runtime/workflow.js";
 import { ConfigError, type ConfigIssue, type LoadedConfig, globalConfigPath, loadConfigFile, repoConfigPath } from "./file.js";
 import { LIMIT_FIELDS, type FlagLimits, type LimitOverrides, type ResolvedConfig, resolveConfig } from "./resolve.js";
 
-export { ConfigError, CONFIG_SCHEMA_PATH, globalConfigPath, repoConfigPath } from "./file.js";
+export { ConfigError, CONFIG_SCHEMA_PATH, REPO_CONFIG_FILE, globalConfigPath, repoConfigPath } from "./file.js";
 export { LIMIT_FIELDS, STEP_OVERRIDE_FIELDS, allowedSources, isModelAllowed, type FlagLimits, type LimitOverrides, type ResolvedConfig, type StepOverrides } from "./resolve.js";
 
 export interface LoadOptions {
