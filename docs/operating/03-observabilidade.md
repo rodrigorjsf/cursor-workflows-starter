@@ -251,7 +251,7 @@ o encerra.
 | `/runs/<runId>` | a página do run: o grafo ao vivo, veja [Ver um run como grafo](#ver-um-run-como-grafo) (HTML, com o script e o estilo em `/assets/…`) |
 | `/api/runs/<runId>/steps/<stepId>/content` | o conteúdo de uma etapa: prompt, mensagens do agente, chamadas de tool e saída de comandos |
 | `/api/csrf` | `{csrfToken}`: o token que o `POST` de cancelar exige |
-| `POST /api/runs/<runId>/cancel` | cancela o job que executa o run (cabeçalho `X-CSRF-Token`): veja [Cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume) |
+| `POST /api/runs/<runId>/cancel` | cancela o job que executa o run (cabeçalho `X-CSRF-Token`); num run que não está executando, cancela pela API da Cursor os cloud agents que o processo morto deixou rodando e responde `200` com um `note`, ou `409` se não havia nada a cancelar: veja [Cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume) |
 | `/api/summary?days=` | o resumo de métricas dos painéis abaixo |
 | `/api/health` | `{app, pid}`: como quem chama sabe que é o dashboard que responde na porta |
 
