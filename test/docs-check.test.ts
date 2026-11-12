@@ -197,3 +197,54 @@ test("this repo's own docs pass the check", () => {
   const { ok, out } = check(ROOT);
   assert.equal(ok, true, out);
 });
+
+// ---- Markdown reading: the cases where a naive reader would pass a broken doc or fail a good one ----
+
+test("reading: a stray backtick never swallows the paragraphs after it", () => {
+  assertRejected(
+    repo({ "README.md": "# Hi\n\nOne ` alone.\n\n[broken](missing1.md)\n\nAnother ` here.\n" }),
+    /README\.md:5: .*missing1\.md/,
+  );
+});
+
+test("reading: a line that only looks like a fence (backticks in its info string) opens no code block", () => {
+  assertRejected(repo({ "README.md": "# Hi\n\n```inline``` text\n\n[broken](missing2.md)\n" }), /README\.md:5: .*missing2\.md/);
+});
+
+test("reading: link titles in any of the three forms, and reference-style definitions, are checked", () => {
+  const root = repo({
+    "README.md": [
+      "# Hi",
+      "",
+      "[a](missing-a.md 'single') [b](missing-b.md (paren)) [c](missing-c.md \"double\")",
+      "",
+      "[d][ref] and [e]",
+      "",
+      "[ref]: missing-d.md",
+      "[e]: <missing-e.md> \"title\"",
+      "[^note]: footnotes are not definitions",
+      "",
+    ].join("\n"),
+  });
+  const { ok, out } = check(root);
+  assert.equal(ok, false, out);
+  for (const target of ["missing-a.md", "missing-b.md", "missing-c.md", "missing-d.md", "missing-e.md"]) assert.match(out, new RegExp(`README\\.md:\\d+: .*${target.replace(".", "\\.")}`));
+  assert.doesNotMatch(out, /note/);
+});
+
+test("reading: headings follow GitHub's ids for emphasis and setext underlines, and front matter is not a heading", () => {
+  const root = repo({
+    "README.md": "# Hi\n\n[a](notes/g.md#under-score) [b](notes/g.md#setext) [c](notes/g.md#snake_case-name) [d](notes/g.md#second-level)\n",
+    "notes/g.md": ["---", "description: hello world", "---", "", "# G", "", "## _Under_ score", "", "Setext", "======", "", "## snake_case name", "", "Second level", "------", ""].join("\n"),
+  });
+  const { ok, out } = check(root);
+  assert.equal(ok, true, out);
+
+  assertRejected(repo({ "README.md": "# Hi\n\n[x](notes/g.md#description-hello-world)\n", "notes/g.md": "---\ndescription: hello world\n---\n\n# G\n" }), /#description-hello-world/);
+});
+
+test("book: a footer needs a blank line before the rule and after it", () => {
+  const glued = GOOD_BOOK["docs/usage/01-um.md"]!.replace("Texto.\n\n---\n\n[", "Texto.\n---\n[");
+  assert.notEqual(glued, GOOD_BOOK["docs/usage/01-um.md"]);
+  assertRejected(repo({ ...GOOD_BOOK, "docs/usage/01-um.md": glued }), /docs\/usage\/01-um\.md:.*footer/);
+});

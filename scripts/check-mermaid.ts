@@ -9,22 +9,20 @@
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
-import { markdownFiles, parseMarkdown } from "./lib/markdown.js";
+import { join } from "node:path";
+import { isEntryPoint, rootFromArgs } from "./lib/cli.js";
+import { markdownFiles, parseMarkdown, type MermaidBlock } from "./lib/markdown.js";
 
 const DEFAULT_RENDERER = "npx --yes @mermaid-js/mermaid-cli@11.17.0";
 const RENDER_TIMEOUT_MS = 120_000;
+/** The first run of mermaid-cli downloads itself, puppeteer and Chromium: that is not a render and gets its own, long limit. */
+const WARM_UP_TIMEOUT_MS = 600_000;
 
-interface Block {
-  file: string;
-  line: number;
-  source: string;
-}
+type Block = MermaidBlock & { file: string };
 
 function findBlocks(root: string): Block[] {
   return markdownFiles(root).flatMap((file) =>
-    parseMarkdown(readFileSync(join(root, file), "utf8")).mermaid.map((block) => ({ file, line: block.line, source: block.source })),
+    parseMarkdown(readFileSync(join(root, file), "utf8")).mermaid.map((block) => ({ ...block, file })),
   );
 }
 
@@ -34,14 +32,25 @@ function diagramType(source: string): string {
   return first?.trim().split(/\s+/)[0] ?? "(empty)";
 }
 
-/** Renders every block; returns one `file:line: message` per block that failed. */
+/** First lines of a failed process's output, on one line. */
+function reason(r: { stdout: string; stderr: string; status: number | null }): string {
+  return `${r.stderr}${r.stdout}`.trim().split("\n").slice(0, 6).join(" | ") || `exit code ${r.status}`;
+}
+
+/** Renders every block; returns one `file:line: message` per block that failed (or one message if the renderer won't start). */
 function render(blocks: Block[]): string[] {
+  if (blocks.length === 0) return [];
   const [command = "", ...baseArgs] = (process.env.MERMAID_CLI ?? DEFAULT_RENDERER).split(/\s+/).filter(Boolean);
   const work = mkdtempSync(join(tmpdir(), "wf-mermaid-"));
   try {
     // GitHub's runners block the Chromium sandbox for an unprivileged user.
     const puppeteer = join(work, "puppeteer.json");
     writeFileSync(puppeteer, JSON.stringify({ args: ["--no-sandbox"] }));
+
+    const warmUp = spawnSync(command, [...baseArgs, "--version"], { encoding: "utf8", timeout: WARM_UP_TIMEOUT_MS });
+    if (warmUp.error || warmUp.status !== 0) {
+      return [`could not run the renderer "${command}": ${warmUp.error?.message ?? reason(warmUp)}`];
+    }
 
     const problems: string[] = [];
     blocks.forEach((block, i) => {
@@ -51,12 +60,8 @@ function render(blocks: Block[]): string[] {
         encoding: "utf8",
         timeout: RENDER_TIMEOUT_MS,
       });
-      if (r.error) {
-        problems.push(`${block.file}:${block.line}: could not run the renderer "${command}": ${r.error.message}`);
-      } else if (r.status !== 0) {
-        const reason = `${r.stderr}${r.stdout}`.trim().split("\n").slice(0, 6).join(" | ") || `exit code ${r.status}`;
-        problems.push(`${block.file}:${block.line}: Mermaid failed to render: ${reason}`);
-      }
+      if (r.error) problems.push(`${block.file}:${block.line}: could not render, ${r.error.message}`);
+      else if (r.status !== 0) problems.push(`${block.file}:${block.line}: Mermaid failed to render: ${reason(r)}`);
     });
     return problems;
   } finally {
@@ -65,9 +70,7 @@ function render(blocks: Block[]): string[] {
 }
 
 function main(argv: string[]): number {
-  const at = argv.indexOf("--root");
-  const root = at === -1 ? resolve(dirname(new URL(import.meta.url).pathname), "..") : resolve(argv[at + 1] ?? ".");
-  const blocks = findBlocks(root);
+  const blocks = findBlocks(rootFromArgs(argv));
 
   if (argv.includes("--list")) {
     for (const block of blocks) console.log(`${block.file}:${block.line}: ${diagramType(block.source)}`);
@@ -77,11 +80,11 @@ function main(argv: string[]): number {
   const problems = render(blocks);
   if (problems.length > 0) {
     console.error(problems.join("\n"));
-    console.error(`mermaid check failed: ${problems.length} of ${blocks.length} block(s) did not render`);
+    console.error(`mermaid check failed: ${problems.length} problem(s) in ${blocks.length} Mermaid block(s)`);
     return 1;
   }
   console.log(`mermaid check ok: ${blocks.length} Mermaid block(s) rendered`);
   return 0;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) process.exitCode = main(process.argv.slice(2));
+if (isEntryPoint(import.meta.url)) process.exitCode = main(process.argv.slice(2));

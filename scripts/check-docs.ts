@@ -6,8 +6,8 @@
 // HOW: `npm run docs:check`, or `tsx scripts/check-docs.ts [--root <dir>]`. Prints one `file:line: problem` per line
 //   and exits 1 when there is any; exits 0 and prints a summary otherwise.
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, posix, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { join, posix, resolve } from "node:path";
+import { isEntryPoint, rootFromArgs } from "./lib/cli.js";
 import { anchorsOf, markdownFiles, parseMarkdown, type ParsedMarkdown } from "./lib/markdown.js";
 
 export interface DocsReport {
@@ -107,9 +107,10 @@ function checkFooter(root: string, chapter: Entry, previous: Entry | undefined, 
 
   const lines = readFileSync(join(root, chapter.file), "utf8").split("\n");
   while (lines.length > 0 && lines.at(-1)!.trim() === "") lines.pop();
-  const rule = lines.slice(0, -1).findLast((l) => l.trim() !== "");
-  if (lines.at(-1) !== expected || rule !== "---") {
-    problems.push(`${chapter.file}:${lines.length}: wrong or missing footer; the file must end with a "---" rule, a blank line and:\n    ${expected}`);
+  // blank line, rule, blank line, footer: a rule glued to the text above would render as a heading, not a rule
+  const [gap, rule, space, footer] = lines.slice(-4);
+  if (lines.length < 4 || gap !== "" || rule !== "---" || space !== "" || footer !== expected) {
+    problems.push(`${chapter.file}:${lines.length}: wrong or missing footer; the file must end with a blank line, a "---" rule, a blank line and:\n    ${expected}`);
   }
 }
 
@@ -145,9 +146,7 @@ function splitTarget(target: string): [string, string | undefined] {
 }
 
 function main(argv: string[]): number {
-  const at = argv.indexOf("--root");
-  const root = at === -1 ? resolve(dirname(new URL(import.meta.url).pathname), "..") : resolve(argv[at + 1] ?? ".");
-  const report = checkDocs(root);
+  const report = checkDocs(rootFromArgs(argv));
   if (report.problems.length > 0) {
     console.error(report.problems.join("\n"));
     console.error(`docs check failed: ${report.problems.length} problem(s) in ${report.files} Markdown file(s)`);
@@ -157,4 +156,4 @@ function main(argv: string[]): number {
   return 0;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) process.exitCode = main(process.argv.slice(2));
+if (isEntryPoint(import.meta.url)) process.exitCode = main(process.argv.slice(2));

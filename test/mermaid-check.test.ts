@@ -25,7 +25,10 @@ function repo(files: Record<string, string>): string {
   return root;
 }
 
-/** A stand-in for `mmdc -i <in> -o <out> -p <puppeteer config>`: fails on a diagram that contains BROKEN. */
+/**
+ * A stand-in for `mmdc`: `--version` succeeds, and `-i <in> -o <out> -p <puppeteer config>` fails on a diagram that
+ * contains BROKEN. Each call appends "version" or "render" to the file in STUB_LOG, when set.
+ */
 function stubRenderer(): string {
   const dir = mkdtempSync(join(tmpdir(), "wf-mermaid-stub-"));
   dirs.push(dir);
@@ -33,8 +36,11 @@ function stubRenderer(): string {
   writeFileSync(
     stub,
     [
-      'import { readFileSync, writeFileSync } from "node:fs";',
+      'import { appendFileSync, readFileSync, writeFileSync } from "node:fs";',
       "const arg = (flag) => process.argv[process.argv.indexOf(flag) + 1];",
+      'const log = (what) => process.env.STUB_LOG && appendFileSync(process.env.STUB_LOG, what + "\\n");',
+      'if (process.argv.includes("--version")) { log("version"); console.log("stub 0.0.0"); process.exit(0); }',
+      'log("render");',
       'const source = readFileSync(arg("-i"), "utf8");',
       'if (source.includes("BROKEN")) { console.error("Parse error on line 2: unexpected BROKEN"); process.exit(1); }',
       'writeFileSync(arg("-o"), "<svg/>");',
@@ -43,11 +49,11 @@ function stubRenderer(): string {
   return `${process.execPath} ${stub}`;
 }
 
-function run(root: string, args: string[] = [], renderer = stubRenderer()): { status: number | null; out: string } {
+function run(root: string, args: string[] = [], renderer = stubRenderer(), env: Record<string, string> = {}): { status: number | null; out: string } {
   const r = spawnSync(join(ROOT, "node_modules", ".bin", "tsx"), [join(ROOT, "scripts", "check-mermaid.ts"), "--root", root, ...args], {
     cwd: ROOT,
     encoding: "utf8",
-    env: { ...process.env, MERMAID_CLI: renderer },
+    env: { ...process.env, MERMAID_CLI: renderer, ...env },
   });
   assert.equal(r.error, undefined, String(r.error));
   return { status: r.status, out: `${r.stdout}${r.stderr}` };
@@ -84,6 +90,14 @@ test("every block is rendered, and a repo whose diagrams all render passes", () 
   const { status, out } = run(repo({ "README.md": DOC }));
   assert.equal(status, 0, out);
   assert.match(out, /2 Mermaid block\(s\)/);
+});
+
+test("the renderer is started once, before the blocks, so a cold download is not billed to the first block", () => {
+  const log = join(mkdtempSync(join(tmpdir(), "wf-mermaid-log-")), "calls");
+  dirs.push(join(log, ".."));
+  const { status, out } = run(repo({ "README.md": DOC }), [], stubRenderer(), { STUB_LOG: log });
+  assert.equal(status, 0, out);
+  assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), ["version", "render", "render"]);
 });
 
 test("a block the renderer rejects fails the gate with its file and line, and the other blocks are still checked", () => {

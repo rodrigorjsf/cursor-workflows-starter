@@ -34,8 +34,8 @@ livro: o docs check o ignora.
 
 ## Rodapé
 
-Todo capítulo termina com uma linha `---`, uma linha em branco e o rodapé: capítulo anterior, índice e próximo
-capítulo, na ordem do índice (o último capítulo de uma parte aponta para o primeiro da seguinte). O primeiro
+Todo capítulo termina com uma linha em branco, uma linha `---`, outra linha em branco e o rodapé: capítulo anterior,
+índice e próximo capítulo, na ordem do índice (o último capítulo de uma parte aponta para o primeiro da seguinte). O primeiro
 capítulo do livro não tem "anterior", e o último não tem "próximo".
 
 ```markdown
@@ -60,10 +60,11 @@ imprime o rodapé esperado: copie dali.
 ## O que o docs check confere
 
 `scripts/check-docs.ts` (`npm run docs:check`) roda dentro do `npm test`, em `test/docs-check.test.ts`. Ele lê todo
-Markdown do repositório (menos `node_modules`, estado de runs e links simbólicos), ignorando blocos de código e código
-em linha, e falha quando encontra:
+Markdown do repositório (menos `node_modules`, estado de runs e links simbólicos), ignorando blocos de código, código
+em linha e o front matter YAML das skills e regras, e falha quando encontra:
 
-- um **link relativo** para um arquivo ou pasta que não existe;
+- um **link relativo** para um arquivo ou pasta que não existe (links inline, com ou sem título, e definições de
+  referência `[ref]: alvo`);
 - uma **âncora** (`#titulo`) que não é um título do arquivo de destino, com as regras de ids do GitHub (minúsculas,
   sem pontuação, hífens no lugar de espaços, `-1`, `-2` nas repetições);
 - um arquivo de `docs/` (fora de `docs/agents/`) que **não está no índice**;

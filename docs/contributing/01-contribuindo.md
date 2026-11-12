@@ -8,17 +8,10 @@ um link quebrado, um rodapé errado ou um capítulo fora do índice reprova o PR
 
 ## Onde fica cada coisa
 
-O repositório é um produto mais um espaço de desenvolvimento:
-
-| Pasta | O que é |
-|---|---|
-| `packages/runtime/` | O produto: engine, CLI, servidor MCP, workflows embutidos e os testes offline deles. Resolve seus arquivos pelo local de instalação, nunca pela raiz do repositório. |
-| `skills/` | As skills distribuídas aos usuários. `.agents/skills/` aponta para elas por links simbólicos (dogfood); nunca copie. |
-| `templates/` | Arquivos que o setup do kit grava no repositório alvo. |
-| raiz | O espaço de desenvolvimento: `CLAUDE.md` (guia canônico do mantenedor; `AGENTS.md` é um link para ele), configuração MCP do dogfood, `docs/`, `scripts/` e os testes do repositório (`test/`). |
-
-O `CLAUDE.md` é carregado no contexto de todo agente, e por isso tem limite de linhas. Tudo o que o Cursor e o Codex
-também precisam seguir fica neste livro, e o `CLAUDE.md` só aponta para cá.
+O repositório é um produto (`packages/runtime/`, `skills/`, `templates/`) mais um espaço de desenvolvimento (a raiz). A
+estrutura está na seção [Estrutura do README](../../README.md#estrutura), e o `CLAUDE.md` (guia canônico do mantenedor;
+`AGENTS.md` é um link para ele) tem as regras para quem edita o código. Ele é carregado no contexto de todo agente e por
+isso tem limite de linhas: guarda o essencial, e o detalhe fica neste livro.
 
 ## Idioma
 

@@ -54,14 +54,23 @@ export interface ParsedMarkdown {
   lines: string[];
 }
 
-const OPEN_FENCE = /^ {0,3}(`{3,}|~{3,})\s*([^\s`]*)/;
+/** A code fence opens with 3+ backticks (info string without backticks) or 3+ tildes. */
+const OPEN_FENCE = /^ {0,3}(?:(`{3,})([^`]*)|(~{3,})(.*))$/;
+/** A line that starts a block other than a paragraph: it cannot be the text of a setext heading. */
+const NOT_PARAGRAPH_TEXT = /^ {0,3}(#{1,6}(\s|$)|>|[-*+]\s|\d+[.)]\s|\|)/;
 
 export function parseMarkdown(md: string): ParsedMarkdown {
   const rawLines = md.split("\n");
   const lines: string[] = [];
   const mermaid: MermaidBlock[] = [];
   let fence: { marker: string; language: string; line: number; body: string[] } | undefined;
+  // YAML front matter (skills, Claude Code rules) is metadata, not Markdown: GitHub shows it as a table.
+  const frontMatterEnd = rawLines[0] === "---" ? rawLines.indexOf("---", 1) : -1;
   rawLines.forEach((raw, i) => {
+    if (i <= frontMatterEnd) {
+      lines.push("");
+      return;
+    }
     if (fence) {
       const close = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(raw);
       if (close && close[1]!.startsWith(fence.marker[0]!) && close[1]!.length >= fence.marker.length) {
@@ -75,7 +84,8 @@ export function parseMarkdown(md: string): ParsedMarkdown {
     }
     const open = OPEN_FENCE.exec(raw);
     if (open) {
-      fence = { marker: open[1]!, language: open[2]!.toLowerCase(), line: i + 1, body: [] };
+      const info = (open[2] ?? open[4] ?? "").trim();
+      fence = { marker: (open[1] ?? open[3])!, language: (info.split(/\s+/)[0] ?? "").toLowerCase(), line: i + 1, body: [] };
       lines.push("");
       return;
     }
@@ -94,15 +104,29 @@ export function parseMarkdown(md: string): ParsedMarkdown {
   // Headings keep their inline code: `## \`foo\` flag` is the anchor "foo-flag".
   const headings: Heading[] = [];
   lines.forEach((line, i) => {
-    const m = /^ {0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/.exec(line);
-    if (m) headings.push({ level: m[1]!.length, text: renderedText(m[2]!), line: i + 1 });
+    const atx = /^ {0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/.exec(line);
+    if (atx) {
+      headings.push({ level: atx[1]!.length, text: renderedText(atx[2]!), line: i + 1 });
+      return;
+    }
+    const underline = /^ {0,3}(=+|-+)\s*$/.exec(line);
+    const above = lines[i - 1];
+    if (underline && above?.trim() && !NOT_PARAGRAPH_TEXT.test(above)) {
+      headings.push({ level: underline[1]!.startsWith("=") ? 1 : 2, text: renderedText(above), line: i });
+    }
   });
 
   const links: MarkdownLink[] = [];
-  const linkPattern = /!?\[(?:[^[\]]|\[[^\]]*\])*\]\(\s*(<[^>\n]*>|[^()\s]*(?:\([^()\s]*\)[^()\s]*)*)(?:\s+"[^"]*")?\s*\)/g;
+  const linkPattern =
+    /!?\[(?:[^[\]]|\[[^\]]*\])*\]\(\s*(<[^>\n]*>|[^()\s]*(?:\([^()\s]*\)[^()\s]*)*)(?:\s+(?:"[^"]*"|'[^']*'|\([^()]*\)))?\s*\)/g;
   for (const m of text.matchAll(linkPattern)) {
     links.push({ target: m[1]!.replace(/^<|>$/g, ""), line: lineOf(m.index) });
   }
+  // Reference definitions (`[ref]: target "title"`); footnotes (`[^1]: text`) are not links.
+  text.split("\n").forEach((line, i) => {
+    const definition = /^ {0,3}\[(?!\^)[^\]]+\]:[ \t]*(<[^>\n]*>|\S+)/.exec(line);
+    if (definition) links.push({ target: definition[1]!.replace(/^<|>$/g, ""), line: i + 1 });
+  });
 
   const htmlAnchors = [...text.matchAll(/\bid="([^"]+)"|<a\s[^>]*\bname="([^"]+)"/g)].map((m) => m[1] ?? m[2]!);
   return { headings, links, htmlAnchors, mermaid, lines };
@@ -110,7 +134,8 @@ export function parseMarkdown(md: string): ParsedMarkdown {
 
 /** Replaces inline code spans with spaces (newlines kept) so their content is never read as a link or a heading. */
 function maskInlineCode(text: string): string {
-  return text.replace(/(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g, (span) => span.replace(/[^\n]/g, " "));
+  // A code span never crosses a blank line: a lone backtick must not swallow the paragraphs after it.
+  return text.replace(/(`+)(?!`)((?:(?!\n[ \t]*\n)[\s\S])*?[^`])\1(?!`)/g, (span) => span.replace(/[^\n]/g, " "));
 }
 
 /** A heading's visible text: links keep their text, code spans their content, emphasis and tags disappear. */
@@ -119,6 +144,7 @@ function renderedText(markup: string): string {
     .replace(/!?\[((?:[^[\]]|\[[^\]]*\])*)\]\([^)]*\)/g, "$1")
     .replace(/<[^>]+>/g, "")
     .replace(/[*~]/g, "")
+    .replace(/(^|[^\p{L}\p{N}])_+([^_]+?)_+(?![\p{L}\p{N}])/gu, "$1$2") // _emphasis_, but not snake_case
     .trim();
 }
 
