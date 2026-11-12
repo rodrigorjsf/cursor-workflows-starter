@@ -59,14 +59,18 @@ async function withServer<T>(extra: Record<string, string>, use: (call: (name: s
   }
 }
 
-test("start_workflow starts the dashboard once and returns its link; the dashboard lists the run that was just started", async () => {
+test("start_workflow starts the dashboard once and returns the link to the run's page; the dashboard lists the run that was just started", async () => {
   await withServer({}, async (call) => {
     const first = await call("start_workflow", { name: "quick", args: {} });
-    assert.equal(first.dashboardUrl, `http://127.0.0.1:${port}`, JSON.stringify(first));
+    const origin = `http://127.0.0.1:${port}`;
+    assert.equal(first.dashboardUrl, `${origin}/runs/${first.runId}`, JSON.stringify(first));
     assert.match(first.jobId, /^[0-9a-f]{8}$/);
+    const page = await fetch(first.dashboardUrl);
+    assert.equal(page.status, 200, "the link opens the run's page");
+    assert.match(await page.text(), new RegExp(`Run ${first.runId}`));
 
     const second = await call("start_workflow", { name: "quick", args: {} });
-    assert.equal(second.dashboardUrl, first.dashboardUrl);
+    assert.equal(second.dashboardUrl, `${origin}/runs/${second.runId}`);
     assert.equal(dashboardListens(home), 1, "the second start found the dashboard running");
 
     const wait = async (jobId: string) => {
@@ -76,11 +80,11 @@ test("start_workflow starts the dashboard once and returns its link; the dashboa
     };
     assert.equal((await wait(first.jobId)).status, "finished");
 
-    const listed = (await (await fetch(`${first.dashboardUrl}/api/runs`)).json()) as { runs: Array<{ runId: string; repo: string; workflow: string; status: string; phase?: string }> };
+    const listed = (await (await fetch(`${origin}/api/runs`)).json()) as { runs: Array<{ runId: string; repo: string; workflow: string; status: string; phase?: string }> };
     const run = listed.runs.find((r) => r.runId === first.runId);
     assert.ok(run, JSON.stringify(listed));
     assert.deepEqual([run.repo, run.workflow, run.status, run.phase], [repo, "quick", "finished", "work"]);
-    const detail = (await (await fetch(`${first.dashboardUrl}/api/runs/${first.runId}`)).json()) as { result: unknown };
+    const detail = (await (await fetch(`${origin}/api/runs/${first.runId}`)).json()) as { result: unknown };
     assert.equal(detail.result, "ok");
   });
 });
@@ -117,6 +121,6 @@ test("the dashboard setting in a repo config is reported in the violations and h
   await withServer({}, async (call) => {
     const started = await call("start_workflow", { name: "quick", args: {} });
     assert.deepEqual(started.violations.map((v: { path: string }) => v.path), ["/dashboard"], JSON.stringify(started));
-    assert.equal(started.dashboardUrl, `http://127.0.0.1:${port}`, "a repo file cannot switch the dashboard off");
+    assert.equal(started.dashboardUrl, `http://127.0.0.1:${port}/runs/${started.runId}`, "a repo file cannot switch the dashboard off");
   });
 });

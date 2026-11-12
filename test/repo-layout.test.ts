@@ -173,7 +173,7 @@ test("the run-workflow skill opens the dashboard link that start_workflow return
   assert.match(step2, /`dashboardUrl`/, "step 2 must tell the agent what to do with dashboardUrl");
   assert.match(step2, /built-in browser/i, "the link opens in Cursor's built-in browser");
   assert.match(step2, /`dashboardWarning`/, "a dashboard that could not start is relayed, not ignored");
-  assert.match(step2, /once per conversation/i, "one dashboard shows every run: the link is opened once, not on every start");
+  assert.match(step2, /one tab per conversation/i, "one dashboard shows every run: one tab, not a new one on every start");
 });
 
 test("reference files two skills share stay identical", () => {

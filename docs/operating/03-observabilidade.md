@@ -229,7 +229,7 @@ arquivos dos runs. A única ação dele é [cancelar um run](#cancelar-um-run-e-
 `wf cancel`.
 
 **Como abrir.** O `start_workflow` garante que o dashboard está rodando (inicia um processo destacado se nada responde
-na porta) e devolve `dashboardUrl` ao lado do `jobId`; a skill `run-workflow` abre o link no navegador embutido do
+na porta) e devolve `dashboardUrl`, o link da página do run, ao lado do `jobId`; a skill `run-workflow` abre o link no navegador embutido do
 Cursor. Só um dashboard roda por porta, por mais `start_workflow` que cheguem juntos. `npm run dash` o inicia à mão. Se o
 dashboard não consegue subir (porta ocupada por outro programa, pacote ausente na instalação), a resposta traz
 `dashboardWarning` com o motivo e o job começa do mesmo jeito.

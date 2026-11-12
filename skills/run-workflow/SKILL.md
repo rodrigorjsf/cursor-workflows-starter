@@ -25,8 +25,9 @@ The runtime's messages are in Portuguese. This skill quotes the ones it matches,
    return with `error` (`unknown workflow`, an invalid config with its file and field path, or a kit outside the
    version range the repo declares) goes back to step 1, or to the user for the config and the kit version: tell them
    to run `wf doctor`.
-   - A return with `dashboardUrl` is a live dashboard that shows this run and every other run of every repo. Open it in
-     Cursor's built-in browser, once per conversation, and tell the user the link. A page that fails to load just
+   - A return with `dashboardUrl` is this run's live page on the dashboard, which also shows every other run of every
+     repo (Board and Runs, one link away). Open it in Cursor's built-in browser, in one tab per conversation (a later
+     start points that tab at its own link), and tell the user the link. A page that fails to load just
      after the dashboard started loads on a reload a second later (WSL2 needs that long to forward a new port to
      Windows). Where there is no built-in browser (Claude Code, Codex), give the user the link and let them open it.
      A `dashboardWarning` is the reason the dashboard could not start: relay it once and carry on, since the run does
