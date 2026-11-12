@@ -793,6 +793,7 @@ async function executeRun<A, R>(
                   const t = update.usage;
                   addUsage(turnUsage, { ...t, totalTokens: t.inputTokens + t.outputTokens }); // o cache já está no input
                   if (t.reasoningTokens) turnUsage.reasoningTokens = (turnUsage.reasoningTokens ?? 0) + t.reasoningTokens;
+                  // The real SDK may report one turn per send, so this can fire only when a send ends (see #37).
                   const breach = tokenBreach(step, turnUsage.totalTokens);
                   if (breach instanceof BudgetExceededError) for (const active of cutters) active.cut(breach); // the run's cap: every active attempt
                   else if (breach) attemptCut.cut(breach);

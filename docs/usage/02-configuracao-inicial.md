@@ -119,7 +119,7 @@ Como funciona:
   - O teto em centavos continua checado só **antes** de cada tentativa: o custo só chega depois da etapa.
   Medido em 2026-11-11, antes do teto ao vivo: com `--max-tokens 300000`, o `implement-issue` gastou 344.376 tokens.
   A `corrigir-1` começou com 74,9 mil gastos e sozinha usou 269 mil ([verificações locais](../research/verificacoes-locais.md) §9).
-  O teto ao vivo foi testado só com o SDK falso. Para tetos apertados, use `concurrency` baixa e um `timeoutMs` curto
+  O teto ao vivo foi testado só com o SDK falso; quantos `turn-ended` o SDK real emite numa etapa longa ainda não foi medido (#37). Para tetos apertados, use `concurrency` baixa e um `timeoutMs` curto
   nas etapas que escrevem (o exemplo usa 30 min; sem valor na etapa, o engine usa 20 min).
 - O teto em centavos depende do custo que o `getUsage()` devolve. O Premium testado não devolveu custo nenhum
   (abaixo), e aí só o teto de tokens protege.
