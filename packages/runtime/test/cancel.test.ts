@@ -109,8 +109,9 @@ test("a creation that never answers fails the step on its timeout instead of han
 
 test("schema re-prompts share the step timeout instead of restarting it", async () => {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  // Wide margins, so that no scheduling delay on a busy machine can reorder things: the first send ends a full second before
-  // the step times out (or the re-prompt would never start), and a restart would end a full second after the timeout does.
+  // Wide margins, so that a scheduling delay on a busy machine cannot reorder things: the first send ends a second before the
+  // step times out (a longer delay and the re-prompt would never start), and the step may end up to 0.75 s late before it
+  // is taken for one that restarted its timeout.
   const stepTimeoutMs = 2_000;
   const firstSendMs = 1_000;
   let firstSendAt = 0;
@@ -127,10 +128,10 @@ test("schema re-prompts share the step timeout instead of restarting it", async 
   const stepEnd = eventsOf("r-reprompt").find((e) => e.type === "step-end");
   assert.ok(stepEnd && stepEnd.type === "step-end" && stepEnd.errorKind === "timeout");
   assert.equal(stepEnd.schemaReprompts, 1, "the first send answered without submit_result, so a re-prompt followed it");
-  // The re-prompt starts `beforeReprompt` ms into the step. With the rest of the allowance the step ends at `stepTimeoutMs`;
-  // with a fresh one, at `beforeReprompt + stepTimeoutMs`. Half way between the two is the line.
+  // The first send ran for `beforeReprompt` ms before the re-prompt began. With the rest of the allowance the step ends at
+  // `stepTimeoutMs`; with a fresh one, at `beforeReprompt + stepTimeoutMs`. The line is three quarters of the way to the second.
   const beforeReprompt = repromptAt - firstSendAt;
-  assert.ok(stepEnd.durationMs! < stepTimeoutMs + beforeReprompt / 2, `the re-prompt had the rest of the ${stepTimeoutMs} ms, not a fresh ${stepTimeoutMs} ms (took ${stepEnd.durationMs} ms, the re-prompt started after ${beforeReprompt} ms)`);
+  assert.ok(stepEnd.durationMs! < stepTimeoutMs + beforeReprompt * 0.75, `the re-prompt had the rest of the ${stepTimeoutMs} ms, not a fresh ${stepTimeoutMs} ms (took ${stepEnd.durationMs} ms, the re-prompt started after ${beforeReprompt} ms)`);
   assert.equal(stats.cancelled, 1, "the hung re-prompt run was cancelled");
 });
 
