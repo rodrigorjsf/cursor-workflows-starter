@@ -1,4 +1,5 @@
 {
   "extends": "./packages/runtime/tsconfig.json",
-  "include": ["packages/*/src/**/*.ts", "packages/*/workflows/**/*.ts", "scripts/**/*.ts"]
+  "include": ["packages/*/src/**/*.ts", "packages/*/workflows/**/*.ts", "scripts/**/*.ts"],
+  "exclude": ["packages/dashboard/src/ui"]
 }

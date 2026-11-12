@@ -10,6 +10,8 @@ import { existsSync } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
 import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, type RunTail, defaultDbPath, listRuns, openDb, readRun, readStepContent, summary, tailRun } from "@cursor-workflows/runtime/observe";
 import { METRICS_PAGE } from "./metrics-page.js";
+import { RUN_PAGE_POLICY, runPage } from "./run-page.js";
+import { uiBundle } from "./ui-bundle.js";
 
 /** Host names a request may carry: the loopback names. Anything else is a page of another site asking the browser to talk to us. */
 const ALLOWED_HOSTS = new Set(["127.0.0.1", "localhost"]);
@@ -154,6 +156,21 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
         return;
       }
       default: {
+        const page = /^\/runs\/([^/]+)$/.exec(url.pathname);
+        if (page) {
+          const html = runPage(decodeSegment(page[1]!), await uiBundle());
+          res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-security-policy": RUN_PAGE_POLICY, "cache-control": "no-store", "x-content-type-options": "nosniff" });
+          res.end(req.method === "HEAD" ? undefined : html);
+          return;
+        }
+        const asset = /^\/assets\/(run-[0-9a-f]{12}\.(?:js|css))$/.exec(url.pathname); // only a name the build can have made starts a build
+        if (asset) {
+          const file = (await uiBundle()).assets.get(asset[1]!);
+          if (!file) return send(res, 404, { error: "not found" });
+          res.writeHead(200, { "content-type": file.type, "cache-control": "public, max-age=31536000, immutable", "x-content-type-options": "nosniff" });
+          res.end(req.method === "HEAD" ? undefined : file.body);
+          return;
+        }
         const match = /^\/api\/runs\/([^/]+)(?:\/(.*))?$/.exec(url.pathname);
         if (!match) return send(res, 404, { error: "not found" });
         const runId = decodeSegment(match[1]!);

@@ -195,7 +195,10 @@ test("the dashboard is its own workspace package: its dependencies never enter t
   const dashboard = manifest("packages", "dashboard");
   assert.equal(dashboard.name, "@cursor-workflows/dashboard");
   assert.ok(manifest().workspaces.includes("packages/*"));
-  assert.deepEqual(Object.keys(dashboard.dependencies), ["@cursor-workflows/runtime"], "the dashboard needs nothing the runtime does not already ship");
+  // The web app's libraries (React, React Flow, elkjs) and esbuild, which bundles them when the dashboard starts: they live here and nowhere else.
+  const webApp = ["@xyflow/react", "elkjs", "esbuild", "react", "react-dom"];
+  assert.deepEqual(Object.keys(dashboard.dependencies).sort(), ["@cursor-workflows/runtime", ...webApp].sort(), "the dashboard ships the runtime and its web app's libraries, and nothing else");
+  for (const name of webApp) assert.equal(name in runtime.dependencies, false, `${name} must not enter the runtime`);
   assert.equal(Object.keys(runtime.dependencies).some((name) => name.startsWith("@cursor-workflows/")), false, "the runtime depends on no workspace package");
   assert.deepEqual(Object.keys(runtime.exports).sort(), ["./observe", "./package.json"], "the runtime's only public entry points");
 
@@ -206,4 +209,9 @@ test("the dashboard is its own workspace package: its dependencies never enter t
     const text = read("packages", "dashboard", "src", file);
     assert.doesNotMatch(text, /from "(\.\.\/)+runtime\/|from "@cursor-workflows\/runtime\/(?!observe")/, `${file} reaches into the runtime's sources`);
   }
+  // The web app runs in the browser: it reads the API, never the runtime.
+  const ui = join("packages", "dashboard", "src", "ui");
+  const uiSources = readdirSync(join(ROOT, ui)).filter((f) => /\.tsx?$/.test(f));
+  assert.ok(uiSources.length >= 5);
+  for (const file of uiSources) assert.doesNotMatch(read(ui, file), /@cursor-workflows\/runtime|from "(\.\.\/)+runtime\/|from "node:/, `${file} runs in the browser and must not import the runtime or Node`);
 });
