@@ -121,12 +121,13 @@ const keep = [""];
 const startsFive = (job: string) => [job]; // the jobId; inside the IDE the wizard ends here, the person quits Cursor
 const fiveOutsideIde = (job: string, result: string, note = "") => [job, "", result, note]; // jobId, "Cursor is back", result, note
 const fiveResumed = (result: string, note = "") => [result, note];
+const eighth = (run: "y" | "n", result = "pass", note = "") => (run === "y" ? [run, "", "", result, note] : [run]); // "run scenario 8?", "config saved", "chat answered", the result, the note
 const fileIssue = (yn: "y" | "n") => [yn];
 const noSandboxPrompts = [""]; // a sandbox that exists but was never opened in Cursor: only the "folder opened" pause is asked
 
 const NOTES = ["five tools listed", "answered pong", "PR opened", "still running after the restart", "cancelled in 4 s", "the card moved to Done"];
 /** A whole run outside the IDE's terminal, scenarios 2 to 7 answered; `results` default to pass. */
-const wholeRunOutside = (results: string[] = [], notes: string[] = NOTES, answer: "y" | "n" = "n") => [
+const wholeRunOutside = (results: string[] = [], notes: string[] = NOTES, answer: "y" | "n" = "n", cloud: string[] = eighth("n")) => [
   ...start("no"),
   ...newSandbox(),
   ...doctorRead,
@@ -136,12 +137,13 @@ const wholeRunOutside = (results: string[] = [], notes: string[] = NOTES, answer
   ...fiveOutsideIde("ab12cd34", results[3] ?? "pass", notes[3]),
   ...asked(results[4] ?? "pass", notes[4]),
   ...asked(results[5] ?? "pass", notes[5]),
+  ...cloud,
   ...fileIssue(answer),
 ];
 /** The first run inside the IDE's terminal: scenarios 2 to 4, then the start of 5, where the wizard ends. */
 const firstRunInside = [...start("yes"), ...newSandbox(), ...doctorRead, ...asked("pass", NOTES[0]), ...asked("pass", NOTES[1]), ...asked("pass", NOTES[2]), ...startsFive("ab12cd34")];
 /** The run after Cursor came back: the earlier answers kept, scenarios 5, 6 and 7 answered. */
-const secondRunInside = (answer: "y" | "n") => [...start("yes"), ...doctorRead, ...keep, ...keep, ...keep, ...fiveResumed("pass", "finished after the restart"), ...asked("pass", NOTES[4]), ...asked("pass", NOTES[5]), ...fileIssue(answer)];
+const secondRunInside = (answer: "y" | "n") => [...start("yes"), ...doctorRead, ...keep, ...keep, ...keep, ...fiveResumed("pass", "finished after the restart"), ...asked("pass", NOTES[4]), ...asked("pass", NOTES[5]), ...eighth("n"), ...fileIssue(answer)];
 
 test("outside the IDE's terminal: scenario 1 is not run, the others are recorded as answered, nothing is filed on a 'no'", () => {
   const m = machine();
@@ -203,6 +205,31 @@ test("scenario 7 says what to look at in the dashboard: the link in the built-in
   assert.match(stage, /hover/i);
   assert.match(stage, /log/i);
   assert.equal(m.report().scenarios[6].title, "the dashboard shows the run live");
+});
+
+test("scenario 8 is optional: declined, the report keeps its seven; accepted, it says what to allow and type, and the report lists it apart from the criterion", () => {
+  const declined = machine();
+  const no = declined.run(wholeRunOutside());
+  assert.equal(no.status, 0, no.out);
+  assert.match(no.out, /Run scenario 8\?/);
+  assert.equal(declined.report().scenarios.length, 7, "a 'no' records nothing");
+
+  const m = machine();
+  const r = m.run(wholeRunOutside([], NOTES, "n", eighth("y", "pass", "agent bc-9 answered")));
+  assert.equal(r.status, 0, r.out);
+  const stage = r.stdout.slice(r.stdout.indexOf("Scenario 8 (optional)"), r.stdout.indexOf("Report"));
+  assert.match(stage, /"allowedLocations": \["local", "cloud"\]/, "only the machine owner's file can allow the cloud, so the wizard says what to merge in");
+  assert.match(stage, /"ping": \{ "location": "cloud" \}/);
+  assert.match(stage, /\/run-workflow smoke/);
+  assert.match(stage, /cloud-agent event/);
+  assert.match(stage, /Snapshot branches left on the sandbox's remote/, "and shows whether a snapshot branch was left behind");
+  assert.ok(!existsSync(join(m.home, ".cursor-workflows", "config.json")), "the wizard changes no config of the person's");
+
+  const report = m.report();
+  const eighthScenario = report.scenarios[7];
+  assert.deepEqual([eighthScenario.id, eighthScenario.result, eighthScenario.note, eighthScenario.optional], [8, "pass", "agent bc-9 answered", true]);
+  assert.deepEqual(report.summary, { pass: 6, fail: 0, skipped: 1, releaseCriterionMet: false }, "the seven count as before: scenario 1 was not run outside the IDE");
+  assert.match(readFileSync(join(m.reportDir, "issue-body.md"), "utf8"), /\| 8 \| a read-only step runs on a cloud agent and leaves no snapshot branch on the remote \(optional\) \| pass \|/);
 });
 
 test("scenario 5 gives the text to paste for the job the person noted, and a job still running is not yet a pass", () => {

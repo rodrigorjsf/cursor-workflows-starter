@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { calls, costConfig, script, stats } from "@cursor/sdk";
+import { calls, costConfig, finishCloudRun, resetCloud, script, seedCloudAgent, stats } from "@cursor/sdk";
 import type { AttemptEvent, AttemptResult, StepOptions } from "../src/runtime/backend.js";
 import { createCloudBackend } from "../src/runtime/backend-cloud.js";
 import { cloudRepoUrl } from "../src/runtime/cloud-snapshot.js";
@@ -28,7 +28,8 @@ afterEach(() => {
   script.length = 0;
   calls.length = 0;
   Object.assign(stats, { active: 0, maxActive: 0, disposed: 0, usageReads: 0, cancels: 0, cancelled: 0, turnsDelivered: 0, sends: 0 });
-  Object.assign(costConfig, { raw: 9, charged: 7, getUsageError: undefined, createErrorCode: undefined, createHang: undefined, createDelayMs: undefined, createGate: undefined });
+  Object.assign(costConfig, { raw: 9, charged: 7, getUsageError: undefined, createErrorCode: undefined, createHang: undefined, createDelayMs: undefined, createGate: undefined, listNewestFirst: undefined });
+  resetCloud();
 });
 
 const options = (extra: Partial<StepOptions> = {}): StepOptions => ({
@@ -61,7 +62,8 @@ test("an attempt streams the cloud agent's activity through the callback and rep
   const { result, events } = await attempt("do it", options());
 
   assert.deepEqual(events.map((e) => e.type), ["warning", "agent", "text", "step", "turn"]);
-  assert.deepEqual(events[1], { type: "agent", agentId: "bc-1" });
+  assert.deepEqual(events[1], { type: "agent", agentId: "bc-1", snapshot: { remote: "origin", branch: (events[1] as { snapshot: { branch: string } }).snapshot.branch } });
+  assert.match((events[1] as { snapshot: { branch: string } }).snapshot.branch, /^wf\/cloud-snapshot\/run-1\/[0-9a-f]{8}$/, "the agent's event says which snapshot it starts from");
   assert.deepEqual(outcomeOf(result), { kind: "finished", value: "the answer" });
   assert.equal(result.agentId, "bc-1");
   assert.ok(result.usage && "report" in result.usage);
@@ -233,5 +235,24 @@ test("the repository URL a cloud agent gets is the code host's web URL", () => {
     ["/srv/git/origin.git", "/srv/git/origin.git"],
   ] as const) {
     assert.equal(cloudRepoUrl(remoteUrl), url, remoteUrl);
+  }
+});
+
+test("a reattached attempt waits for the run still going, or else takes the newest, whatever order the cloud lists an agent's runs in", async () => {
+  for (const listNewestFirst of [false, true]) {
+    costConfig.listNewestFirst = listNewestFirst;
+    // An agent in a conversation with a follow-up in progress: the first answer is done, the second run is going.
+    seedCloudAgent("bc-50", [{ status: "finished", result: "first answer" }, { status: "running" }]);
+    setTimeout(() => finishCloudRun("bc-50", { result: "second answer" }), 40);
+    const going = await attempt("p", options({ reattach: { agentId: "bc-50" } }));
+    assert.deepEqual(outcomeOf(going.result), { kind: "finished", value: "second answer" }, `newest first: ${listNewestFirst}`);
+
+    // An agent whose runs all ended while no process was watching: the latest answer is the step's.
+    seedCloudAgent("bc-51", [{ status: "finished", result: "first answer" }, { status: "finished", result: "latest answer" }]);
+    const done = await attempt("p", options({ reattach: { agentId: "bc-51" } }));
+    assert.deepEqual(outcomeOf(done.result), { kind: "finished", value: "latest answer" }, `newest first: ${listNewestFirst}`);
+    assert.equal(done.result.agentId, "bc-51");
+    assert.equal(calls.length, 0, "no agent was created");
+    assert.equal(stats.sends, 0, "and nothing was sent");
   }
 });

@@ -309,6 +309,7 @@ política de custo em [9.1](../contributing/01-contribuindo.md#testes-contra-a-a
 | Faixa de contexto do Haiku 5.5 (acima de 100 mil tokens de input) | Modelo de terceiro exige crédito pré-pago no Premium (§6, C07) | Com crédito, uma etapa `claude-haiku-5-5` com mais de 100 mil tokens de input; conferir o custo no dashboard |
 | macOS e Windows nativo | Só Linux x64 (WSL2) foi testado (§1) | `npm ci`, `npm test` e o teste de fumaça (docs 2.1 §5) em cada sistema; no Windows nativo, com `bash` no PATH |
 | Concorrência e rate limit acima de 2 agentes em paralelo | O máximo medido foi 2 etapas em `ctx.parallel` (§8); a doc não dá limite de agentes por usuário (C15) | `concurrency` 4, 8 e 16 com etapas curtas; registrar `RateLimitError`, `AgentBusyError` e tempo por etapa |
+| Etapas na nuvem contra a API real (`verify-cloud`) | Exige um plano com Cloud Agents e um repositório num code host conectado, e o run empurra e apaga uma branch no `origin`: não rodou na sessão que escreveu o workflow (§14) | `scripts/verify/README.md` (seção `verify-cloud`), com tetos baixos; registrar o resultado em §14 |
 | `getUsage()` em agentes locais (custo real no kit) | A doc do SDK diz que o uso de agentes locais "is rolling out gradually and is enabled per account" ([doc](https://cursor.com/docs/sdk/typescript#agentgetusage)); nesta conta deu `feature_unavailable` em todas as chamadas, inclusive no Premium (§5). Não há como pedir a liberação pela doc. Enquanto isso, o teto em centavos fica cego e o custo vem da tabela `pricing` | Reconfirmar de tempos em tempos: `npm run wf -- metrics reconcile` (se passar a atualizar tentativas, a conta foi liberada, desde que o Cursor ainda guarde o uso dos agentes descartados) ou `npx tsx scripts/probe-sdk.ts --mode smoke --model composer-2.5` (cerca de 3 mil tokens, na franquia): `getUsageReads` com `cost` em vez de `feature_unavailable`. Quando liberar, registrar aqui e revisar o Status do README e os docs 2.2 §3, 5.1 e 5.3 |
 
 ## 13. Fase 6: o `implement-issue` com TDD, review em três eixos e checkpoint (2026-11-11)
@@ -338,6 +339,41 @@ do npm de outra ferramenta, histórico do RTK): nada em `~/.local/share/mise`, e
 
 Não rodaram: o caminho HIGH ("Design it twice" e juiz), o review que bloqueia (fatia extra e refactor) e o
 `alreadySatisfied` contra a API real. Os três estão cobertos só pelos testes offline.
+
+## 14. Fase 7: etapas na nuvem (`verify-cloud`)
+
+As etapas na nuvem ([ADR-0005](../adr/0005-cloud-backend-and-location-cap.md)) foram construídas contra o SDK 1.3.1 e um
+SDK de mentira que modela o cloud agent (`packages/runtime/test/fake-sdk.ts`). Este capítulo separa o que foi **lido no
+código do SDK** do que **só a API real confirma**. O workflow que mede o segundo grupo é o
+[`verify-cloud`](../../scripts/verify/README.md) (uma etapa de leitura, com teto de 60 mil tokens e 25 centavos). **Ele ainda
+não foi executado contra a API real**: a sessão que o escreveu não podia empurrar branches para um code host nem criar o
+repositório descartável, então a coluna de resultado dos itens da API está em aberto. Quem rodar preenche as linhas (e
+corrige o que a medição refutar, como nos outros capítulos).
+
+Lido no código do `@cursor/sdk` 1.3.1 (`dist/esm/448.js` e `index.js`), sem chamar a API:
+
+| Item | Como | Resultado | Evidência | Ação tomada |
+|---|---|---|---|---|
+| Quem cria o agente no servidor | leitura de `Agent.create` e de `send` do cloud agent | ✅ `Agent.create` só sorteia o id (`bc-…`) no cliente; o servidor conhece o agente quando o **primeiro `send()`** chega (`createServerAgent`) | `const r=t.agentId??(t.cloud?mintCloudId():…)`; `send` cria o agente quando `!this.serverCreated` | Um resume que acha um id registrado no log que o servidor nunca viu recebe um 404 ao listar os runs, e a etapa cria outro agente em vez de falhar (aviso no log) |
+| O limite de espera do cliente | leitura de `runStreamLoop` | ✅ o cliente desiste de esperar um run da nuvem depois de duas horas (`Date.now()+72e5`): `wait()` devolve `status: "error"` e `error.message` "Timed out waiting for the cloud run to finish.", sem `code`, e **aquele handle** fica falho, embora o run continue lá; `Agent.getRun(runId, { runtime: "cloud", agentId })` devolve um handle novo | `setWaitDeadlineError()` | O backend pergunta à nuvem antes de falhar a etapa e espera de novo pelo run que continua |
+| Cancelar um run reanexado | leitura de `Run.cancel` | ✅ cancela pelos ids (`cancelRun({ agentId, runId })`), então vale para o handle de `listRuns`/`getRun` como para o do `send` | `async cancel(){…await this.client.cancelRun({agentId:this.agentId,runId:this.id})…}` | — |
+| Stream de um run achado depois | leitura de `Run` e de `listCloudRuns` | ◐ um handle de `listRuns`/`getRun` nasce **sem** `onDelta`: um run reanexado não emite eventos `turn` nem `text`, e os tetos de tokens ao vivo só atuam quando ele termina | `new E(client, run)` sem `sendOptions` | Documentado em [6.2](../reference/config.md#etapas-na-nuvem) e no aviso do log (`reattaching to cloud agent …`) |
+| Ordem de `listRuns` | doc e leitura | ❔ a ordem não é documentada | `GET /v1/agents/{id}/runs` | O backend não depende dela: o run que ainda roda, senão o mais novo por `createdAt` |
+
+Para a API real (`verify-cloud` e a conferência manual do ciclo de vida, descritos no
+[README](../../scripts/verify/README.md)):
+
+| Item | Como | Resultado | Evidência | Ação tomada |
+|---|---|---|---|---|
+| `cloud.repos[].startingRef` aceita o nome da branch empurrada | `verify-cloud` | ⏭ não executado | — | — |
+| O agente enxerga o arquivo não commitado do snapshot (`sawUncommittedFile`) | `verify-cloud` | ⏭ não executado | — | — |
+| `RunResult.result` traz o texto da mensagem final, com o bloco JSON | `verify-cloud`: `schemaReprompts` 0 no `step-end` | ⏭ não executado | — | — |
+| `onDelta` entrega `turn-ended` num run da nuvem (os tetos de tokens ao vivo) | os eventos `turn` do log da etapa | ⏭ não executado | — | — |
+| `getUsage()` de um cloud agent: tokens por run, custo e atraso do custo | `usage` e `costFinal` do `step-end` | ⏭ não executado | — | — |
+| A nuvem apaga a branch de snapshot de que o agente partiu sem estragar o run (a pergunta do #44) | `ls-remote` depois do run (`snapshotBranches.after`) | ⏭ não executado | — | — |
+| `Agent.resume(bc-…)` + `Agent.listRuns` acham o run que estava em andamento depois de um `kill -9` | matar o `wf` depois do `cloud-agent` e rodar com `--resume` | ⏭ não executado | — | — |
+| Um id que o cliente sorteou e o servidor nunca viu dá 404 no `listRuns` (o que o backend trata como "agente sumiu") | `Agent.listRuns` num id sorteado e nunca enviado | ⏭ não executado | — | — |
+| Cancelar o run da nuvem pelo `wf cancel` e pelo Ctrl-C | cancelar com a etapa rodando e olhar o run na Cursor | ⏭ não executado | — | — |
 
 ---
 

@@ -181,9 +181,9 @@ interface AgentBackend {
 
 | Parte | O que carrega |
 |---|---|
-| `prompt` e `options` (`StepOptions`) | O prompt e as opções da etapa já resolvidas: nome, modelo, `cwd`, tools, subagents, MCP servers, camadas de configuração, sandbox (com o teto `requireSandbox` aplicado), `writes` (a etapa pode alterar arquivos), `schema` e `schemaRetries` |
+| `prompt` e `options` (`StepOptions`) | O prompt e as opções da etapa já resolvidas: nome, modelo, `cwd`, tools, subagents, MCP servers, camadas de configuração, sandbox (com o teto `requireSandbox` aplicado), `writes` (a etapa pode alterar arquivos), `schema` e `schemaRetries`, e `reattach` (o agente na nuvem que uma tentativa interrompida deixou rodando) |
 | `signal` | O interruptor da tentativa. O motor o aborta por todo motivo que encerra a tentativa antes da hora e põe o motivo em `signal.reason`: o cancelamento do run (`RunCancelledError`), o `timeoutMs` da etapa e o teto de tokens que passou. O backend cancela o run do agente em andamento, espera ele parar, lê o uso que a tentativa deixou, descarta o agente e devolve `aborted` com esse motivo |
-| `onEvent` | O que acontece durante a tentativa, em ordem: `agent` (o agente existe), `text`, `step`, `tool-call`, `tool-output`, `summary`, `reprompt`, `warning` e `turn`. O motor conta, grava o conteúdo no log e, a cada `turn`, aplica os tetos de tokens ao vivo: pode abortar o `signal` de dentro do callback, e o backend cancela na hora |
+| `onEvent` | O que acontece durante a tentativa, em ordem: `agent` (o agente existe, com a branch de snapshot de onde ele parte, na nuvem), `text`, `step`, `tool-call`, `tool-output`, `summary`, `reprompt`, `warning` e `turn`. O motor conta, grava o conteúdo no log e, a cada `turn`, aplica os tetos de tokens ao vivo: pode abortar o `signal` de dentro do callback, e o backend cancela na hora |
 | `AttemptResult` | `outcome` (`finished` com o valor, `run-error`, `schema`, `aborted`, ou `error` classificado como `account`, `usage-limit`, `rate-limit` ou `other`), o `agentId`, o modelo resolvido e a leitura do uso (o relatório do agente, ou o motivo de não ter conseguido lê-lo) |
 
 O contrato, além da tabela:
@@ -207,6 +207,25 @@ O contrato, além da tabela:
   esperando o evento `agent`.
 - Uma etapa na nuvem não usa o memo. Hoje só roda ali a etapa de leitura (`writes: false`); a que escreve falha antes de
   gastar, com a mensagem que diz o que fazer.
+- **O agente na nuvem sobrevive ao processo.** O evento `agent` do backend leva também a branch de snapshot de que o agente
+  parte (e `reattached`, quando é um agente retomado). O motor o grava no log como `cloud-agent` na hora, antes de a etapa
+  terminar. Num resume, `RunStore.interruptedCloud` lista as etapas na nuvem com um `cloud-agent` sem `step-end` (a
+  projeção `interruptedCloudSteps`), e a primeira tentativa de cada uma recebe `StepOptions.reattach`: o backend de nuvem
+  retoma o agente pelo id (`Agent.resume`), acha o run que estava em andamento (`Agent.listRuns`: o que ainda roda, senão o
+  mais novo) e espera por ele, sem reenviar o prompt; um run que terminou enquanto ninguém olhava entrega a resposta na hora, e
+  um resultado inválido recebe o follow-up de sempre, no agente retomado. O motor fecha no log a tentativa morta (um
+  `step-end` sem cobrança, `errorKind: "exception"`) e tira do orçamento os tokens dos turnos que ela tinha reportado, porque
+  a tentativa que reanexa paga o uso inteiro do agente. A branch de snapshot que o crash deixou é apagada no fim. Um agente
+  que a nuvem não conhece mais (404: a primeira mensagem não chegou, ou ele foi apagado) é trocado por um novo, com um aviso;
+  qualquer outra falha ao alcançá-lo falha só a tentativa, e a seguinte tenta reanexar de novo: criar outro agente seria pagar
+  duas vezes. Um run reanexado não tem o stream: o log não guarda o que o agente fez enquanto nenhum processo olhava, e os
+  tetos de tokens ao vivo só atuam quando o run termina (o `warning` da reanexação diz isso).
+- **Cancelar e o limite de espera.** Cancelar o run aborta o `signal` da tentativa, e `runAttempt` cancela o run em andamento
+  na nuvem e espera ele parar, o reanexado inclusive. O cliente do SDK desiste de esperar um run da nuvem depois de duas horas
+  (`wait()` devolve `error` com "Timed out waiting for the cloud run to finish.", e aquele handle fica falho, embora o run
+  continue lá). O backend de nuvem não trata um `error` assim como o fim da etapa: pergunta à nuvem (`Agent.getRun`) e, se o
+  run ainda roda (ou já terminou), espera de novo por ele. Só um run que a própria nuvem diz ter falhado é um erro; quem limita
+  uma etapa longa é o `timeoutMs` dela.
 - Os testes trocam o SDK (`packages/runtime/test/fake-sdk.ts`) ou o próprio backend (`RunOptions.backend`). Os testes do
   motor com o SDK falso passam pelo backend local, e os de `backend.test.ts` usam um backend de mentira para provar que
   tetos ao vivo, cancelamento e tempo funcionam pela interface.

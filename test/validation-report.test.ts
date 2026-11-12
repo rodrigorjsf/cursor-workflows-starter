@@ -116,6 +116,32 @@ test("the release criterion needs all seven scenarios on record: six passes out 
   assert.deepEqual(r.report.summary, { pass: 6, fail: 0, skipped: 0, releaseCriterionMet: false });
 });
 
+const EIGHTH = "A read-only step runs on a cloud agent";
+/** The optional eighth scenario, as the wizard records it when the person chose to run it. */
+const withEighth = (text: string, result: string, note = "") => `${text}S8_TITLE=${EIGHTH}\nS8_RESULT=${result}\nS8_NOTE=${note}\n`;
+
+test("the optional eighth scenario is reported with its result, but the release criterion and the title count the seven", () => {
+  for (const [typed, reported] of [["pass", "pass"], ["fail", "fail"], ["skip", "skipped"]] as const) {
+    const r = run(withEighth(progress([]), typed, "agent bc-1"));
+    assert.deepEqual(r.report.summary, { pass: 7, fail: 0, skipped: 0, releaseCriterionMet: true }, typed);
+    assert.equal(r.stdout.trim(), "Cursor IDE validation: 7 of 7 scenarios passed", typed);
+    const eighth = r.report.scenarios[7];
+    assert.deepEqual([eighth.id, eighth.title, eighth.result, eighth.note, eighth.optional], [8, EIGHTH, reported, "agent bc-1", true], typed);
+    assert.equal(r.report.scenarios[0].optional, undefined, "the first seven are required");
+    assert.match(r.body, new RegExp(`\\| 8 \\| ${EIGHTH} \\(optional\\) \\| ${reported} \\| agent bc-1 \\|`), typed);
+  }
+});
+
+test("the eighth scenario passing does not make up for a required one that failed, or is missing", () => {
+  const failed = run(withEighth(progress(["pass", "pass", "fail"]), "pass"));
+  assert.deepEqual(failed.report.summary, { pass: 6, fail: 1, skipped: 0, releaseCriterionMet: false });
+  assert.equal(failed.stdout.trim(), "Cursor IDE validation: 6 of 7 scenarios passed, 1 failed");
+
+  const withoutSeventh = progress([]).split("\n").filter((line) => !line.startsWith("S7_")).join("\n");
+  const missing = run(withEighth(`${withoutSeventh}\n`, "pass"));
+  assert.deepEqual(missing.report.summary, { pass: 6, fail: 0, skipped: 0, releaseCriterionMet: false });
+});
+
 test("stdout is the issue title and says what did not pass", () => {
   const r = run(progress(["pass", "fail", "pass", "pass", "skip", "fail", "pass"]));
   assert.equal(r.stdout.trim(), "Cursor IDE validation: 4 of 7 scenarios passed, 2 failed, 1 not run");

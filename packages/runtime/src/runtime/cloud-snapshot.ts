@@ -8,7 +8,8 @@
 // never goes. The commit's parent is HEAD, so the remote only needs to send the difference.
 //
 // Limit: a branch left behind (the process died between the push and the deletion, or the remote refused the deletion) is not
-// swept by `wf gc` yet: see #44.
+// swept by `wf gc` yet: see #44. One a crash left behind is deleted when the resumed run reattaches to the step's agent: the
+// event log keeps its name with the agent's id.
 
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -112,8 +113,11 @@ export async function pushSnapshot({ cwd, remote, branch, signal }: { cwd: strin
   }
 }
 
-/** Deletes a snapshot branch from the remote. Rejects with the reason when it cannot. */
-export async function deleteSnapshot(snapshot: PushedSnapshot): Promise<void> {
+/**
+ * Deletes a snapshot branch from the remote. Rejects with the reason when it cannot. `top` is any directory of the checkout the
+ * remote belongs to: the branch of an attempt that was interrupted is known only by its remote and name.
+ */
+export async function deleteSnapshot(snapshot: Pick<PushedSnapshot, "top" | "remote" | "branch">): Promise<void> {
   await git(snapshot.top, ["push", "--quiet", "--no-verify", snapshot.remote, "--delete", `refs/heads/${snapshot.branch}`], { timeoutMs: NETWORK_TIMEOUT_MS });
 }
 

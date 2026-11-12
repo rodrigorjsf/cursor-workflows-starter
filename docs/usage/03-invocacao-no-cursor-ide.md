@@ -280,17 +280,19 @@ cenário 1 só vale ali, porque o IDE escolhe o próprio Node e PATH. Ele:
 | 6 | O run cancela pelo chat | `/run-workflow implement-issue 3`; com o job rodando, peça ao chat para cancelar | o job termina `cancelled`, com o `runId` para retomar |
 | 7 | O dashboard mostra o run ao vivo | `/run-workflow smoke`; o chat abre o link do dashboard no navegador embutido do Cursor | no navegador embutido: o cartão do run está na coluna Ping do quadro do `smoke` e vai sozinho para Done, sem recarregar; o clique no cartão abre o grafo, com a etapa `ping` que pisca e fica verde; passar o mouse na etapa mostra modelo, tokens, custo e duração; clicar nela abre o log (prompt, o que o agente disse, chamadas de tool) |
 
+Depois do 7, o assistente pergunta se você quer rodar o **cenário 8, opcional**: uma etapa de leitura num cloud agent da Cursor. Ele manda o código do repositório descartável para uma VM, então exige um plano com Cloud Agents e o repositório numa conta do GitHub à qual a Cursor está conectada, e só você pode liberá-lo: o assistente mostra as chaves para mesclar no `~/.cursor-workflows/config.json` (`caps.allowedLocations` com `cloud` e `workflows.smoke.roles.ping.location: "cloud"`) e não escreve nada na sua configuração. Depois você digita `/run-workflow smoke`. Passa quando o job termina com `answer: "pong"`, o log do run tem um evento `cloud-agent` com um id `bc-…` e o repositório descartável não ficou com nenhuma branch `wf/cloud-snapshot/*` no remote (o assistente mostra as duas coisas). O relatório lista o 8 como opcional, e o critério de release continua sendo os sete.
+
 No cenário 5, fechar o Cursor fecha o terminal dele e, com ele, o assistente. As respostas ficam em
 `~/.cursor-workflows/validation/progress.env`: reabra o Cursor, rode o assistente de novo e ele segue do cenário 5, com
 as respostas dos anteriores mantidas (Enter confirma cada uma). Os cenários 3 a 6 rodam workflows e gastam cerca de 800
 mil tokens, em modelos que os planos incluem (o `implement-issue` LOW mediu 339 mil;
-[8.2 §13](../research/verificacoes-locais.md)). O cenário 7 roda também o `smoke`, que não entrou nessa medição.
+[8.2 §13](../research/verificacoes-locais.md)). O cenário 7 roda também o `smoke`, que não entrou nessa medição, e o 8 também (o mesmo `smoke`, na nuvem).
 
 O relatório tem, por cenário, o resultado (`pass`, `fail` ou `skipped`) e a nota, mais os fatos do ambiente (SO, Node,
 versão do kit e do Cursor, se o terminal era o do IDE) e o resultado do `wf doctor`. Caminhos locais, o nome do
 repositório descartável, a conta e a máquina viram marcadores (`~`, `<sandbox-dir>`, `<kit>`, `<sandbox-repo>`, `<owner>`, `<user>`, `<host>`, `<email>`, `<path>`), e
 formatos conhecidos de segredo viram `[REDACTED]`. O critério de release (`releaseCriterionMet`) vale só com os sete em
-`pass`. `WF_KIT_REPO=dono/repo` abre a issue em outro repositório que não o de origem do kit.
+`pass`; o cenário 8, quando rodou, aparece na tabela como opcional e não entra na conta. `WF_KIT_REPO=dono/repo` abre a issue em outro repositório que não o de origem do kit.
 
 ## Paridade Cursor × Claude Code
 

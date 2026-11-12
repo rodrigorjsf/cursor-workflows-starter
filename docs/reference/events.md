@@ -211,6 +211,19 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 | `usageRuns` | `RunUsage[]` | não | O uso por run do agente, como o Cursor o reporta. |
 | `durationMs` | `number` | não | Duração da tentativa em milissegundos. |
 
+### `cloud-agent`
+
+Um agente na nuvem existe para a tentativa. O motor grava o id assim que o backend o tem, antes de a etapa terminar, para que um resume reencontre o agente que ainda roda em vez de criar outro. Só etapas na nuvem emitem este evento; o `step-end` repete o `agentId`, mas só quando a tentativa termina.
+
+Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
+
+| Campo | Tipo | Obrigatório | Descrição |
+| --- | --- | --- | --- |
+| `attemptId` | `string` | sim | A tentativa a que o agente pertence (o `attemptId` do `step-start`). |
+| `agentId` | `string` | sim | O id do agente no Cursor (`bc-…`). |
+| `reattached` | `true` | não | true = a tentativa reanexou a um agente que uma execução anterior, interrompida, deixou rodando: ele não foi criado agora. |
+| `snapshot` | `{ remote: string; branch: string }` | não | A branch de snapshot de que o agente parte e o remote para onde foi empurrada. Quem reanexa a apaga quando a etapa termina. Ausente quando a tentativa reanexou a um agente cuja branch o log não conhece. |
+
 ### `exec-start`
 
 Uma chamada de `ctx.exec` começou. É um nó do run, como uma etapa de agente: o comando fecha com um `exec-end` e a saída dele vai em eventos `content`.

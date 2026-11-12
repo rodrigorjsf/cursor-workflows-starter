@@ -383,6 +383,19 @@ export interface StepEndEvent extends EventBase, StepRef {
   durationMs?: number;
 }
 
+/** Um agente na nuvem existe para a tentativa. O motor grava o id assim que o backend o tem, antes de a etapa terminar, para que um resume reencontre o agente que ainda roda em vez de criar outro. Só etapas na nuvem emitem este evento; o `step-end` repete o `agentId`, mas só quando a tentativa termina. */
+export interface CloudAgentEvent extends EventBase, StepRef {
+  type: "cloud-agent";
+  /** A tentativa a que o agente pertence (o `attemptId` do `step-start`). */
+  attemptId: string;
+  /** O id do agente no Cursor (`bc-…`). */
+  agentId: string;
+  /** true = a tentativa reanexou a um agente que uma execução anterior, interrompida, deixou rodando: ele não foi criado agora. */
+  reattached?: true;
+  /** A branch de snapshot de que o agente parte e o remote para onde foi empurrada. Quem reanexa a apaga quando a etapa termina. Ausente quando a tentativa reanexou a um agente cuja branch o log não conhece. */
+  snapshot?: { remote: string; branch: string };
+}
+
 /** Uma chamada de `ctx.exec` começou. É um nó do run, como uma etapa de agente: o comando fecha com um `exec-end` e a saída dele vai em eventos `content`. */
 export interface ExecStartEvent extends EventBase, StepRef {
   type: "exec-start";
@@ -491,6 +504,7 @@ export type WorkflowEvent =
   | TurnEvent
   | ContentEvent
   | StepEndEvent
+  | CloudAgentEvent
   | ExecStartEvent
   | ExecEndEvent
   | MetricEvent

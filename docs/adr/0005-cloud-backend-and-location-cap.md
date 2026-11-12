@@ -41,7 +41,10 @@ enforced before any cloud code exists.
   corrected by follow-up sends in the same conversation, so workflow code does not change between locations.
 - **The lifecycle matches the local one.** The cloud agent id is stored in the event log as soon as it exists, so a resume
   or a crash reattaches to the running agent instead of starting another. Cancelling a run cancels its cloud agents, and the
-  client's two-hour wait limit is a reattach point, not a failure.
+  client's two-hour wait limit is a reattach point, not a failure. Two rules keep a reattach from paying twice: an agent that
+  cannot be reached is never replaced (the attempt fails and the next one reattaches again; only a "not found" from the cloud
+  means the agent is gone and a new one starts), and a wait that ends in error is checked with the cloud before the step is
+  failed, because the client gives up on a run that is still going.
 
 ## Consequences
 

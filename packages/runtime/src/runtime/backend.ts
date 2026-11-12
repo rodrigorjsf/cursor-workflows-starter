@@ -60,12 +60,28 @@ export interface StepOptions extends Pick<AgentCallOptions, "tools" | "disallowe
   writes: boolean;
   /** Re-prompts allowed, in the same conversation, when a structured step has not delivered a valid result. */
   schemaRetries: number;
+  /**
+   * A cloud agent that an earlier, interrupted attempt of this step left running (the process died, the run was resumed): the
+   * cloud backend picks it up instead of creating another, and the local backend never gets one. `snapshot` is the branch
+   * that attempt pushed, which this one cleans up.
+   */
+  reattach?: { agentId: string; snapshot?: SnapshotRef };
+}
+
+/** A snapshot branch of the worktree on a git remote: what a cloud agent starts from (see cloud-snapshot.ts). */
+export interface SnapshotRef {
+  remote: string;
+  branch: string;
 }
 
 /** What happens while an attempt runs. The engine counts and logs these; a backend only reports them. */
 export type AttemptEvent =
-  /** The agent exists. A token cap that was crossed while it was being created is applied now (see the contract above). */
-  | { type: "agent"; agentId: string }
+  /**
+   * The agent exists. A token cap that was crossed while it was being created is applied now (see the contract above). A cloud
+   * agent also says where it starts from, and whether it is one an interrupted attempt left running (`reattached`): the
+   * engine logs both with the id, so a resume can find the agent and clean up after it.
+   */
+  | { type: "agent"; agentId: string; snapshot?: SnapshotRef; reattached?: true }
   /** A piece of what the agent is saying. */
   | { type: "text"; delta: string }
   /** The agent finished one step (a model call and its tool calls). */
@@ -126,7 +142,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** SDK error codes that are about the account, not the step. Trying again does not help. */
 const ACCOUNT_ERROR_CODES = new Set(["plan_required"]);
 
-function classifyError(err: unknown): Extract<AttemptOutcome, { kind: "error" }> {
+export function classifyError(err: unknown): Extract<AttemptOutcome, { kind: "error" }> {
   const message = err instanceof Error ? err.message : String(err);
   const code = (err as { code?: unknown } | undefined)?.code;
   if (typeof code === "string" && ACCOUNT_ERROR_CODES.has(code)) return { kind: "error", reason: "account", message, code };
@@ -144,7 +160,7 @@ const SEND_GRACE_MS = 1000;
  * at the same time. With `graceMs`, an abort first waits that long for the value (a run that is about to be handed back
  * is cancelled by the caller, and waited for, instead of being left to stop on its own).
  */
-async function within<T>(signal: AbortSignal, promise: Promise<T>, late?: (value: T) => void, graceMs = 0): Promise<T> {
+export async function within<T>(signal: AbortSignal, promise: Promise<T>, late?: (value: T) => void, graceMs = 0): Promise<T> {
   let onAbort!: () => void;
   let abortedFirst = false;
   const aborted = new Promise<never>((_, reject) => {
@@ -278,6 +294,21 @@ class RunCanceller {
   }
 }
 
+/** How a conversation talks to the agent of an attempt. */
+export interface Exchange {
+  /** Sends `message` and waits for the answer. */
+  (message: string): Promise<RunResult>;
+  /** Waits for the answer of a run that is already going (the one an interrupted attempt left on a reattached agent). */
+  attach(run: Run): Promise<RunResult>;
+}
+
+/**
+ * How a backend waits for a run to end: by default `run.wait()`. A backend whose wait can end without the run having ended (a
+ * cloud run, whose client gives up after two hours) looks the run up again here and waits on what it finds. The run's
+ * cancellation goes by ids, so cancelling the run `runAttempt` holds cancels the one found later too.
+ */
+export type SettleRun = (run: Run) => Promise<RunResult>;
+
 /**
  * Runs one attempt around an agent, the same wherever the agent runs: creates it (an abort that arrives meanwhile disposes
  * it), reports it, hands `converse` the way to send a message and wait for the answer, and reports how the attempt ended.
@@ -288,7 +319,8 @@ export async function runAttempt(
   signal: AbortSignal,
   onEvent: (event: AttemptEvent) => void,
   createAgent: () => Promise<SDKAgent>,
-  converse: (exchange: (message: string) => Promise<RunResult>) => Promise<AttemptOutcome>,
+  converse: (exchange: Exchange) => Promise<AttemptOutcome>,
+  settle: SettleRun = (run) => run.wait(),
 ): Promise<AttemptResult> {
   const canceller = new RunCanceller(signal);
   const sendOpts: SendOptions = { onDelta: attemptDeltas(onEvent) };
@@ -302,13 +334,13 @@ export async function runAttempt(
     onEvent({ type: "agent", agentId: created.agentId });
     signal.throwIfAborted();
     let answered = false;
-    /** One message and its answer. An aborted attempt throws the signal's reason as soon as it knows, before anything else. */
-    const exchange = async (message: string): Promise<RunResult> => {
-      const run = await within(signal, sendWhenFree(created, message, sendOpts), (late) => void late.cancel().catch(() => {}), SEND_GRACE_MS);
+    /** The answer of the run `getRun` hands back. An aborted attempt throws the signal's reason as soon as it knows, before anything else. */
+    const answerOf = async (getRun: Promise<Run>): Promise<RunResult> => {
+      const run = await within(signal, getRun, (late) => void late.cancel().catch(() => {}), SEND_GRACE_MS);
       canceller.bind(run);
       signal.throwIfAborted();
       try {
-        const answer = await within(signal, run.wait());
+        const answer = await within(signal, settle(run));
         signal.throwIfAborted();
         if (!answered) model = answer.model?.id; // the first answer names the model the alias resolved to
         answered = true;
@@ -317,6 +349,8 @@ export async function runAttempt(
         canceller.bind(undefined); // finished or abandoned: an abort has nothing to cancel until the next send()
       }
     };
+    /** One message and its answer. */
+    const exchange: Exchange = Object.assign((message: string) => answerOf(sendWhenFree(created, message, sendOpts)), { attach: (run: Run) => answerOf(Promise.resolve(run)) });
     outcome = await converse(exchange);
   } catch (err) {
     outcome = signal.aborted ? { kind: "aborted", reason: signal.reason } : classifyError(err);
@@ -337,14 +371,16 @@ export type Delivery = { ok: true; value: unknown } | { ok: false; message: stri
 
 /**
  * Sends `message` and, for a structured step (`check` given), re-prompts in the SAME conversation, up to `schemaRetries`
- * times, until `check` accepts the answer. Says how the attempt ended.
+ * times, until `check` accepts the answer. Says how the attempt ended. With `running`, the conversation starts from that run's
+ * answer instead of sending `message`.
  */
 export async function converse(
-  exchange: (message: string) => Promise<RunResult>,
+  exchange: Exchange,
   message: string,
-  { schemaRetries, check, onEvent }: { schemaRetries: number; check?: (answer: RunResult) => Delivery; onEvent: (event: AttemptEvent) => void },
+  { schemaRetries, check, onEvent, running }: { schemaRetries: number; check?: (answer: RunResult) => Delivery; onEvent: (event: AttemptEvent) => void; running?: Run },
 ): Promise<AttemptOutcome> {
-  let answer = await exchange(message);
+  // A reattached agent already has a run going: its answer is the first one, and `message` is not sent again.
+  let answer = await (running ? exchange.attach(running) : exchange(message));
   let delivery = check?.(answer);
   for (let tries = schemaRetries; check && delivery && !delivery.ok && answer.status === "finished" && tries > 0; tries--) {
     onEvent({ type: "reprompt", message: delivery.reprompt });

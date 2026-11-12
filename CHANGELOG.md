@@ -18,6 +18,17 @@
   `step-start` e o `step-end` ganham `location`, e a configuração efetiva ganha `cloud.remote` e a `location` de cada
   papel. O `AgentBackend` ganhou o evento `warning` e o campo `writes`, e `runAttempt` e `converse` guardam o que os dois
   backends repartem.
+- **Ciclo de vida das etapas na nuvem: reanexar, cancelar e o limite de espera.** O motor grava o id do cloud agent no log
+  (evento novo `cloud-agent`, com a branch de snapshot de que o agente parte) assim que o agente existe. Um resume depois de
+  um crash reanexa ao agente que ainda roda (`Agent.resume`, `Agent.listRuns`) em vez de criar outro: espera o run que ele já
+  tinha, sem reenviar o prompt, fecha no log a tentativa morta, cobra o uso do agente uma só vez e apaga a branch de snapshot
+  que o crash deixou. Um agente que a nuvem não conhece mais é trocado por um novo, com aviso; qualquer outra falha ao
+  alcançá-lo falha só a tentativa e a próxima reanexa de novo. Cancelar o run cancela os runs dele na nuvem, o reanexado
+  inclusive. O limite de espera de duas horas do cliente do SDK deixou de falhar a etapa: o backend pergunta à nuvem
+  (`Agent.getRun`) e espera de novo pelo run que continua. Novo workflow de verificação contra a API real,
+  `scripts/verify/verify-cloud.ts` ([8.2 §14](docs/research/verificacoes-locais.md)), e o cenário 8 (opcional) do assistente
+  de validação. O `AgentBackend` ganhou `StepOptions.reattach`, o evento `agent` ganhou `snapshot` e `reattached`, e
+  `runAttempt` aceita a espera do backend.
 - **Dashboard: log da etapa, cancelar um run, comando de resume e o cenário 7 da validação.** Clicar num nó do grafo (ou
   Enter nele) abre ao lado dele o log da etapa, ao vivo: por tentativa, o prompt, o que o agente disse, as chamadas de tool
   com a saída de cada uma, ou, num comando de `ctx.exec`, a linha de comando e a saída com `stdout` e `stderr` apartados; a

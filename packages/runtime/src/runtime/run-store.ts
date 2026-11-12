@@ -14,7 +14,7 @@ import { dirname, join } from "node:path";
 import { EVENT_SCHEMA_VERSION, type RunStartEvent, type RunStatus, type WorkflowEvent, isContentLine } from "./events.js";
 import { Journal } from "./journal.js";
 import { isAlive } from "./pid.js";
-import { type Ledger, replayLedger } from "./projection.js";
+import { type InterruptedCloudStep, type Ledger, interruptedCloudSteps, replayLedger } from "./projection.js";
 import { type Redactor, createRedactor } from "./redaction.js";
 import { type RetentionPolicy, pruneContent } from "./retention.js";
 import { stateDir } from "./state.js";
@@ -240,6 +240,11 @@ export class RunStore {
    * failed attempts included. The budget starts from here, so a resume never starts from zero.
    */
   readonly ledger: Ledger;
+  /**
+   * The cloud steps an earlier execution left without an end, by `stepId`, replayed from the event log when the store was
+   * opened. A resume reattaches to their agents instead of creating new ones.
+   */
+  readonly interruptedCloud: ReadonlyMap<string, InterruptedCloudStep>;
   /** Which files ended in a torn line (a crash mid-append) when the run was opened. */
   readonly tornTail: { events: boolean; journal: boolean };
   private readonly dir: string;
@@ -262,6 +267,7 @@ export class RunStore {
       const { events } = readEventLog(this.eventsFile, { content: false });
       this.previousStart = events.findLast((e): e is RunStartEvent => e.type === "run-start");
       this.ledger = replayLedger(events);
+      this.interruptedCloud = interruptedCloudSteps(events);
     } catch (err) {
       this.releaseLock();
       throw err;
