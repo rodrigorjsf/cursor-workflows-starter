@@ -41,7 +41,7 @@ _Em preparação._
 
 ### Parte 6 · Referência
 
-_Em preparação._
+- [6.1 · Referência de eventos](reference/events.md): os campos de cada evento do log de eventos do run (`events.jsonl`), gerada do tipo
 
 ### Parte 7 · Decisões (ADRs)
 

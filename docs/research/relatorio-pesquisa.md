@@ -601,4 +601,4 @@ condicional** sobre o Cursor SDK. Esse é o espaço que o starter kit ocupa.
 
 ---
 
-[← Anterior: 5.3 · Observabilidade: custo, tokens, contexto e eficiência](../operating/03-observabilidade.md) · [Índice](../README.md) · [Próximo: 8.2 · Verificações locais (2026-11-11) →](verificacoes-locais.md)
+[← Anterior: 6.1 · Referência de eventos](../reference/events.md) · [Índice](../README.md) · [Próximo: 8.2 · Verificações locais (2026-11-11) →](verificacoes-locais.md)

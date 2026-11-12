@@ -13,6 +13,11 @@ import ts from "typescript";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const EVENTS_SOURCE = join(ROOT, "packages", "runtime", "src", "runtime", "events.ts");
 export const EVENTS_PAGE = join(ROOT, "docs", "reference", "events.md");
+/** The page's label in the book index (docs/README.md); its H1 must equal it. */
+const BOOK_LABEL = "6.1 · Referência de eventos";
+/** The footer `npm run docs:check` expects: previous and next chapter in index order. Update it when they change. */
+const BOOK_FOOTER =
+  "[← Anterior: 5.3 · Observabilidade: custo, tokens, contexto e eficiência](../operating/03-observabilidade.md) · [Índice](../README.md) · [Próximo: 8.1 · Cursor SDK como motor de workflows determinísticos: relatório de pesquisa →](../research/relatorio-pesquisa.md)";
 
 interface Field {
   name: string;
@@ -120,7 +125,7 @@ export function generateEventsReference(sourceText: string): string {
   };
 
   const out: string[] = [
-    "# Referência de eventos",
+    `# ${BOOK_LABEL}`,
     "",
     `<!-- Gerado por scripts/events-reference.ts a partir de packages/runtime/src/runtime/events.ts. Não edite à mão: rode \`npm run docs:events\`. O \`npm test\` falha se esta página divergir do código. -->`,
     "",
@@ -153,6 +158,8 @@ export function generateEventsReference(sourceText: string): string {
       else out.push("```ts", `type ${a.name} = ${a.text};`, "```", "");
     }
   }
+  // The page is chapter 6.1 of the docs book, so it ends with the previous/next footer the docs check demands.
+  out.push("---", "", BOOK_FOOTER);
   return `${out.join("\n").trimEnd()}\n`;
 }
 

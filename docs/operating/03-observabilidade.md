@@ -305,4 +305,4 @@ Para validar a entrega depois, por exemplo quando o PR é aceito ou recusado, us
 
 ---
 
-[← Anterior: 5.2 · Custos, cache e boas práticas](02-custos-e-cache.md) · [Índice](../README.md) · [Próximo: 8.1 · Cursor SDK como motor de workflows determinísticos: relatório de pesquisa →](../research/relatorio-pesquisa.md)
+[← Anterior: 5.2 · Custos, cache e boas práticas](02-custos-e-cache.md) · [Índice](../README.md) · [Próximo: 6.1 · Referência de eventos →](../reference/events.md)

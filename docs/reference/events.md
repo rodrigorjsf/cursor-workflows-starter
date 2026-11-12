@@ -1,4 +1,4 @@
-# Referência de eventos
+# 6.1 · Referência de eventos
 
 <!-- Gerado por scripts/events-reference.ts a partir de packages/runtime/src/runtime/events.ts. Não edite à mão: rode `npm run docs:events`. O `npm test` falha se esta página divergir do código. -->
 
@@ -214,3 +214,7 @@ Por que uma tentativa de etapa falhou: estourou o tempo, o run do agente termino
 ```ts
 type ErrorKind = "timeout" | "run-error" | "schema" | "rate-limit" | "exception";
 ```
+
+---
+
+[← Anterior: 5.3 · Observabilidade: custo, tokens, contexto e eficiência](../operating/03-observabilidade.md) · [Índice](../README.md) · [Próximo: 8.1 · Cursor SDK como motor de workflows determinísticos: relatório de pesquisa →](../research/relatorio-pesquisa.md)
