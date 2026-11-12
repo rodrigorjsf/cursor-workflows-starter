@@ -47,12 +47,12 @@ Estados e transições (o ciclo de vida de um job, de uma etapa, de um run) usam
 ```mermaid
 stateDiagram-v2
   [*] --> running
-  running --> done: o workflow devolve o resultado
-  running --> failed: erro ou coração parado
+  running --> finished: o workflow devolve o resultado
+  running --> failed: erro ou heartbeat parado
   running --> cancelled: cancelamento
   failed --> running: resume
   cancelled --> running: resume
-  done --> [*]
+  finished --> [*]
 ```
 
 ## Boas práticas

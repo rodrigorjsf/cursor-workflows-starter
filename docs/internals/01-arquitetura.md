@@ -125,6 +125,31 @@ flowchart TB
     cada texto em 32768 caracteres. Ao iniciar um run, o `text` dos runs do repositório fora da retenção (os últimos 30
     runs ou 14 dias) é apagado; o resto do log fica.
 
+## Ciclo de vida de um job
+
+Um job é uma execução de um run, num processo destacado. O status que `wait_workflow`, `get_workflow_status` e
+`wf status` devolvem é projetado do log de eventos do run e do heartbeat do registro do job:
+
+```mermaid
+stateDiagram-v2
+  [*] --> running: start_workflow ou wf start
+  running --> finished: run-end finished, o workflow devolveu o resultado
+  running --> failed: run-end failed, etapa que falhou ou teto atingido
+  running --> failed: processo morto sem run-end
+  running --> failed: heartbeat parado há mais de 30 s
+  running --> cancelled: cancel_workflow, wf cancel, SIGINT ou SIGTERM
+  failed --> running: resume com resumeRunId, novo job no mesmo run
+  cancelled --> running: resume com resumeRunId, novo job no mesmo run
+  finished --> [*]
+```
+
+- `running` dura enquanto o log não tem o `run-end` da execução e o heartbeat está fresco.
+- Um job recusado antes de o run começar (args inválidos, configuração inválida, run já em execução) aparece como
+  `failed`, com o motivo.
+- Com o heartbeat parado, o processo pode estar vivo e segurando o lock do run. Um resume recebe `already running` até
+  `cancel_workflow` encerrar o processo com `SIGKILL`.
+- O resume não repete as etapas que estão no journal, e o gasto parte do que o log já registra.
+
 ## O que o runtime garante
 
 | Garantia | Mecanismo |

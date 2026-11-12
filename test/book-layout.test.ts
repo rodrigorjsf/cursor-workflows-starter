@@ -130,3 +130,15 @@ test("the diagrams in the repo follow the diagram conventions", () => {
   }
   assert.ok(blocks >= 5, `expected the book's diagrams, found ${blocks}`);
 });
+
+test("a chapter outside the conventions draws the job lifecycle as a state machine, with the statuses the runtime reports", () => {
+  const statuses = ["running", "finished", "failed", "cancelled"]; // RunStatus plus `running`, as wait_workflow returns them
+  const machines = markdownFiles(ROOT)
+    .filter((file) => file.startsWith("docs/") && !file.startsWith("docs/contributing/"))
+    .flatMap((file) => parseMarkdown(read(file)).mermaid.map((block) => block.source))
+    .filter((source) => /^\s*stateDiagram-v2\b/.test(source));
+  assert.ok(
+    machines.some((source) => statuses.every((s) => new RegExp(`\\b${s}\\b`).test(source))),
+    "no stateDiagram-v2 in the book shows running, finished, failed and cancelled",
+  );
+});
