@@ -277,7 +277,8 @@ async function main(): Promise<number> {
       }
     }
     default:
-      process.stderr.write("usage: wf <login|whoami|models|list|init|doctor|upgrade|config|run|start|status|wait|cancel|jobs|gc|stats|metrics> ...\n");
+      // Still "uso:": test/cli-commands.ts reads the command list from this line by that word. Change both together.
+      process.stderr.write("uso: wf <login|whoami|models|list|init|doctor|upgrade|config|run|start|status|wait|cancel|jobs|gc|stats|metrics> ...\n");
       return 2;
   }
 }
