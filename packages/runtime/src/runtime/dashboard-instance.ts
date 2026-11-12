@@ -35,6 +35,8 @@ export function dashboardPort(): number {
 export const dashboardUrl = (port: number): string => `http://${DASHBOARD_HOST}:${port}`;
 
 export const dashboardPidPath = (): string => join(userDir(), "dashboard.pid");
+/** Where the dashboard keeps the bundle of its web app, one folder per content hash (see packages/dashboard/src/app-bundle.ts). */
+export const dashboardCacheDir = (): string => join(userDir(), "dashboard-cache");
 const dashboardLogPath = (): string => join(userDir(), "dashboard.log");
 
 /** Whether starting the dashboard is allowed: `WF_DASH_AUTOSTART=off`, or `dashboard.autoStart: false` in the global config, forbids it. */

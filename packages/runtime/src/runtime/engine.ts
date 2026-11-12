@@ -229,6 +229,7 @@ function announceRun<A>(o: {
     workflowHash,
     argsHash: sha(JSON.stringify(args ?? null)).slice(0, 16),
     repo: o.repo,
+    phases: def.meta.phases?.map((p) => p.title),
     jobId: opts.jobId,
     config: resolved.config,
     provenance: resolved.provenance,
@@ -1139,6 +1140,10 @@ async function executeRun<A, R>(
     },
     log(message) {
       emit({ type: "log", message });
+    },
+    card({ title, subtitle, links, badges }) {
+      // Field by field, copied: an object with more than the card's fields, or one the workflow edits afterwards, changes nothing in the log.
+      emit({ type: "card", title, subtitle, links: links?.map(({ label, url }) => ({ label, url })), badges: badges && [...badges] });
     },
     metric(name, value) {
       emit({ type: "metric", name, value });

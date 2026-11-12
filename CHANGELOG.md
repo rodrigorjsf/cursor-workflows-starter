@@ -4,6 +4,18 @@
 
 ### Adicionado
 
+- **Dashboard: o app, o quadro (Board) e `ctx.card`.** A página inicial do dashboard passa a ser um app em React com três
+  menus, Runs, Board e Metrics (o painel de métricas de antes, no menu Metrics). O app é empacotado com o esbuild quando o
+  dashboard sobe, guardado por hash do conteúdo em `~/.cursor-workflows/dashboard-cache/` e servido pelo próprio
+  dashboard: sem CDN, sem passo de build, com a política de conteúdo `script-src 'self'`. O Board tem um quadro por
+  workflow, com as fases do workflow (agora declaradas no `run-start`, campo `phases`) e as colunas Awaiting approval, Done,
+  Failed e Cancelled, e um cartão por run, que muda de coluna sozinho enquanto o run anda (`GET /api/board`). Um workflow
+  decide o que o cartão mostra com `ctx.card({ title, subtitle, links, badges })` (novo evento `card`; o quadro mostra o
+  último de cada run). O `implement-issue` põe o cartão no ar depois da triagem, com `#<n> <título>` e o tier, e o atualiza
+  na entrega, com a branch e o link da PR; o link da PR mostra se ela está aberta, mesclada ou fechada, perguntado ao `gh` em
+  segundo plano e guardado em cache (o quadro nunca espera pelo GitHub). `GET /api/runs` traz agora `phases`, `outcome` e
+  `card` de cada run, e o servidor só relê o log de um run quando ele cresceu. O pacote do dashboard ganha as dependências
+  `react`, `react-dom` e `esbuild`; o runtime não ganha nenhuma.
 - **Dashboard local: servidor, API de runs e início automático.** O dashboard agora é o pacote `packages/dashboard/`
   (`@cursor-workflows/dashboard`), separado do runtime: as dependências dele nunca entram nele, e ele só importa do runtime
   `@cursor-workflows/runtime/observe`. É um só por usuário, para os runs de todos os repositórios: `GET /api/runs` lista os

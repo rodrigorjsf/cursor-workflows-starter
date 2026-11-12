@@ -194,6 +194,21 @@ export interface Budget {
   usage(): UsageTotals;
 }
 
+/**
+ * What a workflow puts on its run's card in the dashboard's Board. The Board shows the latest card of each run, so calling
+ * `ctx.card` again updates it.
+ */
+export interface WorkflowCard {
+  /** The headline: an issue's number and title, a ticket id... */
+  title: string;
+  /** One line under the headline. */
+  subtitle?: string;
+  /** Links on the card. A link to a GitHub pull request also shows the pull request's state (open, merged or closed). Only `http:` and `https:` links are shown. */
+  links?: Array<{ label: string; url: string }>;
+  /** Short labels, like a difficulty tier. */
+  badges?: string[];
+}
+
 export interface WorkflowContext<A = unknown> {
   readonly args: A;
   readonly runId: string;
@@ -227,6 +242,12 @@ export interface WorkflowContext<A = unknown> {
   exec(command: string, args?: string[], opts?: ExecOptions): Promise<ExecResult>;
   phase(title: string): void;
   log(message: string): void;
+  /**
+   * Sets what the run's card shows in the dashboard's Board (see `WorkflowCard`). The Board keeps the latest card of each
+   * run: call it again when something the card shows changes (a pull request opened, a tier decided). A run that never
+   * calls it still has a card, with the run id as its title.
+   */
+  card(card: WorkflowCard): void;
   /**
    * Métrica de negócio do run (vai para a tabela `metrics`): resultado de testes, achados de review, tamanho do
    * diff, dificuldade (tier)… É o que permite medir custo por entrega e controlar a dificuldade nas comparações.

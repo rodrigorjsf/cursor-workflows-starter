@@ -5,6 +5,7 @@
 // at metadata fields only, and `content` events are not read at all.
 
 import type { ExecEndEvent, RunStatus, WorkflowEvent } from "./events.js";
+import { type OutcomeClass, outcomeClass } from "./outcome.js";
 import type { UsageTotals } from "./workflow.js";
 
 /** How a message tells the reader to continue a run that stopped without finishing. The `run-workflow` skill matches the `resumeRunId="..."` part. */
@@ -115,6 +116,7 @@ function recentLine(e: WorkflowEvent): string | undefined {
       return oneLine(`· ${e.name} = ${e.value}`);
     case "run-start":
     case "run-end":
+    case "card": // the Board shows it; it is not progress
     case "group-start":
     case "group-end":
     case "turn":
@@ -129,6 +131,8 @@ export interface ExecutionState {
   startedAt: string;
   /** Set when the execution wrote its `run-end`. */
   finishedAt?: string;
+  /** How the execution's ending is classed (see `outcomeClass`). Set with `finishedAt`. */
+  outcome?: OutcomeClass;
   /** `running` until the execution writes its `run-end`. A caller that knows the process is gone decides what that means. */
   status: "running" | RunStatus;
   phase?: string;
@@ -162,6 +166,7 @@ function projectFrom(events: readonly WorkflowEvent[], start: number): Execution
     if (e.type === "run-end") {
       state.status = e.status;
       state.finishedAt = e.ts;
+      state.outcome = outcomeClass(e.status, e.outcomeStatus);
       state.result = e.result;
       state.error = e.error;
     }
@@ -185,4 +190,91 @@ export function projectExecution(events: readonly WorkflowEvent[], jobId: string
 export function projectLatestExecution(events: readonly WorkflowEvent[]): ExecutionState | undefined {
   const start = events.findLastIndex((e) => e.type === "run-start");
   return start < 0 ? undefined : projectFrom(events, start);
+}
+
+/** A link on a run's card. */
+export interface RunCardLink {
+  label: string;
+  /** An `http:` or `https:` URL: anything else in a log is dropped. */
+  url: string;
+}
+
+/** What a run's card shows on the Board: the latest `card` event of the run, made safe to display. */
+export interface RunCard {
+  title: string;
+  subtitle?: string;
+  links: RunCardLink[];
+  badges: string[];
+}
+
+/** The most a card carries. A log is written by workflow code and read by a browser: the read side bounds what it hands over. */
+const CARD_MAX = { title: 200, subtitle: 200, label: 80, url: 2048, badge: 40, links: 8, badges: 8 };
+/** The most a phase title and a run's phase list carry, for the same reason. */
+const PHASES_MAX = { title: 80, count: 30 };
+
+const clip = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+const isText = (value: unknown): value is string => typeof value === "string" && value.trim() !== "";
+
+/** Whether `url` is an absolute `http:` or `https:` URL. A card link is shown as a link to click: `javascript:` and `data:` never are. */
+function isWebUrl(url: string): boolean {
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/** The card a `card` event describes, or undefined when it has no usable title. Log content is data, not code: types are checked, not assumed. */
+function parseCardEvent(event: unknown): RunCard | undefined {
+  if (typeof event !== "object" || event === null) return undefined;
+  const { title, subtitle, links, badges } = event as Record<string, unknown>;
+  if (!isText(title)) return undefined;
+  const card: RunCard = { title: clip(title.trim(), CARD_MAX.title), links: [], badges: [] };
+  if (isText(subtitle)) card.subtitle = clip(subtitle.trim(), CARD_MAX.subtitle);
+  for (const link of Array.isArray(links) ? links : []) {
+    const { label, url } = (typeof link === "object" && link !== null ? link : {}) as Record<string, unknown>;
+    if (card.links.length < CARD_MAX.links && isText(label) && isText(url) && url.length <= CARD_MAX.url && isWebUrl(url)) {
+      card.links.push({ label: clip(label.trim(), CARD_MAX.label), url });
+    }
+  }
+  for (const badge of Array.isArray(badges) ? badges : []) {
+    if (card.badges.length < CARD_MAX.badges && isText(badge)) card.badges.push(clip(badge.trim(), CARD_MAX.badge));
+  }
+  return card;
+}
+
+/**
+ * The card of a run: the latest `card` event of the log, whichever execution wrote it (a resume that sets no card of its own
+ * is still the same card). An event with no usable title is skipped, so the card before it stays. Undefined when the workflow
+ * never set one.
+ */
+export function latestCard(events: readonly WorkflowEvent[]): RunCard | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i]!;
+    if (event.type !== "card") continue;
+    const card = parseCardEvent(event);
+    if (card) return card;
+  }
+  return undefined;
+}
+
+/** A phase title as the read side hands it over: cut to what a column title may hold. A run's `phase` and its `phases` both go through it, so they always agree. */
+export const boundedPhase = (title: string): string => clip(title, PHASES_MAX.title);
+
+/**
+ * The phases of a run, in order: the ones its workflow declared (the latest `run-start` that lists them; logs of older kits
+ * list none), then any other phase the run entered. The Board's columns.
+ */
+export function runPhases(events: readonly WorkflowEvent[]): string[] {
+  const phases: string[] = [];
+  const add = (title: unknown) => {
+    if (!isText(title) || phases.length >= PHASES_MAX.count) return;
+    const bounded = boundedPhase(title);
+    if (!phases.includes(bounded)) phases.push(bounded);
+  };
+  const declared = events.findLast((e) => e.type === "run-start" && Array.isArray(e.phases));
+  if (declared?.type === "run-start") for (const title of declared.phases ?? []) add(title);
+  for (const e of events) if (e.type === "phase") add(e.title);
+  return phases;
 }

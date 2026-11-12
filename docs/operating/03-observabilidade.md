@@ -242,7 +242,8 @@ o encerra.
 
 | Rota | Resposta |
 |---|---|
-| `/api/runs?limit=` | `{runs}`: os runs de todos os repositórios, do mais novo ao mais antigo (até 200, no máximo 1000), cada um com `status` (`running`, `finished`, `failed`, `cancelled` ou `missing`), `repo`, `workflow`, `phase`, `startedAt`, `finishedAt`, `error`, `executions` e o gasto |
+| `/api/runs?limit=` | `{runs}`: os runs de todos os repositórios, do mais novo ao mais antigo (até 200, no máximo 1000), cada um com `status` (`running`, `finished`, `failed`, `cancelled` ou `missing`), `repo`, `workflow`, `phase`, `phases`, `outcome`, `card`, `startedAt`, `finishedAt`, `error`, `executions` e o gasto |
+| `/api/board?limit=` | `{boards}`: um quadro por workflow, com as `columns` e os `cards` (um por run), cada card já na coluna do estado do run: veja [O quadro](#o-quadro-board) |
 | `/api/runs/<runId>` | o mesmo run com `recent` (as últimas linhas de andamento), `result` e `usage` |
 | `/api/runs/<runId>/events` | stream de eventos (SSE) do log do run, ao vivo: veja [Acompanhar um run ao vivo](#acompanhar-um-run-ao-vivo) |
 | `/api/runs/<runId>/steps/<stepId>/content` | o conteúdo de uma etapa: prompt, mensagens do agente, chamadas de tool e saída de comandos |
@@ -289,11 +290,25 @@ vazia; um run ou uma etapa que o log não tem é `404`.
 Um log que o dashboard não consegue ler ou projetar (danificado, ou com eventos que o código não entende) deixa só aquele
 run como `missing`, com o motivo em `error`; os outros runs e o stream de eventos dele continuam funcionando.
 
-Hoje a página inicial (`/`) é a das métricas:
+### O app
+
+A página inicial (`/`) é um só app, em React, com três menus (o menu é o `#` do endereço: `#/runs`, `#/board`,
+`#/metrics`; sem `#`, abre o Board):
+
+- **Runs:** os runs de todos os repositórios, do mais novo ao mais antigo, com status, fase, duração e custo;
+- **Board:** o quadro, descrito abaixo;
+- **Metrics:** o painel de custo e eficiência, o mesmo de antes (a tela abaixo).
+
+O app é empacotado com o esbuild **quando o dashboard sobe** (nenhum passo de build para quem usa o kit), e o resultado
+fica guardado por hash do conteúdo em `~/.cursor-workflows/dashboard-cache/<hash>/`: o hash cobre os arquivos de
+`packages/dashboard/ui/` e as versões do React e do esbuild, então uma subida com os mesmos fontes só lê dois arquivos, e
+qualquer mudança gera um build novo (só o atual é mantido). O dashboard serve o script e a folha de estilo ele mesmo
+(`/assets/app.<hash>.js` e `.css`, com cache de um ano, porque o nome muda com o conteúdo). Se os fontes não compilam, o
+dashboard não sobe e diz o motivo.
 
 ![Dashboard com dados sintéticos gerados pelos testes](../img/dashboard.png)
 
-*Captura com dados sintéticos (SDK falso), não com uso real.*
+*Captura do painel Metrics com dados sintéticos (SDK falso), não com uso real.*
 
 - **KPIs:** runs, custo, tokens, parcela em cache, tentativas falhas, etapas sem API, custos a reconciliar;
 - **Painel 1:** gasto diário por workflow;
@@ -302,13 +317,53 @@ Hoje a página inicial (`/`) é a das métricas:
 - **Painel 4:** desperdício e economia;
 - **Tabela de modelos.**
 
+### O quadro (Board)
+
+O Board é um kanban com **um quadro por workflow** (o do run mais novo primeiro) e um cartão por run. As colunas de um
+quadro são as fases do workflow, na ordem em que ele as declara em `meta.phases` (o `run-start` do log as traz em
+`phases`; um log de uma versão antiga, sem isso, usa as fases que os runs percorreram), e depois quatro colunas fixas. Um
+workflow que não declara nem percorre fase alguma tem uma coluna só, `Running`. Cada run fica na coluna do seu estado:
+
+| Estado do run | Coluna |
+|---|---|
+| rodando | a fase em que está (a primeira, antes de entrar em alguma) |
+| terminou e o workflow devolveu `seams-proposed` ou `pending` | **Awaiting approval** |
+| terminou entregue (`done`, `ok`…) ou com um resultado que não diz um status | **Done** |
+| terminou com outro status (`tests-failed`, `baseline-red`…) | **Failed** |
+| terminou com erro, estourou o teto, ou o processo morreu sem terminá-lo | **Failed** |
+| cancelado | **Cancelled** |
+
+Um run cujo log não dá para ler (`missing`) não tem estado e fica fora do quadro; o menu Runs o mostra, com o motivo. A
+classe de cada término é a mesma do [§6](#6-instrumentando-um-workflow). O quadro lê `GET /api/board` a cada 2 segundos, e o
+cartão muda de coluna logo depois de o run mudar de fase. O servidor só relê o log de um run quando ele cresceu (o tamanho
+ou a data de modificação mudou), então os runs terminados não custam nada por consulta.
+
+**O que o cartão mostra** é o workflow que decide, com `ctx.card({ title, subtitle?, links?, badges? })`. Cada chamada
+grava um evento `card` ([referência de eventos](../reference/events.md#card)), e o quadro mostra o **último** de cada run,
+de qualquer execução (um resume que não chama `ctx.card` continua com o cartão do run). Sem nenhum, o título é o id do run.
+Todo cartão mostra também o repositório, o custo e a duração do run, que vêm do log e não do workflow. O que o log diz de
+um cartão não é confiável: o dashboard só mostra links `http:` e `https:`, descarta itens do tipo errado e corta os
+textos (título e subtítulo em 200 caracteres, no máximo 8 links e 8 rótulos).
+
+O `implement-issue` põe o cartão no ar depois da triagem (`#<n> <título da issue>` e o tier) e o atualiza na entrega, com
+a branch e o link da PR.
+
+**Estado da PR.** Um link de cartão para uma pull request do GitHub (`https://github.com/<dono>/<repo>/pull/<n>`, exatamente
+esse formato) mostra se ela está `open`, `merged` ou `closed`. O servidor pergunta ao `gh pr view <url> --json state` (a
+sessão do `gh` é a do usuário) em segundo plano, no máximo quatro por vez, e **o quadro nunca espera por isso**: a primeira
+resposta traz o link sem o estado, e a seguinte, o estado. A resposta é guardada por 30 segundos enquanto a PR está
+aberta, 1 hora depois de mesclada ou fechada, e 5 minutos quando o `gh` não consegue responder (sem login, sem rede, sem
+`gh`); uma consulta que falha mantém o último estado conhecido. Só a URL exata de uma PR do github.com vai ao `gh`.
+
 Segurança:
 
 - escuta só em `127.0.0.1`;
 - recusa `Host` diferente de `127.0.0.1` e `localhost` (proteção contra DNS rebinding);
 - aceita só `GET` e `HEAD`, e não envia cabeçalhos CORS;
 - abre o banco em modo leitura;
-- não usa CDN nem bibliotecas: funciona offline e em rede corporativa restrita.
+- não carrega nada de fora: sem CDN, sem fontes nem imagens remotas, e a política de conteúdo da página é
+  `default-src 'self'; script-src 'self'; style-src 'self'`, sem código inline: funciona offline e em rede corporativa
+  restrita.
 
 Verificado em 2026-11-11 no WSL2: escuta só em `127.0.0.1`, responde 403 a um `Host` estranho, não envia
 cabeçalhos CORS e não é alcançável pelo IP do WSL.
@@ -344,6 +399,9 @@ return { status: "tests-failed", ... };      // qualquer outro status = o workfl
 
 Para validar a entrega depois, por exemplo quando o PR é aceito ou recusado, use
 `wf metrics mark <runId> accepted|rejected`.
+
+**Cartão no dashboard.** `ctx.card({ title, subtitle, links, badges })` define o que o cartão do run mostra no Board do
+[dashboard](#o-quadro-board) (a issue e o tier, o link da PR…). Chame de novo quando algo mudar: o quadro mostra o último.
 
 **Labels:** dê `label` explícito às etapas (`"planejar"`, `"implementar"`). Sem label, o runtime usa
 `step-<hash>`, para não vazar conteúdo do prompt. Mas aí as análises por etapa ficam ilegíveis.

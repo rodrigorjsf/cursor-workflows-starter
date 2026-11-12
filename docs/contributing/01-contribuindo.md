@@ -18,7 +18,8 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 ├── CLAUDE.md               # guia canônico do mantenedor, em inglês (AGENTS.md é um link simbólico para ele)
 ├── packages/
 │   ├── dashboard/          # o dashboard local (workspace npm @cursor-workflows/dashboard): servidor HTTP só de leitura sobre os runs e as métricas
-│   │   ├── src/            # server.ts (API JSON e stream SSE), main.ts (o processo), metrics-page.ts (a página)
+│   │   ├── src/            # server.ts (API JSON e stream SSE), main.ts (o processo), board.ts (as colunas do quadro), pr-state.ts (estado das PRs, pelo `gh`), app-bundle.ts (empacota o app com esbuild)
+│   │   ├── ui/             # o app web em React (menus Runs, Board e Metrics); o esbuild o empacota quando o dashboard sobe
 │   │   └── test/           # testes do servidor por HTTP, sobre diretórios de run de mentira
 │   └── runtime/            # o produto (workspace npm @cursor-workflows/runtime)
 │       ├── src/
