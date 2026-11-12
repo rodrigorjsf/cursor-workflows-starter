@@ -212,6 +212,17 @@ test("the snapshot holds the tracked files as they are on disk and the untracked
   assert.deepEqual(Object.keys(files!).sort(), [".gitignore", "a.txt", "b.txt", "untracked.txt"]);
 });
 
+test("a run id that is not a valid git ref name still gives a snapshot branch the remote accepts", async () => {
+  for (const runId of ["we..ird.run.", ".hidden", "-dash", "has space/and:colon", "ends.lock", "", "ünï"]) {
+    const seen: string[] = [];
+    script.push(() => (seen.push(...remoteBranches(remote)), { result: "ok" }));
+    const result = await createCloudBackend({ remote: "origin", runId }).run("p", options(), new AbortController().signal, () => {});
+    assert.equal(outcomeOf(result).kind, "finished", `run id ${JSON.stringify(runId)}: ${JSON.stringify(outcomeOf(result))}`);
+    assert.match(seen[0]!, /^wf\/cloud-snapshot\/[A-Za-z0-9][A-Za-z0-9._-]*\/[0-9a-f]{8}$/, `run id ${JSON.stringify(runId)}`);
+    assert.equal(seen[0]!.includes(".."), false);
+  }
+});
+
 test("the repository URL a cloud agent gets is the code host's web URL", () => {
   for (const [remoteUrl, url] of [
     ["git@github.com:org/repo.git", "https://github.com/org/repo"],

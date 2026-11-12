@@ -24,8 +24,10 @@ enforced before any cloud code exists.
   enable cloud execution. Sending code to a cloud VM is the machine owner's decision.
 - **A declared capability per role.** Each role in a workflow's metadata declares `ok`, `read-only` or `never`: whether
   its step can run in the cloud at all, and whether only without writing.
-- **Rejected before spending.** The config resolver rejects `cloud` on a role declared `never`, and cloud writes on a role
-  declared `read-only`, with a message that names the role. A misconfiguration fails before a token is spent.
+- **Rejected before spending.** The config resolver rejects `cloud` on a role declared `never`, with a message that names the
+  role. Whether a step writes is a fact of the step (its `tools`), which the config cannot see, so a cloud step that can write
+  on a role declared `read-only` is rejected by the engine, with the same kind of message, before the step's first attempt
+  starts. Either way a misconfiguration fails before a token is spent on the step.
 - **Agent execution sits behind a seam.** A cloud backend implements the same `AgentBackend` interface as the local one
   (the internal interface is `packages/runtime/src/runtime/backend.ts`; [spec #3](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/3)
   makes it a public extension point), so

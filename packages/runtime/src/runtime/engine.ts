@@ -893,8 +893,9 @@ async function executeRun<A, R>(
       tools: o.tools,
       disallowedTools: o.disallowedTools,
       agents: o.agents,
-      // O guarda vem antes: um mcpServers da etapa com o mesmo nome continua podendo substituí-lo de propósito. Na nuvem não
-      // há guarda: ele é um comando desta máquina, e as camadas de arquivo (onde o servidor do projeto mora) não valem lá.
+      // O guarda vem antes: um mcpServers da etapa com o mesmo nome continua podendo substituí-lo de propósito.
+      // In the cloud there is no guard: it is a command of this machine, which a VM cannot run, and the VM could not reach
+      // this machine's `workflows` server either.
       mcpServers: location === "cloud" ? o.mcpServers : withGuard(nestedGuard(sources), o.mcpServers),
       cwd: stepCwd,
       settingSources: sources,

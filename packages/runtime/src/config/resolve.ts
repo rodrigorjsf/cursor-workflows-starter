@@ -269,16 +269,17 @@ function checkDeclaredNames(input: ResolveInput, section: "roles" | "settings", 
 function checkLocations(input: ResolveInput, roles: WorkflowRole[], issues: ConfigIssue[]): void {
   const name = input.workflow.meta.name;
   const files = [input.global, input.repo].filter((f): f is LoadedConfig => f !== undefined);
+  const prefsOf = (file: LoadedConfig) => file.data.workflows?.[name];
   for (const file of files) {
-    for (const [glob, prefs] of Object.entries(file.data.workflows?.[name]?.labels ?? {})) {
+    for (const [glob, prefs] of Object.entries(prefsOf(file)?.labels ?? {})) {
       if (prefs.location !== undefined) {
         issues.push({ ref: file.path, path: pointerOf("workflows", name, "labels", glob, "location"), message: "location is set per role: a label has no cloud capability declared by the workflow" });
       }
     }
   }
   for (const role of roles.filter((r) => r.cloud === "never")) {
-    const deciding = files.filter((f) => f.data.workflows?.[name]?.roles?.[role.name]?.location !== undefined).at(-1);
-    if (deciding?.data.workflows?.[name]?.roles?.[role.name]?.location === "cloud") {
+    const deciding = files.filter((f) => prefsOf(f)?.roles?.[role.name]?.location !== undefined).at(-1);
+    if (deciding && prefsOf(deciding)?.roles?.[role.name]?.location === "cloud") {
       issues.push({
         ref: deciding.path,
         path: pointerOf("workflows", name, "roles", role.name, "location"),

@@ -35,14 +35,24 @@ export interface PushedSnapshot {
   commit: string;
 }
 
-/** The name of a new snapshot branch for a run: unique, so two steps (or two executions of a run) never meet on a branch. */
+/**
+ * The name of a new snapshot branch for a run: unique, so two steps (or two executions of a run) never meet on a branch. The
+ * run id is made a valid ref component (a run id can be anything its caller passes): letters, digits, dots and dashes; it
+ * starts with a letter or digit, has no `..`, and neither ends with a dot nor with `.lock`.
+ */
 export function snapshotBranch(runId: string): string {
-  const safe = runId.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[.-]+/, "").replace(/\.lock$/, "-lock") || "run";
+  const safe =
+    runId
+      .replace(/[^A-Za-z0-9._-]+/g, "-")
+      .replace(/\.{2,}/g, ".")
+      .replace(/^[^A-Za-z0-9]+/, "")
+      .replace(/\.+$/, "")
+      .replace(/\.lock$/, "-lock") || "run";
   return `${SNAPSHOT_BRANCH_PREFIX}${safe}/${randomUUID().slice(0, 8)}`;
 }
 
 /** The first line git said on stderr, or the error's own message. */
-function why(err: unknown): string {
+function gitErrorLine(err: unknown): string {
   const stderr = (err as { stderr?: unknown } | undefined)?.stderr;
   const text = typeof stderr === "string" && stderr.trim() ? stderr.trim() : err instanceof Error ? err.message : String(err);
   return text.split("\n")[0]!;
@@ -62,7 +72,7 @@ async function git(cwd: string, args: string[], options: { env?: Record<string, 
     return stdout.trim();
   } catch (err) {
     if (options.signal?.aborted) throw options.signal.reason; // the abort, not git's complaint about being killed
-    throw new Error(`git ${args[0]}: ${why(err)}`);
+    throw new Error(`git ${args[0]}: ${gitErrorLine(err)}`);
   }
 }
 
@@ -74,18 +84,14 @@ const IDENTITY = { GIT_AUTHOR_NAME: "cursor-workflows", GIT_AUTHOR_EMAIL: "curso
  * `signal` aborts; a failure leaves nothing on the remote.
  */
 export async function pushSnapshot({ cwd, remote, branch, signal }: { cwd: string; remote: string; branch: string; signal?: AbortSignal }): Promise<PushedSnapshot> {
-  const top = await git(cwd, ["rev-parse", "--show-toplevel"], { signal }).catch((err: unknown) => {
-    if (signal?.aborted) throw err;
-    throw new Error(`${cwd} is not inside a git repository: a cloud step runs against a snapshot of the repository's worktree`);
-  });
-  const remoteUrl = await git(top, ["remote", "get-url", remote], { signal }).catch((err: unknown) => {
-    if (signal?.aborted) throw err;
-    throw new Error(`the remote "${remote}" does not exist in ${top}: add it, or point \`cloud.remote\` in the config at one that does`);
-  });
-  const head = await git(top, ["rev-parse", "--verify", "--quiet", "HEAD"], { signal }).catch((err: unknown) => {
-    if (signal?.aborted) throw err;
-    throw new Error(`${top} has no commit yet: a cloud step needs one to start the snapshot from`);
-  });
+  /** Runs a git command that tells the user something about their setup when it fails; an abort is never that. */
+  const asked = (dir: string, args: string[], whenItFails: string): Promise<string> =>
+    git(dir, args, { signal }).catch((err: unknown) => {
+      throw signal?.aborted ? err : new Error(whenItFails);
+    });
+  const top = await asked(cwd, ["rev-parse", "--show-toplevel"], `${cwd} is not inside a git repository: a cloud step runs against a snapshot of the repository's worktree`);
+  const remoteUrl = await asked(top, ["remote", "get-url", remote], `the remote "${remote}" does not exist in ${top}: add it, or point \`cloud.remote\` in the config at one that does`);
+  const head = await asked(top, ["rev-parse", "--verify", "--quiet", "HEAD"], `${top} has no commit yet: a cloud step needs one to start the snapshot from`);
 
   const scratch = await mkdtemp(join(tmpdir(), "wf-snapshot-"));
   try {
