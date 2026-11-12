@@ -14,7 +14,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
-import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, dashboardUrl, type RunTail, cancelRun, defaultDbPath, listRuns, openDb, readRun, readStepContent, summary, tailRun } from "@cursor-workflows/runtime/observe";
+import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, dashboardUrl, type RunTail, cancelRun, defaultDbPath, leftAgentsNote, listRuns, openDb, readRun, readStepContent, summary, tailRun } from "@cursor-workflows/runtime/observe";
 import { buildBoards } from "./board.js";
 import { PAGE_POLICY, assetPath, pageHtml } from "./pages.js";
 import { PrStates } from "./pr-state.js";
@@ -192,8 +192,12 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
     switch (outcome.kind) {
       case "unknown-run":
         return send(res, 404, { error: "run not found" });
-      case "not-running":
+      case "not-running": {
+        // No process to signal; the cloud agents a dead process left running were reached through the Cursor API.
+        const left = leftAgentsNote({ cancelled: outcome.cancelledAgents, failed: outcome.cloudErrors ?? [] });
+        if (left) return send(res, 200, { runId, status: outcome.status, note: `the run is not running (${outcome.status})${left}` });
         return send(res, 409, { error: `the run is not running (${outcome.status}); nothing to cancel` });
+      }
       case "no-job":
         return send(res, 409, { error: "the run was not started as a job (wf run in a terminal), so the dashboard cannot stop it: press Ctrl-C in that terminal" });
       case "signalled": {

@@ -32,6 +32,7 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   │   ├── backend.ts      # AgentBackend: onde cada tentativa roda; o backend local, que fala com o SDK
 │       │   │   ├── backend-cloud.ts  # o backend de nuvem: a tentativa num cloud agent, contra um snapshot do worktree
 │       │   │   ├── cloud-snapshot.ts # a branch de snapshot: push, exclusão e o fast-forward do trabalho do agente de volta
+│       │   │   ├── cloud-cancel.ts # cancela, pela API da Cursor, os cloud agents que um run de processo morto deixou rodando
 │       │   │   ├── events.ts       # o tipo dos eventos (a referência 6.1 é gerada dele)
 │       │   │   ├── outcome.ts      # a classe de um run terminado (entregue, falhou, cancelado…): o recorder e o `wf gc` leem a mesma
 │       │   │   ├── run-store.ts    # log de eventos, journal, lock de cada run e locks nomeados do repositório (`.workflows/locks/`)

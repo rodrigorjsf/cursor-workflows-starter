@@ -34,6 +34,7 @@ import {
   within,
 } from "./backend.js";
 import { errorText } from "./error-text.js";
+import { isGone } from "./cloud-cancel.js";
 import { BringBackError, type PushedSnapshot, bringBack, cloudRepoUrl, deleteSnapshot, pushSnapshot, snapshotBranch } from "./cloud-snapshot.js";
 import type { JsonSchema } from "./workflow.js";
 import { type Parsed, RESULT_ARTIFACT, artifactInstruction, artifactReprompt, jsonBlockInstruction, jsonBlockReprompt, resultFromArtifact, resultFromJsonBlock } from "./structured.js";
@@ -61,12 +62,6 @@ export interface CloudBackendOptions {
 const WAIT_FLOOR_MS = 1000;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-
-/** Did the cloud answer that it has no such agent (or run)? The SDK reports a 404 as a configuration error with the status. */
-function isGone(err: unknown): boolean {
-  const { status, code } = (err ?? {}) as { status?: unknown; code?: unknown };
-  return status === 404 || code === "agent_not_found";
-}
 
 /**
  * Waits for a cloud run to end. The SDK's `wait()` also ends, with status "error", when the client gives up (after two hours,

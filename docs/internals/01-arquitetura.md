@@ -242,9 +242,10 @@ O contrato, além da tabela:
 - **Cancelar e o limite de espera.** Cancelar o run aborta o `signal` da tentativa, e `runAttempt` cancela o run em andamento
   na nuvem e espera ele parar, o reanexado inclusive; um cancelamento que chega enquanto o backend procura o agente
   interrompido dá uma breve espera pela lista e cancela o run que ela trouxer. Um run cujo processo já morreu não tem
-  `signal` a abortar, e o cancelamento por fora (`wf cancel`, o botão do dashboard) não chama a API da Cursor: para parar o
-  agente dele, retome o run e cancele. A busca do agente também não varre o log atrás de agentes de etapas que o resume
-  não executa. O cliente do SDK desiste de esperar um run da nuvem depois de duas horas
+  `signal` a abortar: o cancelamento por fora (`wf cancel`, `cancel_workflow`, a rota de cancelamento do dashboard) lê no
+  log os agentes sem fim e cancela os runs deles na nuvem pela API da Cursor (`cancelLeftCloudAgents`, em
+  `cloud-cancel.ts`), a menos que um processo esteja executando o run de novo. Isso alcança também o agente de uma etapa que
+  o resume não executa (prompt ou opções mudaram). O cliente do SDK desiste de esperar um run da nuvem depois de duas horas
   (`wait()` devolve `error` com "Timed out waiting for the cloud run to finish.", e aquele handle fica falho, embora o run
   continue lá). O backend de nuvem não trata um `error` assim como o fim da etapa: pergunta à nuvem (`Agent.getRun`) e, se o
   run ainda roda (ou já terminou), espera de novo por ele. Só um run que a própria nuvem diz ter falhado é um erro; quem limita

@@ -70,8 +70,9 @@ enforced before any cloud code exists.
   cannot be reached is never replaced (the attempt fails and the next one reattaches again; only a "not found" from the cloud
   means the agent is gone and a new one starts), and a wait that ends in error is checked with the cloud before the step is
   failed, because the client gives up on a run that is still going. Cancelling stops the cloud runs of a run that is executing
-  (and one that is still looking for its interrupted agent); a run whose process already died has nothing to signal, and
-  cancelling from outside does not call the Cursor API, so the way to stop its agent is to resume the run and cancel it.
+  (and one that is still looking for its interrupted agent). A run whose process already died has nothing to signal:
+  cancelling it from outside reads the agents its event log shows without an end and cancels their cloud runs through the
+  Cursor API, unless a process is executing the run again.
 
 ## Consequences
 

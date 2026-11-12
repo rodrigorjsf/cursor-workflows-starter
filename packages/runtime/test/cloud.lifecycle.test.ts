@@ -5,6 +5,7 @@
 // that is a reattach point. The assertions are on the outcome, the agents the SDK was asked for, the replayed log and the remote.
 process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import "./isolate-home.js";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -14,6 +15,9 @@ import { createCloudBackend } from "../src/runtime/backend-cloud.js";
 import { openDb } from "../src/observability/db.js";
 import { reconcile } from "../src/observability/queries.js";
 import { runWorkflow } from "../src/runtime/engine.js";
+import { cancelRun } from "../src/runtime/run-cancel.js";
+import { cancelJob } from "../src/runtime/job-state.js";
+import { createJob } from "../src/runtime/jobs.js";
 import type { WorkflowEvent } from "../src/runtime/events.js";
 import { abortOpenRuns, eventLogPath, readEventLog, runDirIn } from "../src/runtime/run-store.js";
 import { applyGc, directCommands, formatPlan, planGc } from "../workflows/implement-issue/gc.js";
@@ -375,6 +379,35 @@ test("a cloud agent the run reattached to is cancelled with the run", async () =
     assert.deepEqual(remoteBranches(remote), [], "the snapshot the crash left is deleted too");
     const [closed, cancelled] = ofType(logOf("life-8").slice(logOf("life-8").findLastIndex((e) => e.type === "run-start")), "step-end");
     assert.deepEqual([closed!.errorKind, cancelled!.errorKind, cancelled!.agentId], ["exception", "cancelled", "bc-1"]);
+  } finally {
+    await crashed.end();
+  }
+});
+
+test("cancelling a run whose process died cancels the cloud agent it left running: nothing keeps spending after the user stops", async () => {
+  const crashed = await crashWhileTheAgentRuns("life-dead");
+  try {
+    const outcome = await cancelRun("life-dead", 100);
+
+    assert.deepEqual(outcome, { kind: "not-running", status: "failed", cancelledAgents: ["bc-1"] }, "no process to signal, but the cloud agent is reached through the Cursor API");
+    assert.deepEqual(cloudRunsOf("bc-1").map((x) => x.status), ["cancelled"], "and the cloud agrees");
+    assert.equal(stats.cancelled, 1);
+  } finally {
+    await crashed.end();
+  }
+});
+
+test("wf cancel of a job whose process died cancels the cloud agent its run left running, and says so", async () => {
+  const crashed = await crashWhileTheAgentRuns("life-dead-job");
+  try {
+    const dead = spawnSync("true").pid!; // a pid that no process holds any more: the job's process crashed
+    createJob(cwd, "cfg", { runId: "life-dead-job", jobId: "dead-job", pid: dead });
+
+    const result = await cancelJob(cwd, "dead-job", 100);
+
+    assert.equal(result!.status, "failed");
+    assert.match(result!.note, /already ended .*; cancelled the cloud agent it left running: bc-1/);
+    assert.deepEqual(cloudRunsOf("bc-1").map((x) => x.status), ["cancelled"]);
   } finally {
     await crashed.end();
   }
