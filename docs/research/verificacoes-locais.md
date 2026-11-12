@@ -340,7 +340,7 @@ do npm de outra ferramenta, histórico do RTK): nada em `~/.local/share/mise`, e
 Não rodaram: o caminho HIGH ("Design it twice" e juiz), o review que bloqueia (fatia extra e refactor) e o
 `alreadySatisfied` contra a API real. Os três estão cobertos só pelos testes offline.
 
-## 14. Fase 7: etapas na nuvem (`verify-cloud`)
+## 14. Fase 7: etapas na nuvem (`verify-cloud`) (2026-11-12)
 
 As etapas na nuvem ([ADR-0006](../adr/0006-cloud-steps-as-built.md)) foram construídas contra o SDK 1.3.1 e um
 SDK de mentira que modela o cloud agent (`packages/runtime/test/fake-sdk.ts`). Este capítulo separa o que foi **lido no
