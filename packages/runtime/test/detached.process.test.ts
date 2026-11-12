@@ -258,6 +258,6 @@ test("a --timeout that is not a number of seconds is an error, not a wait that r
   for (const command of ["wait", "cancel"]) {
     const r = spawnSync(process.execPath, [...tsx("cli.ts"), command, "anyjob", "--timeout", "soon", "--cwd", repo], { env, encoding: "utf8" });
     assert.equal(r.status, 1, command);
-    assert.match(r.stderr, /--timeout precisa ser um número de segundos/, command);
+    assert.match(r.stderr, /--timeout must be a number of seconds/, command);
   }
 });

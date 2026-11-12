@@ -11,7 +11,7 @@ import { test } from "node:test";
 import ts from "typescript";
 
 const SRC = join(import.meta.dirname, "..", "src");
-const PORTUGUESE = /[ãõçáéíóúâêôà]|\b(não|para|uma|que|dos|das|são|também|você|com o|de um|de|da|em|ou|sem|nenhuma?|chave|desconhecid[oa]s?|encontrad[oa]s?|arquivo|pasta|rode|banco)\b/i;
+const PORTUGUESE = /[ãõçáéíóúâêôà]|\b(não|para|uma|que|dos|das|são|também|você|com o|de um|de|da|em|ou|sem|nenhuma?|chave|desconhecid[oa]s?|encontrad[oa]s?|arquivo|pasta|rode|banco|uso|falha|nem|autenticado|servidor)\b/i;
 /** Not messages: the metrics database's DDL, whose SQL comments keep the file's language, and the pricing rows it seeds. */
 const DATA = ["CREATE VIEW", "CREATE TABLE", "cursor.com/docs/models-and-pricing"];
 

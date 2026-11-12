@@ -416,7 +416,7 @@ test("wf upgrade refuses a dev install and leaves the working copy where it is",
 
   const r = upgrade(home);
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /desenvolvimento/);
+  assert.match(r.stderr, /development install/);
   assert.equal(git(copy, "rev-parse", "HEAD"), head);
 });
 
@@ -460,7 +460,7 @@ test("wf upgrade whose checkout fails says which tag it could not move to and le
 
   const r = upgrade(home);
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /não consegui mudar o kit para v0\.4\.0/);
+  assert.match(r.stderr, /could not move the kit to v0\.4\.0/);
   assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.3.0");
   assert.deepEqual(npmCalls().slice(before), []);
 });

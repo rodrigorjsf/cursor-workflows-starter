@@ -151,17 +151,17 @@ test("without --json the report is text, one block per check with the fix hint u
   const healthy = doctor(repoCopy(), { args: [] });
   assert.equal(healthy.status, 0, healthy.stdout + healthy.stderr);
   assert.match(healthy.stdout, /\[ok\]\s+Node\.js: v\d+/);
-  assert.match(healthy.stdout, /Tudo certo: 8 verificações passaram\./);
+  assert.match(healthy.stdout, /All good: 8 checks passed\./);
 
   // Logged out and no gh: login, models (no catalog without a login) and gh fail.
   const r = doctor(repoCopy(), { args: [], bins: [], env: { FAKE_SDK_LOGGED_OUT: "1" } });
   assert.equal(r.status, 1);
   assert.throws(() => JSON.parse(r.stdout), "text, not JSON");
   assert.match(r.stdout, /\[ok\]\s+Node\.js/);
-  assert.match(r.stdout, /\[FALHA\] Login no Cursor SDK: /);
-  assert.match(r.stdout, /como corrigir: Faça login com `wf login`/);
-  assert.match(r.stdout, /\[FALHA\] GitHub CLI \(gh\): /);
-  assert.match(r.stdout, /3 de 8 verificações falharam\./);
+  assert.match(r.stdout, /\[FAIL\]\s+Cursor SDK login: /);
+  assert.match(r.stdout, /how to fix: Log in with `wf login`/);
+  assert.match(r.stdout, /\[FAIL\]\s+GitHub CLI \(gh\): /);
+  assert.match(r.stdout, /3 of 8 checks failed\./);
 });
 
 test("wf doctor --json reports an unusable repo config with its file and field path and a fix hint, and exits non-zero", () => {
@@ -281,7 +281,7 @@ test("the models check does not guess when the config does not resolve", () => {
   put(repoConfigPath(repo), "{ not json");
   const models = checkOf(reportOf(doctor(repo)), "models");
   assert.equal(models.status, "fail");
-  assert.match(models.message, /configuração/i);
+  assert.match(models.message, /config/i);
   assert.ok(models.hint);
 });
 
@@ -333,7 +333,7 @@ test("a server that never answers tools/list fails the mcp-server check at the t
   breakClaudeCodeServer(repo, "while read line; do :; done"); // reads every request and answers none (shell builtins only)
   const server = checkOf(reportOf(doctor(repo, { env: { WF_DOCTOR_TIMEOUT_MS: "1500" } })), "mcp-server");
   assert.equal(server.status, "fail");
-  assert.match(server.message, /não respondeu em 1\.5s/);
+  assert.match(server.message, /did not answer within 1\.5s/);
 });
 
 /** A repo copy whose config declares `range` as the kit it accepts. */
@@ -354,7 +354,7 @@ test("the kit-version check passes inside the declared range, in any semver spel
   put(repoConfigPath(noRange), {}); // `wf init` writes a range; a repo that never did declares none
   const undeclared = checkOf(reportOf(doctor(noRange, { kit })), "kit-version");
   assert.equal(undeclared.status, "pass", undeclared.message);
-  assert.match(undeclared.message, /não declara/);
+  assert.match(undeclared.message, /declares no range/);
 });
 
 test("a kit older than the repo's range fails, says so, and tells how to get a kit inside the range", () => {
@@ -364,24 +364,24 @@ test("a kit older than the repo's range fails, says so, and tells how to get a k
   assert.equal(check.status, "fail");
   assert.match(check.message, /1\.4\.0/);
   assert.match(check.message, />=1\.5\.0 <2\.0\.0/);
-  assert.match(check.message, /mais antigo/);
+  assert.match(check.message, /older than the range/);
   assert.match(check.message, /\.agents\/workflows\/config\.json/);
-  assert.match(check.hint ?? "", /Atualize o kit/);
+  assert.match(check.hint ?? "", /Update the kit/);
   assert.match(check.hint ?? "", /`wf upgrade`/, "the command that moves the kit to a newer release exists now");
 });
 
 test("a kit newer than the repo's range fails too, and the hint is about the repo's range", () => {
   const check = checkOf(reportOf(doctor(repoAccepting(">=0.2.0 <0.3.0"), { kit: kitAt("1.4.0") })), "kit-version");
   assert.equal(check.status, "fail");
-  assert.match(check.message, /mais novo/);
-  assert.match(check.hint ?? "", /atualize "kit" em \.agents\/workflows\/config\.json/);
+  assert.match(check.message, /newer than the range/);
+  assert.match(check.hint ?? "", /update "kit" in \.agents\/workflows\/config\.json/);
 });
 
 test("a kit range that is not semver fails with an example of one", () => {
   for (const range of ["banana", ">=x.y"]) {
     const check = checkOf(reportOf(doctor(repoAccepting(range), { kit: kitAt("1.4.0") })), "kit-version");
     assert.equal(check.status, "fail", range);
-    assert.match(check.message, /não é uma faixa semver/);
+    assert.match(check.message, /is not a valid semver range/);
     assert.ok(check.message.includes(range), check.message);
     assert.match(check.hint ?? "", />=1\.0\.0 <2\.0\.0/);
   }
@@ -412,7 +412,7 @@ test("start_workflow refuses a kit outside the repo's range with the versions an
     assert.equal(refused.isError, true);
     assert.match(textOf(refused), /1\.4\.0/);
     assert.match(textOf(refused), />=1\.5\.0 <2\.0\.0/);
-    assert.match(textOf(refused), /mais antigo/);
+    assert.match(textOf(refused), /older than the range/);
   });
   assert.ok(!existsSync(join(outside, ".workflows", "jobs")), "a refused start leaves no job behind");
 
@@ -526,12 +526,12 @@ test("an old node running `wf doctor` itself still gets the report, as a node fa
 
   const text = doctor(repoCopy(), { nodeArgs, args: [] });
   assert.equal(text.status, 1);
-  assert.match(text.stdout, /\[FALHA\] Node\.js: /);
+  assert.match(text.stdout, /\[FAIL\]\s+Node\.js: /);
 
   const list = wf(repoCopy(), ["list"], { nodeArgs });
   assert.equal(list.status, 1);
   assert.equal(list.stdout, "");
-  assert.match(list.stderr, /antigo demais/);
+  assert.match(list.stderr, /is too old/);
 });
 
 test("the kit-version check also tests the kit the IDE would start, which is not always the one running wf", () => {
@@ -540,7 +540,7 @@ test("the kit-version check also tests the kit the IDE would start, which is not
   const diverging = checkOf(reportOf(doctor(repoAccepting(">=1.0.0 <2.0.0"), { kit: running, home: homeWithKit(installed) })), "kit-version");
   assert.equal(diverging.status, "fail");
   assert.ok(diverging.message.includes(".cursor/mcp.json") && diverging.message.includes("2.0.0"), diverging.message);
-  assert.match(diverging.message, /mais novo/);
+  assert.match(diverging.message, /newer than the range/);
 
   // The same kit on both sides: one verdict that names both.
   const same = checkOf(reportOf(doctor(repoAccepting(">=1.0.0 <2.0.0"), { kit: running })), "kit-version");

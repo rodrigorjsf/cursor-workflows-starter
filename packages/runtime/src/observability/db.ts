@@ -51,7 +51,7 @@ export async function openDb(path = defaultDbPath(), opts: { readOnly?: boolean 
   filterSqliteWarning();
   const { DatabaseSync } = await import("node:sqlite");
   if (opts.readOnly) {
-    if (!existsSync(path)) throw new Error(`banco de métricas não encontrado: ${path}`);
+    if (!existsSync(path)) throw new Error(`metrics database not found: ${path}`);
     const db = new DatabaseSync(path, { readOnly: true });
     db.exec("PRAGMA busy_timeout = 5000");
     return db;

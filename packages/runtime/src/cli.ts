@@ -72,7 +72,7 @@ const out = (v: unknown) => process.stdout.write(JSON.stringify(v, null, 2) + "\
 /** `--timeout`, in milliseconds. A value that is not a number of seconds is an error: it would make the wait return at once. */
 const timeoutMs = (): number => {
   const seconds = Number(values.timeout);
-  if (values.timeout!.trim() === "" || !Number.isFinite(seconds) || seconds < 0) throw new Error(`--timeout precisa ser um número de segundos maior ou igual a 0, recebeu "${values.timeout}"`);
+  if (values.timeout!.trim() === "" || !Number.isFinite(seconds) || seconds < 0) throw new Error(`--timeout must be a number of seconds, 0 or more; got "${values.timeout}"`);
   return seconds * 1000;
 };
 /** The flag layer of the config: only what the command line says. WF_MAX_* are the env layer, read by the config. */
@@ -81,7 +81,7 @@ const flagLimits = () => {
     const raw = values[flag];
     if (raw === undefined) return undefined;
     const n = Number(raw);
-    if (raw.trim() === "" || !Number.isFinite(n) || n < 0) throw new Error(`--${flag} precisa ser um número maior ou igual a 0, recebeu "${raw}"`);
+    if (raw.trim() === "" || !Number.isFinite(n) || n < 0) throw new Error(`--${flag} must be a number, 0 or more; got "${raw}"`);
     return n;
   };
   return { maxCents: number("max-cents"), maxTokens: number("max-tokens") };
@@ -100,14 +100,14 @@ const exitCodeOf = (status: RunStatus) => (status === "finished" ? 0 : status ==
 
 async function resolveWorkflow() {
   const def = (await loadWorkflows(cwd)).get(name ?? "");
-  if (!def) throw new Error(`workflow desconhecido: ${name}. Use \`wf list\`.`);
+  if (!def) throw new Error(`unknown workflow: ${name}. Use \`wf list\`.`);
   return def;
 }
 
 async function main(): Promise<number> {
   installCrashHandlers();
   if ((command === "run" || command === "start") && process.env[INSIDE_WORKFLOW_ENV] === "1" && !values.job) {
-    throw new Error("workflows não podem ser iniciados de dentro de uma etapa de workflow");
+    throw new Error("workflows cannot be started from inside a workflow step");
   }
   if (command === "run" || command === "start") assertKitCompatible(cwd); // before anything starts: a kit outside the repo's declared range is refused
   switch (command) {
@@ -136,7 +136,7 @@ async function main(): Promise<number> {
       const { changes, notes } = initRepo({ cwd, skipAgentsMd: values["no-agents-md"], remove: values.remove });
       // stdout is the diff alone (empty when there is nothing to change); the summary goes to stderr.
       for (const { path, before, after } of changes) process.stdout.write(unifiedDiff(path, before, after));
-      process.stderr.write(changes.length ? `wf init: ${changes.length} arquivo(s) alterado(s) em ${cwd}. Nada foi commitado: revise o diff e faça o commit você mesmo.\n` : "wf init: nada a mudar, o repositório já está configurado.\n");
+      process.stderr.write(changes.length ? `wf init: ${changes.length} file(s) changed in ${cwd}. Nothing was committed: review the diff and commit it yourself.\n` : "wf init: nothing to change, the repository is already set up.\n");
       for (const note of notes) process.stderr.write(`wf init: ${note}\n`);
       return 0;
     }
@@ -151,16 +151,16 @@ async function main(): Promise<number> {
       out(result);
       process.stderr.write(
         result.upgraded
-          ? `wf upgrade: kit ${result.from} -> ${result.to} (${result.tag}). Rode \`wf doctor\` em cada repositório que usa o kit.\n`
-          : `wf upgrade: o kit ${result.from} já é a versão mais nova (${result.tag}).\n`,
+          ? `wf upgrade: kit ${result.from} -> ${result.to} (${result.tag}). Run \`wf doctor\` in each repository that uses the kit.\n`
+          : `wf upgrade: kit ${result.from} is already the newest version (${result.tag}).\n`,
       );
       return 0;
     }
     case "config": {
-      if (name !== "show") throw new Error("uso: wf config show [workflow] [--max-tokens N] [--max-cents N]");
+      if (name !== "show") throw new Error("usage: wf config show [workflow] [--max-tokens N] [--max-cents N]");
       const known = await loadWorkflows(cwd);
       const wanted = positionals[2];
-      if (wanted !== undefined && !known.has(wanted)) throw new Error(`workflow desconhecido: ${wanted}. Use \`wf list\`.`);
+      if (wanted !== undefined && !known.has(wanted)) throw new Error(`unknown workflow: ${wanted}. Use \`wf list\`.`);
       const shown = (wanted === undefined ? [...known.values()] : [known.get(wanted)!]).map((def) => {
         const { config, provenance, violations } = loadEffectiveConfig(def, { cwd, flags: flagLimits() });
         return [def.meta.name, { config, provenance, violations }] as const;
@@ -176,7 +176,7 @@ async function main(): Promise<number> {
       if (values.job) {
         // Child mode of `wf start` and `start_workflow`: the parent already created the job.
         const existing = readJobRecord(cwd, values.job);
-        if (!existing) throw new Error(`job ${values.job} não encontrado`);
+        if (!existing) throw new Error(`job not found: ${values.job}`);
         const { done } = startJob(def, args, opts, existing);
         const state = await done;
         if (state.status !== "finished" && state.error) process.stderr.write(`${state.error}\n`); // goes to the job's log (.workflows/jobs/<jobId>.log)
@@ -197,16 +197,16 @@ async function main(): Promise<number> {
       return 0;
     }
     case "status": {
-      out(readJob(cwd, name ?? "") ?? { error: "job não encontrado" });
+      out(readJob(cwd, name ?? "") ?? { error: "job not found" });
       return 0;
     }
     case "wait": {
-      out((await waitJob(cwd, name ?? "", timeoutMs())) ?? { error: "job não encontrado" });
+      out((await waitJob(cwd, name ?? "", timeoutMs())) ?? { error: "job not found" });
       return 0;
     }
     case "cancel": {
       // Waits for the process to stop (it cancels the agents, reverts the in-flight step and writes the run's end), 30 s at most.
-      out((await cancelJob(cwd, name ?? "", Math.min(timeoutMs(), 30_000))) ?? { error: "job não encontrado" });
+      out((await cancelJob(cwd, name ?? "", Math.min(timeoutMs(), 30_000))) ?? { error: "job not found" });
       return 0;
     }
     case "jobs": {
@@ -237,7 +237,7 @@ async function main(): Promise<number> {
       for (const [section, rows] of Object.entries(s)) {
         process.stdout.write(`\n== ${section}\n`);
         if (rows.length) console.table(rows);
-        else process.stdout.write("(sem dados)\n");
+        else process.stdout.write("(no data)\n");
       }
       db.close();
       return 0;
@@ -267,17 +267,17 @@ async function main(): Promise<number> {
         }
         if (sub === "mark") {
           const [, , runId, verdict] = positionals;
-          if (!runId || (verdict !== "accepted" && verdict !== "rejected")) throw new Error("uso: wf metrics mark <runId> accepted|rejected");
+          if (!runId || (verdict !== "accepted" && verdict !== "rejected")) throw new Error("usage: wf metrics mark <runId> accepted|rejected");
           out({ runId, verdict, updated: q.markRun(db, runId, verdict) });
           return 0;
         }
-        throw new Error("uso: wf metrics <export|reconcile|mark> ...");
+        throw new Error("usage: wf metrics <export|reconcile|mark> ...");
       } finally {
         db.close();
       }
     }
     default:
-      process.stderr.write("uso: wf <login|whoami|models|list|init|doctor|upgrade|config|run|start|status|wait|cancel|jobs|gc|stats|metrics> ...\n");
+      process.stderr.write("usage: wf <login|whoami|models|list|init|doctor|upgrade|config|run|start|status|wait|cancel|jobs|gc|stats|metrics> ...\n");
       return 2;
   }
 }
