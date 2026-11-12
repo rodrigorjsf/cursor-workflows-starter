@@ -82,7 +82,7 @@ export function toFlow(graph: RunGraph, layout: RunLayout, now: number, selected
   const state = new Map(graph.nodes.map((n) => [n.id, n.state]));
   const edges: Edge[] = graph.edges
     .filter((e) => layout.nodes[e.source] && layout.nodes[e.target])
-    .map((e) => ({ id: e.id, source: e.source, target: e.target, animated: state.get(e.target) === "running", className: `edge-${state.get(e.target)}` }));
+    .map((e) => ({ id: e.id, source: e.source, target: e.target, animated: state.get(e.target) === "running", className: `edge-${state.get(e.target)}`, focusable: false })); // an edge has no action: not a Tab stop
   return { nodes: [...(layout.lanes.some((l) => l.title !== "") ? lanes : []), ...work], edges };
 }
 
