@@ -14,8 +14,8 @@ import { existsSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { runCommand, toExecResult } from "../../src/runtime/command-runner.js";
 import { outcomeClass } from "../../src/runtime/outcome.js";
-import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn, tryAcquireRunLock } from "../../src/runtime/run-store.js";
-import { type Exec, type PrState, Commands, LOCAL_GIT_TIMEOUT_MS, NETWORK_TIMEOUT_SEC, WORKFLOW_BRANCH_PREFIX } from "./commands.js";
+import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn, runsDirIn, tryAcquireRunLock } from "../../src/runtime/run-store.js";
+import { type Exec, type PrState, Commands, LOCAL_GIT_TIMEOUT_MS, NETWORK_TIMEOUT_SEC, WORKFLOW_BRANCH_PREFIX, worktreesDirIn } from "./commands.js";
 import { type Progress, ProgressStore } from "./tdd.js";
 
 /** Why something is cleaned up: its PR was merged or closed, or its run failed longer ago than the limit. */
@@ -80,7 +80,7 @@ const message = (err: unknown) => (err instanceof Error ? err.message : String(e
 
 /** The runs of the repo that have a progress file. A run with no (or an unreadable) progress file is not an implement-issue run. */
 function implementIssueRuns(cwd: string, errors: string[]): Array<{ runId: string; progress: Progress }> {
-  const runsDir = join(cwd, ".workflows", "runs");
+  const runsDir = runsDirIn(cwd);
   if (!existsSync(runsDir)) return [];
   const runs: Array<{ runId: string; progress: Progress }> = [];
   for (const runId of readdirSync(runsDir).sort()) {
@@ -148,7 +148,7 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
   const { cwd, commands, failedAfterDays } = options;
   const now = Date.now();
   const plan: GcPlan = { repo: cwd, failedAfterDays, remove: [], kept: [], errors: [] };
-  const worktreesDir = join(cwd, ".workflows", "worktrees");
+  const worktreesDir = worktreesDirIn(cwd);
 
   const runs = implementIssueRuns(cwd, plan.errors);
   const locals = new Set((await commands.gitRead(cwd, "for-each-ref", "--format=%(refname:short)", `refs/heads/${WORKFLOW_BRANCH_PREFIX}`)).split("\n").filter(Boolean));

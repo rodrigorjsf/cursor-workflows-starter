@@ -180,9 +180,14 @@ export function acquireNamedLock(cwd: string, name: string, runId: string): () =
   );
 }
 
+/** Where the runs' state is in the target repo (one directory per run), whether or not it exists: nothing is created. */
+export function runsDirIn(cwd: string): string {
+  return join(cwd, ".workflows", "runs");
+}
+
 /** Where a run's state is in the target repo, whether or not it exists: nothing is created. */
 export function runDirIn(cwd: string, runId: string): string {
-  return join(cwd, ".workflows", "runs", runId);
+  return join(runsDirIn(cwd), runId);
 }
 
 /** Directory of a run's state in the target repo; makes `.workflows/runs/` if it is not there. */

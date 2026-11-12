@@ -50,6 +50,12 @@ function failureMessage(line: string, r: ExecResult, timeoutMs: number | undefin
 /** Every branch the workflow creates starts with this, and it force-pushes no other (`Commands.pushOwned`). */
 export const WORKFLOW_BRANCH_PREFIX = "wf/";
 
+/** Where the runs' worktrees are in the target repo: one per branch, named after it. `wf gc` removes none outside it. */
+export const worktreesDirIn = (cwd: string) => join(cwd, ".workflows", "worktrees");
+
+/** The worktree of `branch` in the target repo. */
+export const worktreeOf = (cwd: string, branch: string) => join(worktreesDirIn(cwd), branch.replaceAll("/", "-"));
+
 /** Throws unless `branch` is one the workflow owns: it never force-pushes or deletes any other. */
 function assertOwned(branch: string, action: string, verb: string): void {
   if (!branch.startsWith(WORKFLOW_BRANCH_PREFIX)) throw new Error(`refusing to ${action}: the workflow only ${verb} branches under ${WORKFLOW_BRANCH_PREFIX}`);

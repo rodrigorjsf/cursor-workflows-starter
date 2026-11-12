@@ -91,7 +91,7 @@ import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import { NamedLockedError, acquireNamedLock } from "../src/runtime/run-store.js";
 import { defineWorkflow, type AgentCallOptions } from "../src/runtime/workflow.js";
 import { buildPrBody, type PrText } from "./implement-issue/pr-body.js";
-import { CommandError, Commands, NETWORK_TIMEOUT_SEC, WORKFLOW_BRANCH_PREFIX } from "./implement-issue/commands.js";
+import { CommandError, Commands, NETWORK_TIMEOUT_SEC, WORKFLOW_BRANCH_PREFIX, worktreeOf } from "./implement-issue/commands.js";
 import * as P from "./implement-issue/prompts.js";
 import { AXES, AXIS_SCHEMAS, blockingAxes, blockingOf, type Axis, type ReviewReports } from "./implement-issue/review.js";
 import {
@@ -597,7 +597,7 @@ export default defineWorkflow<Args>({
       // Cada run tem a sua branch e o seu worktree, com o id do run no nome. O worktree só é reaproveitado pelo run que o registrou.
       const legacy = !progress.data.worktree && progress.data.baseCommit !== undefined; // run começado quando a branch era `wf/issue-<n>`, fixa
       const branch = progress.data.branch ?? (legacy ? issueBranch(issue.number) : runBranch(issue.number, ctx.runId));
-      const worktree = progress.data.worktree ?? join(ctx.cwd, ".workflows", "worktrees", branch.replaceAll("/", "-"));
+      const worktree = progress.data.worktree ?? worktreeOf(ctx.cwd, branch);
       if (!progress.data.worktree) {
         // Nada deste run ainda. O que estiver no lugar dele não foi criado por ele (com o id do run no nome, só sobra um run apagado ou um engano): não se reaproveita.
         if (!legacy && (existsSync(worktree) || (await branchExists(cmd, ctx.cwd, branch)))) {
