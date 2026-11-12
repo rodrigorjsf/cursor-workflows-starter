@@ -167,7 +167,7 @@ poderia estourar o tempo dela e a saída dela ficaria invisível.
 
 O motor não sabe onde o agente roda: cada tentativa de uma etapa passa por um `AgentBackend`
 (`packages/runtime/src/runtime/backend.ts`). Há dois, um por location. O local (`Agent.create` com as opções `local` do
-SDK) é o padrão. O de nuvem (`backend-cloud.ts`, [ADR-0006](../adr/0006-cloud-steps-as-built.md)) cria o agente
+SDK) é o padrão. O de nuvem (`backend-cloud.ts`, [ADR-0007](../adr/0007-cancel-stops-cloud-agents.md)) cria o agente
 com as opções `cloud` contra um snapshot do worktree. O motor escolhe o backend pela location da etapa, a do papel na
 configuração; `RunOptions.backend` substitui o da location dele. Os dois rodam a tentativa por `runAttempt` (o mesmo cuidado
 com abortos, cancelamento e uso).
