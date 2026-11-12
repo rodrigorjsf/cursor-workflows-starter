@@ -12,11 +12,13 @@ import {
   PLAN,
   SUB_CODE,
   SUB_TEST,
+  branchOf,
   fx,
   gh,
   git,
   issue,
   names,
+  onOrigin,
   run,
   setup,
   submit,
@@ -31,14 +33,6 @@ afterEach(teardown);
 
 const FAKE_KEY = "crsr_" + "x".repeat(40);
 const res = (r: { result?: unknown }) => r.result as any;
-const onOrigin = () => {
-  try {
-    git(join(fx.root, "origin.git"), "rev-parse", "--verify", "--quiet", "refs/heads/wf/issue-7");
-    return true;
-  } catch {
-    return false;
-  }
-};
 const weakTest = 'import { test } from "node:test";\ntest("subtract", () => {});\n';
 const missing = (behavior: string) => ({
   findings: [{ kind: "missing", quote: "devolve a - b", note: `falta ${behavior}`, behavior, seam: "math.subtract" }],
@@ -135,12 +129,12 @@ test("refactor que quebra a suíte é desfeito; o resume não entrega suíte ver
   };
   const first = await run({});
   assert.equal(res(first).status, "tests-failed-after-review");
-  assert.ok(suitePasses(worktreeOf()), "o worktree volta ao último estado verde");
+  assert.ok(suitePasses(worktreeOf(first.runId)), "o worktree volta ao último estado verde");
 
   fx.handlers["refatorar-1"] = (o) => submit(o, { summary: "nada a mudar", filesChanged: [] });
   const second = await run({}, first.runId);
   assert.equal(res(second).status, "done", JSON.stringify(res(second)));
-  assert.ok(suitePasses(worktreeOf()));
+  assert.ok(suitePasses(worktreeOf(first.runId)));
 });
 
 test("etapa que falha no meio é desfeita: o resume não herda um teste enfraquecido", async () => {
@@ -159,8 +153,8 @@ test("etapa que falha no meio é desfeita: o resume não herda um teste enfraque
   };
   const second = await run({}, first.runId);
   assert.equal(res(second).status, "done", JSON.stringify(res(second)));
-  assert.equal(readFileSync(join(worktreeOf(), "test", "sub.test.js"), "utf8"), SUB_TEST);
-  assert.match(readFileSync(join(worktreeOf(), "src", "math.js"), "utf8"), /subtract/);
+  assert.equal(readFileSync(join(worktreeOf(first.runId), "test", "sub.test.js"), "utf8"), SUB_TEST);
+  assert.match(readFileSync(join(worktreeOf(first.runId), "src", "math.js"), "utf8"), /subtract/);
 });
 
 test("queda do processo durante uma etapa: o resume volta ao snapshot de antes dela", async () => {
@@ -171,10 +165,10 @@ test("queda do processo durante uma etapa: o resume volta ao snapshot de antes d
   // O processo "morre" no meio da etapa: o progresso diz que ela está em andamento e o worktree ficou sujo.
   const file = join(fx.repo, ".workflows", "runs", first.runId, "tdd-progress.json");
   const p = JSON.parse(readFileSync(file, "utf8"));
-  git(worktreeOf(), "add", "-A");
-  p.inFlight = { id: "green:simulada", before: git(worktreeOf(), "write-tree").trim(), resumes: 0 };
+  git(worktreeOf(first.runId), "add", "-A");
+  p.inFlight = { id: "green:simulada", before: git(worktreeOf(first.runId), "write-tree").trim(), resumes: 0 };
   writeFileSync(file, JSON.stringify(p));
-  writeFileSync(join(worktreeOf(), "test", "sub.test.js"), weakTest);
+  writeFileSync(join(worktreeOf(first.runId), "test", "sub.test.js"), weakTest);
 
   fx.handlers["codigo-1"] = (o) => {
     write(o, "src/math.js", SUB_CODE);
@@ -182,7 +176,7 @@ test("queda do processo durante uma etapa: o resume volta ao snapshot de antes d
   };
   const second = await run({}, first.runId);
   assert.equal(res(second).status, "done", JSON.stringify(res(second)));
-  assert.equal(readFileSync(join(worktreeOf(), "test", "sub.test.js"), "utf8"), SUB_TEST);
+  assert.equal(readFileSync(join(worktreeOf(first.runId), "test", "sub.test.js"), "utf8"), SUB_TEST);
 });
 
 test("resume depois de done com fatia extra não pede review novo", async () => {
@@ -223,12 +217,12 @@ test("resume com o worktree removido mantém os commits da branch", async () => 
   issue(["complexity:low"]);
   const first = await run({});
   assert.equal(res(first).status, "done");
-  git(fx.repo, "worktree", "remove", "--force", worktreeOf());
+  git(fx.repo, "worktree", "remove", "--force", worktreeOf(first.runId));
 
   const second = await run({}, first.runId);
   assert.equal(res(second).status, "done", JSON.stringify(res(second)));
-  assert.match(git(fx.repo, "log", "--oneline", "main..wf/issue-7"), /#7/);
-  assert.match(readFileSync(join(worktreeOf(), "src", "math.js"), "utf8"), /subtract/);
+  assert.match(git(fx.repo, "log", "--oneline", `main..${branchOf(first.runId)}`), /#7/);
+  assert.match(readFileSync(join(worktreeOf(first.runId), "src", "math.js"), "utf8"), /subtract/);
 });
 
 test("comando de relançamento postado na issue sobrevive a aspas simples nos args", async () => {

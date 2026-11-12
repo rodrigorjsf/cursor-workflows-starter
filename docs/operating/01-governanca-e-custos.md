@@ -95,7 +95,10 @@ contexto que as etapas carregam (`settingSources`):
 - **Cada run grava métricas** (tokens, custo, modelo, passos, resultado) em `~/.cursor-workflows/metrics.db`. Os prompts
   ficam só como hash. Desligue com `WF_METRICS=off` (ver [5.3](03-observabilidade.md)).
 - **Commit, push, PR e comentário na issue são feitos pelo código do workflow**, com `git` e `gh`. O `implement-issue`
-  sempre faz o commit local na branch `wf/issue-<n>`; push e PR, só com `openPr: true`. Em issues MED e HIGH, o primeiro
+  sempre faz o commit local numa branch só do run, `wf/issue-<n>-<run>`; push e PR, só com `openPr: true`. O push é um
+  `--force-with-lease`, restrito às branches `wf/`: um resume depois do PR refaz o commit e entrega por cima, mas só
+  sobre commits que o próprio run empurrou. Commit de outra pessoa na branch dá `status: "push-refused"` e não é
+  sobrescrito. Em issues MED e HIGH, o primeiro
   run comenta as seams propostas na issue, com ou sem `openPr`.
 - **Uma guarda evita que uma etapa dispare outro workflow por acidente**; ela não é uma fronteira de segurança
   (ver acima, "Workflow disparando workflow").

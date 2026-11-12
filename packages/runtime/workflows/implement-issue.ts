@@ -34,7 +34,13 @@
 //     locais; com fatias adiadas, o PR só referencia a issue (`Refs`) em vez de fechá-la;
 //   - todo comando (testes, git, gh) roda por `ctx.exec` (implement-issue/commands.ts): assíncrono, com teto de tempo
 //     (testes: `testTimeoutSec`; `git push` e `gh`: `networkTimeoutSec`; git local: 5 min) e como nó de comando no log
-//     do run. Um erro do `gh` ou do `git` falha o run com a mensagem dele; "sem PR" é só a resposta conhecida do `gh`.
+//     do run. Um erro do `gh` ou do `git` falha o run com a mensagem dele; "sem PR" é só a resposta conhecida do `gh`;
+//   - cada run tem a sua branch (`wf/issue-<n>-<run>`) e o seu worktree, criados a partir da cabeça ATUAL da branch padrão; o
+//     worktree só é reaproveitado pelo run que o registrou no progresso. Uma issue tem no máximo um run ativo: o segundo run
+//     devolve "issue-locked" com o id do que está ativo (lock `issue-<n>` no run store);
+//   - a entrega empurra com `--force-with-lease`, só em branch `wf/`, e só quando o commit que o origin tem na branch é um que
+//     este run empurrou: o resume depois do PR refaz o commit e entrega por cima; commit de outra pessoa na branch dá
+//     "push-refused" e não é sobrescrito.
 //
 // Custo por etapa (passo 4 da /skill-to-workflow). "[]" = settingSources vazio: sem AGENTS.md, regras, hooks, MCP e
 // sem as skills que o SDK carrega com qualquer outra camada (medido: 58).
@@ -70,13 +76,15 @@
 // STATUS: LOW e MED verificados contra a API real em 2026-11-11 (docs/research/verificacoes-locais.md §13). HIGH, o
 // review que bloqueia e o alreadySatisfied só têm testes offline.
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
+import { NamedLockedError, acquireNamedLock } from "../src/runtime/run-store.js";
 import { defineWorkflow, type AgentCallOptions } from "../src/runtime/workflow.js";
 import { buildPrBody, type PrText } from "./implement-issue/pr-body.js";
-import { Commands } from "./implement-issue/commands.js";
+import { CommandError, Commands, WORKFLOW_BRANCH_PREFIX } from "./implement-issue/commands.js";
 import * as P from "./implement-issue/prompts.js";
 import { AXES, AXIS_SCHEMAS, blockingAxes, blockingOf, type Axis, type ReviewReports } from "./implement-issue/review.js";
 import {
@@ -219,6 +227,63 @@ async function existingPr(cmd: Commands, branch: string, repoFlag: string[], cwd
 
 const branchExists = (cmd: Commands, cwd: string, branch: string) => cmd.gitIs(cwd, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`);
 
+const issueBranch = (issue: number) => `${WORKFLOW_BRANCH_PREFIX}issue-${issue}`;
+
+/**
+ * The branch of a run: one per run, named after the issue and the run id, so two runs on an issue never share one. A run id
+ * with characters a branch name cannot hold is cleaned, and a short hash of the whole id keeps two such ids apart.
+ */
+function runBranch(issue: number, runId: string): string {
+  const id = runId.replace(/^implement-issue-/, "");
+  const clean = id.replace(/[^\w-]+/g, "-");
+  return `${issueBranch(issue)}-${clean === id ? clean : `${clean}-${createHash("sha256").update(runId).digest("hex").slice(0, 6)}`}`;
+}
+
+/** Is `dir` the root of a worktree, and not a directory inside some other repository (where git would act on that repository)? */
+async function isWorktreeRoot(cmd: Commands, dir: string): Promise<boolean> {
+  try {
+    return realpathSync((await cmd.gitRead(dir, "rev-parse", "--show-toplevel")).trim()) === realpathSync(dir);
+  } catch (err) {
+    if (err instanceof CommandError && err.result.exitCode !== null) return false; // git answered that this is not a repository
+    throw err;
+  }
+}
+
+/**
+ * The commit a fresh run starts from: the head of the repository's default branch, as it is now. That is the branch
+ * `origin/HEAD` names (a clone records it), or else the one checked out. The local branch wins over `origin/<name>`: commits
+ * that are on it here but not pushed are part of the base, as they were when a run started from the checked out HEAD.
+ */
+async function defaultBranchHead(cmd: Commands, cwd: string): Promise<string> {
+  const remoteDefault = (await cmd.gitRead(cwd, "for-each-ref", "--format=%(symref:short)", "refs/remotes/origin/HEAD")).trim();
+  const name = remoteDefault.replace(/^origin\//, "") || (await cmd.gitRead(cwd, "branch", "--show-current")).trim();
+  if (!name) return (await cmd.gitRead(cwd, "rev-parse", "HEAD")).trim(); // a detached HEAD and no origin/HEAD: nothing names a default branch
+  for (const ref of [`refs/heads/${name}`, `refs/remotes/origin/${name}`]) {
+    if (await cmd.gitIs(cwd, "rev-parse", "--verify", "--quiet", `${ref}^{commit}`)) return (await cmd.gitRead(cwd, "rev-parse", ref)).trim();
+  }
+  throw new Error(`the default branch ${name} has no commit in this repository: fetch it, or check out the branch the run should start from`);
+}
+
+/**
+ * Puts the run's delivered commit on the origin's copy of its branch. On a resume the history is rewritten (a commit an agent
+ * made is undone, the tree is committed again), so a plain push is refused once the branch has been pushed. The push is a force
+ * with a lease on the commit the origin has right now, and it happens only when that commit is one this run pushed (or the
+ * branch is not there yet): a commit anyone else made on the branch is never overwritten. Returns why the push was refused, or
+ * undefined when the branch is on the origin.
+ */
+async function pushDelivery(cmd: Commands, progress: ProgressStore, worktree: string, branch: string): Promise<string | undefined> {
+  const delivered = progress.data.deliveredCommit!;
+  const onOrigin = await cmd.remoteBranchHead(worktree, branch);
+  if (onOrigin === delivered) return undefined;
+  if (onOrigin && !progress.data.pushed?.includes(onOrigin)) {
+    return `origin/${branch} is at ${onOrigin.slice(0, 7)}, which has commits this workflow did not make, and the push would overwrite them: merge your work from ${worktree} by hand, or push it under another branch`;
+  }
+  progress.data.pushed = [...(progress.data.pushed ?? []), delivered]; // before the push: a crash right after it still leaves the origin's branch recognized as this run's
+  progress.save();
+  await cmd.pushOwned(worktree, branch, onOrigin);
+  return undefined;
+}
+
 /** Escreve um corpo longo num arquivo temporário para `--body-file` (sem limite de argumento de linha de comando). */
 async function withBodyFile<T>(body: string, fn: (path: string) => Promise<T>): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), "wf-body-"));
@@ -326,518 +391,553 @@ export default defineWorkflow<Args>({
   budget: { maxTokens: 3_000_000 },
 
   async run(ctx) {
-    const { issue: number, repo, openPr = false } = ctx.args;
-    const globs = ctx.args.testGlobs?.length ? ctx.args.testGlobs : DEFAULT_TEST_GLOBS;
-    const protectedGlobs = ctx.args.protectedGlobs ?? DEFAULT_PROTECTED_GLOBS;
-    const testTimeout = (ctx.args.testTimeoutSec ?? 600) * 1000;
-    // Todo comando do workflow (testes, git, gh) passa por ctx.exec: assíncrono, com teto de tempo e visível no log do run.
-    const cmd = new Commands((command, args, opts) => ctx.exec(command, args, opts), {
-      localMs: LOCAL_GIT_TIMEOUT_MS,
-      networkMs: (ctx.args.networkTimeoutSec ?? NETWORK_TIMEOUT_SEC) * 1000,
-    });
-    const isTest = (f: string) => isTestFile(f, globs);
-    const progress = new ProgressStore(ctx.cwd, ctx.runId);
-
-    // ── Triagem: dados da issue via gh (código, sem modelo) ─────────────────────────────
-    ctx.phase("Triage");
-    const repoFlag = repo ? ["--repo", repo] : [];
-    const issue = JSON.parse(await cmd.gh(ctx.cwd, "issue", "view", String(number), ...repoFlag, "--json", "number,title,body,labels")) as Issue;
-    let tier = issue.labels.map((l) => LABEL_TIERS[l.name.toLowerCase()]).find(Boolean);
-    if (!tier) {
-      const c = await ctx.agent<{ tier: Tier; reason: string }>(`${CLASSIFY_INSTRUCTIONS}\n\n${issueBlock(issue)}`, {
-        label: "classificar",
-        role: "classify", // the role's settingSources is []: no AGENTS.md, hooks, MCP or the skills any other layer loads (measured)
-        tools: [], // só texto: classificar não precisa ler o repositório
-        memo: true,
-        schema: CLASSIFY_SCHEMA,
-      });
-      tier = c.tier;
-    }
-    const base = { issue: issue.number, tier };
-    ctx.log(`Issue #${issue.number} → tier ${tier} (role ${implementRole(tier)})`);
-    ctx.metric("tier", tier); // covariável de dificuldade: compare modelos dentro do mesmo tier
-    ctx.metric("tier_source", issue.labels.some((l) => LABEL_TIERS[l.name.toLowerCase()]) ? "label" : "classifier");
-    const ctxFiles = CONTEXT_FILES.filter((f) => existsSync(join(ctx.cwd, f)));
-    const contextBlock = listBlock("Repository context files (read the ones that matter)", ctxFiles);
-
-    // ── Plano (codebase-design): LOW uma fatia; MED planejador; HIGH "Design it twice" ─────
-    let plan: Plan;
-    if (tier === "LOW") {
-      plan = {
-        seams: [{ name: "affected public interface", interface: "chosen by the test step", why: "LOW: one slice, no planner" }],
-        slices: [{ behavior: issue.title, seam: "the public interface closest to the requested behaviour", testIdea: "use an example from the issue as the expected value" }],
-        testCommand: ctx.args.testCommand ?? "npm test",
+    // Uma issue tem no máximo um run ativo: dois runs na mesma issue brigariam pelo mesmo trabalho e abririam dois PRs. O lock
+    // fica no run store (`.workflows/locks/issue-<n>.lock`) e vale até o run terminar, qualquer que seja o jeito (status, erro, cancelamento).
+    let releaseIssue: () => void;
+    try {
+      releaseIssue = acquireNamedLock(ctx.cwd, `issue-${ctx.args.issue}`, ctx.runId);
+    } catch (err) {
+      if (!(err instanceof NamedLockedError)) throw err;
+      return {
+        issue: ctx.args.issue,
+        status: "issue-locked",
+        activeRunId: err.holderRunId,
+        reason: `issue #${ctx.args.issue} already has an active run: ${err.holderRunId ?? "unknown"}; wait for it to end, or cancel it and start again`,
+        lock: err.message,
       };
-    } else if (ctx.args.approveSeams && !ctx.args.seams?.length && !progress.data.proposedPlan) {
-      // Aprovar exige um plano mostrado: sem ele, um planejador novo produziria um plano que ninguém viu.
-      return { ...base, status: "seams-not-proposed", runId: ctx.runId, hint: "run without approveSeams to propose the seams, or resume the run that proposed them with the same --cwd" };
-    } else if (ctx.args.approveSeams && !ctx.args.seams?.length && progress.data.proposedPlan) {
-      plan = progress.data.proposedPlan as Plan; // aprova exatamente o que foi mostrado na issue
-      ctx.log("seams approved: using the plan proposed by the first run");
-    } else {
-      ctx.phase("Plan");
-      const approved = listBlock("Approved seams (use exactly these)", ctx.args.seams ?? []);
-      // O planejador sabe o teto: sem isso, propôs 5 fatias para um tier de 3 na issue #8, e o PR saiu parcial.
-      const capBlock =
-        `## Slice cap\nThis tier does up to ${SLICE_CAP[tier]} slices. To fit the whole issue, one slice may cover ` +
-        "cases of one behaviour that are tested together (the odd and the even case of a function; the value and the error). " +
-        "If it still does not fit, put last what can wait.";
-      const planData = `${issueBlock(issue)}\n\n${capBlock}\n\n${contextBlock}${approved ? `\n\n${approved}` : ""}`;
-      if (tier === "MED") {
-        plan = await ctx.agent<Plan>(`${P.PLAN_INSTRUCTIONS}\n\n${planData}`, {
-          label: "planejar",
-          role: "design",
-          model: GROK,
-          tools: READ_ONLY,
-          schema: PLAN_SCHEMA,
+    }
+    try {
+      const { issue: number, repo, openPr = false } = ctx.args;
+      const globs = ctx.args.testGlobs?.length ? ctx.args.testGlobs : DEFAULT_TEST_GLOBS;
+      const protectedGlobs = ctx.args.protectedGlobs ?? DEFAULT_PROTECTED_GLOBS;
+      const testTimeout = (ctx.args.testTimeoutSec ?? 600) * 1000;
+      // Todo comando do workflow (testes, git, gh) passa por ctx.exec: assíncrono, com teto de tempo e visível no log do run.
+      const cmd = new Commands((command, args, opts) => ctx.exec(command, args, opts), {
+        localMs: LOCAL_GIT_TIMEOUT_MS,
+        networkMs: (ctx.args.networkTimeoutSec ?? NETWORK_TIMEOUT_SEC) * 1000,
+      });
+      const isTest = (f: string) => isTestFile(f, globs);
+      const progress = new ProgressStore(ctx.cwd, ctx.runId);
+
+      // ── Triagem: dados da issue via gh (código, sem modelo) ─────────────────────────────
+      ctx.phase("Triage");
+      const repoFlag = repo ? ["--repo", repo] : [];
+      const issue = JSON.parse(await cmd.gh(ctx.cwd, "issue", "view", String(number), ...repoFlag, "--json", "number,title,body,labels")) as Issue;
+      let tier = issue.labels.map((l) => LABEL_TIERS[l.name.toLowerCase()]).find(Boolean);
+      if (!tier) {
+        const c = await ctx.agent<{ tier: Tier; reason: string }>(`${CLASSIFY_INSTRUCTIONS}\n\n${issueBlock(issue)}`, {
+          label: "classificar",
+          role: "classify", // the role's settingSources is []: no AGENTS.md, hooks, MCP or the skills any other layer loads (measured)
+          tools: [], // só texto: classificar não precisa ler o repositório
           memo: true,
+          schema: CLASSIFY_SCHEMA,
         });
+        tier = c.tier;
+      }
+      const base = { issue: issue.number, tier };
+      ctx.log(`Issue #${issue.number} → tier ${tier} (role ${implementRole(tier)})`);
+      ctx.metric("tier", tier); // covariável de dificuldade: compare modelos dentro do mesmo tier
+      ctx.metric("tier_source", issue.labels.some((l) => LABEL_TIERS[l.name.toLowerCase()]) ? "label" : "classifier");
+      const ctxFiles = CONTEXT_FILES.filter((f) => existsSync(join(ctx.cwd, f)));
+      const contextBlock = listBlock("Repository context files (read the ones that matter)", ctxFiles);
+
+      // ── Plano (codebase-design): LOW uma fatia; MED planejador; HIGH "Design it twice" ─────
+      let plan: Plan;
+      if (tier === "LOW") {
+        plan = {
+          seams: [{ name: "affected public interface", interface: "chosen by the test step", why: "LOW: one slice, no planner" }],
+          slices: [{ behavior: issue.title, seam: "the public interface closest to the requested behaviour", testIdea: "use an example from the issue as the expected value" }],
+          testCommand: ctx.args.testCommand ?? "npm test",
+        };
+      } else if (ctx.args.approveSeams && !ctx.args.seams?.length && !progress.data.proposedPlan) {
+        // Aprovar exige um plano mostrado: sem ele, um planejador novo produziria um plano que ninguém viu.
+        return { ...base, status: "seams-not-proposed", runId: ctx.runId, hint: "run without approveSeams to propose the seams, or resume the run that proposed them with the same --cwd" };
+      } else if (ctx.args.approveSeams && !ctx.args.seams?.length && progress.data.proposedPlan) {
+        plan = progress.data.proposedPlan as Plan; // aprova exatamente o que foi mostrado na issue
+        ctx.log("seams approved: using the plan proposed by the first run");
       } else {
-        const kinds = ["minima", "flexivel", "comum"] as const;
-        const designs = await ctx.parallel(
-          kinds.map((k) => () =>
-            ctx.agent<Record<string, string>>(`${P.DESIGN_INSTRUCTIONS}\n\n## Constraint\n${P.DESIGN_CONSTRAINTS[k]}\n\n${issueBlock(issue)}\n\n${contextBlock}`, {
-              label: `desenhar:${k}`,
-              phase: "Plan",
-              role: "design",
-              model: COMPOSER,
-              tools: READ_ONLY,
-              schema: DESIGN_SCHEMA,
-              memo: true,
+        ctx.phase("Plan");
+        const approved = listBlock("Approved seams (use exactly these)", ctx.args.seams ?? []);
+        // O planejador sabe o teto: sem isso, propôs 5 fatias para um tier de 3 na issue #8, e o PR saiu parcial.
+        const capBlock =
+          `## Slice cap\nThis tier does up to ${SLICE_CAP[tier]} slices. To fit the whole issue, one slice may cover ` +
+          "cases of one behaviour that are tested together (the odd and the even case of a function; the value and the error). " +
+          "If it still does not fit, put last what can wait.";
+        const planData = `${issueBlock(issue)}\n\n${capBlock}\n\n${contextBlock}${approved ? `\n\n${approved}` : ""}`;
+        if (tier === "MED") {
+          plan = await ctx.agent<Plan>(`${P.PLAN_INSTRUCTIONS}\n\n${planData}`, {
+            label: "planejar",
+            role: "design",
+            model: GROK,
+            tools: READ_ONLY,
+            schema: PLAN_SCHEMA,
+            memo: true,
+          });
+        } else {
+          const kinds = ["minima", "flexivel", "comum"] as const;
+          const designs = await ctx.parallel(
+            kinds.map((k) => () =>
+              ctx.agent<Record<string, string>>(`${P.DESIGN_INSTRUCTIONS}\n\n## Constraint\n${P.DESIGN_CONSTRAINTS[k]}\n\n${issueBlock(issue)}\n\n${contextBlock}`, {
+                label: `desenhar:${k}`,
+                phase: "Plan",
+                role: "design",
+                model: COMPOSER,
+                tools: READ_ONLY,
+                schema: DESIGN_SCHEMA,
+                memo: true,
+              }),
+            ),
+          );
+          const done = designs.flatMap((d, i) => (d ? [{ constraint: kinds[i], ...d }] : []));
+          if (done.length < 2) return { ...base, status: "design-failed", designs: done.length };
+          plan = await ctx.agent<Plan>(`${P.JUDGE_INSTRUCTIONS}\n\n${planData}\n\n## Designs\n${JSON.stringify(done, null, 2)}`, {
+            label: "julgar",
+            role: "design",
+            model: GROK_HIGH,
+            tools: READ_ONLY,
+            schema: PLAN_SCHEMA,
+            memo: true,
+          });
+        }
+        // tdd: seams combinadas antes de qualquer teste. O runtime não pausa: propõe na issue, guarda o plano e para.
+        if (!ctx.args.seams?.length && !ctx.args.approveSeams) {
+          progress.data.proposedPlan = plan;
+          progress.save();
+          const relaunch = `npm run wf -- run implement-issue --args ${shellQuote(JSON.stringify({ ...ctx.args, approveSeams: true }))} --resume ${ctx.runId}`;
+          const comment = [
+            SEAMS_MARKER,
+            `## Seams proposed by the \`implement-issue\` workflow (tier ${tier})`,
+            "",
+            ...plan.seams.map((s) => `- **${s.name}**: \`${s.interface}\` — ${s.why}`),
+            "",
+            "### Slices (one per red → green cycle)",
+            "",
+            ...plan.slices.map(
+              (s, i) => `${i + 1}. ${s.behavior} (seam: ${s.seam}; test: ${s.testIdea})${i >= SLICE_CAP[tier] ? " (deferred)" : ""}`,
+            ),
+            ...(plan.slices.length > SLICE_CAP[tier]
+              ? ["", `The slices marked deferred are left out by the tier ${tier} slice cap (${SLICE_CAP[tier]} slices): the PR only references the issue, without closing it.`]
+              : []),
+            "",
+            `Test command: \`${ctx.args.testCommand ?? plan.testCommand}\``,
+            ...(plan.rationale ? ["", `### Why this design\n\n${plan.rationale}`] : []),
+            "",
+            "### To approve",
+            "",
+            "Relaunch with the same args and `approveSeams: true`, in the same directory as this run (or with the same `--cwd`); it executes exactly this plan:",
+            "",
+            "```bash",
+            relaunch,
+            "```",
+            "",
+            `In the chat: \`/run-workflow implement-issue\` with \`resumeRunId: "${ctx.runId}"\` and \`approveSeams: true\`. To change the seams, pass \`seams: [...]\` instead of \`approveSeams\`.`,
+          ].join("\n");
+          const leak = findSecretInText(comment);
+          if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the seams comment` };
+          const existing = JSON.parse(await cmd.gh(ctx.cwd, "issue", "view", String(issue.number), ...repoFlag, "--json", "comments")) as { comments: Array<{ body: string }> };
+          if (!existing.comments.some((c) => c.body.includes(SEAMS_MARKER) && c.body.includes(ctx.runId))) {
+            await withBodyFile(comment, (f) => cmd.gh(ctx.cwd, "issue", "comment", String(issue.number), ...repoFlag, "--body-file", f));
+          }
+          return { ...base, status: "seams-proposed", runId: ctx.runId, seams: plan.seams, slices: plan.slices, next: relaunch };
+        }
+      }
+
+      // ── Implementação (tdd): worktree, base verde, fatias red → green ──────────────────
+      ctx.phase("Implementation");
+      // Cada run tem a sua branch e o seu worktree, com o id do run no nome. O worktree só é reaproveitado pelo run que o registrou.
+      const legacy = !progress.data.worktree && progress.data.baseCommit !== undefined; // run começado quando a branch era `wf/issue-<n>`, fixa
+      const branch = progress.data.branch ?? (legacy ? issueBranch(issue.number) : runBranch(issue.number, ctx.runId));
+      const worktree = progress.data.worktree ?? join(ctx.cwd, ".workflows", "worktrees", branch.replaceAll("/", "-"));
+      if (!progress.data.worktree) {
+        // Nada deste run ainda. O que estiver no lugar dele não foi criado por ele (com o id do run no nome, só sobra um run apagado ou um engano): não se reaproveita.
+        if (!legacy && (existsSync(worktree) || (await branchExists(cmd, ctx.cwd, branch)))) {
+          throw new Error(`${worktree} (branch ${branch}) already exists and was not created by this run: remove it, or run again under another run id`);
+        }
+        progress.data.branch = branch; // registrado antes de criar: uma queda no meio do `worktree add` ainda é deste run
+        progress.data.worktree = worktree;
+        progress.save();
+      }
+      if (existsSync(worktree) && !(await isWorktreeRoot(cmd, worktree))) {
+        // O run registrou este caminho, mas ele não é um worktree: o `git worktree add` caiu no meio. Um git rodado ali agiria no repositório em volta.
+        ctx.log(`${worktree} is the run's, but is not a worktree (an interrupted \`git worktree add\`); removing it to create it again`);
+        rmSync(worktree, { recursive: true, force: true });
+        await cmd.git(ctx.cwd, "worktree", "prune");
+      }
+      if (existsSync(worktree)) ctx.log(`worktree ${worktree} is this run's; reusing it`);
+      else if (await branchExists(cmd, ctx.cwd, branch)) await cmd.git(ctx.cwd, "worktree", "add", worktree, branch); // resume: mantém os commits
+      else await cmd.git(ctx.cwd, "worktree", "add", "-b", branch, worktree, progress.data.baseCommit ?? (await defaultBranchHead(cmd, ctx.cwd)));
+      if (!progress.data.baseCommit) {
+        progress.data.baseCommit = (await cmd.gitRead(worktree, "rev-parse", "HEAD")).trim();
+        progress.save();
+      }
+      // Uma etapa de escrita interrompida (o processo caiu no meio): volta ao estado de antes dela.
+      if (progress.data.inFlight) {
+        ctx.log(`undoing the interrupted step ${progress.data.inFlight.id}`);
+        await revertTo(cmd, worktree, progress.data.inFlight.before);
+        progress.data.inFlight = undefined;
+        progress.save();
+      }
+      const testCommand = ctx.args.testCommand ?? plan.testCommand ?? "npm test";
+      const suite = (label: string) => runTests(cmd, testCommand, worktree, { timeoutMs: testTimeout, label: `suite:${label}` });
+      if (!progress.data.baselineGreen) {
+        if (ctx.args.setupCommand) {
+          const setup = await runTests(cmd, ctx.args.setupCommand, worktree, { timeoutMs: testTimeout, label: "setup" });
+          if (!setup.ok) return { ...base, status: "setup-failed", worktree, output: setup.output };
+        }
+        const baseline = await suite("baseline");
+        if (baseline.kind === "timeout" || baseline.kind === "killed") return { ...base, status: `tests-${baseline.kind}`, worktree, output: baseline.output };
+        if (!baseline.ok && !looksLikeNoTests(baseline.output)) return { ...base, status: "baseline-red", worktree, output: baseline.output };
+        if (!baseline.ok) ctx.log("the baseline suite has no tests: counted as green");
+        progress.data.baselineGreen = true;
+        progress.save();
+      }
+
+      /**
+       * Etapa que escreve: snapshot antes, registro "em andamento" no progresso e um número de sequência no prompt.
+       * O número faz cada execução ser nova para o journal: o efeito de uma etapa está no worktree, não na resposta
+       * guardada. Se o agente falhar, a etapa é desfeita antes de o erro subir.
+       */
+      const writeStep = async <T>(id: string, prompt: string, opts: AgentCallOptions): Promise<{ value: T; before: string }> => {
+        const before = await snapshotTree(cmd, worktree);
+        const seq = (progress.data.writeSeq ?? 0) + 1;
+        progress.data.writeSeq = seq;
+        progress.data.inFlight = { id, before, resumes: 0 };
+        progress.save();
+        try {
+          const value = await ctx.agent<T>(`${prompt}\n\n<!-- write step ${seq} -->`, { ...opts, cwd: worktree });
+          return { value, before };
+        } catch (err) {
+          try {
+            await revertTo(cmd, worktree, before);
+            settle();
+          } catch {
+            // O desfazer falhou (o run foi cancelado, ou o git travou): o erro da etapa é o que sobe, e o registro "em andamento" fica,
+            // para o resume voltar ao snapshot de antes dela.
+          }
+          throw err;
+        }
+      };
+      const settle = () => {
+        progress.data.inFlight = undefined;
+        progress.save();
+      };
+      /** O que uma etapa de código (green, correção, refactor) não pode mudar. Vazio = nenhuma violação. */
+      const codeViolation = async (before: string, after: string, rec?: SliceRecord): Promise<string> => {
+        const changed = await changedBetween(cmd, worktree, before, after);
+        const tests = changed.filter(isTest);
+        const guarded = changed.filter((f) => matchesAny(f, protectedGlobs));
+        const problems: string[] = [];
+        if (tests.length) problems.push(`changed test files (${tests.join(", ")})`);
+        if (guarded.length) problems.push(`changed the runner configuration (${guarded.join(", ")})`);
+        if (await runnerConfigChanged(cmd, worktree, before, after)) problems.push("changed the scripts or the test configuration in package.json");
+        if (rec?.testFile && fileHash(worktree, rec.testFile) !== rec.testHash) problems.push(`the slice's test (${rec.testFile}) changed or is gone`);
+        return problems.length ? `You ${problems.join("; ")}. The change was undone: the test is the specification, change only the code.` : "";
+      };
+
+      let tddRetries = 0;
+      let redUnattributed = 0;
+      let redDiscarded = 0;
+      /** O motivo da última violação, devolvido no resultado de tdd-violation e test-not-red. */
+      let lastProblem = "";
+      /** Um ciclo red → green. Devolve um status de falha (com o worktree de volta ao último estado verde), ou undefined. */
+      const runSlice = async (key: string, sfx: string, sl: Slice): Promise<string | undefined> => {
+        const rec: SliceRecord = progress.slice(key) ?? { key, behavior: sl.behavior, seam: sl.seam, done: false };
+        if (rec.done) return undefined; // resume: fatia já verde
+
+        // red: um teste (ou a atualização dos que fixam o comportamento antigo); a suíte tem de falhar
+        if (!rec.red) {
+          let problem = "";
+          for (let attempt = rec.redAttempt ?? 1; attempt <= 2 && !rec.red; attempt++) {
+            if (attempt > 1) tddRetries++;
+            rec.redAttempt = attempt;
+            progress.upsert(rec);
+            const { value: t, before } = await writeStep<TestOut>(
+              `red:${key}:${attempt}`,
+              `${P.TEST_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Test command\n\`${testCommand}\`${problem ? `\n\n## Fix\n${problem}` : ""}`,
+              { label: attempt === 1 ? `teste-${sfx}` : `teste-${sfx}:${attempt}`, role: implementRole(tier), schema: TEST_SCHEMA },
+            );
+            let after = await snapshotTree(cmd, worktree);
+            const changes = await changesBetween(cmd, worktree, before, after);
+            // O que não é teste (implementação, stub, configuração) é descartado pelo código: o teste fica e tem de
+            // falhar sozinho. Medido: o composer-2.5 implementou junto com o teste nas duas tentativas da issue #7.
+            const nonTest = changes.filter((c) => !isTest(c.path)).map((c) => c.path);
+            if (nonTest.length) {
+              await restorePaths(cmd, worktree, before, nonTest);
+              redDiscarded += nonTest.length;
+              ctx.log(`slice ${sfx}: the red step changed ${nonTest.join(", ")}; those changes were discarded, only the test stays`);
+              after = await snapshotTree(cmd, worktree);
+            }
+            const deleted = changes.filter((c) => c.status === "D" && isTest(c.path)).map((c) => c.path);
+            if (deleted.length || await runnerConfigChanged(cmd, worktree, before, after)) {
+              await revertTo(cmd, worktree, before);
+              settle();
+              problem =
+                `The change was undone: ${deleted.length ? `you deleted tests (${deleted.join(", ")})` : "you changed the runner configuration"}. ` +
+                "Write or update tests, without deleting any.";
+              lastProblem = problem;
+              if (attempt === 2) return "tdd-violation";
+              continue;
+            }
+            const res = await suite(`red:${sfx}`);
+            if (res.kind === "timeout" || res.kind === "killed") {
+              await revertTo(cmd, worktree, before);
+              settle();
+              return `tests-${res.kind}`;
+            }
+            if (res.ok) {
+              if (t.alreadySatisfied) {
+                settle(); // o comportamento já existia: o teste fica como regressão, sem etapa de código
+                Object.assign(rec, { testFile: t.testFile, testName: t.testName, alreadySatisfied: t.evidence ?? "confirmed by the test step", green: res.output, done: true });
+                progress.upsert(rec);
+                return undefined;
+              }
+              await revertTo(cmd, worktree, before);
+              settle();
+              problem =
+                "The test passed without implementation. If the behaviour already exists, answer alreadySatisfied: true with the evidence; " +
+                "otherwise, write a test that fails because the slice's behaviour is missing.";
+              lastProblem = problem;
+              if (attempt === 2) return "test-not-red";
+              continue;
+            }
+            settle();
+            if (!res.output.includes(t.testName) && !res.output.includes(basename(t.testFile))) {
+              redUnattributed++;
+              ctx.log(`slice ${sfx}: the red output does not name ${t.testName}; check that the failure comes from the new test`);
+            }
+            Object.assign(rec, { testFile: t.testFile, testName: t.testName, red: res.output, redTree: after, testHash: fileHash(worktree, t.testFile) });
+            progress.upsert(rec);
+          }
+          if (!rec.red) return "test-not-red";
+        }
+
+        // green: o mínimo de código; nada de testes, runner ou teste da fatia; a suíte tem de passar
+        if (!rec.greenDone) {
+          let problem = "";
+          for (let attempt = rec.greenAttempt ?? 1; attempt <= 2 && !rec.greenDone; attempt++) {
+            if (attempt > 1) tddRetries++;
+            rec.greenAttempt = attempt;
+            progress.upsert(rec);
+            const { before } = await writeStep<Impl>(
+              `green:${key}:${attempt}`,
+              `${P.CODE_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Failing test\n\`${rec.testName}\` in \`${rec.testFile}\`\n\n## Suite output\n${tail(rec.red)}${problem ? `\n\n## Fix\n${problem}` : ""}`,
+              { label: attempt === 1 ? `codigo-${sfx}` : `codigo-${sfx}:${attempt}`, role: implementRole(tier), schema: IMPL_SCHEMA },
+            );
+            problem = await codeViolation(before, await snapshotTree(cmd, worktree), rec);
+            if (problem) {
+              lastProblem = problem;
+              await revertTo(cmd, worktree, before);
+              settle();
+              if (attempt === 2) return "tdd-violation";
+              continue;
+            }
+            settle();
+            rec.greenDone = true;
+            progress.upsert(rec);
+          }
+          if (!rec.greenDone) return "tdd-violation";
+        }
+        let res = await suite(`green:${sfx}`);
+        for (let round = (rec.fixRound ?? 0) + 1; res.kind === "failed" && round <= MAX_FIX_ROUNDS; round++) {
+          ctx.log(`slice ${sfx}: tests failed; fix ${round}/${MAX_FIX_ROUNDS}`);
+          rec.fixRound = round;
+          progress.upsert(rec);
+          const { before } = await writeStep<Impl>(`fix:${key}:${round}`, `${P.FIX_INSTRUCTIONS}\n\n${sliceBlock(sl)}\n\n## Test output\n${res.output}`, {
+            label: `corrigir-${sfx}-${round}`,
+            role: "fix",
+            model: tier === "LOW" ? GROK : GROK_HIGH, // escala o modelo na correção
+            schema: IMPL_SCHEMA,
+          });
+          lastProblem = await codeViolation(before, await snapshotTree(cmd, worktree), rec);
+          if (lastProblem) {
+            await revertTo(cmd, worktree, before);
+            settle();
+            return "tdd-violation";
+          }
+          settle();
+          res = await suite(`fix:${sfx}:${round}`);
+        }
+        if (res.kind === "timeout" || res.kind === "killed") return `tests-${res.kind}`;
+        if (!res.ok) return "tests-failed";
+        Object.assign(rec, { green: res.output, done: true });
+        progress.upsert(rec);
+        return undefined;
+      };
+      /** Falha de fatia: o worktree volta ao estado do começo dela (verde), para o resume e para quem inspeciona. */
+      const sliceStart = () => snapshotTree(cmd, worktree);
+
+      const planned = plan.slices.slice(0, SLICE_CAP[tier]);
+      const deferred = plan.slices.slice(SLICE_CAP[tier]).map((s) => `${s.behavior} (seam: ${s.seam})`);
+      if (deferred.length) ctx.log(`cap of ${SLICE_CAP[tier]} slices at tier ${tier}: ${deferred.length} deferred`);
+      ctx.metric("slices_planned", plan.slices.length);
+      for (const [i, sl] of planned.entries()) {
+        const start = await sliceStart();
+        const failed = await runSlice(sliceKey("s", sl.behavior, sl.seam), String(i + 1), sl);
+        if (failed) {
+          if (failed !== "tdd-violation" && failed !== "test-not-red") await revertTo(cmd, worktree, start);
+          return { ...base, status: failed, slice: i + 1, reason: lastProblem || undefined, worktree };
+        }
+      }
+
+      // ── Review (code-review + Segurança): três eixos separados, sempre ─────────────────
+      ctx.phase("Review");
+      const reports: ReviewReports = {};
+      const standardsFiles = STANDARDS_FILES.filter((f) => existsSync(join(worktree, f)));
+      /** Uma rodada de review. O resultado fica no progresso: o resume o reaproveita em vez de pedir outro. */
+      const review = async (axes: Axis[], round: number): Promise<boolean> => {
+        const pinned = progress.data.reviews?.[`r${round}`] as ReviewReports | undefined;
+        if (pinned) {
+          Object.assign(reports, pinned);
+          return true;
+        }
+        const diff = await diffSinceBase(cmd, worktree, progress.data.baseCommit!);
+        const extra: Record<Axis, string> = {
+          standards: listBlock("Repository standards files", standardsFiles) || "## Repository standards files\nNone: use only the smell baseline.",
+          spec: listBlock("Slices deferred by the cap (not 'missing')", deferred),
+          security: "",
+        };
+        // A rodada entra no prompt: sem ela, a rodada 2 de um resume teria a mesma chave de journal da rodada 1 e
+        // receberia a resposta antiga. Na rodada 2 o revisor vê também a resposta da correção (o agente pode discordar).
+        const roundBlock =
+          round === 1 ? "## Round 1" : `## Round ${round}, after the fix\n${progress.data.refactorSummary ?? "Extra slices only: see the diff."}`;
+        const results = await ctx.parallel(
+          axes.map((axis) => () =>
+            ctx.agent<any>(`${AXIS_INSTRUCTIONS[axis]}\n\n${extra[axis]}\n\n${issueBlock(issue)}\n\n${roundBlock}\n\n## Diff since the base\n${diff}`, {
+              label: `review:${axis}:${round}`,
+              phase: "Review",
+              role: "review",
+              cwd: worktree,
+              tools: REVIEW_TOOLS,
+              schema: AXIS_SCHEMAS[axis],
+              memo: true, // o mesmo diff na mesma rodada não paga de novo
             }),
           ),
         );
-        const done = designs.flatMap((d, i) => (d ? [{ constraint: kinds[i], ...d }] : []));
-        if (done.length < 2) return { ...base, status: "design-failed", designs: done.length };
-        plan = await ctx.agent<Plan>(`${P.JUDGE_INSTRUCTIONS}\n\n${planData}\n\n## Designs\n${JSON.stringify(done, null, 2)}`, {
-          label: "julgar",
-          role: "design",
-          model: GROK_HIGH,
-          tools: READ_ONLY,
-          schema: PLAN_SCHEMA,
-          memo: true,
-        });
-      }
-      // tdd: seams combinadas antes de qualquer teste. O runtime não pausa: propõe na issue, guarda o plano e para.
-      if (!ctx.args.seams?.length && !ctx.args.approveSeams) {
-        progress.data.proposedPlan = plan;
+        // Review exigido que não rodou não pode virar "sem achados".
+        if (results.some((r) => r === null)) return false;
+        const got: ReviewReports = {};
+        axes.forEach((a, i) => ((got as Record<Axis, unknown>)[a] = results[i]));
+        Object.assign(reports, got);
+        progress.data.reviews = { ...(progress.data.reviews ?? {}), [`r${round}`]: got };
         progress.save();
-        const relaunch = `npm run wf -- run implement-issue --args ${shellQuote(JSON.stringify({ ...ctx.args, approveSeams: true }))} --resume ${ctx.runId}`;
-        const comment = [
-          SEAMS_MARKER,
-          `## Seams proposed by the \`implement-issue\` workflow (tier ${tier})`,
-          "",
-          ...plan.seams.map((s) => `- **${s.name}**: \`${s.interface}\` — ${s.why}`),
-          "",
-          "### Slices (one per red → green cycle)",
-          "",
-          ...plan.slices.map(
-            (s, i) => `${i + 1}. ${s.behavior} (seam: ${s.seam}; test: ${s.testIdea})${i >= SLICE_CAP[tier] ? " (deferred)" : ""}`,
-          ),
-          ...(plan.slices.length > SLICE_CAP[tier]
-            ? ["", `The slices marked deferred are left out by the tier ${tier} slice cap (${SLICE_CAP[tier]} slices): the PR only references the issue, without closing it.`]
-            : []),
-          "",
-          `Test command: \`${ctx.args.testCommand ?? plan.testCommand}\``,
-          ...(plan.rationale ? ["", `### Why this design\n\n${plan.rationale}`] : []),
-          "",
-          "### To approve",
-          "",
-          "Relaunch with the same args and `approveSeams: true`, in the same directory as this run (or with the same `--cwd`); it executes exactly this plan:",
-          "",
-          "```bash",
-          relaunch,
-          "```",
-          "",
-          `In the chat: \`/run-workflow implement-issue\` with \`resumeRunId: "${ctx.runId}"\` and \`approveSeams: true\`. To change the seams, pass \`seams: [...]\` instead of \`approveSeams\`.`,
-        ].join("\n");
-        const leak = findSecretInText(comment);
-        if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the seams comment` };
-        const existing = JSON.parse(await cmd.gh(ctx.cwd, "issue", "view", String(issue.number), ...repoFlag, "--json", "comments")) as { comments: Array<{ body: string }> };
-        if (!existing.comments.some((c) => c.body.includes(SEAMS_MARKER) && c.body.includes(ctx.runId))) {
-          await withBodyFile(comment, (f) => cmd.gh(ctx.cwd, "issue", "comment", String(issue.number), ...repoFlag, "--body-file", f));
-        }
-        return { ...base, status: "seams-proposed", runId: ctx.runId, seams: plan.seams, slices: plan.slices, next: relaunch };
-      }
-    }
-
-    // ── Implementação (tdd): worktree, base verde, fatias red → green ──────────────────
-    ctx.phase("Implementation");
-    const branch = `wf/issue-${issue.number}`;
-    const worktree = join(ctx.cwd, ".workflows", "worktrees", branch.replace("/", "-"));
-    if (existsSync(worktree)) ctx.log(`worktree ${worktree} already exists; reusing it`);
-    else if (progress.data.baseCommit && (await branchExists(cmd, ctx.cwd, branch))) await cmd.git(ctx.cwd, "worktree", "add", worktree, branch); // resume: mantém os commits
-    else {
-      if (await branchExists(cmd, ctx.cwd, branch)) ctx.log(`branch ${branch} from an earlier run was recreated from HEAD`);
-      await cmd.git(ctx.cwd, "worktree", "add", "-B", branch, worktree);
-    }
-    if (!progress.data.baseCommit) {
-      progress.data.baseCommit = (await cmd.gitRead(worktree, "rev-parse", "HEAD")).trim();
-      progress.save();
-    }
-    // Uma etapa de escrita interrompida (o processo caiu no meio): volta ao estado de antes dela.
-    if (progress.data.inFlight) {
-      ctx.log(`undoing the interrupted step ${progress.data.inFlight.id}`);
-      await revertTo(cmd, worktree, progress.data.inFlight.before);
-      progress.data.inFlight = undefined;
-      progress.save();
-    }
-    const testCommand = ctx.args.testCommand ?? plan.testCommand ?? "npm test";
-    const suite = (label: string) => runTests(cmd, testCommand, worktree, { timeoutMs: testTimeout, label: `suite:${label}` });
-    if (!progress.data.baselineGreen) {
-      if (ctx.args.setupCommand) {
-        const setup = await runTests(cmd, ctx.args.setupCommand, worktree, { timeoutMs: testTimeout, label: "setup" });
-        if (!setup.ok) return { ...base, status: "setup-failed", worktree, output: setup.output };
-      }
-      const baseline = await suite("baseline");
-      if (baseline.kind === "timeout" || baseline.kind === "killed") return { ...base, status: `tests-${baseline.kind}`, worktree, output: baseline.output };
-      if (!baseline.ok && !looksLikeNoTests(baseline.output)) return { ...base, status: "baseline-red", worktree, output: baseline.output };
-      if (!baseline.ok) ctx.log("the baseline suite has no tests: counted as green");
-      progress.data.baselineGreen = true;
-      progress.save();
-    }
-
-    /**
-     * Etapa que escreve: snapshot antes, registro "em andamento" no progresso e um número de sequência no prompt.
-     * O número faz cada execução ser nova para o journal: o efeito de uma etapa está no worktree, não na resposta
-     * guardada. Se o agente falhar, a etapa é desfeita antes de o erro subir.
-     */
-    const writeStep = async <T>(id: string, prompt: string, opts: AgentCallOptions): Promise<{ value: T; before: string }> => {
-      const before = await snapshotTree(cmd, worktree);
-      const seq = (progress.data.writeSeq ?? 0) + 1;
-      progress.data.writeSeq = seq;
-      progress.data.inFlight = { id, before, resumes: 0 };
-      progress.save();
-      try {
-        const value = await ctx.agent<T>(`${prompt}\n\n<!-- write step ${seq} -->`, { ...opts, cwd: worktree });
-        return { value, before };
-      } catch (err) {
-        try {
-          await revertTo(cmd, worktree, before);
-          settle();
-        } catch {
-          // O desfazer falhou (o run foi cancelado, ou o git travou): o erro da etapa é o que sobe, e o registro "em andamento" fica,
-          // para o resume voltar ao snapshot de antes dela.
-        }
-        throw err;
-      }
-    };
-    const settle = () => {
-      progress.data.inFlight = undefined;
-      progress.save();
-    };
-    /** O que uma etapa de código (green, correção, refactor) não pode mudar. Vazio = nenhuma violação. */
-    const codeViolation = async (before: string, after: string, rec?: SliceRecord): Promise<string> => {
-      const changed = await changedBetween(cmd, worktree, before, after);
-      const tests = changed.filter(isTest);
-      const guarded = changed.filter((f) => matchesAny(f, protectedGlobs));
-      const problems: string[] = [];
-      if (tests.length) problems.push(`changed test files (${tests.join(", ")})`);
-      if (guarded.length) problems.push(`changed the runner configuration (${guarded.join(", ")})`);
-      if (await runnerConfigChanged(cmd, worktree, before, after)) problems.push("changed the scripts or the test configuration in package.json");
-      if (rec?.testFile && fileHash(worktree, rec.testFile) !== rec.testHash) problems.push(`the slice's test (${rec.testFile}) changed or is gone`);
-      return problems.length ? `You ${problems.join("; ")}. The change was undone: the test is the specification, change only the code.` : "";
-    };
-
-    let tddRetries = 0;
-    let redUnattributed = 0;
-    let redDiscarded = 0;
-    /** O motivo da última violação, devolvido no resultado de tdd-violation e test-not-red. */
-    let lastProblem = "";
-    /** Um ciclo red → green. Devolve um status de falha (com o worktree de volta ao último estado verde), ou undefined. */
-    const runSlice = async (key: string, sfx: string, sl: Slice): Promise<string | undefined> => {
-      const rec: SliceRecord = progress.slice(key) ?? { key, behavior: sl.behavior, seam: sl.seam, done: false };
-      if (rec.done) return undefined; // resume: fatia já verde
-
-      // red: um teste (ou a atualização dos que fixam o comportamento antigo); a suíte tem de falhar
-      if (!rec.red) {
-        let problem = "";
-        for (let attempt = rec.redAttempt ?? 1; attempt <= 2 && !rec.red; attempt++) {
-          if (attempt > 1) tddRetries++;
-          rec.redAttempt = attempt;
-          progress.upsert(rec);
-          const { value: t, before } = await writeStep<TestOut>(
-            `red:${key}:${attempt}`,
-            `${P.TEST_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Test command\n\`${testCommand}\`${problem ? `\n\n## Fix\n${problem}` : ""}`,
-            { label: attempt === 1 ? `teste-${sfx}` : `teste-${sfx}:${attempt}`, role: implementRole(tier), schema: TEST_SCHEMA },
-          );
-          let after = await snapshotTree(cmd, worktree);
-          const changes = await changesBetween(cmd, worktree, before, after);
-          // O que não é teste (implementação, stub, configuração) é descartado pelo código: o teste fica e tem de
-          // falhar sozinho. Medido: o composer-2.5 implementou junto com o teste nas duas tentativas da issue #7.
-          const nonTest = changes.filter((c) => !isTest(c.path)).map((c) => c.path);
-          if (nonTest.length) {
-            await restorePaths(cmd, worktree, before, nonTest);
-            redDiscarded += nonTest.length;
-            ctx.log(`slice ${sfx}: the red step changed ${nonTest.join(", ")}; those changes were discarded, only the test stays`);
-            after = await snapshotTree(cmd, worktree);
-          }
-          const deleted = changes.filter((c) => c.status === "D" && isTest(c.path)).map((c) => c.path);
-          if (deleted.length || await runnerConfigChanged(cmd, worktree, before, after)) {
-            await revertTo(cmd, worktree, before);
-            settle();
-            problem =
-              `The change was undone: ${deleted.length ? `you deleted tests (${deleted.join(", ")})` : "you changed the runner configuration"}. ` +
-              "Write or update tests, without deleting any.";
-            lastProblem = problem;
-            if (attempt === 2) return "tdd-violation";
-            continue;
-          }
-          const res = await suite(`red:${sfx}`);
-          if (res.kind === "timeout" || res.kind === "killed") {
-            await revertTo(cmd, worktree, before);
-            settle();
-            return `tests-${res.kind}`;
-          }
-          if (res.ok) {
-            if (t.alreadySatisfied) {
-              settle(); // o comportamento já existia: o teste fica como regressão, sem etapa de código
-              Object.assign(rec, { testFile: t.testFile, testName: t.testName, alreadySatisfied: t.evidence ?? "confirmed by the test step", green: res.output, done: true });
-              progress.upsert(rec);
-              return undefined;
-            }
-            await revertTo(cmd, worktree, before);
-            settle();
-            problem =
-              "The test passed without implementation. If the behaviour already exists, answer alreadySatisfied: true with the evidence; " +
-              "otherwise, write a test that fails because the slice's behaviour is missing.";
-            lastProblem = problem;
-            if (attempt === 2) return "test-not-red";
-            continue;
-          }
-          settle();
-          if (!res.output.includes(t.testName) && !res.output.includes(basename(t.testFile))) {
-            redUnattributed++;
-            ctx.log(`slice ${sfx}: the red output does not name ${t.testName}; check that the failure comes from the new test`);
-          }
-          Object.assign(rec, { testFile: t.testFile, testName: t.testName, red: res.output, redTree: after, testHash: fileHash(worktree, t.testFile) });
-          progress.upsert(rec);
-        }
-        if (!rec.red) return "test-not-red";
-      }
-
-      // green: o mínimo de código; nada de testes, runner ou teste da fatia; a suíte tem de passar
-      if (!rec.greenDone) {
-        let problem = "";
-        for (let attempt = rec.greenAttempt ?? 1; attempt <= 2 && !rec.greenDone; attempt++) {
-          if (attempt > 1) tddRetries++;
-          rec.greenAttempt = attempt;
-          progress.upsert(rec);
-          const { before } = await writeStep<Impl>(
-            `green:${key}:${attempt}`,
-            `${P.CODE_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Failing test\n\`${rec.testName}\` in \`${rec.testFile}\`\n\n## Suite output\n${tail(rec.red)}${problem ? `\n\n## Fix\n${problem}` : ""}`,
-            { label: attempt === 1 ? `codigo-${sfx}` : `codigo-${sfx}:${attempt}`, role: implementRole(tier), schema: IMPL_SCHEMA },
-          );
-          problem = await codeViolation(before, await snapshotTree(cmd, worktree), rec);
-          if (problem) {
-            lastProblem = problem;
-            await revertTo(cmd, worktree, before);
-            settle();
-            if (attempt === 2) return "tdd-violation";
-            continue;
-          }
-          settle();
-          rec.greenDone = true;
-          progress.upsert(rec);
-        }
-        if (!rec.greenDone) return "tdd-violation";
-      }
-      let res = await suite(`green:${sfx}`);
-      for (let round = (rec.fixRound ?? 0) + 1; res.kind === "failed" && round <= MAX_FIX_ROUNDS; round++) {
-        ctx.log(`slice ${sfx}: tests failed; fix ${round}/${MAX_FIX_ROUNDS}`);
-        rec.fixRound = round;
-        progress.upsert(rec);
-        const { before } = await writeStep<Impl>(`fix:${key}:${round}`, `${P.FIX_INSTRUCTIONS}\n\n${sliceBlock(sl)}\n\n## Test output\n${res.output}`, {
-          label: `corrigir-${sfx}-${round}`,
-          role: "fix",
-          model: tier === "LOW" ? GROK : GROK_HIGH, // escala o modelo na correção
-          schema: IMPL_SCHEMA,
-        });
-        lastProblem = await codeViolation(before, await snapshotTree(cmd, worktree), rec);
-        if (lastProblem) {
-          await revertTo(cmd, worktree, before);
-          settle();
-          return "tdd-violation";
-        }
-        settle();
-        res = await suite(`fix:${sfx}:${round}`);
-      }
-      if (res.kind === "timeout" || res.kind === "killed") return `tests-${res.kind}`;
-      if (!res.ok) return "tests-failed";
-      Object.assign(rec, { green: res.output, done: true });
-      progress.upsert(rec);
-      return undefined;
-    };
-    /** Falha de fatia: o worktree volta ao estado do começo dela (verde), para o resume e para quem inspeciona. */
-    const sliceStart = () => snapshotTree(cmd, worktree);
-
-    const planned = plan.slices.slice(0, SLICE_CAP[tier]);
-    const deferred = plan.slices.slice(SLICE_CAP[tier]).map((s) => `${s.behavior} (seam: ${s.seam})`);
-    if (deferred.length) ctx.log(`cap of ${SLICE_CAP[tier]} slices at tier ${tier}: ${deferred.length} deferred`);
-    ctx.metric("slices_planned", plan.slices.length);
-    for (const [i, sl] of planned.entries()) {
-      const start = await sliceStart();
-      const failed = await runSlice(sliceKey("s", sl.behavior, sl.seam), String(i + 1), sl);
-      if (failed) {
-        if (failed !== "tdd-violation" && failed !== "test-not-red") await revertTo(cmd, worktree, start);
-        return { ...base, status: failed, slice: i + 1, reason: lastProblem || undefined, worktree };
-      }
-    }
-
-    // ── Review (code-review + Segurança): três eixos separados, sempre ─────────────────
-    ctx.phase("Review");
-    const reports: ReviewReports = {};
-    const standardsFiles = STANDARDS_FILES.filter((f) => existsSync(join(worktree, f)));
-    /** Uma rodada de review. O resultado fica no progresso: o resume o reaproveita em vez de pedir outro. */
-    const review = async (axes: Axis[], round: number): Promise<boolean> => {
-      const pinned = progress.data.reviews?.[`r${round}`] as ReviewReports | undefined;
-      if (pinned) {
-        Object.assign(reports, pinned);
         return true;
-      }
-      const diff = await diffSinceBase(cmd, worktree, progress.data.baseCommit!);
-      const extra: Record<Axis, string> = {
-        standards: listBlock("Repository standards files", standardsFiles) || "## Repository standards files\nNone: use only the smell baseline.",
-        spec: listBlock("Slices deferred by the cap (not 'missing')", deferred),
-        security: "",
       };
-      // A rodada entra no prompt: sem ela, a rodada 2 de um resume teria a mesma chave de journal da rodada 1 e
-      // receberia a resposta antiga. Na rodada 2 o revisor vê também a resposta da correção (o agente pode discordar).
-      const roundBlock =
-        round === 1 ? "## Round 1" : `## Round ${round}, after the fix\n${progress.data.refactorSummary ?? "Extra slices only: see the diff."}`;
-      const results = await ctx.parallel(
-        axes.map((axis) => () =>
-          ctx.agent<any>(`${AXIS_INSTRUCTIONS[axis]}\n\n${extra[axis]}\n\n${issueBlock(issue)}\n\n${roundBlock}\n\n## Diff since the base\n${diff}`, {
-            label: `review:${axis}:${round}`,
-            phase: "Review",
-            role: "review",
-            cwd: worktree,
-            tools: REVIEW_TOOLS,
-            schema: AXIS_SCHEMAS[axis],
-            memo: true, // o mesmo diff na mesma rodada não paga de novo
-          }),
-        ),
-      );
-      // Review exigido que não rodou não pode virar "sem achados".
-      if (results.some((r) => r === null)) return false;
-      const got: ReviewReports = {};
-      axes.forEach((a, i) => ((got as Record<Axis, unknown>)[a] = results[i]));
-      Object.assign(reports, got);
-      progress.data.reviews = { ...(progress.data.reviews ?? {}), [`r${round}`]: got };
-      progress.save();
-      return true;
-    };
-    if (!(await review(AXES, 1))) return { ...base, status: "review-failed", worktree };
-    for (const a of AXES) ctx.metric(`review_${a}_findings`, reports[a]?.findings.length ?? 0);
-    const redo = blockingAxes(reports);
-    ctx.metric("review_blocking_axes", redo.length);
-    const refuted: string[] = [];
-    if (redo.length) {
-      const b = blockingOf(reports);
-      // Requisito faltando ou errado: comportamento novo, então nova fatia TDD (red → green), com teto.
-      for (const [i, f] of [...b.missing, ...b.wrong].slice(0, EXTRA_SLICE_CAP).entries()) {
-        const behavior = f.behavior ?? f.note;
-        const seam = f.seam ?? "the closest public interface";
-        const key = sliceKey("x", behavior, seam);
-        const start = await sliceStart();
-        const failed = await runSlice(key, `extra-${i + 1}`, { behavior, seam, testIdea: `issue requirement: "${f.quote}"` });
-        if (failed) {
-          if (failed !== "tdd-violation" && failed !== "test-not-red") await revertTo(cmd, worktree, start);
-          return { ...base, status: failed, slice: `extra-${i + 1}`, reason: lastProblem || undefined, worktree };
+      if (!(await review(AXES, 1))) return { ...base, status: "review-failed", worktree };
+      for (const a of AXES) ctx.metric(`review_${a}_findings`, reports[a]?.findings.length ?? 0);
+      const redo = blockingAxes(reports);
+      ctx.metric("review_blocking_axes", redo.length);
+      const refuted: string[] = [];
+      if (redo.length) {
+        const b = blockingOf(reports);
+        // Requisito faltando ou errado: comportamento novo, então nova fatia TDD (red → green), com teto.
+        for (const [i, f] of [...b.missing, ...b.wrong].slice(0, EXTRA_SLICE_CAP).entries()) {
+          const behavior = f.behavior ?? f.note;
+          const seam = f.seam ?? "the closest public interface";
+          const key = sliceKey("x", behavior, seam);
+          const start = await sliceStart();
+          const failed = await runSlice(key, `extra-${i + 1}`, { behavior, seam, testIdea: `issue requirement: "${f.quote}"` });
+          if (failed) {
+            if (failed !== "tdd-violation" && failed !== "test-not-red") await revertTo(cmd, worktree, start);
+            return { ...base, status: failed, slice: `extra-${i + 1}`, reason: lastProblem || undefined, worktree };
+          }
+          const rec = progress.slice(key);
+          if (rec?.alreadySatisfied) refuted.push(`${behavior}: ${rec.alreadySatisfied}`); // o review se enganou
         }
-        const rec = progress.slice(key);
-        if (rec?.alreadySatisfied) refuted.push(`${behavior}: ${rec.alreadySatisfied}`); // o review se enganou
+        // Padrão e segurança: refactor, sem tocar testes e com a suíte verde.
+        const toRefactor = [...b.standards, ...b.security];
+        if (toRefactor.length && !progress.data.refactorDone) {
+          const { value: fix, before } = await writeStep<Impl>(
+            "refactor",
+            `${P.REFACTOR_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n## Findings\n${JSON.stringify(toRefactor, null, 2)}`,
+            { label: "refatorar-1", role: implementRole(tier), schema: IMPL_SCHEMA },
+          );
+          const refactorProblem = await codeViolation(before, await snapshotTree(cmd, worktree));
+          if (refactorProblem) {
+            await revertTo(cmd, worktree, before);
+            settle();
+            return { ...base, status: "tdd-violation", step: "refatorar-1", reason: refactorProblem, worktree };
+          }
+          const after = await suite("refactor");
+          if (!after.ok) {
+            await revertTo(cmd, worktree, before); // volta ao último verde
+            settle();
+            return { ...base, status: "tests-failed-after-review", worktree, output: after.output };
+          }
+          settle();
+          progress.data.refactorDone = true;
+          progress.data.refactorSummary = fix.summary;
+          progress.save();
+        }
+        if (!(await review(redo, 2))) return { ...base, status: "review-failed", worktree };
+        if (blockingAxes(reports).length) return { ...base, status: "review-blocking", worktree, findings: blockingOf(reports) };
       }
-      // Padrão e segurança: refactor, sem tocar testes e com a suíte verde.
-      const toRefactor = [...b.standards, ...b.security];
-      if (toRefactor.length && !progress.data.refactorDone) {
-        const { value: fix, before } = await writeStep<Impl>(
-          "refactor",
-          `${P.REFACTOR_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n## Findings\n${JSON.stringify(toRefactor, null, 2)}`,
-          { label: "refatorar-1", role: implementRole(tier), schema: IMPL_SCHEMA },
-        );
-        const refactorProblem = await codeViolation(before, await snapshotTree(cmd, worktree));
-        if (refactorProblem) {
-          await revertTo(cmd, worktree, before);
-          settle();
-          return { ...base, status: "tdd-violation", step: "refatorar-1", reason: refactorProblem, worktree };
+      ctx.metric("tdd_retries", tddRetries);
+      ctx.metric("red_unattributed", redUnattributed);
+      ctx.metric("red_discarded_files", redDiscarded);
+      ctx.metric("slices_done", progress.data.slices.filter((s) => s.done).length);
+
+      // ── Entrega (pr): suíte verde, commit e PR feitos pelo código; idempotentes no resume ─
+      ctx.phase("Delivery");
+      const final = await suite("final");
+      if (!final.ok) return { ...base, status: final.kind === "failed" ? "tests-failed" : `tests-${final.kind}`, worktree, output: final.output };
+      const baseCommit = progress.data.baseCommit!;
+      const head = (await cmd.gitRead(worktree, "rev-parse", "HEAD")).trim();
+      if (head !== progress.data.deliveredCommit) {
+        // Commits feitos por agentes (a instrução pede para não fazer) são desfeitos, mantendo a árvore.
+        if (head !== baseCommit) await cmd.git(worktree, "reset", "--soft", baseCommit);
+        await cmd.git(worktree, "add", "-A");
+        const secret = await findStagedSecret(cmd, worktree, undefined, baseCommit);
+        if (secret) {
+          // Nada de commit, push ou PR. O worktree fica para inspeção; o motivo não repete o segredo.
+          ctx.metric("secret_blocked", 1);
+          ctx.log(`delivery blocked: ${secret}`);
+          return { ...base, status: "secret-blocked", reason: secret, branch, worktree, spentCents: ctx.budget.spentCents() };
         }
-        const after = await suite("refactor");
-        if (!after.ok) {
-          await revertTo(cmd, worktree, before); // volta ao último verde
-          settle();
-          return { ...base, status: "tests-failed-after-review", worktree, output: after.output };
-        }
-        settle();
-        progress.data.refactorDone = true;
-        progress.data.refactorSummary = fix.summary;
+        if (!(await cmd.gitIs(worktree, "diff", "--cached", "--quiet"))) await cmd.git(worktree, "commit", "-m", `feat: ${issue.title} (#${issue.number})`);
+        progress.data.deliveredCommit = (await cmd.gitRead(worktree, "rev-parse", "HEAD")).trim();
         progress.save();
       }
-      if (!(await review(redo, 2))) return { ...base, status: "review-failed", worktree };
-      if (blockingAxes(reports).length) return { ...base, status: "review-blocking", worktree, findings: blockingOf(reports) };
-    }
-    ctx.metric("tdd_retries", tddRetries);
-    ctx.metric("red_unattributed", redUnattributed);
-    ctx.metric("red_discarded_files", redDiscarded);
-    ctx.metric("slices_done", progress.data.slices.filter((s) => s.done).length);
-
-    // ── Entrega (pr): suíte verde, commit e PR feitos pelo código; idempotentes no resume ─
-    ctx.phase("Delivery");
-    const final = await suite("final");
-    if (!final.ok) return { ...base, status: final.kind === "failed" ? "tests-failed" : `tests-${final.kind}`, worktree, output: final.output };
-    const baseCommit = progress.data.baseCommit!;
-    const head = (await cmd.gitRead(worktree, "rev-parse", "HEAD")).trim();
-    if (head !== progress.data.deliveredCommit) {
-      // Commits feitos por agentes (a instrução pede para não fazer) são desfeitos, mantendo a árvore.
-      if (head !== baseCommit) await cmd.git(worktree, "reset", "--soft", baseCommit);
-      await cmd.git(worktree, "add", "-A");
-      const secret = await findStagedSecret(cmd, worktree, undefined, baseCommit);
-      if (secret) {
-        // Nada de commit, push ou PR. O worktree fica para inspeção; o motivo não repete o segredo.
-        ctx.metric("secret_blocked", 1);
-        ctx.log(`delivery blocked: ${secret}`);
-        return { ...base, status: "secret-blocked", reason: secret, branch, worktree, spentCents: ctx.budget.spentCents() };
+      let prUrl: string | undefined;
+      if (openPr) {
+        prUrl = await existingPr(cmd, branch, repoFlag, worktree);
+        let body: string | undefined; // sem PR ainda: o texto e a trava de segredos vêm ANTES do push, e o PR só depois dele
+        if (!prUrl) {
+          const text = await ctx.agent<PrText>(
+            `${P.PR_INSTRUCTIONS}\n\n${contextBlock}\n\n${issueBlock(issue)}\n\n## Diff\n${await diffSinceBase(cmd, worktree, baseCommit)}`,
+            { label: "pr-texto", role: "pr-text", cwd: worktree, tools: REVIEW_TOOLS, schema: PR_SCHEMA, memo: true },
+          );
+          body = buildPrBody({
+            issueNumber: issue.number,
+            text,
+            slices: progress.data.slices,
+            review: reports,
+            deferred,
+            refuted,
+            worktree,
+          });
+          const leak = findSecretInText(body);
+          if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the PR body`, branch, worktree };
+        }
+        const refused = await pushDelivery(cmd, progress, worktree, branch);
+        if (refused) return { ...base, status: "push-refused", reason: refused, branch, worktree };
+        if (body !== undefined) {
+          prUrl = (await withBodyFile(body, (f) => cmd.gh(worktree, "pr", "create", "--head", branch, "--title", `${issue.title} (#${issue.number})`, "--body-file", f, ...repoFlag))).trim();
+        }
       }
-      if (!(await cmd.gitIs(worktree, "diff", "--cached", "--quiet"))) await cmd.git(worktree, "commit", "-m", `feat: ${issue.title} (#${issue.number})`);
-      progress.data.deliveredCommit = (await cmd.gitRead(worktree, "rev-parse", "HEAD")).trim();
-      progress.save();
+      return {
+        ...base,
+        status: "done",
+        branch,
+        worktree,
+        prUrl,
+        slices: progress.data.slices.filter((s) => s.done).map((s) => ({ behavior: s.behavior, test: s.testName, alreadySatisfied: Boolean(s.alreadySatisfied) })),
+        deferred,
+        refutedFindings: refuted,
+        review: Object.fromEntries(AXES.map((a) => [a, { findings: reports[a]?.findings.length ?? 0, worst: reports[a]?.worst ?? "" }])),
+        spentCents: ctx.budget.spentCents(),
+      };
+    } finally {
+      releaseIssue();
     }
-    let prUrl: string | undefined;
-    if (openPr) {
-      prUrl = await existingPr(cmd, branch, repoFlag, worktree);
-      if (!prUrl) {
-        const text = await ctx.agent<PrText>(
-          `${P.PR_INSTRUCTIONS}\n\n${contextBlock}\n\n${issueBlock(issue)}\n\n## Diff\n${await diffSinceBase(cmd, worktree, baseCommit)}`,
-          { label: "pr-texto", role: "pr-text", cwd: worktree, tools: REVIEW_TOOLS, schema: PR_SCHEMA, memo: true },
-        );
-        const body = buildPrBody({
-          issueNumber: issue.number,
-          text,
-          slices: progress.data.slices,
-          review: reports,
-          deferred,
-          refuted,
-          worktree,
-        });
-        const leak = findSecretInText(body);
-        if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the PR body`, branch, worktree };
-        await cmd.push(worktree, "-u", "origin", branch);
-        prUrl = (await withBodyFile(body, (f) => cmd.gh(worktree, "pr", "create", "--head", branch, "--title", `${issue.title} (#${issue.number})`, "--body-file", f, ...repoFlag))).trim();
-      } else {
-        await cmd.push(worktree, "-u", "origin", branch);
-      }
-    }
-    return {
-      ...base,
-      status: "done",
-      branch,
-      worktree,
-      prUrl,
-      slices: progress.data.slices.filter((s) => s.done).map((s) => ({ behavior: s.behavior, test: s.testName, alreadySatisfied: Boolean(s.alreadySatisfied) })),
-      deferred,
-      refutedFindings: refuted,
-      review: Object.fromEntries(AXES.map((a) => [a, { findings: reports[a]?.findings.length ?? 0, worst: reports[a]?.worst ?? "" }])),
-      spentCents: ctx.budget.spentCents(),
-    };
   },
 });

@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { calls, costConfig, script, stats } from "@cursor/sdk";
 import { runWorkflow } from "../src/runtime/engine.js";
-import { eventLogPath, processIdentity, readEventLog, runDirPath } from "../src/runtime/run-store.js";
+import { NamedLockedError, acquireNamedLock, eventLogPath, processIdentity, readEventLog, runDirPath } from "../src/runtime/run-store.js";
 import { defineWorkflow } from "../src/runtime/workflow.js";
 
 const cwd = join(import.meta.dirname, ".tmp", `run-lock-${process.pid}`);
@@ -98,4 +98,19 @@ test("a lock held by a live process with the same identity is respected, and the
   assert.equal(r.status, "failed");
   assert.match(r.error!, /^already running: run alive-holder belongs to process \d+ /);
   assert.match(r.error!, /run\.lock/, "names the file to delete when the process is gone");
+});
+
+// The repo-wide named locks (`.workflows/locks/<name>.lock`), which implement-issue uses to keep one active run per issue.
+
+test("a named lock refuses a second holder with the first one's run id, and is free again once released", () => {
+  const release = acquireNamedLock(cwd, "issue-7", "run-a");
+  assert.throws(() => acquireNamedLock(cwd, "issue-7", "run-b"), (err) => err instanceof NamedLockedError && err.holderRunId === "run-a" && /^issue-7 already has an active run: run-a /.test(err.message));
+  acquireNamedLock(cwd, "issue-8", "run-b")(); // another name is another lock
+  release();
+  acquireNamedLock(cwd, "issue-7", "run-b")();
+});
+
+test("a named lock takes a plain name only: it becomes a file name", () => {
+  for (const name of ["../escape", "a/b", "a b", ""]) assert.throws(() => acquireNamedLock(cwd, name, "run-a"), /invalid lock name/, JSON.stringify(name));
+  assert.ok(!existsSync(join(cwd, ".workflows", "escape.lock")));
 });

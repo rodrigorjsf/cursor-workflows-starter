@@ -151,7 +151,7 @@ O que conferir:
    Isso não é hipótese: num Premium, em 2026-11-11, toda chamada ao `getUsage()` deu `feature_unavailable`
    ([8.2 §5](../research/verificacoes-locais.md)). Com isso, `spentCents` fica em 0 e o
    `--max-cents` não dispara. Veja [2.2 §3](02-configuracao-inicial.md#3-teto-de-custo).
-4. Em `/caminho/do/repo-de-teste/.workflows/worktrees/` existe a branch `wf/issue-1` com o commit.
+4. Em `/caminho/do/repo-de-teste/.workflows/worktrees/` existe um worktree `wf-issue-1-<run>`, na branch `wf/issue-1-<run>`, com o commit.
 5. Rodando de novo com `--resume <runId>`, as etapas de agente concluídas aparecem como "(cache)", e o commit
    não é repetido. Exceção esperada: as etapas `corrigir-N` embutem a saída dos testes no prompt, e essa saída
    costuma mudar (tempos de execução), então elas rodam de novo se os testes falharem outra vez.

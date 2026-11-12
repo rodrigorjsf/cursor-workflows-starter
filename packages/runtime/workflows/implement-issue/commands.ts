@@ -39,6 +39,9 @@ function failureMessage(line: string, r: ExecResult, timeoutMs: number): string 
   return `${line} ${r.exitCode === null ? "was killed" : `exited with code ${r.exitCode}`}${output ? `: ${output}` : ""}`;
 }
 
+/** Every branch the workflow creates starts with this, and it force-pushes no other (`Commands.pushOwned`). */
+export const WORKFLOW_BRANCH_PREFIX = "wf/";
+
 /** A command's output is read whole, but not without limit: this is what the old synchronous calls allowed (`maxBuffer`). */
 const MAX_STDOUT_BYTES = 64 * 1024 * 1024;
 
@@ -74,6 +77,23 @@ export class Commands {
   /** `git push`: a network command. */
   async push(cwd: string, ...args: string[]): Promise<void> {
     await this.succeed("git", ["push", ...args], cwd, this.timeouts.networkMs);
+  }
+
+  /** The commit `branch` points at on the origin, or undefined when the origin has no such branch. A network command. */
+  async remoteBranchHead(cwd: string, branch: string): Promise<string | undefined> {
+    const out = await this.succeedRead("git", ["ls-remote", "--heads", "origin", `refs/heads/${branch}`], cwd, this.timeouts.networkMs);
+    return out.trim().split(/\s+/)[0] || undefined;
+  }
+
+  /**
+   * Pushes `branch` with a force that only replaces what the workflow expects the origin to have: `expected` is the commit it
+   * believes `origin/<branch>` points at (undefined: the origin must not have the branch). A branch the workflow does not own
+   * is never pushed this way, so the workflow cannot overwrite a branch a human owns. If the origin moved since `expected`, git
+   * refuses ("stale info") and the push fails.
+   */
+  async pushOwned(cwd: string, branch: string, expected: string | undefined): Promise<void> {
+    if (!branch.startsWith(WORKFLOW_BRANCH_PREFIX)) throw new Error(`refusing to force-push ${branch}: the workflow only pushes branches under ${WORKFLOW_BRANCH_PREFIX}`);
+    await this.push(cwd, `--force-with-lease=${branch}:${expected ?? ""}`, "-u", "origin", branch);
   }
 
   /** `gh` in `cwd`, which has to succeed; returns all of its stdout. */
