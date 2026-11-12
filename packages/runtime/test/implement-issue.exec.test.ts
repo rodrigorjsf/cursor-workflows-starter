@@ -12,7 +12,7 @@ import { runWorkflow } from "../src/runtime/engine.js";
 import implementIssue from "../workflows/implement-issue.js";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import { runnerConfigChanged } from "../workflows/implement-issue/tdd.js";
-import { SUB_CODE, SUB_TEST, failGh, fx, gh, git, issue, run, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
+import { SUB_CODE, SUB_TEST, failGh, fx, gh, git, issue, onOrigin, run, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
 
 beforeEach(setup);
 afterEach(teardown);
@@ -120,15 +120,6 @@ test("cancelling the run while the suite is running kills the suite at once inst
 
 // ── gh: a failure is an error ─────────────────────────────────────────────────────────
 
-const onOrigin = () => {
-  try {
-    git(join(fx.root, "origin.git"), "rev-parse", "--verify", "--quiet", "refs/heads/wf/issue-7");
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 test("a gh error in the existing-PR lookup fails the run with gh's error, not as 'no PR'; the resume delivers once gh works", async () => {
   issue(["complexity:low"]);
   failGh("pr view", "HTTP 401: Bad credentials (https://api.github.com/graphql)");
@@ -147,7 +138,7 @@ test("a gh error in the existing-PR lookup fails the run with gh's error, not as
 
 test("a branch with no PR yet is not an error: the lookup finds nothing and the PR is created", async () => {
   issue(["complexity:low"]);
-  failGh("pr view", 'no pull requests found for branch "wf/issue-7"');
+  failGh("pr view", 'no pull requests found for branch "wf/issue-7-x"');
   const r = await run({ openPr: true });
   assert.equal(res(r).status, "done", JSON.stringify(res(r)));
   assert.equal(gh().prs.length, 1);
@@ -242,9 +233,9 @@ test("cancelling in the middle of a write step leaves the worktree as before the
     },
   });
   assert.equal(first.status, "cancelled");
-  const math = readFileSync(join(worktreeOf(), "src", "math.js"), "utf8");
+  const math = readFileSync(join(worktreeOf(first.runId), "src", "math.js"), "utf8");
   assert.ok(!math.includes("half-made"), "the step's edit is undone");
-  assert.equal(readFileSync(join(worktreeOf(), "test", "sub.test.js"), "utf8"), SUB_TEST, "the slice's test, made before the step, stays");
+  assert.equal(readFileSync(join(worktreeOf(first.runId), "test", "sub.test.js"), "utf8"), SUB_TEST, "the slice's test, made before the step, stays");
 
   fx.handlers["codigo-1"] = (o) => {
     write(o, "src/math.js", SUB_CODE);

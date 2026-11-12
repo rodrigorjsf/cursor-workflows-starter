@@ -139,6 +139,6 @@ test("the depth the README used to carry lives in the book: what the kit does un
   const governance = read("docs/operating/01-governanca-e-custos.md");
   assert.match(governance, /^## Transparência: o que o kit faz por baixo$/m);
   assert.match(governance, /info\/exclude/, "the state dir is excluded through .git/info/exclude, not .gitignore");
-  assert.match(governance, /`wf\/issue-<n>`/, "the branch the implement-issue workflow commits to");
+  assert.match(governance, /`wf\/issue-<n>-<run>`/, "the branch the implement-issue workflow commits to: one per run");
   for (const hub of HUBS) assert.doesNotMatch(read(hub.file), /settingSources|info\/exclude/, `${hub.file} leaves that depth to the book`);
 });

@@ -42,7 +42,16 @@ export function failGh(command: string, message: string | undefined) {
   writeFileSync(fx.ghState, JSON.stringify(state));
 }
 
-export const worktreeOf = () => join(fx.repo, ".workflows", "worktrees", "wf-issue-7");
+/** The branch and the worktree of a run on issue 7: each run owns its own (`wf/issue-<n>-<run>`), named after the run id without the workflow's name. */
+const runSuffix = (runId: string) => runId.replace(/^implement-issue-/, "");
+export const branchOf = (runId: string) => `wf/issue-7-${runSuffix(runId)}`;
+export const worktreeOf = (runId: string) => join(fx.repo, ".workflows", "worktrees", `wf-issue-7-${runSuffix(runId)}`);
+/** The branches the workflow has on the origin (everything under `wf/`). */
+export const originBranches = () =>
+  git(join(fx.root, "origin.git"), "for-each-ref", "--format=%(refname:short)", "refs/heads/wf/")
+    .split("\n")
+    .filter(Boolean);
+export const onOrigin = () => originBranches().length > 0;
 
 const FAKE_GH = `#!/usr/bin/env node
 const fs = require("fs");

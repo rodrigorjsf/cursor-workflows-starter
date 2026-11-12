@@ -189,6 +189,9 @@ export interface SliceRecord {
 export interface InFlight { id: string; before: string; resumes: number }
 
 export interface Progress {
+  /** A branch e o worktree que ESTE run criou: o worktree só é reaproveitado pelo run que o registrou (nunca por outro). */
+  branch?: string;
+  worktree?: string;
   /** Commit do worktree antes de qualquer mudança: base do diff do review e do commit final. */
   baseCommit?: string;
   baselineGreen?: boolean;
@@ -200,6 +203,8 @@ export interface Progress {
   /** O que a rodada de correção disse que fez (ou por que discordou): vai para o revisor da rodada 2. */
   refactorSummary?: string;
   deliveredCommit?: string;
+  /** Commits que o run empurrou (ou ia empurrar) para o origin: o que ele reconhece como seu lá. Qualquer outro commit na branch é de alguém. */
+  pushed?: string[];
   inFlight?: InFlight;
   /** Contador das etapas de escrita: entra no prompt para o journal nunca devolver uma escrita antiga. */
   writeSeq?: number;

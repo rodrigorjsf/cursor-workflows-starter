@@ -219,7 +219,13 @@ etapa interrompida deixaria edições pela metade. Por isso o `implement-issue`:
 - põe um número de sequência no prompt de cada etapa de escrita, para o journal nunca devolver uma escrita antiga;
 - guarda os relatórios de review por rodada, para o resume não pedir um review novo sobre um diff diferente;
 - reaproveita a branch existente no resume (sem `worktree add -B`, que a zeraria) e roda a suíte de novo antes do
-  commit.
+  commit;
+- dá a cada run a sua branch e o seu worktree (o id do run no nome), registrados no progresso: um run novo parte da
+  cabeça atual da branch padrão e nunca reaproveita o worktree de outro; o lock `issue-<n>` (em `.workflows/locks/`)
+  recusa um segundo run na mesma issue;
+- entrega com `git push --force-with-lease=<branch>:<commit que o origin tem>`, só em branch `wf/`, e só quando esse
+  commit é de um push do próprio run (o resume refaz o commit depois do PR; o commit de outra pessoa não é
+  sobrescrito).
 
 ### Checkpoint em dois runs
 

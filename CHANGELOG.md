@@ -131,6 +131,17 @@
   que mostra o comando, o `stderr` e o resultado; a saída das suítes, do `git push` e do `git commit` vai. O `runTests` agora é assíncrono e não devolve mais `overflow`, porque a saída não passa por um
   buffer. Uma suíte morta por um sinal (o OOM killer, por exemplo) deixa de contar como red: o run para com
   `tests-killed`, em vez de pedir a um agente que "faça passar" um runner que caiu.
+- **O `implement-issue` entrega com segurança e pode rodar várias vezes na mesma issue.** Cada run tem a sua branch
+  (`wf/issue-<n>-<run>`, antes a fixa `wf/issue-<n>`) e o seu worktree (`.workflows/worktrees/wf-issue-<n>-<run>`),
+  registrados no progresso do run; um run novo parte da cabeça atual da branch padrão (a que o `origin/HEAD` aponta, ou
+  a branch em uso; a cópia local, não a do origin: rode `git pull` antes para partir do que está lá) e nunca reaproveita
+  o worktree de outro run. Um worktree no lugar do run que ele não criou falha o run, sem apagar nada. Um run começado
+  antes desta mudança retoma na branch e no worktree antigos. Uma issue tem no máximo um run ativo: o segundo run volta
+  `status: "issue-locked"` com o `activeRunId` do que está ativo, sem branch, worktree nem agente (o lock é o arquivo
+  `.workflows/locks/issue-<n>.lock`, do mesmo tipo do `run.lock`; o de um processo que morreu é retomado). A entrega
+  empurra com `--force-with-lease`, só em branch `wf/`: o resume depois de o PR existir refaz o commit e entrega por
+  cima, em vez de falhar com non-fast-forward. Se a branch no origin tem um commit que o run não empurrou (alguém
+  empurrou uma correção), o run volta `status: "push-refused"` e não sobrescreve nada; o trabalho fica no worktree.
 - **A execução do agente fica atrás de uma interface, o `AgentBackend`.** O motor deixa de falar com o SDK: cada
   tentativa de uma etapa vai a `AgentBackend.run(prompt, opções resolvidas, sinal de aborto, callback de eventos)`, que
   devolve o resultado da tentativa. A execução local (criar o agente, enviar, esperar, entregar o resultado estruturado,

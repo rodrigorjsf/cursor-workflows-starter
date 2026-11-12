@@ -5,6 +5,9 @@
 //   events.jsonl   every event of every execution of the run, one JSON object per line
 //   journal.jsonl  the results of the finished steps, for resume
 //   run.lock       present while a process executes the run: who holds it
+//
+// Under `<cwd>/.workflows/locks/<name>.lock` live the repo-wide named locks a run can hold (`acquireNamedLock`): the
+// same kind of lock as `run.lock`, but on a resource the run works on (an issue) instead of on the run itself.
 import { randomUUID } from "node:crypto";
 import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -26,10 +29,22 @@ export const CONTENT_MAX_CHARS = 32_768;
 /** Another process (or another execution in this one) is already executing the run. */
 export class RunLockedError extends Error {}
 
+/** Another run holds the named lock (`acquireNamedLock`). `holderRunId` is that run's id; absent for a lock written without one. */
+export class NamedLockedError extends Error {
+  constructor(
+    message: string,
+    readonly holderRunId: string | undefined,
+  ) {
+    super(message);
+  }
+}
+
 interface LockContent {
   pid: number;
   token: string;
   startedAt: string;
+  /** The run that holds the lock. */
+  runId?: string;
   /** Who the pid was when it took the lock (see `processIdentity`). Absent where the platform cannot tell. */
   identity?: string;
 }
@@ -75,7 +90,7 @@ function readLock(file: string): LockContent | undefined {
 }
 
 /**
- * Takes the lock of the run in `dir`, or throws `RunLockedError` naming the holder. The lock file is created complete
+ * Takes the lock file `file` for run `runId`, or throws what `refuse` makes of the holder. The lock file is created complete
  * and atomically (written aside, then hard-linked into place: `link` fails when the target exists), so nobody ever reads
  * a half-written lock. A lock whose process is gone is stale and is taken over. Returns the release function.
  *
@@ -83,9 +98,8 @@ function readLock(file: string): LockContent | undefined {
  * platform cannot tell a recycled pid from the original process (no /proc), a leftover lock whose pid is alive again
  * keeps the run locked until that process ends or the lock file is deleted (the refusal message says so).
  */
-function acquireLock(dir: string, runId: string): () => void {
-  const file = join(dir, LOCK_FILE);
-  const content: LockContent = { pid: process.pid, token: randomUUID(), startedAt: new Date().toISOString(), identity: processIdentity(process.pid) };
+function takeLock(file: string, runId: string, refuse: (holder: LockContent | undefined) => Error): () => void {
+  const content: LockContent = { pid: process.pid, token: randomUUID(), startedAt: new Date().toISOString(), runId, identity: processIdentity(process.pid) };
   const aside = `${file}.${process.pid}.${content.token.slice(0, 8)}.tmp`;
   writeFileSync(aside, JSON.stringify(content));
   try {
@@ -106,17 +120,42 @@ function acquireLock(dir: string, runId: string): () => void {
         if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
       }
       const holder = readLock(file);
-      if (holder && isHeld(holder, file)) {
-        throw new RunLockedError(
-          `already running: run ${runId} belongs to process ${holder.pid} (since ${holder.startedAt}); wait for it to end, or delete ${file} if that process no longer exists`,
-        );
-      }
+      if (holder && isHeld(holder, file)) throw refuse(holder);
       rmSync(file, { force: true }); // stale (dead holder) or unreadable: take it over
     }
-    throw new RunLockedError(`already running: another process claimed run ${runId} at the same time`);
+    throw refuse(undefined);
   } finally {
     rmSync(aside, { force: true });
   }
+}
+
+/** Takes the lock of the run in `dir`, or throws `RunLockedError` naming the holder. Returns the release function. */
+function acquireLock(dir: string, runId: string): () => void {
+  const file = join(dir, LOCK_FILE);
+  return takeLock(file, runId, (holder) =>
+    new RunLockedError(
+      holder
+        ? `already running: run ${runId} belongs to process ${holder.pid} (since ${holder.startedAt}); wait for it to end, or delete ${file} if that process no longer exists`
+        : `already running: another process claimed run ${runId} at the same time`,
+    ),
+  );
+}
+
+/**
+ * Takes the repo-wide lock `name` for run `runId`, or throws `NamedLockedError` naming the run that holds it. It is how a
+ * workflow keeps two runs from working on the same thing at once (`implement-issue` locks `issue-<n>`). Held until the
+ * returned function is called or the process ends; the lock of a process that died is stale and is taken over.
+ */
+export function acquireNamedLock(cwd: string, name: string, runId: string): () => void {
+  const file = join(stateDir(cwd, "locks"), `${name}.lock`);
+  return takeLock(file, runId, (holder) =>
+    new NamedLockedError(
+      holder
+        ? `${name} already has an active run: ${holder.runId ?? "unknown"} (process ${holder.pid}, since ${holder.startedAt}); wait for it to end, or delete ${file} if that process no longer exists`
+        : `${name} was claimed by another run at the same time`,
+      holder?.runId,
+    ),
+  );
 }
 
 /** Directory of a run's state in the target repo. */
