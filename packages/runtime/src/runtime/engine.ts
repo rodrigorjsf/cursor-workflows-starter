@@ -1014,6 +1014,7 @@ async function executeRun<A, R>(
         let errorKind: ErrorKind | undefined;
         let cancelledBy: RunCancelledError | undefined;
         let touchedWorktree = false;
+        let final = false;
         let reverted = false;
         let agentId: string | undefined;
         let resolvedModel: string | undefined;
@@ -1066,6 +1067,7 @@ async function executeRun<A, R>(
           agentId = result.agentId;
           resolvedModel = result.model;
           touchedWorktree = result.touchedWorktree === true;
+          final = result.final === true;
           // Timeout/error also cost. No reading and no turns: no agent existed, so nothing was used.
           if (result.usage || turnUsage.totalTokens > 0) charge = chargeUsage(result.usage ?? { failed: "the backend reported no usage" }, turnUsage);
           const { outcome } = result;
@@ -1133,9 +1135,11 @@ async function executeRun<A, R>(
         // a worktree half moved to the agent's result is no one's.
         const putsBack = location === "local" || touchedWorktree;
         if (cancelledBy) reverted = putsBack && (await reverter.onCancel());
-        else if (touchedWorktree || (putsBack && o.revertOnRetry && attempt < attempts)) reverted = await reverter.beforeRetry();
+        else if (touchedWorktree || (putsBack && o.revertOnRetry && attempt < attempts && !final)) reverted = await reverter.beforeRetry();
         endEvent(false);
         if (cancelledBy) throw cancelledBy;
+        // The backend says another attempt could not do better (a cloud step's work that could not be brought back): the step fails now.
+        if (final) throw new StepFailedError(`step "${label}" failed after ${attempt} attempt(s): ${lastError}`);
       }
       throw new StepFailedError(`step "${label}" failed after ${attempts} attempt(s): ${lastError}`);
     } finally {

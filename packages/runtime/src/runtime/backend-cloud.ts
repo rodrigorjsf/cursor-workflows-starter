@@ -186,13 +186,15 @@ function pushedElsewhere(pushed: PushedBranches | undefined, snapshotBranch: str
 
 /**
  * The end of a step that writes: the agent's commits are fetched into the worktree, which is fast-forwarded to them (see
- * `bringBack`). A work that cannot be brought back fails the attempt, with the reason, and the worktree is left as it was (or the
- * engine puts it back, when `touchedWorktree` says it may have been changed). `result` is what the attempt reports otherwise.
+ * `bringBack`). A work that cannot be brought back fails the step (`final`: a retry would pay for a new agent), with the reason,
+ * and the worktree is left as it was (or the engine puts it back, when `touchedWorktree` says it may have been changed). `result`
+ * is what the attempt reports otherwise.
  */
 async function bringWorkBack(result: AttemptResult, pushed: PushedBranches | undefined, from: SnapshotRef | undefined, o: StepOptions, signal: AbortSignal, onEvent: (event: AttemptEvent) => void): Promise<AttemptResult> {
   const failed = (message: string, touchedWorktree = false): AttemptResult => ({
     ...result,
     outcome: { kind: "error", reason: "other", message: `the cloud agent's work could not be brought back: ${message}` },
+    final: true,
     ...(touchedWorktree && { touchedWorktree: true as const }),
   });
   if (!from?.commit) return failed("the snapshot the interrupted agent started from is not in the event log, so there is nothing to check the worktree against");

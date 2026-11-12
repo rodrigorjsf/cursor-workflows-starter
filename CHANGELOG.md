@@ -42,7 +42,7 @@
   (`workOnCurrentBranch`, sem PR) e é instruído a commitar nela, mesmo que o prompt do workflow mande não rodar git. Quando o
   run termina, o motor busca a branch e avança o worktree até ela (fast-forward de arquivos, índice e branch) antes de apagar
   o snapshot, e os comandos que o workflow roda depois com `ctx.exec` (a suíte do TDD) enxergam o trabalho. É um fast-forward
-  ou nada: a etapa falha, sem mudar o worktree, quando o agente reescreveu o histórico, quando a branch local andou ou quando
+  ou nada: a etapa falha, sem nova tentativa e sem mudar o worktree, quando o agente reescreveu o histórico, quando a branch local andou ou quando
   os arquivos mudaram enquanto o agente trabalhava ou o agente adiciona um arquivo onde o worktree tem um que o git
   ignora (o `revertOnRetry` e o cancelamento não desfazem uma etapa na nuvem recusada, para não apagar o que a pessoa
   mudou nesse meio tempo); se o avanço falha depois de mexer no índice e nos arquivos, o motor

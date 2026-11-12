@@ -144,6 +144,11 @@ export interface AttemptResult {
    * worktree half way). The engine puts the directory back as it was before the step, the way it does for a cancelled one.
    */
   touchedWorktree?: true;
+  /**
+   * The step fails with this attempt, whatever retries it has left: another attempt would pay for a new agent and could not do
+   * better (a cloud step's work that could not be brought back into the worktree).
+   */
+  final?: true;
 }
 
 export interface AgentBackend {

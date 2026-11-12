@@ -177,20 +177,22 @@ test("a structured write step brings its commits back and takes its result from 
   assert.deepEqual(subjects(), ["agent: add c", "init"]);
 });
 
-test("a step that has its work brought back when its first attempt could not is retried from a worktree that is as it was", async () => {
+test("a cloud agent's work that cannot be brought back fails the step even with retries left: no second agent is paid for, and the worktree is as it was", async () => {
   writeFileSync(join(cwd, "a.txt"), "a, edited\n");
+  const before = worktreeState(cwd);
   script.push(
     (o) => (agentRewritesHistory(remote, o.cloud.repos[0].startingRef, { "z.txt": "z\n" }), { result: "first" }),
     (o) => (agentCommits(remote, o.cloud.repos[0].startingRef, { "c.txt": "c\n" }, "agent: add c"), { result: "second" }),
   );
-  const r = await runWorkflow(configWorkflow((ctx) => ctx.agent<string>("write it", { role: "classify", label: "write" })), {}, { cwd });
+  const r = await runWorkflow(configWorkflow((ctx) => ctx.agent<string>("write it", { role: "classify", label: "write", retries: 2 })), {}, { cwd });
 
-  assert.equal(r.status, "finished", r.error);
-  assert.equal(r.result, "second");
-  assert.equal(calls.length, 2, "a new agent, from a new snapshot");
-  assert.notEqual(calls[0].cloud.repos[0].startingRef, calls[1].cloud.repos[0].startingRef);
-  assert.deepEqual([read("a.txt"), read("c.txt"), existsSync(join(cwd, "z.txt"))], ["a, edited\n", "c\n", false]);
+  assert.equal(r.status, "failed");
+  assert.match(r.error!, /failed after 1 attempt\(s\): the cloud agent's work could not be brought back: not a fast-forward/);
+  assert.equal(calls.length, 1, "the refusal ends the step: no new agent, from a new snapshot");
+  assert.deepEqual(worktreeState(cwd), before);
+  assert.deepEqual([read("a.txt"), existsSync(join(cwd, "z.txt"))], ["a, edited\n", false]);
   assert.deepEqual(remoteBranches(remote), []);
+  assert.equal(logOf(r.runId).filter((e) => e.type === "step-end").length, 1);
 });
 
 test("a machine that converts line endings (core.autocrlf) gets its work back and a clean status: the checks compare what git stores, not the bytes on disk", async () => {
@@ -205,43 +207,41 @@ test("a machine that converts line endings (core.autocrlf) gets its work back an
   assert.equal(git(cwd, "show", "HEAD:a.txt"), "a\nedited\n", "git stores the file with plain line ends");
 });
 
-test("a cloud attempt that was refused leaves the worktree to the person even when the step asks to be reverted on retry: what they changed meanwhile stays, and the retry builds on it", async () => {
+test("a cloud attempt that was refused leaves the worktree to the person even when the step asks to be reverted on retry: what they changed meanwhile stays, and the step fails", async () => {
   writeFileSync(join(cwd, "a.txt"), "a, edited\n");
-  script.push(
-    (o) => {
-      agentCommits(remote, o.cloud.repos[0].startingRef, { "c.txt": "c\n" });
-      writeFileSync(join(cwd, "a.txt"), "a, edited while the agent worked\n");
-      return { result: "first" };
-    },
-    (o) => (agentCommits(remote, o.cloud.repos[0].startingRef, { "d.txt": "d\n" }, "agent: add d"), { result: "second" }),
-  );
+  script.push((o) => {
+    agentCommits(remote, o.cloud.repos[0].startingRef, { "c.txt": "c\n" });
+    writeFileSync(join(cwd, "a.txt"), "a, edited while the agent worked\n");
+    return { result: "first" };
+  });
   const r = await runWorkflow(configWorkflow((ctx) => ctx.agent<string>("write it", { role: "classify", label: "write", revertOnRetry: true })), {}, { cwd });
 
-  assert.equal(r.status, "finished", r.error);
-  assert.equal(r.result, "second");
-  assert.equal(read("a.txt"), "a, edited while the agent worked\n", "the change made during the first attempt is not undone");
-  assert.equal(read("d.txt"), "d\n");
-  const [first] = logOf(r.runId).filter((e) => e.type === "step-end");
-  assert.ok(first && first.type === "step-end");
-  assert.deepEqual([first.ok, first.reverted], [false, undefined], "nothing of the step was in the worktree to put back");
+  assert.equal(r.status, "failed");
+  assert.equal(calls.length, 1, "the refusal is not retried");
+  assert.equal(read("a.txt"), "a, edited while the agent worked\n", "the change made during the attempt is not undone");
+  assert.equal(existsSync(join(cwd, "c.txt")), false);
+  const ends = logOf(r.runId).filter((e) => e.type === "step-end");
+  assert.equal(ends.length, 1);
+  const [only] = ends;
+  assert.ok(only && only.type === "step-end");
+  assert.deepEqual([only.ok, only.reverted], [false, undefined], "nothing of the step was in the worktree to put back");
 });
 
-test("a local branch that moved while the agent ran keeps its commit when the step asks to be reverted on retry, and the retry builds on it", async () => {
-  script.push(
-    (o) => {
-      agentCommits(remote, o.cloud.repos[0].startingRef, { "c.txt": "c\n" });
-      writeFileSync(join(cwd, "a.txt"), "a, by the person\n");
-      git(cwd, "commit", "-qam", "the person committed meanwhile");
-      return { result: "first" };
-    },
-    (o) => (agentCommits(remote, o.cloud.repos[0].startingRef, { "d.txt": "d\n" }), { result: "second" }),
-  );
+test("a local branch that moved while the agent ran keeps its commit when the step asks to be reverted on retry, and the step fails", async () => {
+  script.push((o) => {
+    agentCommits(remote, o.cloud.repos[0].startingRef, { "c.txt": "c\n" });
+    writeFileSync(join(cwd, "a.txt"), "a, by the person\n");
+    git(cwd, "commit", "-qam", "the person committed meanwhile");
+    return { result: "first" };
+  });
   const r = await runWorkflow(configWorkflow((ctx) => ctx.agent<string>("write it", { role: "classify", label: "write", revertOnRetry: true })), {}, { cwd });
 
-  assert.equal(r.status, "finished", r.error);
-  assert.equal(git(cwd, "status", "--porcelain"), "", "the person's commit is not shown as a change the retry undid");
+  assert.equal(r.status, "failed");
+  assert.match(r.error!, /not a fast-forward: the local branch moved while the cloud agent ran/);
+  assert.equal(calls.length, 1, "the refusal is not retried");
+  assert.equal(git(cwd, "status", "--porcelain"), "", "the person's commit is not shown as a change a revert undid");
   assert.equal(read("a.txt"), "a, by the person\n");
-  assert.deepEqual(subjects(), ["agent: the work", "the person committed meanwhile", "init"]);
+  assert.deepEqual(subjects(), ["the person committed meanwhile", "init"]);
 });
 
 test("cancelling a run while a cloud write step is running leaves the worktree as it is: the step changed nothing there, and what the person changed meanwhile stays", async () => {

@@ -143,8 +143,8 @@ if (!tests.ok) { /* tests.exitCode, tests.timedOut, tests.tail: the last 32768 c
 - A step that can write runs in the cloud too, on a role declared `ok`. The cloud agent commits on the snapshot branch (it is told
   to, even if your prompt says not to run git commands), and when it finishes the engine fetches the branch and fast-forwards the
   worktree to it, so commands you run afterwards with `ctx.exec` (the tests) see its work. It is a fast-forward or nothing: if the
-  agent rewrote the history, the local branch moved, or the working files changed while it ran, the step fails and the worktree is
-  left as it was. An agent that commits nothing changes nothing. Uncommitted changes the worktree had are committed in a snapshot
+  agent rewrote the history, the local branch moved, or the working files changed while it ran, the step fails (without a retry, which
+  would pay for a new agent) and the worktree is left as it was. An agent that commits nothing changes nothing. Uncommitted changes the worktree had are committed in a snapshot
   commit that stays in the local history.
 - Tokens and cost come from the cloud usage API and count against the same caps as a local step's.
 - A cloud step outlives the process. The engine writes the cloud agent's id to the event log (`cloud-agent`) the moment the agent

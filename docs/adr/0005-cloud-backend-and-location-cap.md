@@ -42,8 +42,8 @@ enforced before any cloud code exists.
   fetches the branch and moves the worktree's branch, index and working files to it, then deletes the snapshot. It refuses,
   changing nothing, when the agent's branch no longer contains the snapshot it started from, when the local branch moved
   meanwhile, when the working files are no longer what was pushed (bringing the work back would overwrite the changes
-  made in the meantime), or when the agent adds a file where the worktree has one git ignores; the attempt fails like any
-  other and the step's retries apply. A refused attempt changed nothing in the worktree, so neither `revertOnRetry` nor a
+  made in the meantime), or when the agent adds a file where the worktree has one git ignores; the step fails, whatever retries it
+  has left, because another attempt would pay for a new agent. A refused attempt changed nothing in the worktree, so neither `revertOnRetry` nor a
   cancellation reverts it: that would undo what the person changed meanwhile. An agent whose run says it pushed only to
   some other branch fails the attempt too, naming it. A worktree that had no changes needs
   no snapshot commit (the snapshot is `HEAD`); one that had changes keeps the snapshot commit in the local history, because
