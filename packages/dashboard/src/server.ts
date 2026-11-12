@@ -119,6 +119,9 @@ function clamped(raw: string | null, fallback: number, min: number, max: number)
   return Math.min(Math.max(Number(raw ?? fallback) || fallback, min), max);
 }
 
+/** How many runs `/api/runs` and `/api/board` read: the `limit` query, 200 by default, from 1 to 1000. */
+const runsLimit = (url: URL): number => clamped(url.searchParams.get("limit"), 200, 1, 1000);
+
 /** The id a reader has seen up to, from the `Last-Event-ID` header a reconnecting EventSource sends (it wins) or the `lastEventId` query. Undefined when neither is there; NaN when it is not a whole number of 0 or more. */
 function resumeId(req: IncomingMessage, url: URL): number | undefined {
   const raw = req.headers["last-event-id"] ?? url.searchParams.get("lastEventId") ?? undefined;
@@ -225,10 +228,10 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
         send(res, 200, { csrfToken });
         return;
       case "/api/runs":
-        send(res, 200, { runs: listRuns(clamped(url.searchParams.get("limit"), 200, 1, 1000)) });
+        send(res, 200, { runs: listRuns(runsLimit(url)) });
         return;
       case "/api/board": {
-        const runs = listRuns(clamped(url.searchParams.get("limit"), 200, 1, 1000));
+        const runs = listRuns(runsLimit(url));
         const states = prStates.states(runs.flatMap((run) => run.card?.links.map((link) => link.url) ?? []));
         send(res, 200, { boards: buildBoards(runs, states) });
         return;
