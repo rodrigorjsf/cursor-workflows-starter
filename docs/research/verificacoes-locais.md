@@ -348,7 +348,8 @@ código do SDK** do que **só a API real confirma**. O workflow que mede o segun
 [`verify-cloud`](../../scripts/verify/README.md) (uma etapa de leitura, com teto de 60 mil tokens e 25 centavos). **Ele ainda
 não foi executado contra a API real**: a sessão que o escreveu não podia empurrar branches para um code host nem criar o
 repositório descartável, então a coluna de resultado dos itens da API está em aberto. Quem rodar preenche as linhas (e
-corrige o que a medição refutar, como nos outros capítulos).
+corrige o que a medição refutar, como nos outros capítulos). A execução está no
+[#47](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/47).
 
 Lido no código do `@cursor/sdk` 1.3.1 (`dist/esm/448.js` e `index.js`), sem chamar a API:
 
