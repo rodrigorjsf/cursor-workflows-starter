@@ -51,3 +51,28 @@ test("the Runs table and the Board write a cost and a count the same way", () =>
   const board = textOf(render(WorkflowBoard, { board: { workflow: "ship-feature", columns: [{ key: "done", title: "Done", kind: "done" }], cards: [card] } as never }));
   assert.match(board, /\$12\.35/);
 });
+
+/** A window where the agents' attempts cover 4 runs, and 2 more runs only ran commands (`ctx.exec`): no attempt, still runs. */
+const WITH_EXEC_ONLY = {
+  ...SUMMARY,
+  totals: [{ ...SUMMARY.totals[0], runs: 4 }],
+  workflows: [
+    { workflow: "ship-feature", runs: 4, delivered: 2, delivery_rate: 0.5, cost_cents: 198, cost_per_delivery_cents: 99, human_rejected: 0 },
+    { workflow: "sleeper", runs: 2, delivered: 2, delivery_rate: 1, cost_cents: 0, cost_per_delivery_cents: 0, human_rejected: 0 },
+  ],
+};
+
+test("the Runs KPI counts what the Runs column under it counts: every run in the window, one that only ran commands included", () => {
+  const html = render(Panels, { data: WITH_EXEC_ONLY, width: 600 });
+  const kpi = /<div class="kpi"><dt>Runs<\/dt><dd>([^<]*)<\/dd>/.exec(html)?.[1];
+  const column = [...html.matchAll(/<td data-label="Runs"[^>]*>([^<]*)<\/td>/g)].reduce((total, m) => total + Number(m[1]!.replace(/,/g, "")), 0);
+  assert.equal(column, 6, "the table counts 6 runs");
+  assert.equal(kpi, "6", "the KPI labelled Runs shows the same count as the column labelled Runs");
+});
+
+test("a window whose only runs ran commands is not empty: its runs are counted", () => {
+  const data = { ...WITH_EXEC_ONLY, totals: [{}], models: [], contextBuckets: [], daily: [], workflows: [WITH_EXEC_ONLY.workflows[1]!] };
+  const page = textOf(render(Panels, { data, width: 600 }));
+  assert.doesNotMatch(page, /No metrics in this window/);
+  assert.match(page, /sleeper/);
+});

@@ -58,3 +58,13 @@ export function offeredActions(status: ApiStatus | undefined, graph: RunGraph): 
       : [];
   return { cancelRun: status === "running", leftCloudAgents };
 }
+
+/**
+ * How long the run took, by the Runs table's rule: to its run-end, or to `now` while no further event can end it (a live run,
+ * a replay part-way through). A run that is over without a run-end (its process died) did not record its end, and has none;
+ * nor has a run with no start yet.
+ */
+export function runElapsed(run: { startedAt?: string; endedAt?: string }, settled: boolean, now: number): number | undefined {
+  if (run.startedAt === undefined || (settled && run.endedAt === undefined)) return undefined;
+  return Math.max(0, (run.endedAt !== undefined ? Date.parse(run.endedAt) : now) - Date.parse(run.startedAt));
+}

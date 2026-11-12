@@ -38,6 +38,14 @@ test("a context band chart with one band still shows the success rate: a lone po
   assert.ok((html.match(/<circle\b/g) ?? []).length >= 2, "a mark for the cost and one for the success rate");
 });
 
+test("a context band chart with one band draws the cost dot over the success ring: where the two meet, both show", () => {
+  const html = render(ContextLines, { rows: [{ ctx_bucket_k: 25, attempts: 20, cents_per_1k_tokens: 0.437, ok_rate: 1, avg_steps: 1, summaries: 0 }], width: 400 } as Parameters<typeof ContextLines>[0]);
+  const ring = html.search(/<circle[^>]*stroke="var\(--chart-3\)"/);
+  const dot = html.search(/<circle[^>]*fill="var\(--chart-1\)"/);
+  assert.ok(ring >= 0 && dot >= 0, "both marks are drawn");
+  assert.ok(dot > ring, "the cost dot is drawn after the success ring, so the ring does not hide it");
+});
+
 /** Every `<td>` of `html` names its column, which a narrow screen shows beside the value when the rows stack. */
 function assertCellsLabelled(html: string, what: string): void {
   const cells = [...html.matchAll(/<td\b[^>]*>/g)].map((m) => m[0]);

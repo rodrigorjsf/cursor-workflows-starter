@@ -106,3 +106,13 @@ test("a run that fits a wide screen at a readable zoom is framed whole", async (
   const frame = frameOf(graph, layout, { width: 2400, height: 900 });
   assert.equal(frame.nodes, undefined);
 });
+
+test("a cancelled run is framed on the step it cancelled, as a failed or an interrupted one is", async () => {
+  const cancelled = [
+    ...long(false).slice(0, -2),
+    stepStart("s4", "push", { parentId: "s3" }),
+    { type: "step-end", stepId: "s4", parentId: "s3", groupId: null, attemptId: "s4#1", stepKey: "s4:k", label: "push", ok: false, errorKind: "cancelled", cached: false, chargedCents: 0 },
+    { type: "run-end", status: "cancelled" },
+  ];
+  assert.ok((await framedIds(cancelled, true, PHONE)).includes("s4"), "the cancelled step is in view");
+});
