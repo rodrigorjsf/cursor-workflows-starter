@@ -11,8 +11,9 @@ export function summary(db: Db, days = 30): Record<string, Row[]> {
   // Um `?` por uso da data de corte. Parâmetros numerados (`?1`) não funcionam no node:sqlite do Node 22.13 a 22.19.
   const q = (sql: string) => db.prepare(sql).all(...Array<string>((sql.match(/\?/g) ?? []).length).fill(s)) as Row[];
   return {
+    // `runs` vem de v_runs, como `workflows[].runs`: um run que só roda comandos não tem tentativa e conta mesmo assim.
     totals: q(`
-      SELECT COUNT(DISTINCT run_id) AS runs, ROUND(SUM(cost_cents), 2) AS cost_cents,
+      SELECT (SELECT COUNT(*) FROM v_runs WHERE started_at >= ?) AS runs, ROUND(SUM(cost_cents), 2) AS cost_cents,
              SUM(prompt_tokens + output_tokens) AS tokens,
              SUM(cached IS NOT NULL) AS cached_steps, SUM(ok = 0) AS failed_attempts,
              ROUND(1.0 * SUM(cache_read_tokens) / NULLIF(SUM(prompt_tokens), 0), 3) AS cache_share,
