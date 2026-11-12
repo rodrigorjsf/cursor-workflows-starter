@@ -38,9 +38,9 @@ export interface TurnUsage {
 /**
  * Por que uma tentativa de etapa falhou: estourou o tempo, o run do agente terminou em erro, o JSON do schema nunca veio
  * válido, limite de uso do plano, teto de tokens (`budget`: o run do agente foi cancelado no turno que passou do teto da
- * etapa ou do run, e a etapa não tenta de novo), ou exceção.
+ * etapa ou do run, e a etapa não tenta de novo), o run foi cancelado, ou exceção.
  */
-export type ErrorKind = "timeout" | "run-error" | "schema" | "rate-limit" | "budget" | "exception";
+export type ErrorKind = "timeout" | "run-error" | "schema" | "rate-limit" | "budget" | "cancelled" | "exception";
 
 /** Campos de todo evento. */
 export interface EventBase {
@@ -191,11 +191,14 @@ export interface RunStartEvent extends EventBase {
   violations: ConfigViolation[];
 }
 
+/** Como uma execução do run terminou: `finished` = o workflow retornou; `failed` = lançou um erro (inclusive teto de custo ou de tokens); `cancelled` = o run foi cancelado (`wf cancel`, `cancel_workflow`, SIGINT ou SIGTERM) e pode ser retomado com o mesmo `runId`. */
+export type RunStatus = "finished" | "failed" | "cancelled";
+
 /** O run terminou. */
 export interface RunEndEvent extends EventBase {
   type: "run-end";
-  /** `finished` = o workflow retornou; `failed` = lançou um erro (inclusive teto de custo ou de tokens). */
-  status: "finished" | "failed";
+  /** Como a execução terminou. */
+  status: RunStatus;
   /** O campo `status` do resultado do workflow, quando ele devolve um objeto com esse campo (por exemplo `done`). */
   outcomeStatus?: string;
   /** O valor que o workflow retornou. É o que `wait_workflow` e `wf status` devolvem como `result`. Não é conteúdo de etapa: a retenção não o apaga (o workflow decide o que devolve), mas a redação de segredos vale para ele. */
@@ -312,6 +315,8 @@ export interface StepEndEvent extends EventBase, StepRef {
   reasoningTokens?: number;
   /** Por que a tentativa falhou, quando `ok` é false. */
   errorKind?: ErrorKind;
+  /** true = o run foi cancelado no meio de uma etapa que escreve e as alterações dela no diretório de trabalho foram desfeitas (o diretório voltou ao estado de antes da etapa). Se não foi possível desfazer, há um `warning` com o motivo. */
+  reverted?: boolean;
   /** A mensagem do erro, quando `ok` é false. */
   error?: string;
   /** Re-prompts feitos até o agente chamar `submit_result` com JSON válido. */

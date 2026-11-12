@@ -26,12 +26,14 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   │   ├── run-store.ts    # log de eventos, journal e lock de cada run
 │       │   │   ├── structured.ts   # saída estruturada via custom tool submit_result + Ajv
 │       │   │   ├── journal.ts      # resume sem repetir etapas concluídas
-│       │   │   ├── jobs.ts         # execução assíncrona com estado em disco (start/wait)
+│       │   │   ├── jobs.ts         # jobs: processo destacado, heartbeat, cancelamento e estado projetado do log
+│       │   │   ├── heartbeat-worker.mjs  # thread que atualiza o heartbeat do job mesmo com a principal bloqueada
+│       │   │   ├── worktree-snapshot.ts  # registra e restaura os arquivos de uma etapa que escreve (cancelamento)
 │       │   │   ├── registry.ts     # descobre workflows/*.ts
 │       │   │   └── nested-mcp-guard.mjs  # servidor MCP sem tools que barra workflow dentro de etapa
 │       │   ├── observability/      # banco SQLite de métricas, recorder, consultas, dashboard localhost
-│       │   ├── cli.ts              # wf login | whoami | models | list | run | start | wait | status | jobs | stats | metrics
-│       │   └── mcp-server.ts       # tools MCP: list_workflows, start_workflow, wait_workflow, get_workflow_status
+│       │   ├── cli.ts              # wf login | whoami | models | list | config | run | start | wait | status | cancel | jobs | stats | metrics
+│       │   └── mcp-server.ts       # tools MCP: list_workflows, start_workflow, wait_workflow, get_workflow_status, cancel_workflow
 │       ├── workflows/
 │       │   ├── implement-issue.ts  # exemplo: TDD fatia a fatia conferido pelo código → review em 3 eixos → PR com evidência
 │       │   └── implement-issue/    # prompts (paráfrases das skills de mattpocock/skills), laço TDD, review, corpo do PR

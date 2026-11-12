@@ -3,8 +3,11 @@
 export const calls: any[] = [];
 /** Comportamento de cada send(), em ordem. Sem entrada: run "finished" com result "ok". */
 export const script: Array<(o: any, msg: string, n: number) => any> = [];
-/** `cancels`: Run.cancel() calls (not on `hang` runs). `turnsDelivered`: turn-ended deltas that reached onDelta on live runs. */
-export const stats = { active: 0, maxActive: 0, disposed: 0, usageReads: 0, cancels: 0, turnsDelivered: 0 };
+/**
+ * `cancels`: Run.cancel() calls (not on `hang` runs). `cancelled`: `hang` runs ended by cancel(). `turnsDelivered`:
+ * turn-ended deltas that reached onDelta on live runs.
+ */
+export const stats = { active: 0, maxActive: 0, disposed: 0, usageReads: 0, cancels: 0, cancelled: 0, turnsDelivered: 0 };
 export class CursorAgentError extends Error {
   isRetryable = false;
 }
@@ -20,13 +23,15 @@ const DEFAULT_DELTAS = [
   { type: "turn-ended", usage: TURN_USAGE },
 ];
 /** Custo devolvido por getUsage() (mude nos testes). */
-export const costConfig: { raw: number | undefined; charged: number; modelId?: string; getUsageError?: string; createErrorCode?: string } = { raw: 9, charged: 7 };
+export const costConfig: { raw: number | undefined; charged: number; modelId?: string; getUsageError?: string; createErrorCode?: string; createHang?: boolean; createDelayMs?: number } = { raw: 9, charged: 7 };
 export const Agent = {
   async getUsage(_agentId: string) {
     return { usage: { ...TURN_USAGE, totalTokens: 110 }, cost: { chargedCents: 7, rawCostCents: 9 }, runs: [] };
   },
   async create(o: any) {
     calls.push(o);
+    if (costConfig.createHang) return new Promise(() => {}); // a creation that never answers
+    if (costConfig.createDelayMs) await new Promise((r) => setTimeout(r, costConfig.createDelayMs)); // a slow one
     if (costConfig.createErrorCode) {
       // Como o SDK no plano Free: a validação local do modelo chama GET /v1/models e recebe 403.
       throw Object.assign(new CursorAgentError(`[${costConfig.createErrorCode}] Cloud Agent is not available for free users. Please upgrade to Pro.`), { code: costConfig.createErrorCode, status: 403 });
@@ -38,7 +43,10 @@ export const Agent = {
     return {
       agentId: `agent-${calls.length}`,
       async send(msg: string, options?: any) {
-        const behave = script.shift() ?? (() => ({ status: "finished", result: "ok" }));
+        // `script` is process-local; a test that spawns a CLI or an MCP server steers the fake through the prompt instead.
+        const behave =
+          script.shift() ??
+          (() => (msg.includes("[fake:hang]") ? { hang: true, cancelDelayMs: msg.includes("[fake:slow-cancel]") ? 5000 : 0 } : { status: "finished", result: "ok" }));
         const r = await behave(o, msg, n++);
         /** One delta reaches the caller; a turn's usage also counts toward the agent's total (what getUsage() sums). */
         const deliver = async (update: any, live: boolean) => {
@@ -74,7 +82,19 @@ export const Agent = {
           };
         }
         for (const update of r?.deltas ?? DEFAULT_DELTAS) await deliver(update, false);
-        if (r?.hang) return { cancel: async () => {}, wait: () => new Promise(() => {}) };
+        if (r?.hang) {
+          // A run that does not end by itself. `cancel()` ends it, as in the SDK: `wait()` then resolves with status "cancelled".
+          let end!: (result: any) => void;
+          const ended = new Promise((resolve) => (end = resolve));
+          return {
+            async cancel() {
+              if (r.cancelDelayMs) await new Promise((resolve) => setTimeout(resolve, r.cancelDelayMs)); // a cancellation that takes its time
+              stats.cancelled++;
+              end({ id: "r", status: "cancelled", model: o.model });
+            },
+            wait: () => ended,
+          };
+        }
         return { cancel: async () => void stats.cancels++, wait: async () => ({ id: "r", status: "finished", model: o.model, ...r }) };
       },
       async getUsage() {

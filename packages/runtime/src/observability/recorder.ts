@@ -8,15 +8,16 @@
 //    the run's local event log (`content` events) and never reach this recorder.
 
 import { randomUUID } from "node:crypto";
-import type { WorkflowEvent } from "../runtime/events.js";
+import type { RunStatus, WorkflowEvent } from "../runtime/events.js";
 import { type Db, openDb, write } from "./db.js";
 
 const DELIVERED = new Set(["done", "delivered", "ok", "success", "succeeded"]);
 /** Status que aguardam alguém (ex.: seams propostas esperando aprovação): não são entrega nem falha. */
 const PENDING = new Set(["seams-proposed", "pending"]);
 
-/** Classe do resultado: delivered (entregou), failed (o workflow decidiu que não entregou), error (exceção/teto). */
-export function outcomeClass(status: "finished" | "failed", outcomeStatus?: string): string {
+/** Classe do resultado: delivered (entregou), failed (o workflow decidiu que não entregou), error (exceção/teto), cancelled (alguém cancelou o run). */
+export function outcomeClass(status: RunStatus, outcomeStatus?: string): string {
+  if (status === "cancelled") return "cancelled";
   if (status === "failed") return "error";
   if (outcomeStatus === undefined) return "unknown";
   if (PENDING.has(outcomeStatus)) return "pending";

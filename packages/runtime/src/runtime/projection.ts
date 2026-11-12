@@ -4,8 +4,11 @@
 // Nothing here reads a file or the clock: both take the events. Neither ever carries step content: the projection looks
 // at metadata fields only, and `content` events are not read at all.
 
-import type { WorkflowEvent } from "./events.js";
+import type { RunStatus, WorkflowEvent } from "./events.js";
 import type { UsageTotals } from "./workflow.js";
+
+/** How a message tells the reader to continue a run that stopped without finishing. The `run-workflow` skill matches the `resumeRunId="..."` part. */
+export const resumeHint = (runId: string): string => `relance com resumeRunId="${runId}"`;
 
 export const emptyUsage = (): UsageTotals => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0 });
 
@@ -117,7 +120,7 @@ export interface ExecutionState {
   /** Set when the execution wrote its `run-end`. */
   finishedAt?: string;
   /** `running` until the execution writes its `run-end`. A caller that knows the process is gone decides what that means. */
-  status: "running" | "finished" | "failed";
+  status: "running" | RunStatus;
   phase?: string;
   /** The last progress lines, one line each. */
   recent: string[];

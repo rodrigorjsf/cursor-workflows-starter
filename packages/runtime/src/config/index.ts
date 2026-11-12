@@ -3,7 +3,7 @@
 
 import type { WorkflowDefinition } from "../runtime/workflow.js";
 import { ConfigError, type ConfigIssue, type LoadedConfig, globalConfigPath, loadConfigFile, repoConfigPath } from "./file.js";
-import { type FlagLimits, type LimitOverrides, type ResolvedConfig, resolveConfig } from "./resolve.js";
+import { LIMIT_FIELDS, type FlagLimits, type LimitOverrides, type ResolvedConfig, resolveConfig } from "./resolve.js";
 
 export { ConfigError, CONFIG_SCHEMA_PATH, globalConfigPath, repoConfigPath } from "./file.js";
 export { LIMIT_FIELDS, STEP_OVERRIDE_FIELDS, allowedSources, isModelAllowed, type FlagLimits, type LimitOverrides, type ResolvedConfig, type StepOverrides } from "./resolve.js";
@@ -32,4 +32,20 @@ export function loadEffectiveConfig(workflow: Pick<WorkflowDefinition, "meta" | 
   const repo = load(repoConfigPath(opts.cwd));
   if (issues.length) throw new ConfigError(issues);
   return resolveConfig({ workflow, global, repo, env: opts.env ?? process.env, flags: opts.flags, mcpOverrides: opts.mcpOverrides });
+}
+
+/**
+ * The chat's `overrides` as limit overrides. Only the shape is checked here (an object of numbers, `null` counting as a
+ * loosening attempt); the config resolver rejects a number that is not a valid limit and ignores one that loosens.
+ */
+export function parseLimitOverrides(raw: unknown): LimitOverrides {
+  if (raw === undefined) return {};
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new Error("overrides precisa ser um objeto");
+  const overrides: Record<string, number | null> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!(LIMIT_FIELDS as readonly string[]).includes(key)) throw new Error(`override desconhecido: ${key} (use ${LIMIT_FIELDS.join(", ")})`);
+    if (value !== null && typeof value !== "number") throw new Error(`override ${key} precisa ser um número`);
+    overrides[key] = value;
+  }
+  return overrides;
 }

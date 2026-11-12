@@ -10,24 +10,27 @@
 //   wf start <workflow> --args '<json>' [--resume <runId>]                 # segundo plano; imprime {jobId}
 //   wf status <jobId>
 //   wf wait <jobId> [--timeout 240]       # espera até o timeout e imprime o estado
+//   wf cancel <jobId> [--timeout 30]      # cancel the job (SIGTERM to its process) and wait for it to stop; the run stays resumable
 //   wf jobs
 //   wf stats [--days 30]                  # resumo de custo/eficiência (banco ~/.cursor-workflows/metrics.db)
 //   wf metrics export [--days 30] [--format csv|json] [--out dir] [--no-anonymize]
 //   wf metrics reconcile                  # completa custos que o Cursor ainda não tinha reportado
 //   wf metrics mark <runId> accepted|rejected
 //
+// `start` runs the job in a detached process. SIGINT (Ctrl-C) or SIGTERM on a running `run` cancels it, like `wf cancel`.
+// `run` and `start` also take --overrides '<json>': limits tighter than the config's, for this run only (the chat's layer).
+//
 // STATUS: verificado contra a API real num plano Premium em 2026-11-11 (docs/research/verificacoes-locais.md).
 
 import "./console-to-stderr.js"; // o stdout leva o JSON do resultado: o console do SDK vai para o stderr
 import "./node-check.js"; // antes de tudo: o @cursor/sdk exige Node 22.13+
-import { spawn } from "node:child_process";
-import { existsSync, openSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { Cursor } from "@cursor/sdk";
-import { globalConfigPath, loadEffectiveConfig, repoConfigPath } from "./config/index.js";
-import { INSIDE_WORKFLOW_ENV, runWorkflow } from "./runtime/engine.js";
-import { createJob, installCrashHandlers, jobLogPath, listJobs, readJob, readJobRecord, startJob, waitJob, writeJob } from "./runtime/jobs.js";
+import { globalConfigPath, loadEffectiveConfig, parseLimitOverrides, repoConfigPath } from "./config/index.js";
+import { INSIDE_WORKFLOW_ENV, type RunStatus, runWorkflow } from "./runtime/engine.js";
+import { cancelJob, cancelOnSignals, installCrashHandlers, listJobs, readJob, readJobRecord, spawnJob, startJob, waitJob } from "./runtime/jobs.js";
 import { loadWorkflows } from "./runtime/registry.js";
 
 const { positionals, values } = parseArgs({
@@ -37,6 +40,7 @@ const { positionals, values } = parseArgs({
     cwd: { type: "string", default: process.cwd() },
     "max-cents": { type: "string" },
     "max-tokens": { type: "string" },
+    overrides: { type: "string" },
     resume: { type: "string" },
     job: { type: "string" },
     timeout: { type: "string", default: "240" },
@@ -50,6 +54,12 @@ const { positionals, values } = parseArgs({
 const [command, name] = positionals;
 const cwd = resolve(values.cwd!);
 const out = (v: unknown) => process.stdout.write(JSON.stringify(v, null, 2) + "\n");
+/** `--timeout`, in milliseconds. A value that is not a number of seconds is an error: it would make the wait return at once. */
+const timeoutMs = (): number => {
+  const seconds = Number(values.timeout);
+  if (values.timeout!.trim() === "" || !Number.isFinite(seconds) || seconds < 0) throw new Error(`--timeout precisa ser um número de segundos maior ou igual a 0, recebeu "${values.timeout}"`);
+  return seconds * 1000;
+};
 /** The flag layer of the config: only what the command line says. WF_MAX_* are the env layer, read by the config. */
 const flagLimits = () => {
   const number = (flag: "max-cents" | "max-tokens") => {
@@ -61,12 +71,17 @@ const flagLimits = () => {
   };
   return { maxCents: number("max-cents"), maxTokens: number("max-tokens") };
 };
+/** The chat's layer of the config (`--overrides`): only what the MCP server forwards to the process it spawns. */
+const overridesFlag = () => (values.overrides === undefined ? undefined : parseLimitOverrides(JSON.parse(values.overrides)));
 const runOpts = () => ({
   cwd,
   runId: values.resume,
   ...flagLimits(),
+  mcpOverrides: overridesFlag(),
   onEvent: (e: unknown) => process.stderr.write(JSON.stringify(e) + "\n"),
 });
+/** 0 finished; 130 cancelled (the shell's code for a run stopped by SIGINT); 1 failed. */
+const exitCodeOf = (status: RunStatus) => (status === "finished" ? 0 : status === "cancelled" ? 130 : 1);
 
 async function resolveWorkflow() {
   const def = (await loadWorkflows(cwd)).get(name ?? "");
@@ -117,38 +132,28 @@ async function main(): Promise<number> {
     case "run": {
       const def = await resolveWorkflow();
       const args = JSON.parse(values.args!);
+      const opts = { ...runOpts(), signal: cancelOnSignals() }; // SIGINT and SIGTERM cancel the run, the same as `wf cancel`
       if (values.job) {
-        // Modo filho de `wf start`: o pai já criou o job.
+        // Child mode of `wf start` and `start_workflow`: the parent already created the job.
         const existing = readJobRecord(cwd, values.job);
         if (!existing) throw new Error(`job ${values.job} não encontrado`);
-        const { done } = startJob(def, args, runOpts(), existing);
+        const { done } = startJob(def, args, opts, existing);
         const state = await done;
         if (state.status !== "finished" && state.error) process.stderr.write(`${state.error}\n`); // goes to the job's log (.workflows/jobs/<jobId>.log)
-        return state.status === "finished" ? 0 : 1;
+        return exitCodeOf(state.status === "running" ? "failed" : state.status);
       }
-      const outcome = await runWorkflow(def, args, runOpts());
+      const outcome = await runWorkflow(def, args, opts);
       out(outcome);
-      return outcome.status === "finished" ? 0 : 1;
+      return exitCodeOf(outcome.status);
     }
     case "start": {
       // Valida no pai, antes do spawn, para o erro aparecer aqui e não sumir num processo destacado.
       const def = await resolveWorkflow();
-      JSON.parse(values.args!);
-      const { violations } = loadEffectiveConfig(def, { cwd, flags: flagLimits() }); // an unusable config fails here, with its field path
-      const job = createJob(cwd, def.meta.name, values.resume);
-      const log = openSync(jobLogPath(cwd, job.jobId), "a");
-      const child = spawn(
-        process.execPath,
-        [...process.execArgv, process.argv[1]!, "run", def.meta.name, "--args", values.args!, "--cwd", cwd, "--job", job.jobId,
-          ...(values["max-cents"] ? ["--max-cents", values["max-cents"]] : []),
-          ...(values["max-tokens"] ? ["--max-tokens", values["max-tokens"]] : [])],
-        { detached: true, stdio: ["ignore", log, log], env: process.env },
-      );
-      // O job nasceu com o pid do pai (que sai já); aponta para o filho, que também grava o próprio pid ao iniciar.
-      const current = readJobRecord(cwd, job.jobId);
-      if (current && child.pid) writeJob(cwd, { ...current, pid: child.pid });
-      child.unref();
-      out({ jobId: job.jobId, runId: job.runId, log: jobLogPath(cwd, job.jobId), next: `wf wait ${job.jobId}`, ...(violations.length ? { violations } : {}) });
+      const args = JSON.parse(values.args!);
+      const overrides = overridesFlag();
+      const { violations } = loadEffectiveConfig(def, { cwd, flags: flagLimits(), mcpOverrides: overrides }); // an unusable config fails here, with its field path
+      const { job, log } = spawnJob({ cwd, workflow: def.meta.name, args, resumeRunId: values.resume, ...flagLimits(), overrides });
+      out({ jobId: job.jobId, runId: job.runId, log, next: `wf wait ${job.jobId}`, ...(violations.length ? { violations } : {}) });
       return 0;
     }
     case "status": {
@@ -156,7 +161,12 @@ async function main(): Promise<number> {
       return 0;
     }
     case "wait": {
-      out((await waitJob(cwd, name ?? "", Number(values.timeout) * 1000)) ?? { error: "job não encontrado" });
+      out((await waitJob(cwd, name ?? "", timeoutMs())) ?? { error: "job não encontrado" });
+      return 0;
+    }
+    case "cancel": {
+      // Waits for the process to stop (it cancels the agents, reverts the in-flight step and writes the run's end), 30 s at most.
+      out((await cancelJob(cwd, name ?? "", Math.min(timeoutMs(), 30_000))) ?? { error: "job não encontrado" });
       return 0;
     }
     case "jobs": {
@@ -211,7 +221,7 @@ async function main(): Promise<number> {
       }
     }
     default:
-      process.stderr.write("uso: wf <login|whoami|list|config|run|start|status|wait|jobs|stats|metrics> ...\n");
+      process.stderr.write("uso: wf <login|whoami|list|config|run|start|status|wait|cancel|jobs|stats|metrics> ...\n");
       return 2;
   }
 }

@@ -59,7 +59,7 @@ test("a relocated install serves its own built-in workflows and version, plus th
     assert.equal(client.getServerVersion()?.version, "9.9.9-relocated");
 
     const { tools } = await client.listTools();
-    assert.deepEqual(tools.map((t) => t.name).sort(), ["get_workflow_status", "list_workflows", "start_workflow", "wait_workflow"]);
+    assert.deepEqual(tools.map((t) => t.name).sort(), ["cancel_workflow", "get_workflow_status", "list_workflows", "start_workflow", "wait_workflow"]);
 
     const listed = await client.callTool({ name: "list_workflows", arguments: {} });
     const names = (JSON.parse((listed.content as Array<{ text: string }>)[0]!.text) as Array<{ name: string }>).map((w) => w.name);

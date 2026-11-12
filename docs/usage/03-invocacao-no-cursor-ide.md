@@ -27,9 +27,10 @@ O servidor `workflows` é registrado em `.cursor/mcp.json` (Cursor) e em `.mcp.j
 | Tool | Entrada | Saída |
 |---|---|---|
 | `list_workflows` | — | `name`, `description`, `whenToUse`, `phases`, `argsSchema` de cada workflow |
-| `start_workflow` | `{ name, args, resumeRunId? }` | `{ jobId, runId }`. O workflow roda em segundo plano dentro do processo do servidor |
+| `start_workflow` | `{ name, args, resumeRunId?, overrides? }` | `{ jobId, runId }`. O workflow roda em segundo plano, em um processo destacado: reiniciar o servidor ou o Cursor não o interrompe |
 | `wait_workflow` | `{ jobId, timeoutSec ≤ 50 }` | Estado do job, projetado do log de eventos do run: `status`, `phase`, `recent` (até 20 linhas de resumo, uma linha cada, nunca texto de prompt ou de saída de agente; o custo de cada etapa é o maior entre bruto e cobrado), `result` (o que o workflow devolveu), `error`, `spentCents` (custo que o teto usa; acumula entre resumes), `chargedCents` (só o valor cobrado), `spentTokens` |
 | `get_workflow_status` | `{ jobId }` | Estado, sem esperar |
+| `cancel_workflow` | `{ jobId }` | Cancela o job: para os agentes ativos, desfaz a etapa que estava escrevendo e devolve o estado com `status: "cancelled"`. O run continua retomável. O agente do chat só chama quando o usuário pede para parar |
 
 **Por que start/wait e não uma tool que bloqueia até o fim?** Um workflow de implementação leva minutos, e a
 doc do Cursor não dá o timeout de uma chamada de tool MCP no IDE. O FAQ de MCP só diz que, se o servidor cai ou
@@ -40,9 +41,16 @@ limites de 60 s que a doc cita valem para outros casos: tool stdio em workers se
 dura no máximo 50 s e o agente do chat repete a espera.
 
 **Se o servidor reiniciar no meio** (por exemplo, ao reiniciar o Cursor ou ao desligar e religar o servidor em
-**Customize** [DOC](https://cursor.com/docs/mcp)): o job aparece como `failed` com o `runId`. A doc não diz se
-mudar o `mcp.json` reinicia um servidor que já está rodando. Chame `start_workflow` com o mesmo `name` e `args`
-e com `resumeRunId: "<runId>"`; as etapas já concluídas saem do journal.
+**Customize** [DOC](https://cursor.com/docs/mcp)): o run continua, porque roda em um processo destacado
+([ADR-0003](../adr/0003-detached-jobs.md)). O servidor novo o encontra pelos arquivos do job e
+`wait_workflow` segue de onde parou. A doc não diz se mudar o `mcp.json` reinicia um servidor que já está rodando.
+
+**Se o processo do job morrer** (ou parar de dar sinal de vida: o heartbeat dele fica mais de 30 s sem atualizar),
+o job aparece como `failed` com o `runId`. Chame `start_workflow` com o mesmo `name` e `args` e com
+`resumeRunId: "<runId>"`; as etapas já concluídas saem do journal.
+
+**Para parar um run:** `cancel_workflow` (ou `wf cancel <jobId>`, ou Ctrl-C / `SIGTERM` no processo do run). O job
+termina como `cancelled`, com o `runId` para retomar.
 
 **Custo do polling:** cada `wait_workflow` é uma chamada de tool do agente do chat e consome tokens do modelo
 que está no chat. Duas formas de reduzir:
@@ -64,6 +72,7 @@ Fallback quando o MCP não está habilitado, e caminho preferido em CI e em runs
 ```bash
 npm run wf -- start implement-issue --args '{"issue":123}'   # processo destacado; log em .workflows/jobs/<id>.log
 npm run wf -- wait <jobId> --timeout 240
+npm run wf -- cancel <jobId>          # para o run (SIGTERM ao processo do job); o run continua retomável
 ```
 
 `start` valida o nome do workflow e o JSON dos args **antes** de destacar o processo e grava o job (com `runId`)

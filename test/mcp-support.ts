@@ -9,7 +9,7 @@ export const ROOT = resolve(import.meta.dirname, "..");
 export const FAKE_SDK_TSCONFIG = join(ROOT, "packages", "runtime", "tsconfig.test.json");
 
 /** The tools the `workflows` MCP server exposes. */
-export const MCP_TOOLS = ["get_workflow_status", "list_workflows", "start_workflow", "wait_workflow"];
+export const MCP_TOOLS = ["cancel_workflow", "get_workflow_status", "list_workflows", "start_workflow", "wait_workflow"];
 
 /** Connects a client to the server described by `params`, runs `use`, and always closes the connection. */
 export async function withMcpServer<T>(params: StdioServerParameters, use: (client: Client) => Promise<T>): Promise<T> {

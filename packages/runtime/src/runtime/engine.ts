@@ -30,17 +30,18 @@ import {
 } from "@cursor/sdk";
 import { Ajv } from "ajv";
 import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedConfig, type StepOverrides, allowedSources, isModelAllowed, loadEffectiveConfig } from "../config/index.js";
-import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type NewEvent, type StepRef, type WorkflowEvent } from "./events.js";
+import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type NewEvent, type RunStatus, type StepRef, type WorkflowEvent } from "./events.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
-import { addUsage, emptyUsage, withRatio } from "./projection.js";
+import { addUsage, emptyUsage, resumeHint, withRatio } from "./projection.js";
 import { RunLockedError, RunStore } from "./run-store.js";
 import type { RetentionPolicy } from "./retention.js";
 import { registerRun } from "./runs-index.js";
 import { stateDir as runtimeStateDir } from "./state.js";
 import { type Capture, SUBMIT_TOOL, repromptMessage, schemaInstruction, submitResultTool } from "./structured.js";
 import type { AgentCallOptions, Budget, UsageTotals, WorkflowContext, WorkflowDefinition } from "./workflow.js";
+import { revertToSnapshot, takeSnapshot } from "./worktree-snapshot.js";
 
-export type { ErrorKind, TurnUsage, WorkflowEvent } from "./events.js";
+export type { ErrorKind, RunStatus, TurnUsage, WorkflowEvent } from "./events.js";
 
 /** Erro que encerra o run inteiro, inclusive dentro de parallel/pipeline (não vira null). */
 export class FatalRunError extends Error {}
@@ -104,6 +105,13 @@ class AttemptCut {
     if (this.run) this.cancelling ??= this.run.cancel().catch(() => {});
   }
 }
+/** The step's time ran out (the attempt's creation, send and wait share it). */
+class StepTimeoutError extends StepFailedError {}
+/**
+ * The run was cancelled (`RunOptions.signal` aborted). It ends the whole run, also inside parallel/pipeline: active steps
+ * stop and no step starts. The run is resumable with the same id.
+ */
+export class RunCancelledError extends FatalRunError {}
 
 /**
  * Marca o ambiente do processo: o shell das etapas herda (o CLI recusa `wf run/start`). Os servidores MCP do
@@ -166,6 +174,12 @@ export interface RunOptions {
    * turns that limit off.
    */
   retention?: RetentionPolicy;
+  /**
+   * Aborting it cancels the run (`wf cancel`, `cancel_workflow`, SIGINT and SIGTERM all end up here): the active agent runs
+   * are cancelled, the in-flight write step is reverted to its state before the step, no new step starts, and the run ends
+   * with status `cancelled`. The run stays resumable: its completed steps are in the journal.
+   */
+  signal?: AbortSignal;
   onEvent?: (e: WorkflowEvent) => void;
   /**
    * Banco de métricas (SQLite). Default: ~/.cursor-workflows/metrics.db ($WF_METRICS_DB). `false` desliga;
@@ -176,7 +190,7 @@ export interface RunOptions {
 
 export interface RunOutcome<R> {
   runId: string;
-  status: "finished" | "failed";
+  status: RunStatus;
   result?: R;
   error?: string;
   /** true when the runtime refused the run before it started (invalid args, run already executing): nothing was written to the log. */
@@ -347,7 +361,7 @@ async function executeRun<A, R>(
   let chargedCents = store.ledger.chargedCents;
   let spentTokens = store.ledger.spentTokens;
   const totals = { ...store.ledger.usage };
-  const outcome = (status: "finished" | "failed", extra: { result?: R; error?: string }): RunOutcome<R> => ({
+  const outcome = (status: RunStatus, extra: { result?: R; error?: string }): RunOutcome<R> => ({
     runId,
     status,
     ...extra,
@@ -498,10 +512,9 @@ async function executeRun<A, R>(
 
   // Live token caps. `live` holds the turn totals of the attempts in flight (they join `spentTokens` when the attempt is
   // charged); `cutters` stop those attempts. Once the run's cap is crossed, `runBreach` is the run's budget error: every
-  // active attempt is cut with it and no step starts after it.
+  // active attempt is cut with it and no step starts after it. The steps in flight are in `inFlight` (below).
   const live = new Set<UsageTotals>();
   const cutters = new Set<AttemptCut>();
-  const running = new Set<Promise<unknown>>();
   let runBreach: BudgetExceededError | undefined;
 
   const stepCapError = (step: StepContext, tokens: number) => new StepBudgetError(`Teto de tokens da etapa "${step.label}" atingido: ${tokens} de ${step.tokenCap}.`);
@@ -516,6 +529,35 @@ async function executeRun<A, R>(
     }
     const stepTokens = step.tokens + attemptTokens;
     return step.tokenCap != null && stepTokens > step.tokenCap ? stepCapError(step, stepTokens) : undefined;
+  }
+
+  // Cancellation. `cancelled` rejects when the signal aborts; it is only ever raced against something, never awaited alone.
+  const signal = opts.signal;
+  const cancelMessage = `run cancelado; ${resumeHint(runId)}`;
+  const cancelled = signal
+    ? new Promise<never>((_, reject) => {
+        const fire = () => reject(new RunCancelledError(cancelMessage));
+        if (signal.aborted) fire();
+        else signal.addEventListener("abort", fire, { once: true });
+      })
+    : undefined;
+  cancelled?.catch(() => {});
+  /** A step was cut short by the cancellation: whatever the workflow returns, the run did not run to its end. */
+  let interrupted = false;
+  /** The steps being executed. A cancelled run waits for them to stop before it ends. */
+  const inFlight = new Set<Promise<unknown>>();
+  /** After the cancellation, ends when every step in flight has stopped; then rejects. Lets a workflow stuck outside a step still end. */
+  const abandoned = cancelled?.catch(async (err: unknown) => {
+    await Promise.allSettled([...inFlight]);
+    throw err;
+  });
+  abandoned?.catch(() => {});
+
+  /** Reverts run one at a time: two steps writing in the same directory must not restore it at once. */
+  let revertQueue: Promise<unknown> = Promise.resolve();
+
+  function assertNotCancelled(): void {
+    if (signal?.aborted) throw new RunCancelledError(cancelMessage);
   }
 
   function assertBudget(): void {
@@ -595,24 +637,40 @@ async function executeRun<A, R>(
     }
   }
 
-  /** `abort` rejects when the attempt is cut (token cap): it wins over a result that arrives at the same time. */
-  async function waitWithTimeout(run: Run, ms: number, abort: Promise<never>): Promise<RunResult> {
+  /** When an attempt's time runs out: `at` is the instant, `ms` the step's timeout, which the error message reports. */
+  interface Deadline {
+    at: number;
+    ms: number;
+  }
+
+  /**
+   * Races `promise` against the attempt's deadline and the run's cancellation: throws a `StepTimeoutError` when the time
+   * runs out and a `RunCancelledError` when the run is cancelled. A value that arrives after the race was given up goes to
+   * `late`, so an agent created too late is still disposed. `abort` rejects when the attempt is cut (token cap): it wins
+   * over a result that arrives at the same time.
+   */
+  async function within<T>(attempt: Deadline, promise: Promise<T>, late?: (value: T) => void, abort?: Promise<never>): Promise<T> {
     let timer: NodeJS.Timeout | undefined;
-    let timedOut = false;
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        timedOut = true;
-        reject(new StepFailedError(`timeout após ${ms} ms`));
-      }, ms);
+      timer = setTimeout(() => reject(new StepTimeoutError(`timeout após ${attempt.ms} ms`)), Math.max(0, attempt.at - Date.now()));
     });
-    const result = run.wait();
-    result.catch(() => {}); // a run that loses the race may still reject later: nobody is waiting for it
     try {
-      return await Promise.race([abort, result, timeout]);
+      return await Promise.race([...(abort ? [abort] : []), promise, timeout, ...(cancelled ? [cancelled] : [])]);
+    } catch (err) {
+      promise.then(late, () => {}); // given up (or failed): whatever it yields later is not ours
+      throw err;
     } finally {
       clearTimeout(timer);
-      // Espera o cancelamento terminar para a próxima tentativa não editar o mesmo cwd em paralelo.
-      if (timedOut) await run.cancel().catch(() => {});
+    }
+  }
+
+  async function waitWithTimeout(run: Run, attempt: Deadline, abort?: Promise<never>): Promise<RunResult> {
+    try {
+      return await within(attempt, run.wait(), undefined, abort);
+    } catch (err) {
+      // Waits for the cancellation to finish so the next attempt does not edit the same cwd in parallel.
+      if (err instanceof StepTimeoutError || err instanceof RunCancelledError) await run.cancel().catch(() => {});
+      throw err;
     }
   }
 
@@ -665,13 +723,15 @@ async function executeRun<A, R>(
     const key = journal.keyFor(prompt, fingerprint);
     const ref: StepRef = { stepId: stepIdOf(key), parentId: flow.last, groupId: flow.groupId };
     const step: StepContext = { o, role, promptHash, label, phase, sources, mKey, fingerprint, key, ref, started: false, tokenCap: overrides.maxTokensPerStep, tokens: 0 };
-    const stepRun = runStep<T>(prompt, step);
-    running.add(stepRun);
-    const done = () => void running.delete(stepRun);
-    stepRun.then(done, done);
+    const running = runStep<T>(prompt, step);
+    inFlight.add(running);
     try {
-      return await stepRun;
+      return await running;
+    } catch (err) {
+      if (err instanceof RunCancelledError) interrupted = true;
+      throw err;
     } finally {
+      inFlight.delete(running);
       if (step.started) flow.last = ref.stepId; // whatever comes next in this flow continues from this step
     }
   }
@@ -742,14 +802,45 @@ async function executeRun<A, R>(
 
     await sem.acquire();
     try {
+      // A step that can write is reverted if the run is cancelled in the middle of it, so a resume meets no half-made edits.
+      const stepCwd = o.cwd ?? opts.cwd;
+      const writes = !isReadOnly(o.tools);
+      const snapshot = writes && !signal?.aborted ? await takeSnapshot(stepCwd) : undefined;
+      let reverting: Promise<boolean> | undefined;
+      /** Puts the step's directory back as it was before the step (once). Never throws. True when it did. */
+      const revert = (): Promise<boolean> => {
+        if (!writes) return Promise.resolve(false);
+        const run = revertQueue.then(async () => {
+          if (!snapshot) {
+            emit({ type: "warning", message: `etapa "${label}" cancelada: ${stepCwd} não é um repositório git (ou o git falhou), então as alterações da etapa não foram desfeitas` });
+            return false;
+          }
+          try {
+            await revertToSnapshot(snapshot);
+            return true;
+          } catch (err) {
+            emit({ type: "warning", message: `etapa "${label}" cancelada: não foi possível desfazer as alterações em ${stepCwd}: ${err instanceof Error ? err.message : String(err)}` });
+            return false;
+          }
+        });
+        revertQueue = run;
+        return (reverting ??= run);
+      };
       const attempts = 1 + (o.retries ?? 1);
       let lastError = "";
       for (let attempt = 1; attempt <= attempts; attempt++) {
+        if (signal?.aborted) {
+          // Cancelled while queued or between attempts: this attempt never starts (no step-start). The attempts before it may have left edits.
+          if (attempt > 1) await revert();
+          assertNotCancelled();
+        }
         assertBudget();
         // Same rule as the run's cap: nothing left of the step's allowance, no attempt starts (a cap of 0 lets no step run).
         if (step.tokenCap != null && step.tokens >= step.tokenCap) throw stepCapError(step, step.tokens);
         const attemptId = randomUUID();
         const startedAt = Date.now();
+        const timeoutMs = o.timeoutMs ?? 20 * 60_000;
+        const deadline: Deadline = { at: startedAt + timeoutMs, ms: timeoutMs }; // creation, send, wait and schema re-prompts share it
         emitStart(attemptId, attempt, false);
         const content = attemptContent(ref, attemptId);
         content.write("prompt", prompt);
@@ -808,6 +899,8 @@ async function executeRun<A, R>(
         let agent: SDKAgent | undefined;
         let charge: Charge | undefined;
         let errorKind: ErrorKind | undefined;
+        let cancelledBy: RunCancelledError | undefined;
+        let reverted = false;
         let resolvedModel: string | undefined;
         const endEvent = (ok: boolean) => {
           content.flush();
@@ -830,6 +923,7 @@ async function executeRun<A, R>(
             usage: charge?.usage,
             reasoningTokens: charge?.reasoningTokens,
             errorKind: ok ? undefined : errorKind,
+            reverted: reverted || undefined,
             error: ok ? undefined : lastError,
             schemaReprompts: c.reprompts,
             turns: c.turns,
@@ -842,7 +936,7 @@ async function executeRun<A, R>(
           });
         };
         try {
-          const sdkAgent = await Agent.create({
+          const sdkAgent = await within(deadline, Agent.create({
             apiKey: opts.apiKey,
             name: `${def.meta.name}:${label}`,
             model,
@@ -859,16 +953,16 @@ async function executeRun<A, R>(
               sandboxOptions: o.sandbox ? { enabled: true } : undefined,
               customTools: o.schema ? { [SUBMIT_TOOL]: submitResultTool(o.schema, capture) } : undefined,
             },
-          });
+          }), (late) => void late[Symbol.asyncDispose]().catch(() => {}));
           agent = sdkAgent;
           attemptCut.throwIfCut();
           /** One message and its answer. A cut attempt throws its budget error as soon as it knows, before anything else. */
           const exchange = async (message: string): Promise<RunResult> => {
-            const run = await send(sdkAgent, message, sendOpts);
+            const run = await within(deadline, send(sdkAgent, message, sendOpts), (late) => void late.cancel().catch(() => {}));
             attemptCut.bind(run);
             attemptCut.throwIfCut();
             try {
-              const answer = await waitWithTimeout(run, o.timeoutMs ?? 20 * 60_000, attemptCut.rejected);
+              const answer = await waitWithTimeout(run, deadline, attemptCut.rejected);
               attemptCut.throwIfCut();
               return answer;
             } finally {
@@ -912,13 +1006,15 @@ async function executeRun<A, R>(
             throw err;
           }
           const code = (err as { code?: unknown } | undefined)?.code;
-          if (typeof code === "string" && ACCOUNT_ERROR_CODES.has(code)) {
+          if (err instanceof RunCancelledError) {
+            errorKind = "cancelled";
+            cancelledBy = err;
+          } else if (typeof code === "string" && ACCOUNT_ERROR_CODES.has(code)) {
             errorKind = "exception";
             endEvent(false);
             accountError ??= new AccountAccessError(`O plano da conta não dá acesso ao Cursor SDK (${code}): ${lastError}`);
             throw accountError;
-          }
-          if (err instanceof RateLimitError) {
+          } else if (err instanceof RateLimitError) {
             errorKind = "rate-limit";
             // Não retentável = teto de uso do plano ("Usage limit exceeded" na doc do SDK): não adianta tentar de novo.
             if (!err.isRetryable) {
@@ -935,7 +1031,9 @@ async function executeRun<A, R>(
           step.tokens += turnUsage.totalTokens;
           if (agent) await agent[Symbol.asyncDispose]().catch(() => {});
         }
+        if (cancelledBy) reverted = await revert();
         endEvent(false);
+        if (cancelledBy) throw cancelledBy;
       }
       throw new StepFailedError(`etapa "${label}" falhou após ${attempts} tentativa(s): ${lastError}`);
     } finally {
@@ -981,18 +1079,25 @@ async function executeRun<A, R>(
     },
   };
 
-  let ended: { status: "finished" | "failed"; result?: R; error?: string };
+  let ended: { status: RunStatus; result?: R; error?: string };
   try {
-    ended = { status: "finished", result: await flows.run(rootFlow, () => def.run(ctx)) };
+    const workflow = flows.run(rootFlow, () => def.run(ctx));
+    ended = { status: "finished", result: await (abandoned ? Promise.race([workflow, abandoned]) : workflow) };
   } catch (err) {
+    if (err instanceof RunCancelledError) interrupted = true;
     ended = { status: "failed", error: err instanceof Error ? err.message : String(err) };
   }
   // A run that hit its token cap cancelled its active steps; they finish their accounting before the run is closed, so no
   // step event trails the run-end and their tokens are in the outcome.
   if (runBreach) {
-    await settledWithin([...running], CANCEL_GRACE_MS);
+    await settledWithin([...inFlight], CANCEL_GRACE_MS);
     // The workflow may have caught the step's error and carried on: crossing the run's cap still ends the run with the budget error.
     if (ended.status === "finished") ended = { status: "failed", error: runBreach.message };
+  }
+  if (interrupted) {
+    // The other branches of a parallel may still be stopping (and reverting): the run ends after the last of them.
+    await Promise.allSettled([...inFlight]);
+    ended = { status: "cancelled", error: cancelMessage };
   }
   const final = outcome(ended.status, ended.status === "finished" ? { result: ended.result } : { error: ended.error });
   const r = final.result as { status?: unknown } | undefined;
