@@ -424,42 +424,137 @@ test("wf init in a directory that does not exist is an error, not a new director
   assert.ok(!existsSync(missing));
 });
 
-test("wf init tells a Claude Code user to import AGENTS.md only when the repo has a Claude Code memory file that does not: without one, Claude Code reads AGENTS.md itself", () => {
-  const hint = /Claude Code reads .*@AGENTS\.md/s;
+/** The `wf init: Claude Code reads ...` line of a `wf init` run in `repo`, or undefined when it printed none. */
+function claudeCodeNote(repo: string): string | undefined {
+  const r = init(repo);
+  assert.equal(r.status, 0, r.stderr);
+  return r.stderr.split("\n").find((line) => line.startsWith("wf init: Claude Code reads"));
+}
+const NOTE_END = "wf init does not write Claude Code's memory files.";
 
-  const withoutClaudeMd = emptyRepo();
-  assert.doesNotMatch(init(withoutClaudeMd).stderr, hint, "no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md: Claude Code reads AGENTS.md");
+// Claude Code resolves an `@path` import relative to the file that holds it, and skips imports in code spans and fences
+// (code.claude.com/docs/en/memory, "Import additional files"). A CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md in the
+// repo or in any directory above it hides AGENTS.md; ~/.claude/CLAUDE.md does not ("When Claude Code reads AGENTS.md").
 
-  for (const file of ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"]) {
+test("wf init gives no Claude Code note when no memory file hides AGENTS.md: Claude Code reads AGENTS.md itself", () => {
+  assert.equal(claudeCodeNote(emptyRepo()), undefined);
+});
+
+test("wf init tells a Claude Code user to import AGENTS.md from a root CLAUDE.md or CLAUDE.local.md that does not, and leaves the file alone", () => {
+  for (const file of ["CLAUDE.md", "CLAUDE.local.md"]) {
     const repo = emptyRepo();
     put(join(repo, file), "# Guide\n");
-    const r = init(repo);
-    assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stderr, hint, file);
-    assert.ok(r.stderr.includes(file), `the note names ${file}`);
+    assert.equal(claudeCodeNote(repo), `wf init: Claude Code reads ${file}, not AGENTS.md: for it to see the kit block, add the line \`@AGENTS.md\` to ${file}. ${NOTE_END}`);
     assert.equal(read(repo, file), "# Guide\n", "init only says it, it does not edit the file");
   }
+});
+
+test("wf init gives .claude/CLAUDE.md the import line that works from that folder, `@../AGENTS.md`", () => {
+  const repo = emptyRepo();
+  put(join(repo, ".claude", "CLAUDE.md"), "# Guide\n");
+  const note = claudeCodeNote(repo);
+  assert.equal(
+    note,
+    `wf init: Claude Code reads .claude/CLAUDE.md, not AGENTS.md: for it to see the kit block, add the line \`@../AGENTS.md\` to .claude/CLAUDE.md (an import resolves from the folder of the file that holds it). ${NOTE_END}`,
+  );
+  assert.ok(!note?.includes("`@AGENTS.md`"), "`@AGENTS.md` there would name .claude/AGENTS.md");
+});
+
+test("wf init still warns about a .claude/CLAUDE.md whose `@AGENTS.md` names .claude/AGENTS.md", () => {
+  const repo = emptyRepo();
+  put(join(repo, ".claude", "CLAUDE.md"), "@AGENTS.md\n");
+  assert.match(claudeCodeNote(repo) ?? "", /add the line `@\.\.\/AGENTS\.md` to \.claude\/CLAUDE\.md/);
+});
+
+test("wf init gives no note when .claude/CLAUDE.md imports `@../AGENTS.md`", () => {
+  const repo = emptyRepo();
+  put(join(repo, ".claude", "CLAUDE.md"), "# Guide\n\n@../AGENTS.md\n");
+  assert.equal(claudeCodeNote(repo), undefined);
+});
+
+test("wf init accepts any import that resolves to AGENTS.md, a memory file that is AGENTS.md, and one importing file among several", () => {
+  const dotSlash = emptyRepo();
+  put(join(dotSlash, "CLAUDE.md"), "# Guide\n\nSee @./AGENTS.md for the rules.\n");
+  assert.equal(claudeCodeNote(dotSlash), undefined, "@./AGENTS.md");
 
   const importing = emptyRepo();
   put(join(importing, "CLAUDE.md"), "@AGENTS.md\n");
-  assert.doesNotMatch(init(importing).stderr, hint);
+  assert.equal(claudeCodeNote(importing), undefined, "@AGENTS.md");
 
   const importingElsewhere = emptyRepo();
   put(join(importingElsewhere, "CLAUDE.md"), "# Guide\n");
   put(join(importingElsewhere, "CLAUDE.local.md"), "@AGENTS.md\n");
-  assert.doesNotMatch(init(importingElsewhere).stderr, hint, "one memory file that imports AGENTS.md is enough");
+  assert.equal(claudeCodeNote(importingElsewhere), undefined, "one memory file that imports AGENTS.md is enough");
 
   const linked = emptyRepo();
   put(join(linked, "CLAUDE.md"), "# Guide\n");
   symlinkSync("CLAUDE.md", join(linked, "AGENTS.md"));
-  assert.doesNotMatch(init(linked).stderr, hint);
+  assert.equal(claudeCodeNote(linked), undefined, "AGENTS.md -> CLAUDE.md");
 });
 
-test("wf init does not give the Claude Code hint when it leaves AGENTS.md alone", () => {
-  const hint = /@AGENTS\.md/;
-  assert.doesNotMatch(init(emptyRepo(), ["--no-agents-md"]).stderr, hint);
+test("wf init does not count an `@AGENTS.md` inside a code fence or a code span: Claude Code does not import it", () => {
+  for (const text of ["# Guide\n\n```\n@AGENTS.md\n```\n", "# Guide\n\n~~~md\n@AGENTS.md\n~~~\n", "# Guide\n\nWrite `@AGENTS.md` to import it.\n"]) {
+    const repo = emptyRepo();
+    put(join(repo, "CLAUDE.md"), text);
+    assert.match(claudeCodeNote(repo) ?? "", /add the line `@AGENTS\.md` to CLAUDE\.md/, text);
+  }
+});
+
+test("wf init warns about a memory file in a directory above the repo, and advises a root CLAUDE.md that imports AGENTS.md", () => {
+  for (const file of ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"]) {
+    const parent = join(sandbox, `parent-${++counter}`);
+    const repo = join(parent, "repo");
+    mkdirSync(repo, { recursive: true });
+    put(join(parent, file), "# Workspace guide\n");
+    assert.equal(
+      claudeCodeNote(repo),
+      `wf init: Claude Code reads ${join(parent, file)}, not AGENTS.md: for it to see the kit block, create CLAUDE.md in the repository root with the line \`@AGENTS.md\`. ${NOTE_END}`,
+      file,
+    );
+    assert.ok(!existsSync(join(repo, "CLAUDE.md")), "init does not create it");
+  }
+
+  const parent = join(sandbox, `parent-${++counter}`);
+  const repo = join(parent, "repo");
+  mkdirSync(repo, { recursive: true });
+  put(join(parent, "CLAUDE.md"), "@repo/AGENTS.md\n");
+  assert.equal(claudeCodeNote(repo), undefined, "the parent file imports the repo's AGENTS.md by its path from there");
+
+  const both = join(sandbox, `parent-${++counter}`);
+  mkdirSync(join(both, "repo"), { recursive: true });
+  put(join(both, "CLAUDE.md"), "# Workspace guide\n");
+  put(join(both, "repo", "CLAUDE.md"), "# Guide\n");
+  assert.equal(
+    claudeCodeNote(join(both, "repo")),
+    `wf init: Claude Code reads CLAUDE.md and ${join(both, "CLAUDE.md")}, not AGENTS.md: for it to see the kit block, add the line \`@AGENTS.md\` to CLAUDE.md. ${NOTE_END}`,
+  );
+});
+
+test("wf init counts CLAUDE.md in the home directory but not ~/.claude/CLAUDE.md, the user memory that loads beside AGENTS.md", () => {
+  const homeRepo = () => {
+    const repo = join(home, `repo-${++counter}`);
+    mkdirSync(repo);
+    return repo;
+  };
+  put(join(home, ".claude", "CLAUDE.md"), "# My preferences\n");
+  try {
+    assert.equal(claudeCodeNote(homeRepo()), undefined, "~/.claude/CLAUDE.md does not hide AGENTS.md");
+    put(join(home, "CLAUDE.md"), "# Home guide\n");
+    assert.ok(claudeCodeNote(homeRepo())?.startsWith(`wf init: Claude Code reads ${join(home, "CLAUDE.md")}, not AGENTS.md`), "~/CLAUDE.md hides it");
+  } finally {
+    rmSync(join(home, ".claude"), { recursive: true, force: true });
+    rmSync(join(home, "CLAUDE.md"), { force: true });
+  }
+});
+
+test("wf init does not give the Claude Code note when it leaves AGENTS.md alone", () => {
+  const hint = /Claude Code reads/;
+  const skipping = emptyRepo();
+  put(join(skipping, "CLAUDE.md"), "# Guide\n");
+  assert.doesNotMatch(init(skipping, ["--no-agents-md"]).stderr, hint);
 
   const removing = emptyRepo();
+  put(join(removing, "CLAUDE.md"), "# Guide\n");
   assert.equal(init(removing).status, 0);
   assert.doesNotMatch(init(removing, ["--remove"]).stderr, hint);
 });

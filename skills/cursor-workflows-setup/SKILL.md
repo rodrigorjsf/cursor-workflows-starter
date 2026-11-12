@@ -26,10 +26,12 @@ Pick the task, then run its steps in order. Each step ends on a stated result.
    - Running it again changes nothing.
 2. Show the user the diff that `wf init` printed on stdout, and its summary from stderr. `wf init` never runs git:
    the user reviews the diff and commits. Done when the user has seen every changed file.
-   - A note that starts with `Claude Code reads` means the repo root has a Claude Code memory file (`CLAUDE.md`,
-     `.claude/CLAUDE.md` or `CLAUDE.local.md`) that neither is `AGENTS.md` nor imports it, so Claude Code does not
-     see the kit block. Relay it, since the user decides whether to add the `@AGENTS.md` line; `wf init` does not edit
-     that file.
+   - A stderr line that starts with `wf init: Claude Code reads` means a Claude Code memory file (`CLAUDE.md`,
+     `.claude/CLAUDE.md` or `CLAUDE.local.md`, in the repo root or any directory above it; `~/.claude/CLAUDE.md` does
+     not count) hides `AGENTS.md`, and none of those files is `AGENTS.md` or imports it, so Claude Code does not see the
+     kit block. Relay the line as printed: it names the import that works from the file to edit (`@AGENTS.md` in a root
+     `CLAUDE.md` or `CLAUDE.local.md`, `@../AGENTS.md` in `.claude/CLAUDE.md`, or a new root `CLAUDE.md` holding
+     `@AGENTS.md` when the file sits above the repo). The user decides; `wf init` does not write those files.
 3. Run the checks in "Check the setup". Done when `wf doctor` exits 0.
 4. Tell the user to enable the `workflows` server in the IDE (Cursor: the MCP list in Customize; Claude Code: approve it
    when asked), then restart it. Done when the user has the instruction.
