@@ -6,6 +6,7 @@
 //   a stream: a resumed run adds to the same log). The status is polled, so a resume of a finished run reopens the stream.
 // - Events are handed over in batches, so a burst (the replay of a long log) is one render, not one per event.
 import { useEffect, useRef, useState } from "react";
+import { batcher } from "./batch.js";
 import type { RunEvent } from "./run-graph.js";
 
 /** `waiting`: the API does not know the run yet. `closed`: the stream was read to the end and shut. */
@@ -92,22 +93,16 @@ export function useRunEvents(runId: string): RunFeed {
   useEffect(() => {
     if (!readable) return;
     const source = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events?content=false&lastEventId=${lastId.current}`);
-    let batch: Array<{ id: number; event: RunEvent }> = [];
-    let batchTimer: ReturnType<typeof setTimeout> | undefined;
     let quietTimer: ReturnType<typeof setTimeout> | undefined;
-    const flush = () => {
-      clearTimeout(batchTimer);
-      batchTimer = undefined;
-      if (batch.length === 0) return;
-      const arrived = batch;
-      batch = [];
-      setFeed((before) => ({ events: before.events.concat(arrived.map((a) => a.event)), ids: before.ids.concat(arrived.map((a) => a.id)) }));
-    };
+    const batch = batcher<{ id: number; event: RunEvent }>(
+      (arrived) => setFeed((before) => ({ events: before.events.concat(arrived.map((a) => a.event)), ids: before.ids.concat(arrived.map((a) => a.id)) })),
+      BATCH_MS,
+    );
     const goQuiet = () => {
       clearTimeout(quietTimer);
       if (running) return;
       quietTimer = setTimeout(() => {
-        flush();
+        batch.flush();
         source.close();
         setConnection("closed");
       }, QUIET_MS);
@@ -125,13 +120,12 @@ export function useRunEvents(runId: string): RunFeed {
       } catch {
         return; // a line that is not JSON is not an event
       }
-      batchTimer ??= setTimeout(flush, BATCH_MS);
       goQuiet();
     };
     source.onerror = () => setConnection(source.readyState === EventSource.CLOSED ? "closed" : "reconnecting");
     return () => {
       clearTimeout(quietTimer);
-      flush();
+      batch.flush();
       source.close();
     };
   }, [runId, readable, running]);

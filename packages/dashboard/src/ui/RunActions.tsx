@@ -1,7 +1,7 @@
 // The actions of the Run view's header: cancel a running run, and copy the command that resumes one that stopped.
 import { useEffect, useRef, useState } from "react";
 import { copyText } from "./clipboard.js";
-import { canResume, resumeCommand } from "./resume-command.js";
+import { ARGS_PLACEHOLDER, canResume, resumeCommand } from "./resume-command.js";
 import { cancelRun } from "./run-actions.js";
 import type { ApiStatus, RunInfo } from "./use-run-events.js";
 
@@ -11,11 +11,13 @@ export interface RunActionsProps {
   runId: string;
   status?: ApiStatus;
   info?: RunInfo;
+  /** The `argsHash` of the run's latest execution (see `argsHashOf`). */
+  argsHash?: string;
   /** Asks the feed to look at the run's status now. */
   onChanged(): void;
 }
 
-export function RunActions({ runId, status, info, onChanged }: RunActionsProps) {
+export function RunActions({ runId, status, info, argsHash, onChanged }: RunActionsProps) {
   const [cancel, setCancel] = useState<CancelState>({ step: "idle" });
   const [copied, setCopied] = useState<"yes" | "no">();
   const [shown, setShown] = useState(false);
@@ -35,7 +37,7 @@ export function RunActions({ runId, status, info, onChanged }: RunActionsProps) 
     else setCancel({ step: "done", message: outcome.status === "cancelled" ? "Cancelled." : `Cancelling: ${outcome.note}` });
   };
 
-  const command = info && canResume(status) ? resumeCommand({ workflow: info.workflow, runId, repo: info.repo }) : undefined;
+  const command = info && canResume(status) ? resumeCommand({ workflow: info.workflow, runId, repo: info.repo, argsHash }) : undefined;
   const copy = async () => {
     if (!command) return;
     setShown(true);
@@ -52,7 +54,16 @@ export function RunActions({ runId, status, info, onChanged }: RunActionsProps) 
             </button>
           )}
           {cancel.step === "confirm" && (
-            <span className="confirm" role="group" aria-label="Confirm cancelling the run">
+            <span
+              className="confirm"
+              role="group"
+              aria-label="Confirm cancelling the run"
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                event.stopPropagation(); // Escape here means "keep running", not "close the log panel"
+                setCancel({ step: "idle" });
+              }}
+            >
               Stop this run?
               <button type="button" className="danger" onClick={() => void send()}>
                 Yes, cancel it
@@ -90,7 +101,13 @@ export function RunActions({ runId, status, info, onChanged }: RunActionsProps) 
             </span>
           )}
           {shown && (
-            <input className="command" readOnly aria-label="Resume command" value={command} onFocus={(e) => e.currentTarget.select()} onClick={(e) => e.currentTarget.select()} />
+            <>
+              <input className="command" readOnly aria-label="Resume command" value={command} onFocus={(e) => e.currentTarget.select()} onClick={(e) => e.currentTarget.select()} />
+              <span className="hint">
+                {command.includes(ARGS_PLACEHOLDER) ? "The log keeps only a hash of the args: put the args of the first start in place of the placeholder. " : ""}
+                Add the same <code>--max-cents</code> and <code>--max-tokens</code> if the first start had them.
+              </span>
+            </>
           )}
         </>
       )}

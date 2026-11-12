@@ -6,10 +6,7 @@
 // ask it to stop (`cancelJob`). Restarting Cursor or the MCP server leaves the run going. The process keeps a heartbeat
 // in the job record; a job whose heartbeat goes stale, or whose process is gone, is reported as failed with its run id.
 //
-// The job record (`.workflows/jobs/<jobId>.json`) holds identity only: job id, run id, pid and heartbeat. Everything else
-// (status, phase, recent lines, spend, result) is a projection of the run's event log
-// (`.workflows/runs/<runId>/events.jsonl`), computed on every read: one source of truth, and no state file to be left
-// half-written.
+// What a job is on disk, and how to read, wait for and cancel one, is in job-state.ts (no engine): this file adds what starts a job.
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -24,9 +21,8 @@ import { resumeHint } from "./projection.js";
 import { abortOpenRuns } from "./run-store.js";
 import type { WorkflowDefinition } from "./workflow.js";
 
-// What a job is on disk and how to read, wait for and cancel one lives in job-state.ts (no engine). Everything that imports
-// `jobs.ts` keeps finding it here.
-export { HEARTBEAT_MS, HEARTBEAT_STALE_MS, type CancelResult, type JobRecord, type JobState, cancelJob, jobLogPath, jobsDir, listJobs, readJob, readJobRecord, runningJobOf, waitJob, writeJob } from "./job-state.js";
+// Everything that imports `jobs.ts` keeps finding the job state here.
+export { HEARTBEAT_MS, HEARTBEAT_STALE_MS, type CancelResult, type JobRecord, type JobState, cancelJob, jobLogPath, jobsDir, listJobs, readJob, readJobRecord, waitJob, writeJob } from "./job-state.js";
 
 /** Creates the job record before the run (the CLI `start` writes it in the parent, before the spawn). */
 export function createJob(cwd: string, workflow: string, runId?: string, jobId: string = randomUUID().slice(0, 8), pid = process.pid): JobRecord {

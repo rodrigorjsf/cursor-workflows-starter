@@ -12,6 +12,7 @@ import { afterEach, beforeEach, test } from "node:test";
 import { calls, script } from "@cursor/sdk";
 import { runWorkflow } from "../../runtime/src/runtime/engine.js";
 import { defineWorkflow } from "../../runtime/src/runtime/workflow.js";
+import { EMPTY_ARGS_HASH, argsHashOf } from "../src/ui/resume-command.js";
 import { type GraphNode, type RunEvent, buildRunGraph, joinIdOf } from "../src/ui/run-graph.js";
 import { type Sandbox, logPath, sandbox } from "./support.js";
 
@@ -86,6 +87,14 @@ test("the graph of a real run: every step and command is a node, the groups fork
   assert.ok(arrow(joinIdOf(outer!), id("merge")), "the step after the group continues from its join");
   assert.deepEqual(graph.lanes.map((l) => l.title), ["Plan", "Build"]);
   assert.equal(byLabel(graph.nodes, "merge").lane, 1);
+});
+
+test("the hash the engine writes for empty args is the one the resume command recognises, and any other args are not mistaken for it", async () => {
+  const repo = box.repo("repo");
+  const empty = await runWorkflow(workflow, {}, { cwd: repo });
+  assert.equal(argsHashOf(eventsOf(repo, empty.runId)), EMPTY_ARGS_HASH, "if the engine changes how it hashes args, the resume command must stop claiming that the args are known");
+  const other = await runWorkflow(workflow, { issue: 1 }, { cwd: repo });
+  assert.notEqual(argsHashOf(eventsOf(repo, other.runId)), EMPTY_ARGS_HASH);
 });
 
 test("a resumed run keeps its nodes: the steps served from the journal show as cached and nothing is drawn twice", async () => {

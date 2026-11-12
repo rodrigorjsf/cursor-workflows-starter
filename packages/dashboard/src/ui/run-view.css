@@ -124,6 +124,8 @@ button:hover { border-color: var(--accent); }
 .actions .confirm { display: inline-flex; align-items: center; gap: 8px; }
 .actions .command { width: min(560px, 90vw); font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
 .actions .copied { color: var(--ok); font-size: 12px; }
+.actions .hint { flex-basis: 100%; color: var(--muted); font-size: 12px; }
+.actions .hint code { font-size: 11px; }
 .cancel-result { font-size: 12px; }
 .cancel-result.failed { color: var(--failed); }
 button.danger { color: var(--failed); border-color: var(--failed); }

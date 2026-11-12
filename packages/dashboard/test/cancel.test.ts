@@ -52,11 +52,11 @@ async function jobProcess(repo: string, runId: string, jobId: string, graceMs = 
   return child;
 }
 
-/** The job record `createJob` writes, naming the process that executes the job. */
-function writeJobRecord(repo: string, jobId: string, runId: string, pid: number): void {
+/** The job record `createJob` writes, naming the process that executes the job. `heartbeat` is when the process last said it was alive. */
+function writeJobRecord(repo: string, jobId: string, runId: string, pid: number, heartbeat = new Date().toISOString()): void {
   const dir = join(repo, ".workflows", "jobs");
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, `${jobId}.json`), JSON.stringify({ jobId, runId, pid, heartbeat: new Date().toISOString() }));
+  writeFileSync(join(dir, `${jobId}.json`), JSON.stringify({ jobId, runId, pid, heartbeat }));
 }
 
 /** A run that a job is executing: registered, logged, its record written, its process alive. */
@@ -67,7 +67,8 @@ async function runningJob(repo: string, runId: string, jobId: string, graceMs = 
   return child;
 }
 
-const exited = (child: ChildProcess) => new Promise<number | null>((resolve) => (child.exitCode !== null ? resolve(child.exitCode) : child.once("exit", (code) => resolve(code))));
+/** Resolves with the exit code (null for a process a signal ended) once the child is gone, also when it went before this was called. */
+const exited = (child: ChildProcess) => new Promise<number | null>((resolve) => (child.exitCode !== null || child.signalCode !== null ? resolve(child.exitCode) : child.once("exit", (code) => resolve(code))));
 
 async function token(): Promise<string> {
   const reply = await http(dash.url, "/api/csrf");
@@ -184,6 +185,22 @@ test("a resumed run has one job per execution: only the one that is running is c
   assert.equal(reply.json.jobId, "job-b-resume");
   assert.equal(await exited(child), 143);
   assert.equal(gone.exitCode, null, "the first execution's process was left alone");
+});
+
+test("a job that stopped beating but whose process is still there is cancelled the way wf cancel does it: killed", async () => {
+  const repo = box.repo("repo");
+  const child = await jobProcess(repo, "smoke-aaaa0008", "job-frozen");
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60_000).toISOString();
+  writeRun(box.home, repo, { runId: "smoke-aaaa0008", workflow: "smoke", startedAt: START, jobId: "job-frozen", events: [{ type: "phase", title: "Ping" }], lockedBy: child.pid });
+  writeJobRecord(repo, "job-frozen", "smoke-aaaa0008", child.pid!, fiveMinutesAgo);
+  assert.equal((await http(dash.url, "/api/runs/smoke-aaaa0008")).json.status, "running", "the run's process holds its lock, so the dashboard shows it as running");
+
+  const reply = await cancel("smoke-aaaa0008", await withToken());
+  assert.equal(reply.status, 200, reply.text);
+  assert.equal(reply.json.jobId, "job-frozen");
+  assert.match(reply.json.note, /no heartbeat and was killed \(SIGKILL\)/);
+  await exited(child);
+  assert.equal(child.signalCode, "SIGKILL", "a frozen process cannot run its SIGTERM handler: it is killed");
 });
 
 test("cancel says why it did nothing: an unknown run, a run that is not running, a run no job executes", async () => {

@@ -96,7 +96,10 @@ export function StepLogPanel({ runId, node, now, live, upTo, onClose }: StepLogP
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) return; // Escape there belongs to the control (the replay slider and speed, the copied command)
+      onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

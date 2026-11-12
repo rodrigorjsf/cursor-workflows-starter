@@ -7,6 +7,7 @@
 // - Items are kept by their line, so an item that comes twice (the read and the stream overlapping) is one.
 // - Events are handed over in batches: a command that prints a thousand lines is a few renders, not a thousand.
 import { useEffect, useRef, useState } from "react";
+import { batcher } from "./batch.js";
 import type { ContentItem } from "./step-log.js";
 
 /** `loading`: nothing read yet. `ready`: read (the step may have no content yet). `error`: the dashboard could not give it. */
@@ -30,8 +31,6 @@ export function useStepLog(runId: string, stepId: string, live: boolean): StepLo
   useEffect(() => {
     let stopped = false;
     let source: EventSource | undefined;
-    let batch: ContentItem[] = [];
-    let batchTimer: ReturnType<typeof setTimeout> | undefined;
 
     const add = (arrived: ContentItem[]) => {
       let changed = false;
@@ -42,14 +41,7 @@ export function useStepLog(runId: string, stepId: string, live: boolean): StepLo
       }
       if (changed) setItems([...known.current.values()].sort((a, b) => a.id - b.id));
     };
-    const flush = () => {
-      clearTimeout(batchTimer);
-      batchTimer = undefined;
-      if (batch.length === 0) return;
-      const arrived = batch;
-      batch = [];
-      add(arrived);
-    };
+    const batch = batcher<ContentItem>(add, BATCH_MS);
 
     const base = `/api/runs/${encodeURIComponent(runId)}`;
     void (async () => {
@@ -82,16 +74,15 @@ export function useStepLog(runId: string, stepId: string, live: boolean): StepLo
           const event = JSON.parse(message.data) as { type?: string } & Partial<ContentItem>;
           if (event.type === "content") batch.push({ ...event, id } as ContentItem);
         } catch {
-          return; // a line that is not JSON is not an event
+          /* a line that is not JSON is not an event */
         }
-        batchTimer ??= setTimeout(flush, BATCH_MS);
       };
     })();
 
     return () => {
       stopped = true;
       source?.close();
-      flush();
+      batch.flush();
     };
   }, [runId, stepId, live]);
 

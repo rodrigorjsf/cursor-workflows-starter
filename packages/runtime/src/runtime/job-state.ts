@@ -67,6 +67,10 @@ export function fromEnv(name: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+/** Where a repo's job records are, whether or not the folder exists: nothing is created. */
+export const jobsDirIn = (cwd: string): string => join(cwd, ".workflows", "jobs");
+
+/** The folder of the job records of `cwd`; makes it if it is not there. */
 export function jobsDir(cwd: string): string {
   return stateDir(cwd, "jobs");
 }
@@ -75,15 +79,19 @@ export function jobLogPath(cwd: string, jobId: string): string {
   return join(jobsDir(cwd), `${jobId}.log`);
 }
 
-/** The job record on disk (identity only), without the projection. */
-export function readJobRecord(cwd: string, jobId: string): JobRecord | undefined {
-  const file = join(jobsDir(cwd), `${jobId}.json`);
+/** The job record in `file` (identity only), without the projection. Undefined when the file is not there or is not a record this runtime wrote. */
+function parseJobRecord(file: string): JobRecord | undefined {
   if (!existsSync(file)) return undefined;
   try {
     return JSON.parse(readFileSync(file, "utf8")) as JobRecord;
   } catch {
-    return undefined; // not a record this runtime wrote
+    return undefined;
   }
+}
+
+/** The job record on disk (identity only), without the projection. */
+export function readJobRecord(cwd: string, jobId: string): JobRecord | undefined {
+  return parseJobRecord(join(jobsDir(cwd), `${jobId}.json`));
 }
 
 /** What a running job's process is doing: `gone` (not there), `silent` (there, but its heartbeat stopped), or `alive`. */
@@ -152,18 +160,20 @@ export function listJobs(cwd: string): JobState[] {
 }
 
 /**
- * The job that is executing run `runId` of the repo `cwd`: the one of its jobs whose state is `running`. A run has one job per
- * execution (a resume is a new job over the same run), and the earlier ones have ended. Undefined when none is running, which
- * is also the case of a run that a terminal executes (`wf run`: no job). Only reads: a repo with no jobs folder gets none.
+ * The job that is executing run `runId` of the repo `cwd`: the one of its jobs whose process is still there, beating or not. A
+ * run has one job per execution (a resume is a new job over the same run) and the earlier ones have ended. A job whose process
+ * stopped beating is reported `failed` by `readJob`, yet it still executes the run (it holds its lock): it is this function's
+ * answer too, and `cancelJob` kills it. Undefined when no job's process is there, which is also the case of a run that a
+ * terminal executes (`wf run`: no job). Reads the job records without creating the jobs folder.
  */
 export function runningJobOf(cwd: string, runId: string): JobState | undefined {
-  if (!existsSync(join(cwd, ".workflows", "jobs"))) return undefined;
-  for (const file of readdirSync(jobsDir(cwd))) {
-    if (!file.endsWith(".json")) continue;
-    const record = readJobRecord(cwd, file.slice(0, -5));
+  const dir = jobsDirIn(cwd);
+  if (!existsSync(dir)) return undefined;
+  for (const file of readdirSync(dir)) {
+    const record = file.endsWith(".json") ? parseJobRecord(join(dir, file)) : undefined;
     if (record?.runId !== runId) continue;
-    const state = jobStateOf(cwd, record);
-    if (state.status === "running") return state;
+    const { state, liveness } = inspect(cwd, record);
+    if (liveness === "alive" || liveness === "silent") return state;
   }
   return undefined;
 }

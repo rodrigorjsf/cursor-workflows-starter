@@ -12,7 +12,7 @@
   /api/runs/<runId>/cancel`, a única escrita do dashboard: exige o token CSRF de `/api/csrf` no cabeçalho `X-CSRF-Token` e
   recusa uma origem de outro site), e **Copy resume command** num run `failed` ou `cancelled`
   (`wf start <workflow> --args '<args>' --resume <runId> --cwd <repositório>`; o log guarda só o hash dos args, então o
-  comando traz um marcador no lugar deles). Os cartões do Board e as linhas da tabela Runs passam a abrir a página do run. O
+  comando traz um marcador no lugar deles, salvo quando eram vazios, como no `smoke`). Os cartões do Board e as linhas da tabela Runs passam a abrir a página do run. O
   assistente de validação no Cursor IDE ganha o cenário 7, "o dashboard mostra o run ao vivo", e o critério de release
   (`releaseCriterionMet`) passa a pedir os sete em `pass`. No runtime, o que lê e cancela jobs sem precisar do engine foi para
   `job-state.ts` (o `jobs.ts` reexporta), para o dashboard cancelar sem carregar o `@cursor/sdk`.

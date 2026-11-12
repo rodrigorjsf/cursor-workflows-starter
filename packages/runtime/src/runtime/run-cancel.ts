@@ -13,7 +13,7 @@ export type CancelRunOutcome =
   /** A process executes the run, but not as a job: `wf run` in a terminal. */
   | { kind: "no-job" }
   /** The job was asked to cancel and waited for. `result.status` says where it stands: `cancelled`, or still `running` when it takes longer than the wait. */
-  | { kind: "cancelled"; result: CancelResult };
+  | { kind: "signalled"; result: CancelResult };
 
 /** Cancels run `runId`, waiting up to `timeoutMs` for it to stop. Never creates a directory in the run's repo. */
 export async function cancelRun(runId: string, timeoutMs: number): Promise<CancelRunOutcome> {
@@ -22,5 +22,5 @@ export async function cancelRun(runId: string, timeoutMs: number): Promise<Cance
   if (run.status !== "running") return { kind: "not-running", status: run.status };
   const job = runningJobOf(run.repo, runId);
   const result = job && (await cancelJob(run.repo, job.jobId, timeoutMs));
-  return result ? { kind: "cancelled", result } : { kind: "no-job" };
+  return result ? { kind: "signalled", result } : { kind: "no-job" };
 }

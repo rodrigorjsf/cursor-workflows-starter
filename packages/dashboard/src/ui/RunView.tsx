@@ -5,6 +5,7 @@ import { Background, Controls, type Edge, type FitViewOptions, type Node, ReactF
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { JunctionNode, LaneNode, type LaneNodeData, StartNode, WorkNode, type WorkNodeData } from "./nodes.js";
 import { RunActions } from "./RunActions.js";
+import { argsHashOf } from "./resume-command.js";
 import { StepLogPanel } from "./StepLogPanel.js";
 import { formatCents, formatDuration } from "./node-details.js";
 import { type ProgressStatus, type RunGraph, buildRunGraph, isWork } from "./run-graph.js";
@@ -296,7 +297,7 @@ export function RunView({ runId }: { runId: string }) {
             </>
           )}
         </div>
-        {!replaying && <RunActions runId={runId} status={status} info={info} onChanged={refresh} />}
+        {!replaying && <RunActions runId={runId} status={status} info={info} argsHash={argsHashOf(events)} onChanged={refresh} />}
       </header>
       {run.error !== undefined && (
         <p className="run-error" role="alert">

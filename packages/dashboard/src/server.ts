@@ -202,7 +202,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
         return send(res, 409, { error: `the run is not running (${outcome.status}); nothing to cancel` });
       case "no-job":
         return send(res, 409, { error: "the run was not started as a job (wf run in a terminal), so the dashboard cannot stop it: press Ctrl-C in that terminal" });
-      case "cancelled": {
+      case "signalled": {
         const { jobId, runId: id, status, note } = outcome.result;
         return send(res, 200, { jobId, runId: id, status, note });
       }

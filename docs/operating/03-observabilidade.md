@@ -357,9 +357,12 @@ No cabeçalho da página do run:
   num terminal) não tem processo registrado para sinalizar: o dashboard responde `409` e diz para dar Ctrl-C naquele terminal.
 - **Copy resume command** (num run `failed` ou `cancelled`) copia
   `wf start <workflow> --args '<os args do primeiro start, em JSON>' --resume <runId> --cwd <repositório>`. O log guarda só o
-  hash dos args, nunca eles, então o comando traz um marcador no lugar: colado sem edição, o `wf` recusa o `--args` (não é
-  JSON) antes de iniciar qualquer coisa, em vez de retomar com outros args. O comando também aparece num campo de texto, para
-  copiar à mão quando o navegador não deixa escrever na área de transferência.
+  hash dos args (`argsHash` do `run-start`), nunca eles, então o comando traz um marcador no lugar: colado sem edição, o `wf`
+  recusa o `--args` (não é JSON) antes de iniciar qualquer coisa, em vez de retomar com outros args. A exceção são os args
+  vazios, como os do `smoke`: o hash da última execução é o de `{}`, e o comando já sai com `--args '{}'`, completo. O
+  comando não traz os tetos (`--max-cents`, `--max-tokens`) do primeiro start, que o log também não guarda: um aviso ao lado do
+  campo lembra de repô-los. O comando aparece num campo de texto, para copiar à mão quando o navegador não deixa escrever na
+  área de transferência.
 
 O cancelamento exige o token CSRF (veja [Segurança](#segurança-do-dashboard)): a página lê o token em `/api/csrf` a cada
 cancelamento e o manda em `X-CSRF-Token`.
