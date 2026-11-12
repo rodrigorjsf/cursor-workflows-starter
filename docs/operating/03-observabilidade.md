@@ -477,7 +477,8 @@ aberta, 1 hora depois de mesclada ou fechada, e 5 minutos quando o `gh` não con
   quando você clica, numa nova aba e sem `Referer`; o dashboard não faz nenhum pedido a ele;
 - só chama a API da Cursor num caso: o `POST` de cancelar um run cujo processo morreu, quando o log nomeia cloud agents
   cuja tentativa não terminou. O servidor carrega então o SDK e cancela os runs desses agentes com a chave que o SDK acha
-  no ambiente do dashboard (`CURSOR_API_KEY`, senão a do `wf login`).
+  no ambiente do dashboard (`CURSOR_API_KEY`, senão a do `wf login`). O dashboard que o `start_workflow` inicia herda o
+  ambiente do servidor MCP, `CURSOR_API_KEY` inclusive; o do `npm run dash`, o do terminal.
 
 Verificado em 2026-11-11 no WSL2: escuta só em `127.0.0.1`, responde 403 a um `Host` estranho, não envia
 cabeçalhos CORS e não é alcançável pelo IP do WSL.
