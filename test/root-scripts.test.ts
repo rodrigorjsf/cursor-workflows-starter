@@ -6,12 +6,11 @@ import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, join } from "node:path";
 import { after, before, test } from "node:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { FAKE_SDK_TSCONFIG, MCP_TOOLS, ROOT, withMcpServer } from "./mcp-support.js";
 
-const ROOT = resolve(import.meta.dirname, "..");
 const scripts = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).scripts as Record<string, string>;
 
 let home: string;
@@ -23,7 +22,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 const scriptEnv = (extra: Record<string, string> = {}): Record<string, string> => ({
   ...(process.env as Record<string, string>),
   PATH: `${join(ROOT, "node_modules", ".bin")}${delimiter}${process.env.PATH ?? ""}`,
-  TSX_TSCONFIG_PATH: join(ROOT, "packages", "runtime", "tsconfig.test.json"),
+  TSX_TSCONFIG_PATH: FAKE_SDK_TSCONFIG,
   WF_METRICS_DB: join(home, "metrics.db"),
   ...extra,
 });
@@ -35,19 +34,11 @@ test("npm run wf: the CLI runs from the repo root and lists the built-in workflo
 });
 
 test("npm run mcp: the MCP server runs from the repo root and answers tools/list", async () => {
-  const client = new Client({ name: "root-scripts-test", version: "0.0.0" });
-  const transport = new StdioClientTransport({
-    command: "sh",
-    args: ["-c", scripts.mcp!],
-    cwd: ROOT,
-    env: { ...getDefaultEnvironment(), ...scriptEnv() },
-  });
-  try {
-    await client.connect(transport);
-    assert.ok((await client.listTools()).tools.some((t) => t.name === "list_workflows"));
-  } finally {
-    await client.close();
-  }
+  const tools = await withMcpServer(
+    { command: "sh", args: ["-c", scripts.mcp!], cwd: ROOT, env: { ...getDefaultEnvironment(), ...scriptEnv() } },
+    async (client) => (await client.listTools()).tools.map((t) => t.name).sort(),
+  );
+  assert.deepEqual(tools, MCP_TOOLS);
 });
 
 test("npm run stats and npm run dash: the metrics summary and the dashboard run from the repo root", async () => {

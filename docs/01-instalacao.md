@@ -50,7 +50,7 @@ e pode ser aberta em outro dispositivo. Gere a URL só quando for concluir o log
 `[plan_required] Cloud Agent is not available for free users. Please upgrade to Pro.`, e `models` dá o mesmo erro
 (medido em 2026-11-11).
 
-Ajuste os IDs do mapa de modelos em `workflows/implement-issue.ts` ou nas variáveis `WF_MODEL_*`
+Ajuste os IDs do mapa de modelos em `packages/runtime/workflows/implement-issue.ts` ou nas variáveis `WF_MODEL_*`
 ([02 · Configuração](02-configuracao-inicial.md)).
 
 ## 5. Teste de fumaça real
@@ -112,17 +112,17 @@ são os candidatos mais prováveis.
 ## 7. Habilitar no Claude Code (opcional)
 
 1. `.mcp.json` na raiz já registra o mesmo servidor `workflows`. Aprove-o quando o Claude Code perguntar. Antes da
-   aprovação, `claude mcp list` mostra `workflows: node_modules/.bin/tsx src/mcp-server.ts - ⏸ Pending approval`
+   aprovação, `claude mcp list` mostra `workflows: node_modules/.bin/tsx packages/runtime/src/mcp-server.ts - ⏸ Pending approval`
    (verificado em 2026-11-11). Em `claude -p`, no Agent SDK e em sessões na nuvem fora de um projeto, o Claude Code carrega os
    servidores do `.mcp.json` sem perguntar ([DOC](https://code.claude.com/docs/en/mcp)); num `claude -p` em 2026-11-11 as
-   quatro tools apareceram como `mcp__workflows__*` e o `CLAUDE.md` → `@AGENTS.md` foi lido
+   quatro tools apareceram como `mcp__workflows__*` e o `CLAUDE.md` (na época, só `@AGENTS.md`) foi lido
    ([verificações §10](research/verificacoes-locais.md)).
 2. O Claude Code não lê nada sob `.agents/`. Para ter as skills lá também, rode `scripts/link-claude-skills.sh`,
    que cria links em `.claude/skills/`. O Cursor também lê `.claude/skills/`, então a mesma skill pode aparecer
    duas vezes no Cursor. A skill de autoria se chama `cursor-workflow-authoring` porque o Claude Code tem uma
    skill embutida `workflow-authoring` (a da ferramenta Workflow dele), e uma skill de projeto com o mesmo nome
    substituiria a embutida ([DOC](https://code.claude.com/docs/en/skills)).
-3. `CLAUDE.md` importa `AGENTS.md` (`@AGENTS.md`), então as instruções do repositório são as mesmas nos dois.
+3. `AGENTS.md` é um link simbólico para o `CLAUDE.md`, então as instruções do repositório são as mesmas nos dois.
 4. Como no Cursor, o Claude Code sobe o servidor com o `node` do PATH do próprio processo, e o mise ou o nvm podem
    não estar ativos ali. Rode `node -v` no ambiente que inicia o `claude`. Abaixo do Node 22.13, o servidor sai
    com uma mensagem clara, e `claude mcp list` mostra `✘ Failed to connect`

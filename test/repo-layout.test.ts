@@ -3,7 +3,7 @@
 // agent would and assert the observable shape; none of them look at runtime internals.
 import assert from "node:assert/strict";
 import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { test } from "node:test";
 
 const ROOT = resolve(import.meta.dirname, "..");
@@ -52,6 +52,8 @@ test("CLAUDE.md is the English maintainer guide and stays within its stated line
   assert.ok(guide.trimEnd().split("\n").length <= budget, `CLAUDE.md has more than its ${budget} lines`);
 
   assert.match(guide, /contributor section/i, "CLAUDE.md must point to the docs contributor section for detail");
+  assert.match(guide, /self-contained/i, "CLAUDE.md must state that every skill is self-contained");
+  assert.match(guide, /\/mattpocock-skills:writing-for-agents/, "CLAUDE.md must say skills are created and updated with writing-for-agents");
 });
 
 test("CLAUDE.md keeps the Agent skills and Applied Learning sections", () => {
@@ -110,12 +112,55 @@ test("the distributed skills are written in English", () => {
   for (const file of files) assert.doesNotMatch(prose(read(file)), NOT_ENGLISH, `${file} must be in English`);
 });
 
-test("the distributed skills point at the workspace layout, not at the old repo-root one", () => {
-  for (const file of markdownFiles("skills")) {
-    const text = read(file);
-    assert.doesNotMatch(text, /`(src|workflows|test)\//, `${file} names a path that moved into packages/runtime`);
-    for (const [, path] of text.matchAll(/`((?:packages|scripts|docs|skills)\/[^`\s*<>{}]+)`/g)) {
-      assert.ok(existsSync(join(ROOT, path!)), `${relative(ROOT, join(ROOT, file))} names ${path}, which does not exist`);
+/** Markdown links `[text](target)` whose target is a relative file (no URL, no bare #anchor), without the #anchor. */
+function relativeLinks(md: string): string[] {
+  return [...md.matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)]
+    .map((m) => m[1]!.split("#")[0]!)
+    .filter((target) => target !== "" && !/^[a-z][a-z0-9+.-]*:/i.test(target));
+}
+
+test("each distributed skill is self-contained: its instructions live in its own folder", () => {
+  for (const name of DISTRIBUTED_SKILLS) {
+    for (const file of markdownFiles(join("skills", name))) {
+      const text = read(file).replace(/https?:\/\/\S+/g, "");
+      assert.doesNotMatch(text, /(^|[^\w/.-])(docs|scripts)\//m, `${file} points at a document or script outside its folder`);
+      for (const target of relativeLinks(read(file))) {
+        const resolved = resolve(ROOT, dirname(file), target);
+        assert.ok(resolved.startsWith(join(ROOT, "skills", name) + "/"), `${file} links to ${target}, outside the skill folder`);
+        assert.ok(existsSync(resolved), `${file} links to ${target}, which does not exist`);
+      }
+    }
+  }
+});
+
+test("every reference file of a skill is linked from its SKILL.md", () => {
+  for (const name of DISTRIBUTED_SKILLS) {
+    const referencesDir = join("skills", name, "references");
+    if (!existsSync(join(ROOT, referencesDir))) continue;
+    const skill = read("skills", name, "SKILL.md");
+    for (const file of markdownFiles(referencesDir)) {
+      assert.ok(skill.includes(`(${relative(join("skills", name), file)})`), `${file} is not linked from skills/${name}/SKILL.md`);
+    }
+  }
+});
+
+test("reference files two skills share stay identical", () => {
+  const authoring = join("skills", "cursor-workflow-authoring", "references");
+  const conversion = join("skills", "skill-to-workflow", "references");
+  const shared = ["runtime-api.md", "rules.md", "recipes.md", "cost.md", "observability.md", "testing.md", "target-repos.md"];
+  for (const file of shared) assert.equal(read(conversion, file), read(authoring, file), `${file} drifted: copy it from ${authoring} to ${conversion}`);
+});
+
+test("the runtime package and the repo carry the same version", () => {
+  const version = (...p: string[]) => JSON.parse(read(...p, "package.json")).version;
+  assert.equal(version("packages", "runtime"), version(), "the MCP server reports the runtime package's version: bump both together");
+});
+
+test("relative links in the markdown docs point at files that exist", () => {
+  const roots = ["README.md", "README.en.md", "CHANGELOG.md", "CREDITS.md", "CONTRIBUTING.md", "SECURITY.md", "PROVENANCE.md", "CLAUDE.md"];
+  for (const file of [...roots, ...markdownFiles("docs"), ...markdownFiles("skills")]) {
+    for (const target of relativeLinks(read(file))) {
+      assert.ok(existsSync(resolve(ROOT, dirname(file), target)), `${file} links to ${target}, which does not exist`);
     }
   }
 });

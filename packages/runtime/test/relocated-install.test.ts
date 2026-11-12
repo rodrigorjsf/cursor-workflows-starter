@@ -34,6 +34,8 @@ before(() => {
   const manifest = JSON.parse(readFileSync(join(PACKAGE, "package.json"), "utf8"));
   writeFileSync(join(kit, "package.json"), JSON.stringify({ ...manifest, version: "9.9.9-relocated" }));
   symlinkSync(dependenciesDir(), join(kit, "node_modules"));
+  // Only the relocated copy has this built-in: finding it proves the built-ins come from the install location.
+  writeFileSync(join(kit, "workflows", "kit-marker.mjs"), 'export default { meta: { name: "kit-marker", description: "built-in of the relocated copy" } };\n');
 
   mkdirSync(join(targetRepo, ".agents", "workflows"), { recursive: true });
   writeFileSync(join(targetRepo, ".agents", "workflows", "repo-local.mjs"), 'export default { meta: { name: "repo-local", description: "workflow of the target repo" } };\n');
@@ -57,6 +59,7 @@ test("a relocated install serves its own built-in workflows and version, plus th
 
     const listed = await client.callTool({ name: "list_workflows", arguments: {} });
     const names = (JSON.parse((listed.content as Array<{ text: string }>)[0]!.text) as Array<{ name: string }>).map((w) => w.name);
+    assert.ok(names.includes("kit-marker"), `built-in workflow of the relocated copy missing from ${names}`);
     assert.ok(names.includes("implement-issue"), `built-in workflow missing from ${names}`);
     assert.ok(names.includes("repo-local"), `target repo workflow missing from ${names}`);
   } finally {

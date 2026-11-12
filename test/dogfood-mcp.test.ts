@@ -5,10 +5,9 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { FAKE_SDK_TSCONFIG, MCP_TOOLS, ROOT, withMcpServer } from "./mcp-support.js";
 
-const ROOT = resolve(import.meta.dirname, "..");
 const RUNTIME_PACKAGE = "@cursor-workflows/runtime";
 
 /** Name of the package.json closest to `file`, walking up the directory tree. */
@@ -31,26 +30,19 @@ for (const file of [".mcp.json", ".cursor/mcp.json"]) {
 
     assert.equal(owningPackage(resolve(ROOT, args[0]!)), RUNTIME_PACKAGE, "the entry point belongs to the runtime package");
 
-    const client = new Client({ name: "dogfood-test", version: "0.0.0" });
-    const transport = new StdioClientTransport({
-      command: resolve(ROOT, resolveVars(config.command)),
-      args,
-      cwd: ROOT,
-      env: {
-        ...getDefaultEnvironment(),
-        ...Object.fromEntries(Object.entries(config.env ?? {}).map(([k, v]) => [k, resolveVars(v)])),
-        TSX_TSCONFIG_PATH: join(ROOT, "packages", "runtime", "tsconfig.test.json"),
+    const tools = await withMcpServer(
+      {
+        command: resolve(ROOT, resolveVars(config.command)),
+        args,
+        cwd: ROOT,
+        env: {
+          ...getDefaultEnvironment(),
+          ...Object.fromEntries(Object.entries(config.env ?? {}).map(([k, v]) => [k, resolveVars(v)])),
+          TSX_TSCONFIG_PATH: FAKE_SDK_TSCONFIG,
+        },
       },
-    });
-    try {
-      await client.connect(transport);
-      const { tools } = await client.listTools();
-      assert.deepEqual(
-        tools.map((t) => t.name).sort(),
-        ["get_workflow_status", "list_workflows", "start_workflow", "wait_workflow"],
-      );
-    } finally {
-      await client.close();
-    }
+      async (client) => (await client.listTools()).tools.map((t) => t.name).sort(),
+    );
+    assert.deepEqual(tools, MCP_TOOLS);
   });
 }

@@ -13,7 +13,7 @@ flowchart LR
   subgraph Claude["Claude Code"]
     U2[Usuário] --> A2[Claude] -->|"mcp__workflows__*"| MCC[".mcp.json<br/>aprovação na sessão interativa"]
   end
-  MC -->|stdio| M["MCP server workflows<br/>(src/mcp-server.ts)"]
+  MC -->|stdio| M["MCP server workflows<br/>(packages/runtime/src/mcp-server.ts)"]
   MCC -->|stdio| M
   M --> R[Runtime]
   C --> R
@@ -75,7 +75,7 @@ Por isso `wait` usa um timeout menor que 300 s, e `start` roda destacado.
 
 ### 3. Skill `run-workflow` e a trava de disparo
 
-`.agents/skills/run-workflow/SKILL.md` é invocável pelo modelo: a descrição dela fica no contexto e o agente a
+`skills/run-workflow/SKILL.md` (linkada em `.agents/skills/`) é invocável pelo modelo: a descrição dela fica no contexto e o agente a
 carrega antes de chamar `start_workflow`, pelo `/run-workflow` ou por um pedido em prosa ("implementa a issue 7").
 A skill ensina a disparar, acompanhar e repassar: tratar checkpoint, custo desconhecido e `secret-blocked`, e não
 mexer nos arquivos enquanto o job roda.
@@ -125,7 +125,7 @@ Consequências no kit:
   sem regra de precedência ou deduplicação ([DOC](https://cursor.com/docs/skills)); essas regras só existem para
   subagents (`.cursor/` vence) e para `CLAUDE.md` × `AGENTS.md`. Fica em aberto. Rode o script só se o time usa
   Claude Code no repositório.
-- **Instruções em `AGENTS.md`.** `CLAUDE.md` contém apenas `@AGENTS.md`.
+- **Instruções em `AGENTS.md`.** `AGENTS.md` é um link simbólico para o `CLAUDE.md`, a fonte canônica.
 - **Subagents continuam em `.cursor/agents/` ou `.claude/agents/`.** Não há `.agents/agents/` documentado
   ([DOC](https://cursor.com/docs/subagents)). Para as runs do SDK, a doc só cita `.cursor/agents/*.md`
   ([DOC](https://cursor.com/docs/sdk/typescript)). Num
@@ -147,7 +147,7 @@ junto com o código.
   "mcpServers": {
     "workflows": {
       "command": "${userHome}/tools/cursor-workflows/node_modules/.bin/tsx",
-      "args": ["${userHome}/tools/cursor-workflows/src/mcp-server.ts"],
+      "args": ["${userHome}/tools/cursor-workflows/packages/runtime/src/mcp-server.ts"],
       "env": { "WF_CWD": "${workspaceFolder}", "WF_MAX_CENTS": "500", "WF_MAX_TOKENS": "2000000" }
     }
   }
@@ -163,7 +163,7 @@ um aviso: o teto em centavos não contou essa tentativa (o de tokens, sim; na fa
 Em uso cobrado por request (planos legados e alguns Enterprise), `rawCostCents` vem 0 e o teto em centavos fica
 cego; só `WF_MAX_TOKENS` protege. Defina sempre os dois, como no exemplo.
 
-Depois, copie `.agents/skills/run-workflow/` para o repositório alvo. No Cursor, se o servidor não aparecer no
+Depois, copie `skills/run-workflow/` para o repositório alvo. No Cursor, se o servidor não aparecer no
 chat, habilite-o em **Customize**, na barra lateral. No Enterprise, o admin pode limitar quais servidores MCP os
 membros rodam (servidores stdio são aprovados por padrão de comando; [DOC](https://cursor.com/docs/mcp)); com a
 Team list ligada, um membro pode precisar que o admin libere o servidor antes
@@ -184,7 +184,7 @@ dentro do kit e depois copie.
 
 | Eixo | Cursor | Claude Code |
 |---|---|---|
-| Onde registrar o MCP server | `.cursor/mcp.json` (projeto) ou `~/.cursor/mcp.json` | `.mcp.json` (projeto) ou `claude mcp add`. Em sessão interativa, o servidor do `.mcp.json` pede aprovação: até lá, `claude mcp list` mostra `workflows: node_modules/.bin/tsx src/mcp-server.ts - ⏸ Pending approval` (verificado em 2026-11-11). Em `claude -p`, no Agent SDK e em sessões na nuvem fora de um projeto, ele é carregado sem perguntar ([DOC](https://code.claude.com/docs/en/mcp)) |
+| Onde registrar o MCP server | `.cursor/mcp.json` (projeto) ou `~/.cursor/mcp.json` | `.mcp.json` (projeto) ou `claude mcp add`. Em sessão interativa, o servidor do `.mcp.json` pede aprovação: até lá, `claude mcp list` mostra `workflows: node_modules/.bin/tsx packages/runtime/src/mcp-server.ts - ⏸ Pending approval` (verificado em 2026-11-11). Em `claude -p`, no Agent SDK e em sessões na nuvem fora de um projeto, ele é carregado sem perguntar ([DOC](https://code.claude.com/docs/en/mcp)) |
 | Trava de disparo | Aprovação de `start_workflow` pelo Run Mode (fora da allowlist) [DOC](https://cursor.com/docs/agent/security/run-modes); a skill `run-workflow` guia o agente | Prompt de permissão de `mcp__workflows__start_workflow` (fora de `permissions.allow`) [DOC](https://code.claude.com/docs/en/permissions); a skill chega via `.claude/skills/` |
 | Workflow nativo | **Não existe**. Este kit preenche a lacuna | Ferramenta `Workflow`, `/deep-research`, `ultracode`, `.claude/workflows/` ([DOC](https://code.claude.com/docs/en/workflows)) |
 | Como o contexto chega aos agentes das etapas | `settingSources: ["project","team","mdm"]` carrega `AGENTS.md`, `.cursor/rules`, skills, hooks e MCP do projeto. Medido em 2026-11-11: o `AGENTS.md` só chega com `"project"`, e é opt-in ([02 §5](02-configuracao-inicial.md#5-contexto-do-projeto-nos-agentes)) | Os agentes das etapas são do Cursor mesmo quando o Claude Code dispara. A doc não diz se as runs locais do SDK leem o `CLAUDE.md` (o agente do Cursor IDE e os cloud agents leem, segundo as release notes: [DOC](https://cursor.com/docs/release-notes)); por isso as regras ficam em `AGENTS.md` |

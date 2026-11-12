@@ -188,7 +188,7 @@ O cache do provedor reaproveita só o **prefixo idêntico**. Então:
 
 - **Instruções fixas primeiro, dados variáveis no fim.** Declare as instruções como constantes no topo do módulo
   (`const PLAN_INSTRUCTIONS = "..."`) e monte o prompt como `INSTRUÇÕES + "\n\n" + dados`. Veja
-  `workflows/implement-issue.ts`.
+  `packages/runtime/workflows/implement-issue.ts`.
 - **Nada volátil no começo do prompt:** sem data, id de run, contador de rodada ou saída de teste antes das
   instruções. Isso também preserva o journal e o memo, que usam o prompt na chave.
 - **Mesma configuração entre irmãos:** mesmo modelo, ordem de `tools`, schema e `settingSources` em etapas

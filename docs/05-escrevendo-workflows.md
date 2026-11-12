@@ -1,7 +1,7 @@
 # 05 · Escrevendo workflows
 
 A referência operacional, que o agente do Cursor também usa, está na skill
-[`.agents/skills/cursor-workflow-authoring/SKILL.md`](../.agents/skills/cursor-workflow-authoring/SKILL.md). Este
+[`skills/cursor-workflow-authoring/SKILL.md`](../skills/cursor-workflow-authoring/SKILL.md). Este
 documento explica o *porquê* das regras e traz as receitas, que a skill aponta.
 
 ## Princípio
@@ -154,7 +154,7 @@ const model = ctx.budget.remainingCents() < 100 ? MODELS.MED : MODELS.HIGH;
 
 Uma regra do processo que o modelo policiaria sozinho ("red antes de green", "só toque arquivos de teste", "o teste
 é a especificação") vira uma **invariante** que o código confere entre duas etapas. As peças estão em
-[`workflows/implement-issue/tdd.ts`](../workflows/implement-issue/tdd.ts):
+[`packages/runtime/workflows/implement-issue/tdd.ts`](../packages/runtime/workflows/implement-issue/tdd.ts):
 
 - **Quem tocou o quê:** `snapshotTree` (uma árvore git do worktree, que enxerga também `git add`, `stash`,
   `commit` e `skip-worktree` feitos pelo agente) antes e depois da etapa, e `changesBetween`, sem detecção de
@@ -205,7 +205,7 @@ combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
 
 1. O run 1 vai até o resultado a aprovar, guarda-o no progresso do run e devolve um status pendente (no
    `implement-issue`, `seams-proposed`) com `runId` e `next`, o comando de retomada. O status entra em `PENDING`
-   ([`src/observability/recorder.ts`](../src/observability/recorder.ts)); fora dele, o run contaria como falha no
+   ([`packages/runtime/src/observability/recorder.ts`](../packages/runtime/src/observability/recorder.ts)); fora dele, o run contaria como falha no
    custo por entrega.
 2. O código publica o resultado onde o humano decide: no `implement-issue`, um comentário na issue com um marcador
    e o `runId` (uma vez por run), o comando pelo CLI (`--resume <runId>`, com os args entre aspas simples
@@ -216,7 +216,7 @@ combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
    mesmo `runId` e o mesmo repositório, porque o progresso fica em `<cwd>/.workflows/runs/<runId>/`: rode o run 2 do
    mesmo diretório (ou com o mesmo `--cwd`) do run 1. Sem o resultado guardado, o `implement-issue` para com
    `seams-not-proposed` em vez de aprovar um plano que ninguém viu.
-4. A skill [`run-workflow`](../.agents/skills/run-workflow/SKILL.md) trata qualquer resultado com `next`: mostra o
+4. A skill [`run-workflow`](../skills/run-workflow/SKILL.md) trata qualquer resultado com `next`: mostra o
    resultado, pergunta ao usuário e relança só com a aprovação dele.
 
 ## Escrevendo bons prompts de etapa
@@ -231,7 +231,7 @@ combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
 
 ## Testando
 
-1. Crie `test/<nome>.test.ts`. O `tsconfig.test.json` troca `@cursor/sdk` por `test/fake-sdk.ts`.
+1. Crie `packages/runtime/test/<nome>.test.ts`. O `packages/runtime/tsconfig.test.json` troca `@cursor/sdk` por `packages/runtime/test/fake-sdk.ts`.
 2. No fake, `script.push(fn)` define o comportamento de cada `send()`:
    - `() => ({ result: "texto" })` simula texto livre;
    - `(o) => { o.local.customTools.submit_result.execute(obj, {}); return {}; }` simula saída estruturada;
@@ -239,11 +239,11 @@ combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
    - `() => ({ hang: true })` simula uma run que não termina (para testar `timeoutMs`).
    `stats` (concorrência, descarte, leituras de custo), `calls` (as opções de cada `Agent.create`) e `costConfig`
    (custo ausente, `getUsage()` com `feature_unavailable`, conta sem acesso) estão comentados em
-   [`test/fake-sdk.ts`](../test/fake-sdk.ts).
+   [`packages/runtime/test/fake-sdk.ts`](../packages/runtime/test/fake-sdk.ts).
 3. A cobertura exigida (ramos, `status` de retorno, invariantes, resume) é a de "Antes de entregar" da skill
-   [`cursor-workflow-authoring`](../.agents/skills/cursor-workflow-authoring/SKILL.md).
+   [`cursor-workflow-authoring`](../skills/cursor-workflow-authoring/SKILL.md).
 4. Para fluxos com `ctx.parallel`, `gh` ou `git`, copie o arnês de
-   [`test/implement-issue.fixture.ts`](../test/implement-issue.fixture.ts):
+   [`packages/runtime/test/implement-issue.fixture.ts`](../packages/runtime/test/implement-issue.fixture.ts):
    - um despachante por `label` no fake SDK, porque com `ctx.parallel` a ordem dos `send()` varia e a fila
      `script` segue a ordem;
    - `gh` falso no `PATH` (script Node com estado em JSON);
@@ -254,7 +254,7 @@ combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
    - em `labelOf`, o prefixo `implement-issue:` trocado pelo nome do seu workflow (o nome do agente é
      `<workflow>:<label>`).
 5. Para cada defeito que um review encontrar, escreva o teste que o reproduz antes da correção e confirme que ele
-   falha no código antigo ([`test/implement-issue.hardening.test.ts`](../test/implement-issue.hardening.test.ts)).
+   falha no código antigo ([`packages/runtime/test/implement-issue.hardening.test.ts`](../packages/runtime/test/implement-issue.hardening.test.ts)).
 
 ```bash
 npm test && npm run typecheck

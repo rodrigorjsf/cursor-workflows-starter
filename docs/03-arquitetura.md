@@ -7,9 +7,9 @@ flowchart TB
   subgraph Entradas
     CHAT["Chat do Cursor IDE<br/>/run-workflow"] --> CREG[".cursor/mcp.json<br/>habilitado em Customize"]
     CCODE["Claude Code"] --> CCREG[".mcp.json<br/>aprovação na sessão interativa"]
-    TERM["Terminal / CI"] --> CLI[src/cli.ts]
+    TERM["Terminal / CI"] --> CLI[packages/runtime/src/cli.ts]
   end
-  CREG -->|MCP stdio| MCP[src/mcp-server.ts]
+  CREG -->|MCP stdio| MCP[packages/runtime/src/mcp-server.ts]
   CCREG -->|MCP stdio| MCP
   MCP --> JOBS[jobs.ts<br/>.workflows/jobs/*.json]
   CLI --> JOBS
@@ -52,7 +52,7 @@ flowchart TB
    inline, o sandbox (se pedido) e `settingSources: ["project","team","mdm"]`.
    - Com `schema`, registra a custom tool `submit_result` e garante `"mcp"` na allowlist.
    - Quando a etapa carrega camadas de arquivo (`project`, `user`, `plugins` ou `all`), registra também um MCP
-     inline `workflows` (ou `WF_MCP_SERVER_NAME`) sem tools, `src/runtime/nested-mcp-guard.mjs`. Ele vence o
+     inline `workflows` (ou `WF_MCP_SERVER_NAME`) sem tools, `packages/runtime/src/runtime/nested-mcp-guard.mjs`. Ele vence o
      servidor de mesmo nome do `.cursor/mcp.json`, e a etapa não vê `start_workflow` (medido em 2026-11-11; ver
      [02 §5](02-configuracao-inicial.md#5-contexto-do-projeto-nos-agentes)).
    - O SDK valida o modelo contra o catálogo da conta; um ID inválido faz a etapa falhar ("Cannot use this

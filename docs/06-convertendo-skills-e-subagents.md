@@ -1,7 +1,7 @@
 # 06 · Convertendo skills e subagents em workflows
 
 O processo está codificado na skill
-[`.agents/skills/skill-to-workflow/SKILL.md`](../.agents/skills/skill-to-workflow/SKILL.md). Use assim:
+[`skills/skill-to-workflow/SKILL.md`](../skills/skill-to-workflow/SKILL.md). Use assim:
 
 ```
 /skill-to-workflow .agents/skills/implementar-feature/SKILL.md .cursor/agents/reviewer.md .claude/agents/tester.md
@@ -45,14 +45,14 @@ em dois runs ([05 · Checkpoint em dois runs](05-escrevendo-workflows.md#checkpo
    completa está na skill.
 4. **Otimização de custo** (obrigatória): checklist de [08](08-custos-e-cache.md#6-checklist-de-custo) etapa por
    etapa e estimativa de custo por caminho, no caso típico e no pior caso.
-5. **Geração** de `workflows/<nome>.ts` e `test/<nome>.test.ts` neste kit, seguida de
+5. **Geração** de `packages/runtime/workflows/<nome>.ts` e `packages/runtime/test/<nome>.test.ts` neste kit, seguida de
    `npm run typecheck && npm test`; com o kit instalado fora, cópia para `.agents/workflows/` do repositório alvo.
 6. **Relatório**: o que foi convertido, o que não foi e por quê, os créditos, a paridade entre harnesses e o
    comando do primeiro run real, que é do usuário.
 
 ## Exemplo: `implement-issue` a partir de quatro skills de terceiros
 
-O [`workflows/implement-issue.ts`](../workflows/implement-issue.ts) é a conversão de referência. Ele segue, em
+O [`packages/runtime/workflows/implement-issue.ts`](../packages/runtime/workflows/implement-issue.ts) é a conversão de referência. Ele segue, em
 código, os fluxos das skills `tdd`, `codebase-design`, `code-review` e `pr` de
 [mattpocock/skills](https://github.com/mattpocock/skills) 1.3.1 (MIT); os créditos estão em
 [`CREDITS.md`](../CREDITS.md).
@@ -91,7 +91,7 @@ engine (`["project","team","mdm"]`): é a exceção do workflow ao item de `tool
 
 O que a conversão exigiu além dos passos da skill virou receita em [05](05-escrevendo-workflows.md#receitas)
 (invariantes entre etapas, resume com invariantes, checkpoint em dois runs, review em eixos) e referência em
-[`ORIGEM.md`](../.agents/skills/skill-to-workflow/ORIGEM.md) (skill citada por outra, sub-agents em paralelo, skill
+[`origin-cases.md`](../skills/skill-to-workflow/references/origin-cases.md) (skill citada por outra, sub-agents em paralelo, skill
 de terceiros).
 
 ## Pós-conversão

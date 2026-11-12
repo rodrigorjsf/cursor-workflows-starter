@@ -148,7 +148,7 @@ Regras que mantêm as somas corretas:
     pede um alias (`composer`) ou o Auto (`default`, sem preço fixo) não casa e sai com `cost_source = none`. Só
     há linha para Composer 2.5, Grok 4.7 e Haiku, Sonnet e Opus 5.5: `composer-2`, por exemplo, também fica sem
     estimativa. Peça o ID completo de um desses, ou acrescente a linha na `pricing` (lido no código:
-    `src/observability/schema.ts`).
+    `packages/runtime/src/observability/schema.ts`).
   - Num Premium, todas as tentativas dos testes saíram com `cost_source = estimate`
     [TESTE](research/verificacoes-locais.md).
 

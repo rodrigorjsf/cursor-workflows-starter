@@ -32,7 +32,7 @@ Para passar a chave ao MCP server sem gravar em arquivo, use interpolação no `
 `args`, `env`, `url` e `headers` ([DOC](https://cursor.com/docs/mcp)):
 
 ```json
-{ "mcpServers": { "workflows": { "command": "${workspaceFolder}/node_modules/.bin/tsx", "args": ["${workspaceFolder}/src/mcp-server.ts"],
+{ "mcpServers": { "workflows": { "command": "${workspaceFolder}/node_modules/.bin/tsx", "args": ["${workspaceFolder}/packages/runtime/src/mcp-server.ts"],
   "env": { "CURSOR_API_KEY": "${env:CURSOR_API_KEY}", "WF_CWD": "${workspaceFolder}" } } } }
 ```
 
@@ -189,7 +189,7 @@ MDM.
 > ambiente do processo**. Medido em 2026-11-11: o servidor `workflows` subia com `WF_INSIDE_WORKFLOW` vazio, e a
 > etapa via `list_workflows`, `start_workflow`, `wait_workflow` e `get_workflow_status`. A correção: quando a
 > etapa carrega camadas de arquivo (`project`, `user`, `plugins` ou `all`), o engine registra um servidor MCP
-> inline com o mesmo nome (`workflows`, ou `WF_MCP_SERVER_NAME`). Ele roda `src/runtime/nested-mcp-guard.mjs` e
+> inline com o mesmo nome (`workflows`, ou `WF_MCP_SERVER_NAME`). Ele roda `packages/runtime/src/runtime/nested-mcp-guard.mjs` e
 > não expõe tools. O inline vence o do arquivo pelo nome, e no reteste a etapa só via `FetchMcpResource` e
 > `submit_result`. O servidor do arquivo ainda sobe, mas não expõe nada. O shell da etapa herda
 > `WF_INSIDE_WORKFLOW=1` (medido), então o CLI recusa `wf run` e `wf start` dentro dela.
