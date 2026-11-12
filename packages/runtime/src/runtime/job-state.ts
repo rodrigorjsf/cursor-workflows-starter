@@ -152,20 +152,41 @@ function inspect(cwd: string, record: JobRecord): { state: JobState; liveness?: 
     return { state };
   }
   if (state.status !== "running") return { state };
-  const silentMs = Date.now() - Date.parse(record.heartbeat);
   if (!isAlive(record.pid)) {
     // The process died without ending the run (crash, machine shut down).
     state.status = "failed";
     state.error = `process ${record.pid} ended without finishing the job; ${resumeHint(record.runId)}`;
     return { state, liveness: "gone" };
   }
-  if (silentMs > fromEnv("WF_HEARTBEAT_STALE_MS", HEARTBEAT_STALE_MS)) {
-    // Alive, or a recycled pid, but it has not said so for too long: frozen, stopped, or not the job's process any more.
+  const silent = silenceOf(record);
+  if (silent !== undefined) {
     state.status = "failed";
-    state.error = `no heartbeat for ${Math.round(silentMs / 1000)}s (process ${record.pid}); ${resumeHint(record.runId)}`;
+    state.error = silent;
     return { state, liveness: "silent" };
   }
   return { state, liveness: "alive" };
+}
+
+/**
+ * Why a job whose process is there counts as failed: its heartbeat is older than `WF_HEARTBEAT_STALE_MS` (30 s). The pid is
+ * alive, or recycled, but has not said so for too long: frozen, stopped, or not the job's process any more. Undefined while
+ * the heartbeat is fresh.
+ */
+function silenceOf(record: JobRecord): string | undefined {
+  const silentMs = Date.now() - Date.parse(record.heartbeat);
+  if (!(silentMs > fromEnv("WF_HEARTBEAT_STALE_MS", HEARTBEAT_STALE_MS))) return undefined;
+  return `no heartbeat for ${Math.round(silentMs / 1000)}s (process ${record.pid}); ${resumeHint(record.runId)}`;
+}
+
+/**
+ * What `wf status` says of job `jobId` of `repo` when its process stopped beating (`silenceOf`), for the run view: a run whose
+ * lock a frozen process still holds is `failed` there with this error, the status `wf status` gives its job. Undefined while
+ * the heartbeat is fresh, and when the id is not a plain name or the record is not there or is another run's. Only reads.
+ */
+export function silentJobError(repo: string, jobId: string, runId: string): string | undefined {
+  if (!/^[A-Za-z0-9_-]+$/.test(jobId)) return undefined;
+  const record = parseJobRecord(join(jobsDirIn(repo), `${jobId}.json`));
+  return record?.runId === runId && typeof record.heartbeat === "string" ? silenceOf(record) : undefined;
 }
 
 const jobStateOf = (cwd: string, record: JobRecord): JobState => inspect(cwd, record).state;
@@ -221,9 +242,10 @@ export interface CancelResult extends JobState {
  * Asks the job's process to cancel (SIGTERM: the process cancels the active agent runs, reverts the in-flight write step,
  * writes the run's end and exits) and waits up to `timeoutMs` for the job to leave `running`. A process that has stopped
  * answering (its heartbeat is stale, so the job already shows as failed) cannot handle a signal: it is killed, which frees
- * the run for a resume but cannot revert the step, and leaves its cloud agents running for the resume to reattach to. A job
- * whose process already ended gets no signal: the cloud agents its run left running are cancelled through the Cursor API,
- * and the job stays as it was (`failed`). A process that is not the job's is left alone. Undefined when there is no such job.
+ * the run for a resume but cannot revert the step; once it is gone, the cloud agents its run left running are cancelled
+ * through the Cursor API, and a resume afterwards starts a new agent in place of each, at new cost. A job whose process
+ * already ended gets no signal: those agents are cancelled the same way. Either way the job stays `failed`, its run's end
+ * never written. A process that is not the job's is left alone. Undefined when there is no such job.
  */
 export async function cancelJob(cwd: string, jobId: string, timeoutMs: number): Promise<CancelResult | undefined> {
   const record = readJobRecord(cwd, jobId);
@@ -248,14 +270,15 @@ export async function cancelJob(cwd: string, jobId: string, timeoutMs: number): 
     await new Promise((r) => setTimeout(r, 200));
     state = readJob(cwd, jobId) ?? state;
   }
-  // Killing a frozen process is the way to free its run for a resume, and a resume reattaches to the cloud agents it left
-  // running (spec #5 story 12): cancelling them here would make the resume pay for new ones. A second cancel of the now
-  // dead job cancels them (the branch above), for the user who wants the run stopped.
+  // A killed process cannot cancel its own cloud agents: once it is gone they are reached through the Cursor API, as for a job
+  // whose process had already ended. A cancel stops everything that spends (spec #5 story 13), also when the user cancelled
+  // only to free the run for a resume: that resume starts a new agent for each step whose agent this cancelled, at new cost.
+  // While the process is still there it holds the run, and `cancelLeftCloudAgents` leaves a run a process executes alone.
   if (signal === "SIGKILL") {
-    return {
-      ...state,
-      note: `process ${record.pid} had no heartbeat and was killed (SIGKILL) without undoing the step in progress; the run stays resumable; any cloud agents it left running were not cancelled: a resume reattaches to them, and cancelling this job again cancels them`,
-    };
+    const left = stopping(state)
+      ? `; process ${record.pid} has not exited yet, so the cloud agents its run left running were not cancelled: cancel this job again once it is gone`
+      : leftAgentsNote(await cancelLeftCloudAgents(cwd, record.runId));
+    return { ...state, note: `process ${record.pid} had no heartbeat and was killed (SIGKILL) without undoing the step in progress; the run stays resumable${left}` };
   }
   return { ...state, note: state.status === "running" ? `SIGTERM sent to process ${record.pid}, which is still stopping; check with wait_workflow` : `SIGTERM sent to process ${record.pid}` };
 }

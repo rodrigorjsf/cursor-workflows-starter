@@ -2,13 +2,15 @@
 // run's event log. Nothing here writes: it never creates a directory in a repo, takes a lock or touches a log.
 //
 // Runs are found through the global runs index (`~/.cursor-workflows/runs.jsonl`), which names each run's repo; the run's
-// own state lives in `<repo>/.workflows/runs/<runId>/`. The status is the projection of the run's latest execution, with one
-// addition the log cannot make: an execution that never wrote its `run-end` is `running` only while a process holds the
-// run's lock. Without one the process died, and the run shows as `failed` with how to resume it, the same as a job does.
+// own state lives in `<repo>/.workflows/runs/<runId>/`. The status is the projection of the run's latest execution, with what
+// the log cannot say, the rule `wf status` applies to a job: an execution that never wrote its `run-end` is `running` only
+// while a process holds the run's lock and, for a run started as a job, while that job's heartbeat is fresh. Without a
+// process the process died; with a stale heartbeat it is frozen (it still holds the lock). Either way the run shows as
+// `failed` with how to resume it, the same as its job does.
 import { statSync } from "node:fs";
 import { join } from "node:path";
 import type { RunStatus } from "./events.js";
-import { type JobStart, readJobStart } from "./job-state.js";
+import { type JobStart, readJobStart, silentJobError } from "./job-state.js";
 import type { OutcomeClass } from "./outcome.js";
 import { type ExecutionState, type RunCard, boundedPhase, latestCard, projectLatestExecution, resumeHint, runPhases, withRatio } from "./projection.js";
 import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn } from "./run-store.js";
@@ -126,9 +128,18 @@ function detailOf(entry: RunsIndexEntry): RunDetail {
   const { execution } = projected;
 
   let { status, error } = execution;
-  if (status === "running" && !isRunExecuting(entry.repo, entry.runId)) {
-    status = "failed";
-    error = `the process executing the run ended without finishing it; ${resumeHint(entry.runId)}`;
+  if (status === "running") {
+    // The rule `wf status` applies to the run's job: a process that is gone, or one that stopped beating, has failed it.
+    if (!isRunExecuting(entry.repo, entry.runId)) {
+      status = "failed";
+      error = `the process executing the run ended without finishing it; ${resumeHint(entry.runId)}`;
+    } else {
+      const silent = projected.jobId === undefined ? undefined : silentJobError(entry.repo, projected.jobId, entry.runId);
+      if (silent !== undefined) {
+        status = "failed";
+        error = silent;
+      }
+    }
   }
   const { ledger } = execution;
   return {
