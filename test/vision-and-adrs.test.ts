@@ -1,5 +1,5 @@
 // Seam: the docs book as a reader finds it. Part 1 (vision: the problem, the idea and its references, the concepts),
-// the credits and provenance that part 1 absorbed, and part 7 (the five ADRs, in English). The mechanical consistency
+// the credits and provenance that part 1 absorbed, and part 7 (the ADRs, in English). The mechanical consistency
 // of links, anchors, footers and the index is docs-check.test.ts; these tests read what the chapters say.
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -94,20 +94,21 @@ const ADRS: Array<{ file: string; number: string; topic: RegExp[] }> = [
   { file: "docs/adr/0003-detached-jobs.md", number: "0003", topic: [/detached/i, /\bjobs?\b/i] },
   { file: "docs/adr/0004-workspaces-and-claude-md-symlink.md", number: "0004", topic: [/workspaces/i, /CLAUDE\.md/, /symlink/i] },
   { file: "docs/adr/0005-cloud-backend-and-location-cap.md", number: "0005", topic: [/cloud/i, /location/i, /\bcap\b/i] },
+  { file: "docs/adr/0006-cloud-steps-as-built.md", number: "0006", topic: [/cloud/i, /read-only/, /fast-forward/i, /supersedes/i] },
 ];
 
-test("part 7 lists five ADRs, one per load-bearing decision, in order", () => {
+test("part 7 lists six ADRs, one per load-bearing decision, in order", () => {
   assert.deepEqual(
     indexPart(7),
     ADRS.map((adr) => adr.file),
   );
 });
 
-/** Every ADR on disk, not only the five: the format below binds the ones added later too. */
+/** Every ADR on disk, not only the six: the format below binds the ones added later too. */
 const adrFiles = () => readdirSync(join(ROOT, "docs/adr")).filter((name) => /^\d{4}-.*\.md$/.test(name)).map((name) => `docs/adr/${name}`);
 
 test("every ADR is titled ADR-NNNN, names its status and records the context, the decision, the consequences and the options considered", () => {
-  assert.ok(adrFiles().length >= ADRS.length, "the five ADRs are on disk");
+  assert.ok(adrFiles().length >= ADRS.length, "the six ADRs are on disk");
   for (const file of adrFiles()) {
     const number = /\/(\d{4})-/.exec(file)![1]!;
     const doc = parseMarkdown(read(file));
@@ -122,7 +123,7 @@ test("every ADR is titled ADR-NNNN, names its status and records the context, th
   }
 });
 
-test("each of the five ADRs is about its decision", () => {
+test("each of the six ADRs is about its decision", () => {
   for (const adr of ADRS) for (const pattern of adr.topic) assert.match(read(adr.file), pattern, `${adr.file}: should be about ${pattern}`);
 });
 
@@ -152,4 +153,11 @@ test("ADR-0005 ties the cloud location to the global cap, the role capability an
   assert.match(adr, /allowedLocations/);
   for (const capability of ["ok", "read-only", "never"]) assert.ok(adr.includes(`\`${capability}\``), `capability ${capability}`);
   assert.match(adr, /ADR-0001/, "it builds on the config layering decision");
+});
+
+test("a changed decision is a new ADR: ADR-0005 keeps its text and points at ADR-0006, which supersedes it", () => {
+  const old = read("docs/adr/0005-cloud-backend-and-location-cap.md");
+  assert.match(old, /^\*\*Status:\*\* superseded by ADR-0006/m);
+  assert.match(old, /The config resolver rejects `cloud` on a role declared `never`, and cloud writes on a role\s+declared `read-only`/, "the original decision text");
+  assert.match(read("docs/adr/0006-cloud-steps-as-built.md"), /^\*\*Status:\*\* accepted .*supersedes \[ADR-0005\]/m);
 });

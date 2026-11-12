@@ -20,7 +20,7 @@
 //    on a bug. The report says how the attempt ended and what it used, so the engine can charge it.
 //
 // There are two backends, one per location: the local one (here) is `Agent.create` with the SDK's `local` options, and the
-// cloud one (backend-cloud.ts) is `Agent.create` with its `cloud` options against a snapshot of the worktree (ADR-0005).
+// cloud one (backend-cloud.ts) is `Agent.create` with its `cloud` options against a snapshot of the worktree (ADR-0006).
 // Both run the attempt through `runAttempt`, which holds the abort, cancellation and usage rules above. Tests substitute the
 // SDK (test/fake-sdk.ts) or a backend (`RunOptions.backend`); the engine has no other way to reach an agent.
 import {

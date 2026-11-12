@@ -58,7 +58,8 @@ As decisões difíceis de reverter, em inglês, uma por arquivo (`docs/adr/NNNN-
 - [7.2 · ADR-0002: The event log is the source of truth](adr/0002-event-log-source-of-truth.md): o log de eventos por run é a fonte da verdade do status, do gasto e do conteúdo
 - [7.3 · ADR-0003: Runs are detached processes](adr/0003-detached-jobs.md): `start_workflow` lança um processo destacado; o MCP server só lê o estado
 - [7.4 · ADR-0004: npm workspaces and a canonical CLAUDE.md](adr/0004-workspaces-and-claude-md-symlink.md): runtime em pacote próprio; `CLAUDE.md` canônico e `AGENTS.md` como link simbólico
-- [7.5 · ADR-0005: The cloud backend and the location cap](adr/0005-cloud-backend-and-location-cap.md): etapas na nuvem só com o teto global e a capacidade declarada pelo workflow
+- [7.5 · ADR-0005: The cloud backend and the location cap](adr/0005-cloud-backend-and-location-cap.md): etapas na nuvem só com o teto global e a capacidade declarada pelo workflow (substituído pelo ADR-0006)
+- [7.6 · ADR-0006: Cloud steps as built](adr/0006-cloud-steps-as-built.md): o ADR-0005 como foi construído: `read-only` conferido pelo motor, o trabalho que volta por fast-forward ou não volta, `resultVia` e o reanexar sem pagar duas vezes
 
 ### Parte 8 · Pesquisa
 

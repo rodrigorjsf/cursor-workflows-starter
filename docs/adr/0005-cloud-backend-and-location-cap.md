@@ -1,6 +1,6 @@
 # 7.5 · ADR-0005: The cloud backend and the location cap
 
-**Status:** accepted · decided in [spec #2](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/2); built by [spec #5](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/5)
+**Status:** superseded by ADR-0006 ([7.6](0006-cloud-steps-as-built.md)) · decided in [spec #2](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/2); built by [spec #5](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/5)
 
 ## Context
 
@@ -24,10 +24,8 @@ enforced before any cloud code exists.
   enable cloud execution. Sending code to a cloud VM is the machine owner's decision.
 - **A declared capability per role.** Each role in a workflow's metadata declares `ok`, `read-only` or `never`: whether
   its step can run in the cloud at all, and whether only without writing.
-- **Rejected before spending.** The config resolver rejects `cloud` on a role declared `never`, with a message that names the
-  role. Whether a step writes is a fact of the step (its `tools`), which the config cannot see, so a cloud step that can write
-  on a role declared `read-only` is rejected by the engine, with the same kind of message, before the step's first attempt
-  starts. Either way a misconfiguration fails before a token is spent on the step.
+- **Rejected before spending.** The config resolver rejects `cloud` on a role declared `never`, and cloud writes on a role
+  declared `read-only`, with a message that names the role. A misconfiguration fails before a token is spent.
 - **Agent execution sits behind a seam.** A cloud backend implements the same `AgentBackend` interface as the local one
   (the internal interface is `packages/runtime/src/runtime/backend.ts`; [spec #3](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/3)
   makes it a public extension point), so
@@ -37,31 +35,11 @@ enforced before any cloud code exists.
   workflow's prefix and pushes it to a configurable remote (default `origin`). After a write step it fetches the cloud
   agent's commits and fast-forwards the local worktree; tests keep running locally. Snapshot branches are deleted when the
   step ends and swept by `wf gc`.
-- **A write step works on the snapshot branch and its work comes back by fast-forward or not at all.** The cloud agent is
-  created to work on the current branch (the snapshot branch) and told to commit there. When its run finishes the engine
-  fetches the branch and moves the worktree's branch, index and working files to it, then deletes the snapshot. It refuses,
-  changing nothing, when the agent's branch no longer contains the snapshot it started from, when the local branch moved
-  meanwhile, when the working files are no longer what was pushed (bringing the work back would overwrite the changes
-  made in the meantime), or when the agent adds a file where the worktree has one git ignores; the step fails, whatever retries it
-  has left, because another attempt would pay for a new agent. A refused attempt changed nothing in the worktree, so neither `revertOnRetry` nor a
-  cancellation reverts it: that would undo what the person changed meanwhile. An agent whose run says it pushed only to
-  some other branch fails the attempt too, naming it. A worktree that had no changes needs
-  no snapshot commit (the snapshot is `HEAD`); one that had changes keeps the snapshot commit in the local history, because
-  the agent's commits are built on it. If moving the worktree fails after it began to change the index or the files, the
-  engine puts them back as they were before the step, the way it does for a cancelled step. A role a workflow declares
-  `never` stays that way until its author declares otherwise: `implement-issue`'s write roles are still `never` (see [#45](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/45)).
 - **Structured results keep their contract.** The prompt requires a final fenced JSON block, validated with Ajv and
-  corrected by follow-up sends in the same conversation, so workflow code does not change between locations. A role can
-  switch (`resultVia: "artifact"`) to a `result.json` file the agent saves in its artifacts directory, downloaded after the
-  run and validated the same way, for schemas the text of an answer does not carry reliably.
+  corrected by follow-up sends in the same conversation, so workflow code does not change between locations.
 - **The lifecycle matches the local one.** The cloud agent id is stored in the event log as soon as it exists, so a resume
   or a crash reattaches to the running agent instead of starting another. Cancelling a run cancels its cloud agents, and the
-  client's two-hour wait limit is a reattach point, not a failure. Two rules keep a reattach from paying twice: an agent that
-  cannot be reached is never replaced (the attempt fails and the next one reattaches again; only a "not found" from the cloud
-  means the agent is gone and a new one starts), and a wait that ends in error is checked with the cloud before the step is
-  failed, because the client gives up on a run that is still going. Cancelling stops the cloud runs of a run that is executing
-  (and one that is still looking for its interrupted agent); a run whose process already died has nothing to signal, and
-  cancelling from outside does not call the Cursor API, so the way to stop its agent is to resume the run and cancel it.
+  client's two-hour wait limit is a reattach point, not a failure.
 
 ## Consequences
 
@@ -85,4 +63,4 @@ enforced before any cloud code exists.
 
 ---
 
-[← Anterior: 7.4 · ADR-0004: npm workspaces and a canonical CLAUDE.md](0004-workspaces-and-claude-md-symlink.md) · [Índice](../README.md) · [Próximo: 8.1 · Cursor SDK como motor de workflows determinísticos: relatório de pesquisa →](../research/relatorio-pesquisa.md)
+[← Anterior: 7.4 · ADR-0004: npm workspaces and a canonical CLAUDE.md](0004-workspaces-and-claude-md-symlink.md) · [Índice](../README.md) · [Próximo: 7.6 · ADR-0006: Cloud steps as built →](0006-cloud-steps-as-built.md)

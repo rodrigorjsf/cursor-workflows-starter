@@ -342,7 +342,7 @@ Não rodaram: o caminho HIGH ("Design it twice" e juiz), o review que bloqueia (
 
 ## 14. Fase 7: etapas na nuvem (`verify-cloud`)
 
-As etapas na nuvem ([ADR-0005](../adr/0005-cloud-backend-and-location-cap.md)) foram construídas contra o SDK 1.3.1 e um
+As etapas na nuvem ([ADR-0006](../adr/0006-cloud-steps-as-built.md)) foram construídas contra o SDK 1.3.1 e um
 SDK de mentira que modela o cloud agent (`packages/runtime/test/fake-sdk.ts`). Este capítulo separa o que foi **lido no
 código do SDK** do que **só a API real confirma**. O workflow que mede o segundo grupo é o
 [`verify-cloud`](../../scripts/verify/README.md) (uma etapa de leitura, com teto de 60 mil tokens e 25 centavos). **Ele ainda
