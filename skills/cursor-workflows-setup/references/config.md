@@ -81,7 +81,8 @@ Under `workflows.<name>`:
   - `networkTimeoutSec`: the time limit, in seconds, of each network command (`git push`, `git ls-remote`, every `gh`),
     for the workflow and `wf gc`.
   - `gcFailedAfterDays`: `wf gc` removes a failed run's worktree and branches once it failed more days ago than this; a
-    cancelled run never counts as failed.
+    cancelled run never counts as failed. A run whose PR was merged or closed goes without waiting, and the origin
+    branch stays while its PR is open.
   - `gcSnapshotGraceHours`: `wf gc` removes a cloud snapshot branch the step left behind once its run (of this repo)
     has no process and its last event is older than this many hours. The branch of a run cut off inside the step that
     owns it waits `gcFailedAfterDays` days instead, and the branch of a cancelled run stays.

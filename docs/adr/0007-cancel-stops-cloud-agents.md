@@ -14,9 +14,9 @@ and is restated below, so that one file holds the whole decision:
 - ADR-0006 said how a cancel reaches the cloud runs of an executing job and of a job whose process already died, but not
   of a frozen job: a process that is alive and no longer writes its heartbeat. It cannot handle a signal, so cancelling
   kills it. Killing it frees the run for a resume, and the open question was whether the cancel should also cancel the
-  cloud agents it left (stop spending now) or keep them, so that the resume reattaches and does not pay twice. The repo
-  owner chose to cancel them, always: "cancel stops everything, cloud agents included, also for a frozen job; a resume
-  afterwards creates a new agent and pays again, and that is documented."
+  cloud agents it left (stop spending now) or keep them, so that the resume reattaches and does not pay twice. Asked
+  whether cancelling a frozen job should also cancel its cloud agents, the repo owner chose to always cancel them, and
+  accepted that a resume afterwards creates a new agent and pays again, as long as the docs say so.
 
 Every step runs as a local agent on the user's machine. Some teams want steps to run as Cursor cloud agents instead: to
 offload work, to keep a run going independently of the laptop, and for the isolation of a cloud VM, which local runs lack
