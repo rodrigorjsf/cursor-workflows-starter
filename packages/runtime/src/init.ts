@@ -160,29 +160,46 @@ function importsOf(file: string): string[] {
   return paths;
 }
 
+/** The real path of `path`, or undefined when it cannot be resolved (missing, a symlink loop, no permission). */
+function realOrUndefined(path: string): string | undefined {
+  try {
+    return realpathSync(path);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Claude Code reads AGENTS.md only when no CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md sits in the repo or in a directory
  * above it; ~/.claude/CLAUDE.md, the user's own memory, does not count, while ~/CLAUDE.md does. Says so when such a file
- * exists and none of them is AGENTS.md or imports it, with the import line that works from the file to edit.
+ * exists and none of them is AGENTS.md or imports it, with the import line that works from the file to edit. A memory file
+ * it cannot stat, resolve or read (a symlink loop, no permission) is skipped: the note is advice, and init has already written.
  */
 function claudeCodeNote(cwd: string): string | undefined {
   const root = realpathSync(cwd);
-  const agents = realpathSync(join(root, "AGENTS.md"));
+  const agents = realOrUndefined(join(root, "AGENTS.md"));
+  if (agents === undefined) return undefined;
   const userMemory = join(homedir(), ".claude", "CLAUDE.md");
-  const userMemoryReal = existsSync(userMemory) ? realpathSync(userMemory) : userMemory;
-  const present: string[] = [];
+  const userMemoryReal = realOrUndefined(userMemory) ?? userMemory;
+  const present: Array<{ path: string; real: string; imports: string[] }> = [];
   for (let dir = root; ; dir = dirname(dir)) {
     for (const file of CLAUDE_MEMORY_FILES) {
       const path = join(dir, file);
-      if (statSync(path, { throwIfNoEntry: false })?.isFile() && realpathSync(path) !== userMemoryReal) present.push(path);
+      try {
+        if (!statSync(path, { throwIfNoEntry: false })?.isFile()) continue;
+        const real = realpathSync(path);
+        if (real !== userMemoryReal) present.push({ path, real, imports: importsOf(path) });
+      } catch {
+        // Unreadable: skipped, neither named in the note nor counted as importing AGENTS.md.
+      }
     }
     if (dirname(dir) === dir) break;
   }
   if (present.length === 0) return undefined;
-  if (present.some((path) => realpathSync(path) === agents || importsOf(path).some((target) => existsSync(target) && realpathSync(target) === agents))) return undefined;
+  if (present.some(({ real, imports }) => real === agents || imports.some((target) => realOrUndefined(target) === agents))) return undefined;
 
   // The repo's own files by their path in the repo, the ones above it by their absolute path.
-  const shown = present.map((path) => (relative(root, path).startsWith("..") ? path : relative(root, path)));
+  const shown = present.map(({ path }) => (relative(root, path).startsWith("..") ? path : relative(root, path)));
   const target = CLAUDE_MEMORY_FILES.find((file) => shown.includes(file));
   const fix =
     target === undefined
@@ -227,6 +244,7 @@ export function initRepo({ cwd, skipAgentsMd = false, remove = false }: InitOpti
     mkdirSync(dirname(file), { recursive: true });
     writeFileAtomic(existsSync(file) ? realpathSync(file) : file, after); // through a symlink, not over it
   }
-  const note = !remove && !skipAgentsMd && changes.some((c) => c.path === "AGENTS.md") ? claudeCodeNote(cwd) : undefined;
+  // On every run, not only when this one changed AGENTS.md: a memory file added after the first init hides the block all the same.
+  const note = !remove && !skipAgentsMd ? claudeCodeNote(cwd) : undefined;
   return { changes, notes: note ? [note] : [] };
 }

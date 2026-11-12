@@ -397,6 +397,26 @@ test("a fix step that ran to its end counts, even when the run is cancelled duri
   assert.deepEqual(names().filter((s) => s.startsWith("corrigir")), ["corrigir-1-1", "corrigir-1-2"], "round 1 is not run again");
 });
 
+test("a right fix that ran to its end stays when the run is cancelled during its suite: the resume keeps it and runs no other round", async () => {
+  issue(["complexity:low"]);
+  fx.handlers["codigo-1"] = wrongGreen;
+  fx.handlers["corrigir-1-1"] = rightFix;
+  const runId = "implement-issue-fixsuitecancel-right";
+  const controller = new AbortController();
+  const cancelled = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test" } as any, {
+    cwd: fx.repo,
+    runId,
+    signal: controller.signal,
+    onEvent: (e) => {
+      if (e.type === "exec-start" && String(e.label).startsWith("suite:fix:1:1")) controller.abort();
+    },
+  });
+  assert.equal(cancelled.status, "cancelled", JSON.stringify(cancelled));
+  const resumed = await run({}, runId);
+  assert.equal(res(resumed).status, "done", JSON.stringify(res(resumed)));
+  assert.deepEqual(names().filter((s) => s.startsWith("corrigir")), ["corrigir-1-1"], "the counted fix is not undone, so no round 2");
+});
+
 test("a fix step that crashes the process again and again stops at the crash limit, like any write step", async () => {
   issue(["complexity:low"]);
   fx.handlers["codigo-1"] = wrongGreen;

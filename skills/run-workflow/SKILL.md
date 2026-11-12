@@ -81,13 +81,14 @@ matches, in code spans; match them verbatim.
      `no heartbeat`): offer to relaunch **resuming**: `start_workflow` with the same `name` and `args` and
      `resumeRunId` equal to the job's `runId`. Completed steps are not repeated.
      With `no heartbeat` the process may still be alive and holding the run; if the resume then returns
-     `already running`, ask the user whether to cancel the job (`cancel_workflow` ends a frozen process), then resume.
-     Say first that the cancel also stops the cloud agents the run left, so the resume pays for new ones (see
-     "Cancelling").
+     `already running`, ask the user whether to cancel the job (`cancel_workflow` kills a frozen process with
+     SIGKILL), then resume. That cancel leaves the cloud agents the run left running, and the resume reattaches to them
+     at no new cost. Call `cancel_workflow` only once here: a second call on the now-dead job cancels those agents.
      A run with cloud steps may have left cloud agents running when its process died, and they keep spending until
      cancelled. If the user wants the run stopped rather than resumed, call `cancel_workflow` on the failed job: it
-     cancels those agents (see "Cancelling"). The job stays `failed` and the run stays resumable; tell the user what a
-     later resume then costs (see "Cancelling").
+     cancels those agents (see "Cancelling"). A `no heartbeat` job takes two calls: the first only kills the frozen
+     process. The job stays `failed` and the run stays resumable; tell the user what a later resume then costs (see
+     "Cancelling").
    On a relaunch, go back to step 3 with the new `jobId`.
 6. When `status` is `cancelled`, the run was stopped on purpose. Relay that with the `runId`, and offer to resume it
    as in step 5 if the user wants to continue; the steps it finished are not repeated.
@@ -103,13 +104,20 @@ to the state it had before the step, and returns the job with `status: "cancelle
   `nothing to cancel`, or names the agents after `cancelled the cloud agent it left running:` (`agents` when there are
   several), or names one it `could not reach` and says to resume the run and cancel it.
 - A `note` that starts with `process <pid> had no heartbeat and was killed (SIGKILL)`: the process was frozen, so it
-  was killed without undoing the step in progress, and the run stays resumable. The note can go on to name the cloud
-  agents it cancelled, as above. Relay it.
-- A resume after a cancel whose note names cloud agents (after `cancelled the cloud agent it left running:`, in
-  either note above) does not reattach to them. It starts a new cloud agent for each of those steps, at new cost, and
-  the work of the cancelled agents is lost; the log warns
+  was killed without undoing the step in progress, and the run stays resumable. The job stays `failed`, and any cloud
+  agents the run left running were not cancelled. What comes next depends on why you cancelled:
+  - To free the run for a resume (step 5, after `already running`): do not cancel again. Resume now; the resume
+    reattaches to those agents.
+  - Because the user asked to stop the run: call `cancel_workflow` on the same `jobId` again at once, without asking
+    again. The job is dead now, so that call cancels those agents and returns a note that starts with
+    `the job already ended`, as above. Relay both notes.
+- A resume after a cancel whose note names cloud agents (after `cancelled the cloud agent it left running:`) does not
+  reattach to them. It starts a new cloud agent for each of those steps, at new cost, and the work of the cancelled
+  agents is lost; the log warns
   `cloud agent <id>, left by an interrupted attempt, was cancelled: starting a new one`. Tell the user before
-  resuming. After `nothing to cancel`, an agent whose run already finished is still reattached, and its answer used.
+  resuming. `nothing to cancel` also follows a cancel repeated after one that named agents, and the resume then starts
+  new ones all the same. Only when no cancel named an agent does the resume reattach to it, and use its answer if its
+  run already finished.
 - A `note` that the process is not the job's (`is not the job's process`) or that starts with
   `could not signal process`: relay it. Nothing was cancelled.
 - `status` still `running` after the call: the process is stopping; chain `wait_workflow` (step 3) until it ends.

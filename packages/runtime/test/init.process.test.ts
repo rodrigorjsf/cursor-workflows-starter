@@ -3,7 +3,7 @@
 // `.gitignore` entry, the `AGENTS.md` block (`--no-agents-md`, `--remove`), idempotence, the diff and the absence of a commit.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
@@ -544,6 +544,39 @@ test("wf init counts CLAUDE.md in the home directory but not ~/.claude/CLAUDE.md
   } finally {
     rmSync(join(home, ".claude"), { recursive: true, force: true });
     rmSync(join(home, "CLAUDE.md"), { force: true });
+  }
+});
+
+test("wf init gives the Claude Code note on every run, also when it has nothing to change: a CLAUDE.md added after the first run gets it", () => {
+  const repo = emptyRepo();
+  assert.equal(claudeCodeNote(repo), undefined, "first run: no memory file yet");
+  put(join(repo, "CLAUDE.md"), "# Guide\n");
+  const r = init(repo);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /wf init: nothing to change/);
+  assert.match(r.stderr, new RegExp(`wf init: Claude Code reads CLAUDE\\.md, not AGENTS\\.md: .*${NOTE_END.replace(/[.']/g, "\\$&")}`));
+});
+
+test("wf init skips a memory file above the repo that it cannot read, instead of failing after it wrote the kit's files", () => {
+  const looping = join(sandbox, `parent-${++counter}`);
+  mkdirSync(join(looping, "repo"), { recursive: true });
+  symlinkSync("CLAUDE.local.md", join(looping, "CLAUDE.local.md")); // a link to itself: ELOOP
+  const loop = init(join(looping, "repo"));
+  assert.equal(loop.status, 0, loop.stderr);
+  assert.doesNotMatch(loop.stderr, /Claude Code reads/);
+  assert.ok(existsSync(join(looping, "repo", "AGENTS.md")));
+
+  if (process.getuid?.() === 0) return; // root reads a mode-000 file
+  const locked = join(sandbox, `parent-${++counter}`);
+  mkdirSync(join(locked, "repo"), { recursive: true });
+  put(join(locked, "CLAUDE.md"), "# Workspace guide\n");
+  chmodSync(join(locked, "CLAUDE.md"), 0o000); // EACCES
+  try {
+    const denied = init(join(locked, "repo"));
+    assert.equal(denied.status, 0, denied.stderr);
+    assert.doesNotMatch(denied.stderr, /Claude Code reads/);
+  } finally {
+    chmodSync(join(locked, "CLAUDE.md"), 0o644);
   }
 });
 
