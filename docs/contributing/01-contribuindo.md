@@ -22,6 +22,7 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   ├── runtime/
 │       │   │   ├── workflow.ts     # tipos públicos + defineWorkflow()
 │       │   │   ├── engine.ts       # agent/parallel/pipeline/phase, retries, modelo, teto de custo
+│       │   │   ├── backend.ts      # AgentBackend: onde cada tentativa roda (hoje só o backend local, que fala com o SDK)
 │       │   │   ├── events.ts       # o tipo dos eventos (a referência 6.1 é gerada dele)
 │       │   │   ├── run-store.ts    # log de eventos, journal e lock de cada run
 │       │   │   ├── structured.ts   # saída estruturada via custom tool submit_result + Ajv
