@@ -214,9 +214,9 @@ async function main(): Promise<number> {
     }
     case "gc": {
       const def = (await loadWorkflows(cwd)).get("implement-issue");
-      if (!def) throw new Error("workflow desconhecido: implement-issue. Use `wf list`.");
+      if (!def) throw new Error("unknown workflow: implement-issue. Use `wf list`.");
       const failedAfterDays = loadEffectiveConfig(def, { cwd }).config.settings.gcFailedAfterDays;
-      if (typeof failedAfterDays !== "number") throw new Error("workflows.implement-issue.settings.gcFailedAfterDays precisa ser um número de dias");
+      if (typeof failedAfterDays !== "number") throw new Error("workflows.implement-issue.settings.gcFailedAfterDays must be a number of days");
       const commands = directCommands();
       const plan = await planGc({ cwd, commands, failedAfterDays });
       process.stderr.write(formatPlan(plan)); // the plan first, then the removal

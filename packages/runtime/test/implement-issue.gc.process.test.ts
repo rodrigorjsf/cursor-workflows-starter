@@ -7,7 +7,7 @@
 // what a resume finds after gc.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { writeRepoConfig } from "./config-fixtures.js";
@@ -15,7 +15,7 @@ import { runWorkflow } from "../src/runtime/engine.js";
 import { tryAcquireRunLock } from "../src/runtime/run-store.js";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import implementIssue from "../workflows/implement-issue.js";
-import { applyGc, directCommands, planGc } from "../workflows/implement-issue/gc.js";
+import { type GcPlan, applyGc, directCommands, planGc } from "../workflows/implement-issue/gc.js";
 import { branchOf, failGh, fx, git, issue, originBranches, run, setPrState, setup, teardown, worktreeOf } from "./implement-issue.fixture.js";
 
 beforeEach(() => {
@@ -26,19 +26,8 @@ afterEach(teardown);
 
 const PACKAGE = join(import.meta.dirname, "..");
 
-interface GcAction {
-  kind: "worktree" | "local-branch" | "remote-branch";
-  target: string;
-  result?: "removed" | "failed";
-  error?: string;
-}
-interface GcOutput {
-  dryRun: boolean;
-  failedAfterDays: number;
-  remove: Array<{ runId: string; reason: string; actions: GcAction[] }>;
-  kept: Array<{ runId: string; why: string }>;
-  errors: string[];
-}
+/** What `wf gc` prints on stdout: the plan, with the result of each action. */
+type GcOutput = GcPlan & { dryRun: boolean };
 
 /** `wf gc <args>` in the temp repo. The child inherits the PATH with the fake gh and the throwaway home. */
 function gc(...args: string[]): { status: number | null; stderr: string; out: GcOutput } {
@@ -246,7 +235,7 @@ test("a second gc finds nothing left to do", async () => {
   assert.deepEqual(again.out.kept, [], "the run is clean: it is not listed");
 });
 
-test("gc never removes a branch outside the workflow's prefix, nor a wf/ branch of no run it knows", async () => {
+test("gc never removes a branch outside the workflow's prefix, nor a wf/ branch of no run it knows that has no merged or closed PR", async () => {
   const merged = await delivered();
   setPrState(merged.branch, "MERGED");
   for (const branch of ["feature/keep", "wf/issue-9-someone-elses-run"]) git(fx.repo, "push", "-q", "origin", `HEAD:refs/heads/${branch}`);
@@ -254,7 +243,7 @@ test("gc never removes a branch outside the workflow's prefix, nor a wf/ branch 
 
   const r = gc();
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(originBranches(), ["wf/issue-9-someone-elses-run"], "a wf/ branch of no run this repo knows is not gc's to delete");
+  assert.deepEqual(originBranches(), ["wf/issue-9-someone-elses-run"], "a wf/ branch of no run this repo knows, with no PR, is not gc's to delete");
   assert.equal(git(fx.repo, "for-each-ref", "refs/heads/feature/local").includes("feature/local"), true);
   const origin = git(join(fx.root, "origin.git"), "for-each-ref", "--format=%(refname:short)", "refs/heads/").split("\n").filter(Boolean);
   assert.deepEqual(origin.sort(), ["feature/keep", "wf/issue-9-someone-elses-run"]);
@@ -398,4 +387,54 @@ test("a run that failed before its first slice can be resumed after gc: there wa
   const resumed = await run({ testCommand: "node --test" }, failed.runId);
   assert.equal((resumed.result as { status: string }).status, "done", JSON.stringify(resumed.result ?? resumed.error));
   assert.ok(existsSync(failed.worktree));
+});
+
+/** A PR on GitHub for a branch this repo has no run for (the run was made in another clone): the fake gh gets it as if `pr create` had made it. */
+function addPr(head: string, state: "OPEN" | "MERGED" | "CLOSED") {
+  const st = JSON.parse(readFileSync(fx.ghState, "utf8")) as { prs: unknown[] };
+  st.prs.push({ url: `https://example.invalid/pull/${st.prs.length + 1}`, body: "", head, state });
+  writeFileSync(fx.ghState, JSON.stringify(st));
+}
+
+test("a wf/ branch on the origin that no run of this repo owns goes when its PR was merged or closed, and stays when its PR is open or it has none", async () => {
+  // Runs made in another clone: their branches are on the origin and their PRs on GitHub, but this repo has no state for them.
+  const merged = await delivered();
+  const closed = await delivered();
+  const open = await delivered();
+  rmSync(join(fx.repo, ".workflows", "runs"), { recursive: true });
+  setPrState(merged.branch, "MERGED");
+  setPrState(closed.branch, "CLOSED");
+  git(fx.repo, "push", "-q", "origin", "HEAD:refs/heads/wf/issue-9-no-pr-yet");
+  git(fx.repo, "push", "-q", "origin", "HEAD:refs/heads/wf/issue-7"); // the name every run had before runs owned their branch: one run may be using it now
+  addPr("wf/issue-7", "MERGED");
+
+  const r = gc();
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(originBranches().sort(), [open.branch, "wf/issue-7", "wf/issue-9-no-pr-yet"].sort());
+  assert.deepEqual(
+    r.out.remove.map((x) => [x.runId, x.reason, x.actions.map((a) => [a.kind, a.target, a.result])]).sort(),
+    [
+      [undefined, "pr-closed", [["remote-branch", closed.branch, "removed"]]],
+      [undefined, "pr-merged", [["remote-branch", merged.branch, "removed"]]],
+    ].sort(),
+  );
+  assert.ok(existsSync(merged.worktree) && localBranches().includes(merged.branch), "nothing local is touched: no run here owns it");
+  assert.match(r.out.kept.find((x) => x.branch === open.branch)?.why ?? "", /PR is open/);
+});
+
+test("the plan says what a failed run's removal loses: uncommitted files in its worktree, and commits that are on no remote", async () => {
+  const failed = await failedRun();
+  age(failed.runId, 30);
+  writeFileSync(join(failed.worktree, "notes.txt"), "half-written\n");
+  git(failed.worktree, "add", "notes.txt");
+  git(failed.worktree, "commit", "-qm", "work that was never pushed");
+  writeFileSync(join(failed.worktree, "scratch.txt"), "uncommitted\n");
+
+  const r = gc("--dry-run");
+  assert.equal(r.status, 0, r.stderr);
+  const notes = r.out.remove[0]!.notes.join("\n");
+  assert.match(notes, /uncommitted/);
+  assert.match(notes, /1 commit .*on no remote/);
+  assert.match(r.stderr, /uncommitted/);
+  assert.ok(existsSync(join(failed.worktree, "scratch.txt")), "a dry run loses nothing");
 });

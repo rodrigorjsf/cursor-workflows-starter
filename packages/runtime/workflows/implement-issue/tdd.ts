@@ -4,6 +4,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { runDirIn } from "../../src/runtime/run-store.js";
 import { writeFileAtomic } from "../../src/runtime/state-files.js";
 import { CommandError, type Commands } from "./commands.js";
 
@@ -235,7 +236,7 @@ export class ProgressStore {
   readonly file: string;
   data: Progress;
   constructor(cwd: string, runId: string) {
-    this.file = join(cwd, ".workflows", "runs", runId, "tdd-progress.json");
+    this.file = join(runDirIn(cwd, runId), "tdd-progress.json");
     this.data = existsSync(this.file) ? (JSON.parse(readFileSync(this.file, "utf8")) as Progress) : { slices: [] };
   }
   slice(key: string): SliceRecord | undefined {

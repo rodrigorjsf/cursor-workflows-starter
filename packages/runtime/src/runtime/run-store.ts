@@ -143,7 +143,7 @@ function acquireLock(dir: string, runId: string): () => void {
 
 /** Is a live process executing run `runId` of the repo `cwd`? Only reads: it neither creates the run's directory nor takes its lock. */
 export function isRunExecuting(cwd: string, runId: string): boolean {
-  const file = join(cwd, ".workflows", "runs", runId, LOCK_FILE);
+  const file = join(runDirIn(cwd, runId), LOCK_FILE);
   const holder = readLock(file);
   return holder !== undefined && isHeld(holder, file);
 }
@@ -180,9 +180,15 @@ export function acquireNamedLock(cwd: string, name: string, runId: string): () =
   );
 }
 
-/** Directory of a run's state in the target repo. */
+/** Where a run's state is in the target repo, whether or not it exists: nothing is created. */
+export function runDirIn(cwd: string, runId: string): string {
+  return join(cwd, ".workflows", "runs", runId);
+}
+
+/** Directory of a run's state in the target repo; makes `.workflows/runs/` if it is not there. */
 export function runDirPath(cwd: string, runId: string): string {
-  return join(stateDir(cwd, "runs"), runId);
+  stateDir(cwd, "runs");
+  return runDirIn(cwd, runId);
 }
 
 export function eventLogPath(cwd: string, runId: string): string {

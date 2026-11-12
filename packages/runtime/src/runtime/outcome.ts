@@ -6,8 +6,10 @@ const DELIVERED = new Set(["done", "delivered", "ok", "success", "succeeded"]);
 /** Status que aguardam alguém (ex.: seams propostas esperando aprovação): não são entrega nem falha. */
 const PENDING = new Set(["seams-proposed", "pending"]);
 
+export type OutcomeClass = "delivered" | "failed" | "error" | "cancelled" | "pending" | "unknown";
+
 /** Classe do resultado: delivered (entregou), failed (o workflow decidiu que não entregou), error (exceção/teto), cancelled (alguém cancelou o run). */
-export function outcomeClass(status: RunStatus, outcomeStatus?: string): string {
+export function outcomeClass(status: RunStatus, outcomeStatus?: string): OutcomeClass {
   if (status === "cancelled") return "cancelled";
   if (status === "failed") return "error";
   if (outcomeStatus === undefined) return "unknown";

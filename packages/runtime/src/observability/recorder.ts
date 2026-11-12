@@ -12,8 +12,6 @@ import type { WorkflowEvent } from "../runtime/events.js";
 import { outcomeClass } from "../runtime/outcome.js";
 import { type Db, openDb, write } from "./db.js";
 
-export { outcomeClass };
-
 const now = () => new Date().toISOString();
 const json = (v: unknown) => (v === undefined ? null : JSON.stringify(v));
 

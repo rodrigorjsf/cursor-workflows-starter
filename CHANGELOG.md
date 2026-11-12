@@ -11,8 +11,10 @@
   falha, ou o processo cair sem terminar, e um run cancelado não conta). `wf gc --dry-run` só imprime o plano. Nunca toca
   num run que um processo está executando (o lock do run decide, e é tomado também durante a remoção), numa branch fora de
   `wf/`, num caminho fora de `.workflows/worktrees/`, nem num commit do origin que o run não empurrou; a branch do
-  origin de um run que falhou também fica se o PR dela está aberto (apagar fecharia o PR). O estado do run em
-  `.workflows/runs/<runId>/` (log, journal) fica. Se o `gh` não diz o que houve com um PR, o run fica e o comando sai
+  origin de um run que falhou também fica se o PR dela está aberto (apagar fecharia o PR). Uma branch `wf/` do origin que
+  nenhum run deste repositório possui (o run foi feito em outro clone) sai quando o PR dela foi mergeado ou fechado; sem
+  PR, ou com o PR aberto, fica. Para um run que falhou, o plano avisa o que se perde com ele: arquivos não commitados no
+  worktree e commits que não estão em nenhum remoto. O estado do run em `.workflows/runs/<runId>/` (log, journal) fica. Se o `gh` não diz o que houve com um PR, o run fica e o comando sai
   com 1. Um run começado quando a branch era a fixa `wf/issue-<n>` aparece como mantido: o estado dele não diz qual é a
   branch nem o worktree dele, então se remove à mão. A saída é um JSON em stdout (`remove`, `kept`, `errors`), e o plano
   vai antes para o stderr.

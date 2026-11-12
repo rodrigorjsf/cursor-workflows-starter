@@ -6,18 +6,20 @@
 // It cleans a run up when its PR was merged or closed, or when the run failed longer ago than `gcFailedAfterDays`. It
 // never touches a run a process is executing, a branch outside `wf/`, or a worktree outside `.workflows/worktrees/`. The
 // origin's branch of a merged or closed PR goes with the run; the one of a run that merely failed goes only if no PR is
-// open on it (deleting the branch would close the PR) and it points at a commit the run pushed. The run's own state
-// (`.workflows/runs/<runId>/`, its event log and journal) stays: it is the history, and the metrics read it.
+// open on it (deleting the branch would close the PR) and it points at a commit the run pushed. A `wf/` branch on the
+// origin that no run of this repo owns (the run was made in another clone) goes when its PR was merged or closed, and
+// stays otherwise. The run's own state (`.workflows/runs/<runId>/`, its event log and journal) stays: it is the history,
+// and the metrics read it.
 import { existsSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { runCommand } from "../../src/runtime/command-runner.js";
 import { outcomeClass } from "../../src/runtime/outcome.js";
-import { EVENTS_FILE, isRunExecuting, readEventLog, tryAcquireRunLock } from "../../src/runtime/run-store.js";
+import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn, tryAcquireRunLock } from "../../src/runtime/run-store.js";
 import type { ExecResult } from "../../src/runtime/workflow.js";
 import { type Exec, type PrState, Commands, LOCAL_GIT_TIMEOUT_MS, NETWORK_TIMEOUT_SEC, WORKFLOW_BRANCH_PREFIX } from "./commands.js";
-import { ProgressStore } from "./tdd.js";
+import { type Progress, ProgressStore } from "./tdd.js";
 
-/** Why a run is cleaned up: its PR was merged or closed, or it failed longer ago than the limit. */
+/** Why something is cleaned up: its PR was merged or closed, or its run failed longer ago than the limit. */
 export type GcReason = "pr-merged" | "pr-closed" | "failed";
 
 /** One thing to remove. `head` is the commit an origin branch points at (the lease its deletion carries). */
@@ -31,11 +33,12 @@ export interface GcAction {
   error?: string;
 }
 
-export interface GcRunPlan {
-  runId: string;
+/** What is cleaned up for one run, or (no `runId`) for one origin branch that no run of this repo owns. */
+export interface GcCleanup {
+  runId?: string;
   reason: GcReason;
   actions: GcAction[];
-  /** What of the run stays although the run is cleaned up, and why. */
+  /** What stays although the rest is cleaned up, and what is lost with it. */
   notes: string[];
 }
 
@@ -43,10 +46,9 @@ export interface GcPlan {
   repo: string;
   /** A run that failed more days ago than this is cleaned up. */
   failedAfterDays: number;
-  /** The runs to clean up, with what to remove from each. */
-  remove: GcRunPlan[];
-  /** The runs that still have something and are not cleaned up, with why. */
-  kept: Array<{ runId: string; why: string }>;
+  remove: GcCleanup[];
+  /** What still exists and is not cleaned up: a run, or an origin branch that no run owns, with why. */
+  kept: Array<{ runId?: string; branch?: string; why: string }>;
   /** What could not be read or asked, or (after `applyGc`) removed. */
   errors: string[];
 }
@@ -76,11 +78,11 @@ const normal = (path: string) => {
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** The runs of the repo that have a progress file, and their ids. A run with no (or an unreadable) progress file is not an implement-issue run. */
-function implementIssueRuns(cwd: string, errors: string[]): Array<{ runId: string; progress: ProgressStore["data"] }> {
+/** The runs of the repo that have a progress file. A run with no (or an unreadable) progress file is not an implement-issue run. */
+function implementIssueRuns(cwd: string, errors: string[]): Array<{ runId: string; progress: Progress }> {
   const runsDir = join(cwd, ".workflows", "runs");
   if (!existsSync(runsDir)) return [];
-  const runs: Array<{ runId: string; progress: ProgressStore["data"] }> = [];
+  const runs: Array<{ runId: string; progress: Progress }> = [];
   for (const runId of readdirSync(runsDir).sort()) {
     try {
       const store = new ProgressStore(cwd, runId);
@@ -101,7 +103,7 @@ const ago = (ms: number) => (ms < DAY_MS ? "less than a day ago" : `${plural(Mat
  * went down) counts as failed, at its last event: that is what `wf status` calls it. Undefined when the log has no execution.
  */
 function lastEnd(cwd: string, runId: string): { how: "failed" | "cancelled" | "other"; at: number } | undefined {
-  const { events } = readEventLog(join(cwd, ".workflows", "runs", runId, EVENTS_FILE), { content: false });
+  const { events } = readEventLog(join(runDirIn(cwd, runId), EVENTS_FILE), { content: false });
   const start = events.findLastIndex((e) => e.type === "run-start");
   if (start < 0) return undefined;
   const end = events.slice(start).find((e) => e.type === "run-end");
@@ -118,6 +120,26 @@ function keptBecause(state: PrState | undefined, end: ReturnType<typeof lastEnd>
   return "it has no merged or closed PR";
 }
 
+/** What deleting the run's worktree and branch would lose: files nobody committed, and commits that are on no remote. */
+async function unsavedWork(commands: Commands, cwd: string, run: { worktree?: string; branch?: string; baseCommit?: string }): Promise<string[]> {
+  const notes: string[] = [];
+  try {
+    if (run.worktree && existsSync(run.worktree) && (await commands.gitRead(run.worktree, "status", "--porcelain")).trim()) {
+      notes.push("the worktree has uncommitted changes, which go with it");
+    }
+    if (run.branch && run.baseCommit) {
+      const unpushed = Number((await commands.gitRead(cwd, "rev-list", "--count", run.branch, "--not", run.baseCommit, "--remotes")).trim());
+      if (unpushed > 0) notes.push(`${plural(unpushed, "commit")} on ${run.branch} ${unpushed === 1 ? "is" : "are"} on no remote, and go with the branch`);
+    }
+  } catch (err) {
+    notes.push(`could not tell whether anything unsaved goes with it: ${message(err)}`);
+  }
+  return notes;
+}
+
+/** The name every run's branch had before runs owned theirs (`wf/issue-<n>`): a run may be using it, so it is nobody's leftover. */
+const SHARED_BRANCH = new RegExp(`^${WORKFLOW_BRANCH_PREFIX}issue-\\d+$`);
+
 /**
  * Looks at every run of the repo and decides what to remove; changes nothing. The runs are the repo's own (`.workflows/runs/`):
  * the global runs index is for tools that are not inside a repo.
@@ -129,8 +151,6 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
   const worktreesDir = join(cwd, ".workflows", "worktrees");
 
   const runs = implementIssueRuns(cwd, plan.errors);
-  if (!runs.length) return plan;
-
   const locals = new Set((await commands.gitRead(cwd, "for-each-ref", "--format=%(refname:short)", `refs/heads/${WORKFLOW_BRANCH_PREFIX}`)).split("\n").filter(Boolean));
   const registered = new Set(
     (await commands.gitRead(cwd, "worktree", "list", "--porcelain"))
@@ -184,7 +204,7 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
     }
 
     const actions: GcAction[] = [];
-    const notes: string[] = [];
+    const notes: string[] = reason === "failed" ? await unsavedWork(commands, cwd, { worktree: hasWorktree ? worktree : undefined, branch: hasLocal ? branch : undefined, baseCommit: progress.baseCommit }) : [];
     if (hasWorktree) actions.push({ kind: "worktree", target: worktree });
     if (hasLocal) actions.push({ kind: "local-branch", target: branch });
     if (remoteHead) {
@@ -193,6 +213,20 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
       else notes.push(state === "OPEN" ? `origin branch ${branch} kept: its PR is open` : `origin branch ${branch} kept: it points at ${remoteHead.slice(0, 7)}, a commit this workflow did not push`);
     }
     plan.remove.push({ runId, reason, actions, notes });
+  }
+
+  // The origin's `wf/` branches that none of these runs owns: made by a run in another clone, or by one whose state is gone.
+  // Nothing says whether that run is still going, so only a PR that is done (merged or closed) says the branch is a leftover.
+  const owned = new Set(runs.flatMap((r) => (r.progress.branch ? [r.progress.branch] : [])));
+  for (const [branch, head] of remote ?? []) {
+    if (owned.has(branch) || SHARED_BRANCH.test(branch)) continue;
+    try {
+      const state = await commands.prState(cwd, branch);
+      if (state === "MERGED" || state === "CLOSED") plan.remove.push({ reason: state === "MERGED" ? "pr-merged" : "pr-closed", actions: [{ kind: "remote-branch", target: branch, head }], notes: [] });
+      else plan.kept.push({ branch, why: state === "OPEN" ? "its PR is open, and no run of this repo owns it" : "no run of this repo owns it, and it has no PR" });
+    } catch (err) {
+      plan.errors.push(`origin branch ${branch}: the state of its PR cannot be read, so it is kept: ${message(err)}`);
+    }
   }
   return plan;
 }
@@ -203,15 +237,15 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
  */
 export async function applyGc(plan: GcPlan, commands: Commands): Promise<void> {
   const cwd = plan.repo;
-  for (const run of plan.remove) {
-    const release = tryAcquireRunLock(cwd, run.runId);
+  for (const cleanup of plan.remove) {
+    const release = cleanup.runId === undefined ? () => {} : tryAcquireRunLock(cwd, cleanup.runId);
     if (!release) {
-      for (const action of run.actions) action.result = "skipped";
-      run.notes.push("skipped: a process started executing the run after the plan was made");
+      for (const action of cleanup.actions) action.result = "skipped";
+      cleanup.notes.push("skipped: a process started executing the run after the plan was made");
       continue;
     }
     try {
-      for (const action of run.actions) {
+      for (const action of cleanup.actions) {
         try {
           if (action.kind === "worktree") await removeWorktree(commands, cwd, action.target);
           else if (action.kind === "local-branch") await commands.git(cwd, "branch", "-D", action.target);
@@ -220,7 +254,7 @@ export async function applyGc(plan: GcPlan, commands: Commands): Promise<void> {
         } catch (err) {
           action.result = "failed";
           action.error = message(err);
-          plan.errors.push(`run ${run.runId}: ${action.kind} ${action.target}: ${action.error}`);
+          plan.errors.push(`${cleanup.runId === undefined ? "origin branch" : `run ${cleanup.runId}`}: ${action.kind} ${action.target}: ${action.error}`);
         }
       }
     } finally {
@@ -245,12 +279,12 @@ const REASON: Record<GcReason, string> = { "pr-merged": "PR merged", "pr-closed"
 
 /** The plan as a person reads it: what will go, and what stays and why. */
 export function formatPlan(plan: GcPlan): string {
-  const lines = [plan.remove.length ? `wf gc: ${plan.remove.length} run(s) to clean up in ${plan.repo}` : `wf gc: nothing to clean up in ${plan.repo}`];
-  for (const run of plan.remove) {
-    lines.push(`  run ${run.runId} (${REASON[run.reason]})`);
-    for (const a of run.actions) lines.push(`    ${LABEL[a.kind]}${a.target}`);
-    for (const note of run.notes) lines.push(`    ${note}`);
+  const lines = [plan.remove.length ? `wf gc: ${plural(plan.remove.length, "thing")} to clean up in ${plan.repo}` : `wf gc: nothing to clean up in ${plan.repo}`];
+  for (const c of plan.remove) {
+    lines.push(c.runId === undefined ? `  origin branch of no run here (${REASON[c.reason]})` : `  run ${c.runId} (${REASON[c.reason]})`);
+    for (const a of c.actions) lines.push(`    ${LABEL[a.kind]}${a.target}`);
+    for (const note of c.notes) lines.push(`    ${note}`);
   }
-  for (const k of plan.kept) lines.push(`  kept: run ${k.runId}: ${k.why}`);
+  for (const k of plan.kept) lines.push(`  kept: ${k.runId === undefined ? `origin branch ${k.branch}` : `run ${k.runId}`}: ${k.why}`);
   return lines.join("\n") + "\n";
 }

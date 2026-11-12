@@ -619,7 +619,7 @@ export default defineWorkflow<Args>({
         const worked = progress.data.slices.length;
         if (progress.data.baseCommit && worked) {
           throw new Error(
-            `${worktree} and its branch ${branch} are gone, and the run had already worked in them (${worked} slice${worked === 1 ? "" : "s"}): they were removed, by \`wf gc\` or by hand, so this run cannot go on. Start a new run`,
+            `${worktree} and its branch ${branch} are gone, and the run had already worked in them (slices recorded: ${worked}): they were removed, by \`wf gc\` or by hand, so this run cannot go on. Start a new run`,
           );
         }
         await cmd.git(ctx.cwd, "worktree", "add", "-b", branch, worktree, progress.data.baseCommit ?? (await defaultBranchHead(cmd, ctx.cwd)));
