@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import type { ModelSelection, RunUsage, SettingSource } from "@cursor/sdk";
 import { Ajv } from "ajv";
 import { type AgentBackend, type AttemptEvent, type AttemptResult, type StepOptions, type UsageReading, localBackend } from "./backend.js";
-import { type CommandOutcome, EXEC_FLUSH_MS, EXEC_LOG_MAX_CHARS, outputLog, runCommand } from "./command-runner.js";
+import { type CommandOutcome, EXEC_FLUSH_MS, EXEC_LOG_MAX_CHARS, outputLog, runCommand, toExecResult } from "./command-runner.js";
 import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedConfig, type StepOverrides, allowedSources, isModelAllowed, loadEffectiveConfig } from "../config/index.js";
 import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type OutputStream, type NewEvent, type RunStatus, type StepRef, type TurnUsage, type WorkflowEvent } from "./events.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
@@ -1075,7 +1075,7 @@ async function executeRun<A, R>(
       clearInterval(flushing);
       log.end();
     }
-    const ok = done.outcome === "exit" && done.exitCode === 0;
+    const result = toExecResult(done);
     emit({
       type: "exec-end",
       ...ref,
@@ -1083,7 +1083,7 @@ async function executeRun<A, R>(
       label,
       phase,
       command,
-      ok,
+      ok: result.ok,
       outcome: done.outcome,
       exitCode: done.exitCode ?? undefined,
       signal: done.signal ?? undefined,
@@ -1093,7 +1093,7 @@ async function executeRun<A, R>(
       outputTruncated: log.truncated || undefined,
     });
     if (done.outcome === "cancelled") throw new RunCancelledError(cancelMessage); // the command is dead: the workflow must not go on
-    return { ok, exitCode: done.exitCode, timedOut: done.outcome === "timeout", tail: done.tail, ...(done.error === undefined ? {} : { error: done.error }) };
+    return result;
   }
 
   const ctx: WorkflowContext<A> = {

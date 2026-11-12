@@ -3,6 +3,7 @@
 // behind. The engine turns a call into a step node and the output into `content` events (`ctx.exec`).
 import { type ChildProcess, spawn } from "node:child_process";
 import type { ExecOutcome, OutputStream } from "./events.js";
+import type { ExecResult } from "./workflow.js";
 
 /** How much of a command's output a call hands back: the last characters of stdout and stderr, in arrival order. */
 export const TAIL_MAX_CHARS = 32_768;
@@ -38,6 +39,11 @@ export interface CommandOutcome {
   tail: string;
   /** Everything the command wrote, in characters. */
   outputChars: number;
+}
+
+/** What `ctx.exec` hands back for a command that ended this way. */
+export function toExecResult(o: CommandOutcome): ExecResult {
+  return { ok: o.outcome === "exit" && o.exitCode === 0, exitCode: o.exitCode, timedOut: o.outcome === "timeout", tail: o.tail, ...(o.error === undefined ? {} : { error: o.error }) };
 }
 
 /** A command asked to stop gets SIGTERM, and this long to clean up (a `git` removing its lock file) before SIGKILL. */

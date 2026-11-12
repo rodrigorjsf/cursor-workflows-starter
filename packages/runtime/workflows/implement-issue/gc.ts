@@ -12,10 +12,9 @@
 // and the metrics read it.
 import { existsSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { runCommand } from "../../src/runtime/command-runner.js";
+import { runCommand, toExecResult } from "../../src/runtime/command-runner.js";
 import { outcomeClass } from "../../src/runtime/outcome.js";
 import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn, tryAcquireRunLock } from "../../src/runtime/run-store.js";
-import type { ExecResult } from "../../src/runtime/workflow.js";
 import { type Exec, type PrState, Commands, LOCAL_GIT_TIMEOUT_MS, NETWORK_TIMEOUT_SEC, WORKFLOW_BRANCH_PREFIX } from "./commands.js";
 import { type Progress, ProgressStore } from "./tdd.js";
 
@@ -54,10 +53,8 @@ export interface GcPlan {
 }
 
 /** `ctx.exec` without a run: the same asynchronous, time-limited command, with nobody to log it to. */
-const directExec: Exec = async (command, args = [], opts = {}): Promise<ExecResult> => {
-  const o = await runCommand({ command, args, cwd: opts.cwd ?? process.cwd(), env: opts.env, timeoutMs: opts.timeoutMs ?? LOCAL_GIT_TIMEOUT_MS }, () => {});
-  return { ok: o.outcome === "exit" && o.exitCode === 0, exitCode: o.exitCode, timedOut: o.outcome === "timeout", tail: o.tail, ...(o.error === undefined ? {} : { error: o.error }) };
-};
+const directExec: Exec = async (command, args = [], opts = {}) =>
+  toExecResult(await runCommand({ command, args, cwd: opts.cwd ?? process.cwd(), env: opts.env, timeoutMs: opts.timeoutMs ?? LOCAL_GIT_TIMEOUT_MS }, () => {}));
 
 /** The commands of implement-issue, run outside a workflow run. */
 export const directCommands = () => new Commands(directExec, { localMs: LOCAL_GIT_TIMEOUT_MS, networkMs: NETWORK_TIMEOUT_SEC * 1000 });
