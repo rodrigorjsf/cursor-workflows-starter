@@ -10,8 +10,8 @@
 #   for the installed kit. Needs `wf`, a logged-in `gh` and the kit's dependencies. Answers are kept in
 #   `<report-dir>/progress.env` (default `~/.cursor-workflows/validation`), so Ctrl-C, or quitting Cursor in scenario 5,
 #   loses nothing: run it again. `WF_KIT_REPO=owner/repo` files the issue somewhere other than the kit's origin;
-#   `GH_VISIBILITY=--public` reaches the sandbox script. Scenarios 3 to 7 run workflows: about 800k tokens, on models the
-#   plans include.
+#   `GH_VISIBILITY=--public` reaches the sandbox script. Scenarios 3 to 7 run workflows: 3 to 6 measured about 800k
+#   tokens, on models the plans include; scenario 7's `smoke` run was not part of that measurement.
 #
 # The library below, down to the STAGES marker, is the /wizard skill's template.sh, unedited. The wizard's own helpers
 # and stages follow the marker. Wizard text is English, like the library's; the report is English too.

@@ -282,9 +282,9 @@ cenário 1 só vale ali, porque o IDE escolhe o próprio Node e PATH. Ele:
 
 No cenário 5, fechar o Cursor fecha o terminal dele e, com ele, o assistente. As respostas ficam em
 `~/.cursor-workflows/validation/progress.env`: reabra o Cursor, rode o assistente de novo e ele segue do cenário 5, com
-as respostas dos anteriores mantidas (Enter confirma cada uma). Os cenários 3 a 7 rodam workflows e gastam cerca de 800
+as respostas dos anteriores mantidas (Enter confirma cada uma). Os cenários 3 a 6 rodam workflows e gastam cerca de 800
 mil tokens, em modelos que os planos incluem (o `implement-issue` LOW mediu 339 mil;
-[8.2 §13](../research/verificacoes-locais.md)).
+[8.2 §13](../research/verificacoes-locais.md)). O cenário 7 roda também o `smoke`, que não entrou nessa medição.
 
 O relatório tem, por cenário, o resultado (`pass`, `fail` ou `skipped`) e a nota, mais os fatos do ambiente (SO, Node,
 versão do kit e do Cursor, se o terminal era o do IDE) e o resultado do `wf doctor`. Caminhos locais, o nome do
