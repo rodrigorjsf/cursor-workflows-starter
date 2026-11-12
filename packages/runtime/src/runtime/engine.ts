@@ -30,7 +30,7 @@ import {
 import { Ajv } from "ajv";
 import { type AgentBackend, localBackend } from "./backend.js";
 import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedConfig, type StepOverrides, allowedSources, isModelAllowed, loadEffectiveConfig } from "../config/index.js";
-import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type NewEvent, type RunStatus, type StepRef, type WorkflowEvent } from "./events.js";
+import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type NewEvent, type RunStatus, type StepRef, type TurnUsage, type WorkflowEvent } from "./events.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
 import { addUsage, emptyUsage, resumeHint, withRatio } from "./projection.js";
 import { RunLockedError, RunStore } from "./run-store.js";
@@ -39,7 +39,7 @@ import { registerRun } from "./runs-index.js";
 import { stateDir as runtimeStateDir } from "./state.js";
 import { type Capture, SUBMIT_TOOL, repromptMessage, schemaInstruction, submitResultTool } from "./structured.js";
 import type { AgentCallOptions, Budget, UsageTotals, WorkflowContext, WorkflowDefinition } from "./workflow.js";
-import { revertToSnapshot, takeSnapshot } from "./worktree-snapshot.js";
+import { type Snapshot, revertToSnapshot, takeSnapshot } from "./worktree-snapshot.js";
 
 export type { ErrorKind, RunStatus, TurnUsage, WorkflowEvent } from "./events.js";
 
@@ -219,6 +219,228 @@ const ajv = new Ajv({ allErrors: true, strict: false });
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
+/**
+ * Opens an execution of the run in its log: the run-start event with the effective config, then the warnings an
+ * execution starts with (config violations, metrics off, workflow code changed since the last execution, old content
+ * that could not be pruned, a torn last line). Registers a first execution in the global runs index.
+ */
+function announceRun<A>(o: {
+  def: WorkflowDefinition<A, any>;
+  args: A;
+  opts: RunOptions;
+  runId: string;
+  store: RunStore;
+  resolved: ResolvedConfig;
+  emit: (e: NewEvent) => void;
+  recorderWarning: string | undefined;
+}): void {
+  const { def, args, opts, runId, store, resolved, emit, recorderWarning } = o;
+  const workflowHash = sha(JSON.stringify(def.meta) + JSON.stringify(def.defaults ?? {}) + def.run.toString()).slice(0, 16);
+  const startedAt = new Date().toISOString();
+  const pruned = store.pruneOldContent(opts.retention);
+  emit({
+    type: "run-start",
+    workflow: def.meta.name,
+    workflowHash,
+    argsHash: sha(JSON.stringify(args ?? null)).slice(0, 16),
+    repo: repoIdentity(opts.cwd),
+    jobId: opts.jobId,
+    config: resolved.config,
+    provenance: resolved.provenance,
+    violations: resolved.violations,
+  });
+  for (const v of resolved.violations) emit({ type: "warning", message: `config: ${v.message} (${v.ref ?? v.layer}${v.path ? ` ${v.path}` : ""})` });
+  if (recorderWarning) emit({ type: "warning", message: recorderWarning });
+  if (store.previousStart && store.previousStart.workflowHash !== workflowHash) {
+    emit({
+      type: "warning",
+      message: `o código do workflow mudou desde a execução anterior deste run (${store.previousStart.workflowHash} → ${workflowHash}): o run retomado mistura versões`,
+    });
+  }
+  if (!store.previousStart) {
+    // First execution of this run: register it where tools outside the repo can find it. A resume is the same run.
+    try {
+      registerRun({ runId, repo: resolve(opts.cwd), workflow: def.meta.name, startedAt });
+    } catch (err) {
+      emit({ type: "warning", message: `não foi possível registrar o run no índice global: ${err instanceof Error ? err.message : String(err)}` });
+    }
+  }
+  for (const { runId: prunedRun, error } of pruned.failed) {
+    emit({ type: "warning", message: `não foi possível apagar o conteúdo antigo do run ${prunedRun}: ${error}` });
+  }
+  if (store.tornTail.events) emit({ type: "warning", message: "a última linha do log de eventos estava incompleta (queda no meio de uma gravação): ignorada" });
+  if (store.tornTail.journal) emit({ type: "warning", message: "a última linha do journal estava incompleta (queda no meio de uma gravação): a etapa dela roda de novo" });
+}
+
+/** Reverts run one at a time: two steps writing in the same directory must not restore it at once. */
+class RevertQueue {
+  private tail: Promise<unknown> = Promise.resolve();
+
+  /** Returns what puts a step's directory back as it was before the step (once). It never throws; true when it did. */
+  forStep(o: { writes: boolean; snapshot: Snapshot | undefined; stepCwd: string; label: string; warn: (message: string) => void }): () => Promise<boolean> {
+    let reverting: Promise<boolean> | undefined;
+    return () => {
+      if (!o.writes) return Promise.resolve(false);
+      if (reverting) return reverting;
+      const run = this.tail.then(async () => {
+        if (!o.snapshot) {
+          o.warn(`etapa "${o.label}" cancelada: ${o.stepCwd} não é um repositório git (ou o git falhou), então as alterações da etapa não foram desfeitas`);
+          return false;
+        }
+        try {
+          await revertToSnapshot(o.snapshot);
+          return true;
+        } catch (err) {
+          o.warn(`etapa "${o.label}" cancelada: não foi possível desfazer as alterações em ${o.stepCwd}: ${err instanceof Error ? err.message : String(err)}`);
+          return false;
+        }
+      });
+      this.tail = run;
+      return (reverting = run);
+    };
+  }
+}
+
+/** The run's event output: where every event goes, and how an attempt's full content is written. */
+interface EventChannel {
+  /** Stamps, redacts and appends an event, then hands it to the metrics recorder and the `onEvent` listener. */
+  emit(e: NewEvent): void;
+  attemptContent(ref: StepRef, attemptId: string): AttemptContent;
+  /** Why metrics are off for this run, if they failed to start: reported after run-start. */
+  recorderWarning: string | undefined;
+  close(): void;
+}
+
+interface AttemptContent {
+  write(kind: ContentKind, raw: string, extra?: { tool?: string; callId?: string }): void;
+  /** Adds a piece of what the agent is saying. */
+  say(delta: string): void;
+  /** Writes what the agent said since the last flush as one message. */
+  flush(): void;
+}
+
+async function openEventChannel(store: RunStore, runId: string, opts: RunOptions): Promise<EventChannel> {
+  // Métricas: o recorder é carregado só se ligado (importa node:sqlite sob demanda).
+  let recorder: { record(e: WorkflowEvent): void; close(): void } | undefined;
+  let recorderWarning: string | undefined;
+  if (opts.metricsDb !== false && process.env.WF_METRICS !== "off") {
+    try {
+      const { createRecorder } = await import("../observability/recorder.js");
+      recorder = await createRecorder(opts.metricsDb || undefined);
+    } catch (err) {
+      recorderWarning = `métricas desligadas: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+  // Every event is stamped and redacted here, once: the log, the recorder and the listeners all get the same redacted event.
+  const stamp = (e: NewEvent): WorkflowEvent => store.redact({ v: EVENT_SCHEMA_VERSION, ts: new Date().toISOString(), runId, ...e } as WorkflowEvent);
+  let logFailed = false;
+  const append = (event: WorkflowEvent) => {
+    try {
+      store.appendEvent(event);
+    } catch (err) {
+      if (logFailed) return;
+      logFailed = true; // one warning only: the log is the source of truth, but a full disk must not take the run down
+      opts.onEvent?.(stamp({ type: "warning", message: `falha ao gravar o log de eventos: ${err instanceof Error ? err.message : String(err)}` }));
+    }
+  };
+  const emit = (e: NewEvent) => {
+    const event = stamp(e);
+    append(event);
+    try {
+      recorder?.record(event);
+    } catch (err) {
+      const warning = stamp({ type: "warning", message: `falha ao gravar métrica: ${err instanceof Error ? err.message : String(err)}` });
+      append(warning);
+      opts.onEvent?.(warning);
+    }
+    opts.onEvent?.(event);
+  };
+  /**
+   * The content of one attempt (prompts, what the agent said, tool calls, command output). It goes to the event log only:
+   * not to the metrics recorder, not to `onEvent` listeners. Agent text arrives in deltas and is written one message per turn.
+   */
+  const attemptContent = (ref: StepRef, attemptId: string): AttemptContent => {
+    const write = (kind: ContentKind, raw: string, extra: { tool?: string; callId?: string } = {}) => {
+      const { text, chars, truncated } = store.prepareContent(raw);
+      append(stamp({ type: "content", ...ref, attemptId, kind, ...extra, text, chars, truncated: truncated || undefined }));
+    };
+    let said = "";
+    return {
+      write,
+      say: (delta) => void (said += delta),
+      flush() {
+        if (!said) return;
+        write("agent-message", said);
+        said = "";
+      },
+    };
+  };
+  return { emit, attemptContent, recorderWarning, close: () => recorder?.close() };
+}
+
+/** send() com tolerância a AgentBusyError (a run anterior ainda fechando). */
+async function sendWhenFree(agent: SDKAgent, message: string, options?: SendOptions): Promise<Run> {
+  for (let i = 0; ; i++) {
+    try {
+      return await agent.send(message, options);
+    } catch (err) {
+      if (err instanceof AgentBusyError && i < 5) {
+        await sleep(1000 * (i + 1));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+/** What an attempt counts from the SDK's stream of deltas. */
+interface AttemptCounters {
+  turns: number;
+  steps: number;
+  stepsInTurn: number;
+  summaries: number;
+  reprompts: number;
+  toolCalls: Record<string, number>;
+}
+
+/**
+ * The `onDelta` of one attempt: counts turns, steps, summaries and tool calls, writes the attempt's content, and hands
+ * each ended turn's usage to `onTurn` (which emits the turn event and enforces the live caps).
+ */
+function attemptDeltas(c: AttemptCounters, content: AttemptContent, onTurn: (usage: TurnUsage) => void): NonNullable<SendOptions["onDelta"]> {
+  return ({ update }) => {
+    switch (update.type) {
+      case "step-completed":
+        c.steps++;
+        c.stepsInTurn++;
+        break;
+      case "text-delta":
+        content.say(update.text);
+        break;
+      case "tool-call-started": {
+        const name = update.toolCall?.type ?? "unknown";
+        c.toolCalls[name] = (c.toolCalls[name] ?? 0) + 1;
+        content.write("tool-call", JSON.stringify((update.toolCall as { args?: unknown }).args ?? null), { tool: name, callId: update.callId });
+        break;
+      }
+      case "tool-call-completed": {
+        const output = update.toolCall?.type === "shell" ? shellOutput(update.toolCall.result) : undefined;
+        if (output !== undefined) content.write("command-output", output, { tool: "shell", callId: update.callId });
+        break;
+      }
+      case "summary-completed":
+        c.summaries++;
+        break;
+      case "turn-ended":
+        content.flush();
+        if (update.usage) onTurn(update.usage);
+        c.turns++;
+        c.stepsInTurn = 0;
+        break;
+    }
+  };
+}
+
 /** Modelo + params ordenados: "composer-2[reasoning_effort=low]". Esforço e contexto viram braços distintos. */
 export function modelKey(m: ModelSelection | undefined): string | undefined {
   if (!m) return undefined;
@@ -371,99 +593,8 @@ async function executeRun<A, R>(
     usage: withRatio(totals),
   });
 
-  // Métricas: o recorder é carregado só se ligado (importa node:sqlite sob demanda).
-  let recorder: { record(e: WorkflowEvent): void; close(): void } | undefined;
-  // Every event is stamped and redacted here, once: the log, the recorder and the listeners all get the same redacted event.
-  const stamp = (e: NewEvent): WorkflowEvent => store.redact({ v: EVENT_SCHEMA_VERSION, ts: new Date().toISOString(), runId, ...e } as WorkflowEvent);
-  let logFailed = false;
-  const append = (event: WorkflowEvent) => {
-    try {
-      store.appendEvent(event);
-    } catch (err) {
-      if (logFailed) return;
-      logFailed = true; // one warning only: the log is the source of truth, but a full disk must not take the run down
-      opts.onEvent?.(stamp({ type: "warning", message: `falha ao gravar o log de eventos: ${err instanceof Error ? err.message : String(err)}` }));
-    }
-  };
-  const emit = (e: NewEvent) => {
-    const event = stamp(e);
-    append(event);
-    try {
-      recorder?.record(event);
-    } catch (err) {
-      const warning = stamp({ type: "warning", message: `falha ao gravar métrica: ${err instanceof Error ? err.message : String(err)}` });
-      append(warning);
-      opts.onEvent?.(warning);
-    }
-    opts.onEvent?.(event);
-  };
-  /**
-   * The content of one attempt (prompts, what the agent said, tool calls, command output). It goes to the event log only:
-   * not to the metrics recorder, not to `onEvent` listeners. Agent text arrives in deltas and is written one message per turn.
-   */
-  function attemptContent(ref: StepRef, attemptId: string) {
-    const write = (kind: ContentKind, raw: string, extra: { tool?: string; callId?: string } = {}) => {
-      const { text, chars, truncated } = store.prepareContent(raw);
-      append(stamp({ type: "content", ...ref, attemptId, kind, ...extra, text, chars, truncated: truncated || undefined }));
-    };
-    let said = "";
-    return {
-      write,
-      /** Adds a piece of what the agent is saying. */
-      say: (delta: string) => void (said += delta),
-      /** Writes what the agent said since the last flush as one message. */
-      flush() {
-        if (!said) return;
-        write("agent-message", said);
-        said = "";
-      },
-    };
-  }
-
-  let recorderWarning: string | undefined; // reported after run-start: every execution in the log opens with it
-  if (opts.metricsDb !== false && process.env.WF_METRICS !== "off") {
-    try {
-      const { createRecorder } = await import("../observability/recorder.js");
-      recorder = await createRecorder(opts.metricsDb || undefined);
-    } catch (err) {
-      recorderWarning = `métricas desligadas: ${err instanceof Error ? err.message : String(err)}`;
-    }
-  }
-  const workflowHash = sha(JSON.stringify(def.meta) + JSON.stringify(def.defaults ?? {}) + def.run.toString()).slice(0, 16);
-  const startedAt = new Date().toISOString();
-  const pruned = store.pruneOldContent(opts.retention);
-  emit({
-    type: "run-start",
-    workflow: def.meta.name,
-    workflowHash,
-    argsHash: sha(JSON.stringify(args ?? null)).slice(0, 16),
-    repo: repoIdentity(opts.cwd),
-    jobId: opts.jobId,
-    config: resolved.config,
-    provenance: resolved.provenance,
-    violations: resolved.violations,
-  });
-  for (const v of resolved.violations) emit({ type: "warning", message: `config: ${v.message} (${v.ref ?? v.layer}${v.path ? ` ${v.path}` : ""})` });
-  if (recorderWarning) emit({ type: "warning", message: recorderWarning });
-  if (store.previousStart && store.previousStart.workflowHash !== workflowHash) {
-    emit({
-      type: "warning",
-      message: `o código do workflow mudou desde a execução anterior deste run (${store.previousStart.workflowHash} → ${workflowHash}): o run retomado mistura versões`,
-    });
-  }
-  if (!store.previousStart) {
-    // First execution of this run: register it where tools outside the repo can find it. A resume is the same run.
-    try {
-      registerRun({ runId, repo: resolve(opts.cwd), workflow: def.meta.name, startedAt });
-    } catch (err) {
-      emit({ type: "warning", message: `não foi possível registrar o run no índice global: ${err instanceof Error ? err.message : String(err)}` });
-    }
-  }
-  for (const { runId: prunedRun, error } of pruned.failed) {
-    emit({ type: "warning", message: `não foi possível apagar o conteúdo antigo do run ${prunedRun}: ${error}` });
-  }
-  if (store.tornTail.events) emit({ type: "warning", message: "a última linha do log de eventos estava incompleta (queda no meio de uma gravação): ignorada" });
-  if (store.tornTail.journal) emit({ type: "warning", message: "a última linha do journal estava incompleta (queda no meio de uma gravação): a etapa dela roda de novo" });
+  const { emit, attemptContent, recorderWarning, close: closeEvents } = await openEventChannel(store, runId, opts);
+  announceRun({ def, args, opts, runId, store, resolved, emit, recorderWarning });
 
   process.env[INSIDE_WORKFLOW_ENV] = "1";
   const journal = store.journal;
@@ -553,8 +684,7 @@ async function executeRun<A, R>(
   });
   abandoned?.catch(() => {});
 
-  /** Reverts run one at a time: two steps writing in the same directory must not restore it at once. */
-  let revertQueue: Promise<unknown> = Promise.resolve();
+  const reverts = new RevertQueue();
 
   function assertNotCancelled(): void {
     if (signal?.aborted) throw new RunCancelledError(cancelMessage);
@@ -620,21 +750,6 @@ async function executeRun<A, R>(
       await sleep(1000);
     }
     return { charged: 0, costFinal: false, usage: emptyUsage(), runs: [] };
-  }
-
-  /** send() com tolerância a AgentBusyError (a run anterior ainda fechando). */
-  async function send(agent: SDKAgent, message: string, options?: SendOptions): Promise<Run> {
-    for (let i = 0; ; i++) {
-      try {
-        return await agent.send(message, options);
-      } catch (err) {
-        if (err instanceof AgentBusyError && i < 5) {
-          await sleep(1000 * (i + 1));
-          continue;
-        }
-        throw err;
-      }
-    }
   }
 
   /** When an attempt's time runs out: `at` is the instant, `ms` the step's timeout, which the error message reports. */
@@ -808,26 +923,7 @@ async function executeRun<A, R>(
       const stepCwd = o.cwd ?? opts.cwd;
       const writes = !isReadOnly(o.tools);
       const snapshot = writes && !signal?.aborted ? await takeSnapshot(stepCwd) : undefined;
-      let reverting: Promise<boolean> | undefined;
-      /** Puts the step's directory back as it was before the step (once). Never throws. True when it did. */
-      const revert = (): Promise<boolean> => {
-        if (!writes) return Promise.resolve(false);
-        const run = revertQueue.then(async () => {
-          if (!snapshot) {
-            emit({ type: "warning", message: `etapa "${label}" cancelada: ${stepCwd} não é um repositório git (ou o git falhou), então as alterações da etapa não foram desfeitas` });
-            return false;
-          }
-          try {
-            await revertToSnapshot(snapshot);
-            return true;
-          } catch (err) {
-            emit({ type: "warning", message: `etapa "${label}" cancelada: não foi possível desfazer as alterações em ${stepCwd}: ${err instanceof Error ? err.message : String(err)}` });
-            return false;
-          }
-        });
-        revertQueue = run;
-        return (reverting ??= run);
-      };
+      const revert = reverts.forStep({ writes, snapshot, stepCwd, label, warn: (message) => emit({ type: "warning", message }) });
       const attempts = 1 + (o.retries ?? 1);
       let lastError = "";
       for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -847,7 +943,7 @@ async function executeRun<A, R>(
         const content = attemptContent(ref, attemptId);
         content.write("prompt", prompt);
         // Contadores alimentados pelo stream de deltas do SDK.
-        const c = { turns: 0, steps: 0, stepsInTurn: 0, summaries: 0, reprompts: 0, toolCalls: {} as Record<string, number> };
+        const c: AttemptCounters = { turns: 0, steps: 0, stepsInTurn: 0, summaries: 0, reprompts: 0, toolCalls: {} };
         // Soma dos turn-ended desta tentativa: reserva de tokens quando getUsage() não responde.
         const turnUsage: UsageTotals & { reasoningTokens?: number } = emptyUsage();
         // Live caps: a turn that takes the step or the run over its token cap cuts the attempt (its own turn, or another
@@ -856,46 +952,15 @@ async function executeRun<A, R>(
         live.add(turnUsage);
         cutters.add(attemptCut);
         const sendOpts: SendOptions = {
-          onDelta: ({ update }) => {
-            switch (update.type) {
-              case "step-completed":
-                c.steps++;
-                c.stepsInTurn++;
-                break;
-              case "text-delta":
-                content.say(update.text);
-                break;
-              case "tool-call-started": {
-                const name = update.toolCall?.type ?? "unknown";
-                c.toolCalls[name] = (c.toolCalls[name] ?? 0) + 1;
-                content.write("tool-call", JSON.stringify((update.toolCall as { args?: unknown }).args ?? null), { tool: name, callId: update.callId });
-                break;
-              }
-              case "tool-call-completed": {
-                const output = update.toolCall?.type === "shell" ? shellOutput(update.toolCall.result) : undefined;
-                if (output !== undefined) content.write("command-output", output, { tool: "shell", callId: update.callId });
-                break;
-              }
-              case "summary-completed":
-                c.summaries++;
-                break;
-              case "turn-ended":
-                content.flush();
-                if (update.usage) {
-                  emit({ type: "turn", ...ref, attemptId, idx: c.turns, steps: c.stepsInTurn, usage: update.usage });
-                  const t = update.usage;
-                  addUsage(turnUsage, { ...t, totalTokens: t.inputTokens + t.outputTokens }); // o cache já está no input
-                  if (t.reasoningTokens) turnUsage.reasoningTokens = (turnUsage.reasoningTokens ?? 0) + t.reasoningTokens;
-                  // The real SDK may report one turn per send, so this can fire only when a send ends (see #37).
-                  const breach = tokenBreach(step, turnUsage.totalTokens);
-                  if (breach instanceof BudgetExceededError) for (const active of cutters) active.cut(breach); // the run's cap: every active attempt
-                  else if (breach) attemptCut.cut(breach);
-                }
-                c.turns++;
-                c.stepsInTurn = 0;
-                break;
-            }
-          },
+          onDelta: attemptDeltas(c, content, (t) => {
+            emit({ type: "turn", ...ref, attemptId, idx: c.turns, steps: c.stepsInTurn, usage: t });
+            addUsage(turnUsage, { ...t, totalTokens: t.inputTokens + t.outputTokens }); // o cache já está no input
+            if (t.reasoningTokens) turnUsage.reasoningTokens = (turnUsage.reasoningTokens ?? 0) + t.reasoningTokens;
+            // The real SDK may report one turn per send, so this can fire only when a send ends (see #37).
+            const breach = tokenBreach(step, turnUsage.totalTokens);
+            if (breach instanceof BudgetExceededError) for (const active of cutters) active.cut(breach); // the run's cap: every active attempt
+            else if (breach) attemptCut.cut(breach);
+          }),
         };
         const capture: Capture = { value: undefined, submitted: false };
         let agent: SDKAgent | undefined;
@@ -958,7 +1023,7 @@ async function executeRun<A, R>(
           attemptCut.throwIfCut();
           /** One message and its answer. A cut attempt throws its budget error as soon as it knows, before anything else. */
           const exchange = async (message: string): Promise<RunResult> => {
-            const run = await within(deadline, send(sdkAgent, message, sendOpts), (late) => void late.cancel().catch(() => {}));
+            const run = await within(deadline, sendWhenFree(sdkAgent, message, sendOpts), (late) => void late.cancel().catch(() => {}));
             attemptCut.bind(run);
             attemptCut.throwIfCut();
             try {
@@ -1108,6 +1173,6 @@ async function executeRun<A, R>(
     result: final.result,
     error: final.error,
   });
-  recorder?.close();
+  closeEvents();
   return final;
 }
