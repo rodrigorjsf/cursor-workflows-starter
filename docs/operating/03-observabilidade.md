@@ -372,7 +372,8 @@ No cabeçalho da página do run:
   usuário, os cloud agents que o run deixou rodando e a página mostra a nota da resposta (`200`), que os nomeia, no lugar
   do botão. O cancelamento não fica registrado no log, então depois de recarregar a página o botão volta; quando não há
   mais nada a cancelar, a rota responde `409` e a página mostra a mensagem. Um resume depois disso não reanexa aos agentes
-  cancelados: cria outros, que custam de novo ([6.2 §Etapas na nuvem](../reference/config.md#etapas-na-nuvem)).
+  cancelados: cria outros, que custam de novo ([6.2 §Etapas na nuvem](../reference/config.md#etapas-na-nuvem)). Quando a
+  nota diz que um agente não foi alcançado, a página a mostra como falha e mantém o botão.
 - **Copy resume command** (num run `failed` ou `cancelled`) copia
   `wf start <workflow> --args '<args>' --resume <runId> --cwd <repositório>`, com os mesmos `--max-cents`, `--max-tokens` e
   `--overrides` do start. O registro do job da última execução (`.workflows/jobs/<jobId>.json`, campo `start`) guarda os

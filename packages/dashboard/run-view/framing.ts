@@ -28,7 +28,7 @@ export function boundsOf(boxes: Box[]): Box {
 /**
  * How to frame the run in a pane of `pane` pixels: all of it when that stays readable; otherwise as many nodes as fit at a
  * readable zoom around a focus, the nearest first. The focus is the node whose log is open; else, in a run that is over, the
- * first step or command that failed or stopped (what the reader came for; a fork or join only when no step did), or its first step (to be read from the start); in a live run,
+ * first step or command that failed or was interrupted (what the reader came for; a fork or join only when no step did), or its first step (to be read from the start); in a live run,
  * the latest node. The user pans to the rest; Fit View shows it all.
  */
 export function frameOf(graph: RunGraph, layout: RunLayout, pane: { width: number; height: number }, selectedId?: string): FitViewOptions {

@@ -344,7 +344,7 @@ async function planSnapshots(plan: GcPlan, commands: Commands, snapshots: Snapsh
     const cancelled = lastEnd(events)?.how === "cancelled";
     if (cutOff && (cancelled || idle <= plan.failedAfterDays * DAY_MS)) {
       const wait = cancelled ? "it was cancelled, and a cancelled run can be resumed" : `gc waits for more than ${plural(plan.failedAfterDays, "day")} (gcFailedAfterDays) before it gives up on the run`;
-      keep(`run ${runId} was ${cancelled ? "cancelled" : "cut off"} in the middle of the cloud step this branch belongs to (agent ${cutOff.agentId}): a resume reattaches to the agent and takes its work from the branch, and ${wait}`);
+      keep(`run ${runId} was ${cancelled ? "cancelled" : "cut off"} in the middle of the cloud step this branch belongs to (agent ${cutOff.agentId}): a resume reattaches to the agent if it is still running and takes its work from the branch, and ${wait}`);
       continue;
     }
     plan.remove.push({ runId, reason: "snapshot", actions: [{ kind: "remote-branch", target: branch, head, remote }], notes: [] });

@@ -242,7 +242,8 @@ export class RunStore {
   readonly ledger: Ledger;
   /**
    * The cloud steps an earlier execution left without an end, by `stepId`, replayed from the event log when the store was
-   * opened. A resume reattaches to their agents instead of creating new ones.
+   * opened. A resume reattaches to their agents instead of creating new ones, unless an agent's newest run was cancelled
+   * (a dead run's cancel): then it starts a new agent.
    */
   readonly interruptedCloud: ReadonlyMap<string, InterruptedCloudStep>;
   /** Which files ended in a torn line (a crash mid-append) when the run was opened. */
