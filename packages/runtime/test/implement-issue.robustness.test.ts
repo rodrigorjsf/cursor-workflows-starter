@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { runWorkflow } from "../src/runtime/engine.js";
 import implementIssue from "../workflows/implement-issue.js";
-import { PLAN, SUB_CODE, SUB_TEST, branchOf, fx, git, issue, names, run, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
+import { PLAN, SUB_CODE, SUB_TEST, branchOf, failGh, fx, git, issue, names, run, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
 import { writeRepoConfig } from "./config-fixtures.js";
 
 beforeEach(setup);
@@ -52,11 +52,14 @@ const progressFile = (runId: string) => join(fx.repo, ".workflows", "runs", runI
 const progressOf = (runId: string) => JSON.parse(readFileSync(progressFile(runId), "utf8"));
 const FALL = () => ({ status: "error", error: { message: "simulated fall" } });
 
-/** The process "dies" in the middle of the green step of the first slice: the progress says the step is in flight and the tree is dirty. */
-function crashInGreen(runId: string) {
+/**
+ * The process "dies" in the middle of the green step of the first slice: the progress says the step is in flight and the tree is
+ * dirty. `execution`: the execution of the run the record says began the step (absent, as in progress from older versions).
+ */
+function crashInGreen(runId: string, execution?: number) {
   const p = progressOf(runId);
   git(worktreeOf(runId), "add", "-A");
-  p.inFlight = { id: `green:${p.slices[0].key}:1`, before: git(worktreeOf(runId), "write-tree").trim() };
+  p.inFlight = { id: `green:${p.slices[0].key}:1`, before: git(worktreeOf(runId), "write-tree").trim(), execution };
   writeFileSync(progressFile(runId), JSON.stringify(p));
   writeFileSync(join(worktreeOf(runId), "stray.txt"), "half-made edit\n");
 }
@@ -162,9 +165,10 @@ test("a cancel in the middle of a write step is not a crash: any number of them 
 
 /**
  * Cancels run `runId` once at every command a write step runs after its agent answered and before the step is settled (the
- * suite, the tree snapshots, the checks): execution N cuts at the N-th of them, and the next execution resumes the run. Each
- * cancelled execution must leave the step marked interrupted and no crash counted. Returns the number of cuts and the
- * execution that got past the step, which runs on to the end.
+ * suite, the tree snapshots, the checks): execution N cuts at the N-th of them, and the next execution resumes the run. After
+ * each cut the mark the workflow's catch wrote is taken off the record, as when `wf` exits right after the run ends and the
+ * catch never runs: the resume has to tell the cancel from a crash by the event log. No execution may count a crash. Returns
+ * the cuts and the execution that got past the step, which runs on to the end.
  */
 async function cancelAtEveryCommandAfter(label: string, runId: string) {
   const cuts: string[] = [];
@@ -185,12 +189,15 @@ async function cancelAtEveryCommandAfter(label: string, runId: string) {
         }
       },
     });
+    assert.deepEqual(progressOf(runId).crashes ?? {}, {}, `before cut ${cut}: no crash counted`);
     if (at === undefined) return { cuts, past: r };
     cuts.push(at);
     assert.equal(r.status, "cancelled", `cut ${cut} (${at}): ${JSON.stringify(r)}`);
+    await new Promise((resolve) => setTimeout(resolve, 50)); // the cancelled body is done unwinding
     const p = progressOf(runId);
-    assert.equal(p.inFlight?.interrupted, true, `cut ${cut} (${at}): the step is marked interrupted, not left as a crash: ${JSON.stringify(p.inFlight)}`);
-    assert.deepEqual(p.crashes ?? {}, {}, `cut ${cut} (${at}): no crash counted`);
+    assert.ok(p.inFlight?.execution, `cut ${cut} (${at}): the step is in flight, with the execution that began it: ${JSON.stringify(p.inFlight)}`);
+    delete p.inFlight.interrupted;
+    writeFileSync(progressFile(runId), JSON.stringify(p));
   }
   throw new Error(`${label}: the step was never got past`);
 }
@@ -215,11 +222,32 @@ for (const [step, label] of [["red", "teste-1"], ["green", "codigo-1"], ["refact
     }
     const { cuts, past } = await cancelAtEveryCommandAfter(label, `cut-${step}`);
     assert.ok(cuts.length > 2, `more cancels than the default crash limit (2): ${cuts.join(", ")}`);
-    if (step !== "refactor") assert.ok(cuts.some((c) => c.startsWith("suite:")), `the suite is one of the cuts: ${cuts.join(", ")}`);
-    else assert.ok(cuts.includes("suite:refactor"), `the suite is one of the cuts: ${cuts.join(", ")}`);
+    // The green suite runs once the step is settled; the red and the refactor suites run inside theirs.
+    if (step === "red") assert.ok(cuts.some((c) => c.startsWith("suite:red")), `the suite is one of the cuts: ${cuts.join(", ")}`);
+    if (step === "refactor") assert.ok(cuts.includes("suite:refactor"), `the suite is one of the cuts: ${cuts.join(", ")}`);
     assert.equal(res(past).status, "done", JSON.stringify(res(past)));
   });
 }
+
+test("a crash is still counted when the next execution fails before it reaches the step, and when the execution that began the step ended failed", async () => {
+  issue(["complexity:low"]);
+  fx.handlers["codigo-1"] = FALL;
+  const first = await run({}); // execution 1 ends failed
+  assert.equal(first.status, "failed");
+  crashInGreen(first.runId, 1); // a failed execution is no evidence the process lived through the step
+  failGh("issue view", "HTTP 502: Bad Gateway"); // the next execution fails in triage, before the resume looks at the step
+  const triage = await run({}, first.runId);
+  assert.equal(triage.status, "failed", JSON.stringify(triage));
+  assert.equal(progressOf(first.runId).inFlight?.interrupted, undefined, "the failed execution did not mark a step it did not begin");
+  failGh("issue view", undefined);
+  fx.handlers["codigo-1"] = (o) => {
+    write(o, "src/math.js", SUB_CODE);
+    submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
+  };
+  const resumed = await run({}, first.runId);
+  assert.equal(res(resumed).status, "done", JSON.stringify(res(resumed)));
+  assert.deepEqual(Object.values(progressOf(first.runId).crashes ?? {}), [1]);
+});
 
 test("a resume cancelled while it undoes a step that crashed the process still counts that crash, once", async () => {
   issue(["complexity:low"]);

@@ -40,7 +40,8 @@
 //     do run. Um erro do `gh` ou do `git` falha o run com a mensagem dele; "sem PR" é só a resposta conhecida do `gh`;
 //   - cada run tem a sua branch (`wf/issue-<n>-<run>`) e o seu worktree, criados a partir da cabeça ATUAL da branch padrão; o
 //     worktree só é reaproveitado pelo run que o registrou no progresso. Uma issue tem no máximo um run ativo: o segundo run
-//     devolve "issue-locked" com o id do que está ativo (lock `issue-<n>` no run store, por repositório);
+//     devolve "issue-locked" com o id do que está ativo (lock `issue-<n>` no run store, por repositório; um `repo` que o `gh`
+//     diz ser o repositório do cwd é o mesmo lock que um run sem `repo`);
 //   - a entrega empurra com `--force-with-lease`, só em branch `wf/`, e só quando o commit que o origin tem na branch é um que
 //     este run empurrou: o resume depois do PR refaz o commit e entrega por cima; commit de outra pessoa na branch dá
 //     "push-refused" e não é sobrescrito.
@@ -88,7 +89,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileS
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
-import { NamedLockedError, acquireNamedLock } from "../src/runtime/run-store.js";
+import { NamedLockedError, acquireNamedLock, eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { defineWorkflow, type AgentCallOptions, type WorkflowCard } from "../src/runtime/workflow.js";
 import { buildPrBody, type PrText } from "./implement-issue/pr-body.js";
 import { CommandError, Commands, NETWORK_TIMEOUT_SEC, SNAPSHOT_GRACE_HOURS, WORKFLOW_BRANCH_PREFIX, worktreeOf } from "./implement-issue/commands.js";
@@ -288,12 +289,35 @@ function tierOfLabels(labels: Array<{ name: string }>, labelTiers: Record<string
 const branchExists = (cmd: Commands, cwd: string, branch: string) => cmd.gitIs(cwd, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`);
 
 /**
- * The name of the lock on an issue. Without `--repo` the issue is the cwd repository's (`issue-<n>`); with it, the name carries a
- * hash of `owner/repo` (GitHub names ignore case), so the same number in another repository is another lock. Passing `--repo`
- * with the cwd's own repository takes a lock apart from a run without it: nothing asks GitHub which repository the cwd is.
+ * The name of the lock on an issue: `issue-<n>` for an issue of the cwd's repository, and for one of another repository a name
+ * that carries a hash of that repository (GitHub names ignore case), so the same number there is another lock. A `--repo` that
+ * names the cwd's own repository, in any form `gh` takes, is the cwd's issue: `gh repo view` says which repository each one is,
+ * and a run without `--repo` asks nothing. When `gh` cannot say (no GitHub remote here, no network), the lock is the named
+ * repository's, as for another one, and the log says so.
  */
-function issueLockName(issue: number, repo: string | undefined): string {
-  return repo ? `issue-${issue}-${createHash("sha256").update(repo.toLowerCase()).digest("hex").slice(0, 12)}` : `issue-${issue}`;
+async function issueLockName(cmd: Commands, cwd: string, issue: number, repo: string | undefined, log: (message: string) => void): Promise<string> {
+  if (!repo) return `issue-${issue}`;
+  let named = repo.toLowerCase();
+  try {
+    const urlOf = async (...which: string[]) => (await cmd.gh(cwd, "repo", "view", ...which, "--json", "url", "-q", ".url")).trim().toLowerCase();
+    const cwdRepository = await urlOf();
+    named = await urlOf(repo);
+    if (named === cwdRepository) return `issue-${issue}`;
+  } catch (err) {
+    if (!(err instanceof CommandError)) throw err; // a cancel is not an answer
+    log(`could not tell whether ${repo} is this directory's repository, so the issue lock is ${repo}'s: ${err.message}`);
+  }
+  return `issue-${issue}-${createHash("sha256").update(named).digest("hex").slice(0, 12)}`;
+}
+
+/** The run's executions as its event log has them: the `run-start` and the `run-end` (absent while running, or after a crash) of each, in order. */
+function executionsOf(cwd: string, runId: string): Array<{ ended?: string }> {
+  const executions: Array<{ ended?: string }> = [];
+  for (const e of readEventLog(eventLogPath(cwd, runId), { content: false }).events) {
+    if (e.type === "run-start") executions.push({});
+    else if (e.type === "run-end" && executions.length) executions[executions.length - 1]!.ended = e.status;
+  }
+  return executions;
 }
 
 const issueBranch = (issue: number) => `${WORKFLOW_BRANCH_PREFIX}issue-${issue}`;
@@ -480,12 +504,19 @@ export default defineWorkflow<Args>({
   budget: { maxTokens: 3_000_000 },
 
   async run(ctx) {
+    const settings = ctx.settings as unknown as Settings; // o esquema da configuração valida os tipos; os padrões vêm de `meta.settings`
+    // Todo comando do workflow (testes, git, gh) passa por ctx.exec: assíncrono, com teto de tempo e visível no log do run.
+    // O git local não passa teto: vale o `execTimeoutMs` da configuração do workflow.
+    const cmd = new Commands((command, args, opts) => ctx.exec(command, args, opts), {
+      networkMs: settings.networkTimeoutSec * 1000,
+    });
     // Uma issue tem no máximo um run ativo: dois runs na mesma issue brigariam pelo mesmo trabalho e abririam dois PRs. O lock
-    // fica no run store (`.workflows/locks/issue-<n>.lock`, ou `issue-<n>-<hash do --repo>.lock`: a issue #5 de outro repositório
-    // é outra issue) e vale até o run terminar, qualquer que seja o jeito (status, erro, cancelamento).
+    // fica no run store (`.workflows/locks/issue-<n>.lock`, ou `issue-<n>-<hash do repositório>.lock` quando o `--repo` é outro
+    // repositório que não o do cwd: a issue #5 de outro repositório é outra issue) e vale até o run terminar, qualquer que seja
+    // o jeito (status, erro, cancelamento).
     let releaseIssue: () => void;
     try {
-      releaseIssue = acquireNamedLock(ctx.cwd, issueLockName(ctx.args.issue, ctx.args.repo), ctx.runId);
+      releaseIssue = acquireNamedLock(ctx.cwd, await issueLockName(cmd, ctx.cwd, ctx.args.issue, ctx.args.repo, (m) => ctx.log(m)), ctx.runId);
     } catch (err) {
       if (!(err instanceof NamedLockedError)) throw err;
       return {
@@ -496,20 +527,16 @@ export default defineWorkflow<Args>({
         lock: err.message,
       };
     }
+    const progress = new ProgressStore(ctx.cwd, ctx.runId);
+    /** A ordem desta execução no log de eventos do run; lida na primeira etapa de escrita. */
+    let execution: number | undefined;
     try {
       const { issue: number, repo, openPr = false } = ctx.args;
-      const settings = ctx.settings as unknown as Settings; // o esquema da configuração valida os tipos; os padrões vêm de `meta.settings`
       const globs = ctx.args.testGlobs?.length ? ctx.args.testGlobs : DEFAULT_TEST_GLOBS;
       const protectedGlobs = ctx.args.protectedGlobs ?? DEFAULT_PROTECTED_GLOBS;
       // Os tetos de tempo são ajustes, não args: só os arquivos de configuração os trocam (ADR-0001).
       const testTimeout = settings.testTimeoutSec * 1000;
-      // Todo comando do workflow (testes, git, gh) passa por ctx.exec: assíncrono, com teto de tempo e visível no log do run.
-      // O git local não passa teto: vale o `execTimeoutMs` da configuração do workflow.
-      const cmd = new Commands((command, args, opts) => ctx.exec(command, args, opts), {
-        networkMs: settings.networkTimeoutSec * 1000,
-      });
       const isTest = (f: string) => isTestFile(f, globs);
-      const progress = new ProgressStore(ctx.cwd, ctx.runId);
 
       // ── Triagem: dados da issue via gh (código, sem modelo) ─────────────────────────────
       ctx.phase("Triage");
@@ -677,11 +704,19 @@ export default defineWorkflow<Args>({
       }
       // Uma etapa de escrita interrompida (o processo caiu no meio, ou o run foi cancelado nela): volta ao estado de antes dela.
       if (progress.data.inFlight) {
-        const { id, before, interrupted } = progress.data.inFlight;
+        const { id, before, interrupted, execution: startedIn } = progress.data.inFlight;
+        // Só uma queda conta para o limite: numa etapa `interrupted` o código estava vivo (um cancelamento, um erro que subiu), e
+        // numa cuja execução terminou cancelada também (o engine encerra o run cancelado sem esperar este código chegar ao catch,
+        // e o `wf` sai logo depois: a marca pode não ter sido escrita). A queda é contada antes de desfazer, e o registro passa a
+        // `interrupted`: um cancelamento no meio do desfazer não a perde nem a conta de novo.
+        const cancelled = startedIn !== undefined && executionsOf(ctx.cwd, ctx.runId)[startedIn - 1]?.ended === "cancelled";
+        if (!interrupted && !cancelled) {
+          progress.data.crashes = { ...progress.data.crashes, [id]: (progress.data.crashes?.[id] ?? 0) + 1 };
+          progress.data.inFlight = { id, before, interrupted: true };
+          progress.save();
+        }
         ctx.log(`undoing the interrupted step ${id}`);
         await revertTo(cmd, worktree, before);
-        // Só uma queda conta para o limite: numa etapa `interrupted` o código estava vivo (cancelamento).
-        if (!interrupted) progress.data.crashes = { ...progress.data.crashes, [id]: (progress.data.crashes?.[id] ?? 0) + 1 };
         progress.data.inFlight = undefined;
         progress.save();
       }
@@ -724,7 +759,8 @@ export default defineWorkflow<Args>({
         const before = await snapshotTree(cmd, worktree);
         const seq = (progress.data.writeSeq ?? 0) + 1;
         progress.data.writeSeq = seq;
-        progress.data.inFlight = { id, before };
+        execution ??= executionsOf(ctx.cwd, ctx.runId).length; // esta execução: a última do log, que o engine abriu antes do run
+        progress.data.inFlight = { id, before, execution };
         progress.save();
         try {
           // revertOnRetry: o worktree é só desta etapa, e uma nova tentativa não pode herdar o que a que falhou deixou.
@@ -736,9 +772,7 @@ export default defineWorkflow<Args>({
             settle();
           } catch {
             // O desfazer falhou (o run foi cancelado, ou o git travou): o erro da etapa é o que sobe, e o registro "em andamento" fica,
-            // para o resume voltar ao snapshot de antes dela. Marcado `interrupted`: o processo não caiu, não é uma queda para o limite.
-            progress.data.inFlight = { id, before, interrupted: true };
-            progress.save();
+            // para o resume voltar ao snapshot de antes dela. O catch do run o marca `interrupted`: o processo não caiu.
           }
           throw err;
         }
@@ -1064,6 +1098,17 @@ export default defineWorkflow<Args>({
         review: Object.fromEntries(AXES.map((a) => [a, { findings: reports[a]?.findings.length ?? 0, worst: reports[a]?.worst ?? "" }])),
         spentCents: ctx.budget.spentCents(),
       };
+    } catch (err) {
+      // Um erro que chega aqui (um cancelamento no meio da suíte, de um snapshot ou de uma checagem de uma etapa de escrita; um git
+      // que estourou o teto) passou por este código: o processo está vivo. A etapa em andamento que esta execução começou fica para
+      // o resume desfazer, marcada `interrupted`, e não conta como queda para `maxStepCrashes`. A de uma execução anterior não é
+      // tocada: se ela derrubou o processo, a queda ainda tem de ser contada.
+      const step = progress.data.inFlight;
+      if (step && !step.interrupted && execution !== undefined && step.execution === execution) {
+        progress.data.inFlight = { ...step, interrupted: true };
+        progress.save();
+      }
+      throw err;
     } finally {
       releaseIssue();
     }

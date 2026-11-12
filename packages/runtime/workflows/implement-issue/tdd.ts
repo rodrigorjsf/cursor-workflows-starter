@@ -201,6 +201,12 @@ export interface InFlight {
    * não caiu, então o resume não conta isto como uma queda.
    */
   interrupted?: boolean;
+  /**
+   * A execução do run que começou a etapa: a ordem do `run-start` dela no log de eventos (1 = a primeira). Se essa execução
+   * terminou cancelada (`run-end` com status `cancelled`), o processo estava vivo, e o resume não conta uma queda mesmo sem
+   * `interrupted` (o processo pode sair antes de o código marcar a etapa). Ausente em progresso de versões antigas.
+   */
+  execution?: number;
 }
 
 export interface Progress {
