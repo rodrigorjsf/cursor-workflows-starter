@@ -65,6 +65,7 @@ test("the installer clones the kit at the tag, installs its dependencies and wri
   const before = npmCalls().length;
   const r = install(home, ["--tag", "v0.3.0", "--repo", origin]);
   assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /detached HEAD/, "git's advice about a detached HEAD is noise to whoever reads the installer's output");
 
   const kit = kitOf(home);
   assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.3.0");

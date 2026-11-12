@@ -76,7 +76,7 @@ fetch_kit() {
     git -C "$kit" fetch --quiet --tags --force || die "não consegui buscar as tags de $(git -C "$kit" remote get-url origin)"
     git -C "$kit" -c advice.detachedHead=false checkout --quiet "$tag" || die "a tag $tag não existe em $kit"
   else
-    git clone --quiet --branch "$tag" "$repo" "$kit" || die "não consegui clonar $repo na tag $tag"
+    git -c advice.detachedHead=false clone --quiet --branch "$tag" "$repo" "$kit" || die "não consegui clonar $repo na tag $tag"
   fi
 }
 
