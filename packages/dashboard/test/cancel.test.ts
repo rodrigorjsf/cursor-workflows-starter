@@ -165,23 +165,23 @@ test("a job that is slow to stop is answered as still running, with what was don
 
 test("a resumed run has one job per execution: only the one that is running is cancelled", async () => {
   const repo = box.repo("repo");
-  const gone = await jobProcess(repo, "smoke-aaaa0004", "job-old"); // the process of the first execution, which has ended but is still there
-  const child = await jobProcess(repo, "smoke-aaaa0004", "job-new");
+  const gone = await jobProcess(repo, "smoke-aaaa0004", "job-a-first"); // the process of the first execution, which has ended but is still there
+  const child = await jobProcess(repo, "smoke-aaaa0004", "job-b-resume");
   // the run's log: the first execution (job-old) ended as failed, a resume (job-new) is running
   writeRun(box.home, repo, {
     runId: "smoke-aaaa0004",
     workflow: "smoke",
     startedAt: START,
-    jobId: "job-old",
-    events: [{ type: "run-end", status: "failed", error: "boom" }, { type: "run-start", workflow: "smoke", jobId: "job-new" }],
+    jobId: "job-a-first",
+    events: [{ type: "run-end", status: "failed", error: "boom" }, { type: "run-start", workflow: "smoke", jobId: "job-b-resume" }],
     lockedBy: child.pid,
   });
-  writeJobRecord(repo, "job-old", "smoke-aaaa0004", gone.pid!);
-  writeJobRecord(repo, "job-new", "smoke-aaaa0004", child.pid!);
+  writeJobRecord(repo, "job-a-first", "smoke-aaaa0004", gone.pid!);
+  writeJobRecord(repo, "job-b-resume", "smoke-aaaa0004", child.pid!);
 
   const reply = await cancel("smoke-aaaa0004", await withToken());
   assert.equal(reply.status, 200, reply.text);
-  assert.equal(reply.json.jobId, "job-new");
+  assert.equal(reply.json.jobId, "job-b-resume");
   assert.equal(await exited(child), 143);
   assert.equal(gone.exitCode, null, "the first execution's process was left alone");
 });
