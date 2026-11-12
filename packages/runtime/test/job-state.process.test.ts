@@ -1,5 +1,6 @@
 // Seam 2, the process: `wf start|wait|status|jobs` and the MCP tools `get_workflow_status` / `wait_workflow` return the job
-// state projected from the run's event log, and the job record on disk holds identity only, plus how the job was started. The CLI and the MCP server are
+// state projected from the run's event log, and the job record on disk holds identity only, plus how the job was started (and,
+// after a cancel killed its frozen process, when). The CLI and the MCP server are
 // real child processes against the fake Cursor SDK, a temporary repo and a temporary home directory.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

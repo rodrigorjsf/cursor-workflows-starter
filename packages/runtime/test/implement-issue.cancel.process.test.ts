@@ -68,7 +68,10 @@ test("a frozen job cancelled in the middle of a write step is not a crash: more 
   const runId = "implement-issue-frozencancel";
   for (const n of [1, 2, 3]) {
     const pid = await inRedStep(runId, `frozen-${n}`);
+    const logged = readEventLog(eventLogPath(fx.repo, runId), { content: false }).events.length;
     await freezeAndCancel(pid, `frozen-${n}`);
+    const after = readEventLog(eventLogPath(fx.repo, runId), { content: false }).events.slice(logged);
+    assert.ok(!after.some((e) => e.type === "run-end"), "the cancel writes nothing to the log: the killed execution has no run end");
   }
   const resumed = await run({}, runId);
   assert.equal(res(resumed).status, "done", JSON.stringify(res(resumed)));
