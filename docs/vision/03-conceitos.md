@@ -51,9 +51,10 @@ _Evite_: execução (ambíguo com a de uma etapa), sessão.
 
 **Job**:
 O run em segundo plano que `start_workflow` (MCP) ou `wf start` (CLI) disparam, em um processo destacado que sobrevive ao
-MCP server e ao Cursor. Tem identidade própria (job id, run id, pid, heartbeat), e o que `wait_workflow` e
+MCP server e ao Cursor. Tem identidade própria (job id, run id, pid, heartbeat; o registro guarda também os args do start e a marca de um cancelamento que matou o processo), e o que `wait_workflow` e
 `get_workflow_status` respondem é uma projeção do log de eventos do run. Um job termina `finished`, `failed` ou
-`cancelled` (`cancel_workflow`, `wf cancel`, Ctrl-C): cancelar não é falhar, e o run continua retomável.
+`cancelled` (`cancel_workflow`, `wf cancel`, Ctrl-C): cancelar um job em execução não é falhar (um job travado ou já
+terminado continua `failed`), e o run continua retomável.
 Retomar um run abre outro job sobre o mesmo run. Decisão em [ADR-0003](../adr/0003-detached-jobs.md).
 _Evite_: tarefa, processo.
 

@@ -96,7 +96,8 @@ matches, in code spans; match them verbatim.
 
 Cancel when the user asks to stop the run, and at that request only: whether a run is going badly is the user's
 judgement. Call `cancel_workflow` with `{ jobId }`. It stops the active agent runs, reverts the step that was writing
-to the state it had before the step, and returns the job with `status: "cancelled"` (step 6).
+to the state it had before the step, and returns the job with `status: "cancelled"` (step 6). A stuck or already
+ended job is handled as the notes below say, and stays `failed`.
 
 - A `note` that starts with `the job already ended`: the job's process was gone, so no step was stopped or reverted.
   The runtime still cancels any cloud agents the run left running. Relay the note as it came: it ends with
@@ -137,7 +138,7 @@ the config files (global caps, repo config) do: pass `--max-cents` and `--max-to
 ```bash
 wf start <name> --args '<json>' --max-cents <N> --max-tokens <N> [--resume <runId>]   # returns {jobId, runId, log}
 wf wait <jobId> --timeout 240   # repeat until status != running
-wf cancel <jobId>               # only when the user asks to stop; returns the job with status cancelled
+wf cancel <jobId>               # only when the user asks to stop; a running job ends cancelled, a stuck or ended one stays failed
 ```
 
 In Claude Code, run the `wait` with `timeout: 250000` on the Bash tool: its default (120000 ms) cuts the 240 s wait.

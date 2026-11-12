@@ -74,7 +74,7 @@ Fallback quando o MCP não está habilitado, e caminho preferido em CI e em runs
 ```bash
 wf start implement-issue --args '{"issue":123}'   # processo destacado; log em .workflows/jobs/<id>.log
 wf wait <jobId> --timeout 240
-wf cancel <jobId>          # para o run (SIGTERM ao processo do job); o run continua retomável
+wf cancel <jobId>          # para o run (SIGTERM ao job em execução; SIGKILL ao travado); o run continua retomável
 wf gc --dry-run            # mostra os worktrees e branches de runs terminados que o gc removeria
 ```
 
