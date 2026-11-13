@@ -9,7 +9,8 @@
 //                                                   overrides: limits for this run, tighten-only
 //                                                   dashboardUrl: the run's page on the local dashboard, started detached if it was not running
 //                                                   (once, for every repo); dashboardWarning: why it could not be
-//   wait_workflow  {jobId, timeoutSec}              → state (status, phase, recent summary lines, spend, result)
+//   wait_workflow  {jobId, timeoutSec?}             → state (status, phase, recent summary lines, spend, result)
+//                                                   timeoutSec: a number of seconds, clamped to 1..50, 45 when absent
 //   get_workflow_status {jobId}                     → state, without waiting
 //   cancel_workflow {jobId}                         → cancel the job and return its state (the run stays resumable)
 //
@@ -33,7 +34,7 @@ import { assertKitCompatible, readKitPackage } from "./kit-version.js";
 import { type DashboardStatus, ensureDashboard, runPageUrl } from "./runtime/dashboard-instance.js";
 import { INSIDE_WORKFLOW_ENV } from "./runtime/engine.js";
 import { installCrashHandlers, spawnJob } from "./runtime/jobs.js";
-import { cancelJob, readJob, waitJob } from "./runtime/job-state.js";
+import { cancelJob, readJob, waitJob, waitSeconds } from "./runtime/job-state.js";
 import { type BrokenWorkflow, discoverWorkflows } from "./runtime/registry.js";
 import { plainName } from "./runtime/state.js";
 
@@ -82,11 +83,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         },
         {
           name: "wait_workflow",
-          description: "Waits up to timeoutSec (max. 50) for the job to end and returns its state. Repeat while status = running.",
+          description: "Waits up to timeoutSec seconds (a number, 1 to 50, default 45; outside that range it is clamped) for the job to end and returns its state. Repeat while status = running.",
           inputSchema: {
             type: "object",
             required: ["jobId"],
-            properties: { jobId: { type: "string" }, timeoutSec: { type: "number", maximum: 50 } },
+            properties: { jobId: { type: "string" }, timeoutSec: { type: "number", minimum: 1, maximum: 50 } },
           },
         },
         {
@@ -142,7 +143,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       return text({ jobId: job.jobId, runId: job.runId, next: "call wait_workflow with this jobId", ...dashboardFields(await dashboard, job.runId), ...(violations.length ? { violations } : {}) });
     }
     case "wait_workflow": {
-      const secs = Math.min(Number(a.timeoutSec ?? 45), 50);
+      let secs: number;
+      try {
+        secs = waitSeconds(a.timeoutSec); // checked first: a bad value is an error even for a job that is not there
+      } catch (err) {
+        if (err instanceof Error) return fail({ error: err.message });
+        throw err;
+      }
       return text((await waitJob(cwd, String(a.jobId), secs * 1000)) ?? { error: "job not found" });
     }
     case "get_workflow_status":

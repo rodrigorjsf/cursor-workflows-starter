@@ -410,6 +410,11 @@
   `job not found`, um run a retomar assim é recusado com `invalid runId` antes de criar job ou pasta, e um registro de
   job cujo `runId` não é simples é ignorado. O id de um run novo troca por `-` o que, no nome do workflow, não é letra,
   dígito, `_` ou `-` (`team.deploy` vira `team-deploy-<sufixo>`).
+- **`wait_workflow` não espera mais para sempre com um `timeoutSec` que não é número.** Um `"30s"` virava `NaN`, o
+  teto de 50 s deixava de valer e a chamada só voltava quando o job terminava, acima do timeout do cliente MCP. Agora um
+  `timeoutSec` que não é número é um erro (`isError`, com `timeoutSec must be a number of seconds`), o número é levado
+  para 1 a 50 (45 sem ele), e `waitJob` não espera nada com um tempo que não é um número finito. O `cancel_workflow`
+  espera um tempo fixo (20 s) e não tinha o problema.
 
 ## 0.2.0 (pré-release, 2026-11-11)
 

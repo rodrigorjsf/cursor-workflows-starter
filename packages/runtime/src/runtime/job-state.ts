@@ -339,9 +339,22 @@ export function wasKilledByCancel(repo: string, jobId: string): boolean {
   return typeof parseJobRecord(join(jobsDirIn(repo), `${jobId}.json`))?.killedByCancel === "string";
 }
 
-/** Waits up to `timeoutMs` for the job to end; returns its current state (ended or not). */
+/** The longest wait `wait_workflow` gives, in seconds: under the tool-call timeouts of the MCP clients. */
+export const WAIT_MAX_SEC = 50;
+
+/**
+ * The seconds `wait_workflow` waits for, from its `timeoutSec`: 45 when absent, otherwise the number clamped to 1..50. Throws
+ * when it is not a finite number (`"30s"` included): it would make a wait with no end.
+ */
+export function waitSeconds(raw: unknown): number {
+  if (raw === undefined) return 45;
+  if (typeof raw !== "number" || !Number.isFinite(raw)) throw new Error(`timeoutSec must be a number of seconds, 1 to ${WAIT_MAX_SEC}; got ${typeof raw === "string" ? JSON.stringify(raw) : String(raw)}`);
+  return Math.min(Math.max(raw, 1), WAIT_MAX_SEC);
+}
+
+/** Waits up to `timeoutMs` for the job to end; returns its current state (ended or not). A `timeoutMs` that is not a finite number, or is below 0, waits not at all. */
 export async function waitJob(cwd: string, jobId: string, timeoutMs: number): Promise<JobState | undefined> {
-  const deadline = Date.now() + timeoutMs;
+  const deadline = Date.now() + (Number.isFinite(timeoutMs) ? Math.max(timeoutMs, 0) : 0);
   for (;;) {
     const job = readJob(cwd, jobId);
     if (!job || job.status !== "running" || Date.now() >= deadline) return job;
