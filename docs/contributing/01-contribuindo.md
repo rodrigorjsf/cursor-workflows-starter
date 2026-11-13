@@ -2,7 +2,7 @@
 
 ## Antes de abrir um PR
 
-Rode `npm ci`, `npm run typecheck` e `npm test`. Os testes são offline (SDK falso), não precisam de conta nem de rede,
+Rode `npm ci` e `npm run check`, que faz o `typecheck` e o `npm test` (com o Node do `mise.toml`: `mise exec -- npm run check`). Os testes são offline (SDK falso), não precisam de conta nem de rede,
 e são os mesmos do CI (Node 22.13.0 e 22.x). O `npm test` inclui o docs check ([9.2](02-convencoes-do-livro.md#o-que-o-docs-check-confere)):
 um link quebrado, um rodapé errado ou um capítulo fora do índice reprova o PR.
 

@@ -14,6 +14,7 @@
   "scripts": {
     "wf": "tsx packages/runtime/src/cli.ts",
     "mcp": "tsx packages/runtime/src/mcp-server.ts",
+    "check": "npm run typecheck && npm test",
     "typecheck": "tsc --noEmit && tsc --noEmit -p packages/dashboard/app && tsc --noEmit -p packages/dashboard/run-view",
     "models": "tsx packages/runtime/src/cli.ts models",
     "test": "npm run test --workspaces --if-present && tsx --test test/*.test.ts",

@@ -9,6 +9,8 @@ import { join, posix } from "node:path";
 
 /** Folders that never hold documentation we own: dependencies, VCS data, run state, test scratch and handoffs. */
 const SKIPPED_DIRS = new Set(["node_modules", ".git", ".workflows", ".codegraph", ".handoffs", ".tmp", "metrics-export"]);
+/** Paths skipped by where they are, not by name: Claude Code's agent worktrees are whole copies of the repo. */
+const SKIPPED_PATHS = new Set([".claude/worktrees"]);
 
 /** Every `.md` file under `root` as a posix path relative to it, sorted. Symbolic links are not followed or listed. */
 export function markdownFiles(root: string, dir = ""): string[] {
@@ -17,7 +19,7 @@ export function markdownFiles(root: string, dir = ""): string[] {
     if (entry.isSymbolicLink()) continue;
     const path = posix.join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (!SKIPPED_DIRS.has(entry.name)) found.push(...markdownFiles(root, path));
+      if (!SKIPPED_DIRS.has(entry.name) && !SKIPPED_PATHS.has(path)) found.push(...markdownFiles(root, path));
     } else if (entry.name.endsWith(".md")) {
       found.push(path);
     }
