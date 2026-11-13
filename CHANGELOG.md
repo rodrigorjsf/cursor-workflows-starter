@@ -463,7 +463,8 @@
   (que repete o journal) veja o mesmo que a primeira execução e não refaça as etapas seguintes. Os formatos que só são
   redigidos e não travam a entrega (JWT, `Bearer`, a senha ou o token numa URL) ficam no resultado: o workflow pode rodar
   o que a etapa devolve, e um `testCommand` como `DATABASE_URL=postgres://u:senha@localhost/db npm test` rodaria com
-  `[REDACTED]`. Esses ficam em claro no journal e no memo, e o log de eventos continua os redigindo.
+  `[REDACTED]`. Esses ficam em claro no journal e no memo; o log de eventos continua os redigindo, e o
+  comentário das seams e o corpo do PR passam inteiros pelo redator antes de ir para o GitHub.
 - **Uma etapa na nuvem não manda para a Cursor a credencial embutida na URL do remote, e recusa remotes inseguros.**
   `cloudRepoUrl` mantinha o `usuario:token` de um remote `https://usuario:token@host/...` na URL do repositório enviada
   à API da Cursor, e passava `http://`, `ext::` e caminhos locais como estavam (o snapshot, com arquivos não commitados,

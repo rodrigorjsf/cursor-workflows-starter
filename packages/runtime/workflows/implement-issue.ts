@@ -639,7 +639,10 @@ export default defineWorkflow<Args>({
           // interface and the test command sit in inline code spans, where GitHub gives them no effect only while the span
           // holds: inlineCode turns their backticks and line breaks into characters that cannot close it.
           const prose = sanitizeModelText;
-          const comment = [
+          // Redacted with every credential format: a step result keeps the redact-only ones (a URL password in the test
+          // command, a `Bearer` header) for the workflow to run, but a public comment gets none of them.
+          const redactOutbound = createRedactor({ extra: savedSecrets() }).text;
+          const comment = redactOutbound([
             SEAMS_MARKER,
             `## Seams proposed by the \`implement-issue\` workflow (tier ${tier})`,
             "",
@@ -666,7 +669,7 @@ export default defineWorkflow<Args>({
             "```",
             "",
             `In the chat: \`/run-workflow implement-issue\` with \`resumeRunId: "${ctx.runId}"\` and \`approveSeams: true\`. To change the seams, pass \`seams: [...]\` instead of \`approveSeams\`.`,
-          ].join("\n");
+          ].join("\n"));
           const leak = findSecretInText(comment);
           if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the seams comment` };
           const existing = JSON.parse(await cmd.gh(ctx.cwd, "issue", "view", String(issue.number), ...repoFlag, "--json", "comments")) as { comments: Array<{ body: string }> };

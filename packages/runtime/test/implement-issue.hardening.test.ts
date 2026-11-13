@@ -329,6 +329,28 @@ test("model text in an inline code span of the seams comment cannot close the sp
   assert.doesNotMatch(comment, /`\s*@octocat/);
 });
 
+// A step result keeps the redact-only shapes (a URL password, Bearer, JWT) so the workflow can run them; what goes to GitHub
+// is redacted with every format all the same.
+test("a redact-only credential in the plan runs in the test command but reaches neither the seams comment nor the PR", async () => {
+  issue(["complexity:medium"]);
+  const seen = join(fx.root, "db-url.txt");
+  const testCommand = `DATABASE_URL=postgres://u:pw1234567890@localhost/db bash -c 'printf %s "$DATABASE_URL" > ${seen}; node --test'`;
+  fx.handlers.plan = (o) => submit(o, { ...PLAN, seams: [{ ...PLAN.seams[0], why: "send Authorization: Bearer abcdefghijklmnop1234" }], testCommand });
+  const jwt = "eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.c2lnbmF0dXJlMTIz";
+  fx.handlers["pr-text"] = (o) => submit(o, { summary: `token ${jwt}`, door: "two-way", blastRadius: "local" });
+  const first = await run({ testCommand: undefined });
+  assert.equal(res(first).status, "seams-proposed", JSON.stringify(res(first)));
+  const comment = gh().comments[0]!;
+  assert.ok(comment.includes("postgres://u:[REDACTED]@localhost/db"), comment);
+  assert.ok(comment.includes("Bearer [REDACTED]"), comment);
+
+  const second = await run({ testCommand: undefined, approveSeams: true, openPr: true }, first.runId);
+  assert.equal(res(second).status, "done", JSON.stringify(res(second)));
+  assert.equal(readFileSync(seen, "utf8"), "postgres://u:pw1234567890@localhost/db", "the suite ran with the real value");
+  assert.match(gh().prs[0]!.body, /token \[REDACTED\]/);
+  for (const shown of ["pw1234567890", "abcdefghijklmnop1234", jwt]) assert.ok(!JSON.stringify(gh()).includes(shown), `GitHub got ${shown}`);
+});
+
 test("segredo no texto do PR não chega ao PR", async () => {
   issue(["complexity:low"]);
   fx.handlers["pr-text"] = (o) => submit(o, { summary: `chave: ${FAKE_KEY}`, door: "two-way", blastRadius: "local" });
