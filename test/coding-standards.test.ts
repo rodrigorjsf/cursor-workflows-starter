@@ -69,7 +69,7 @@ function importsOf(path: string, text: string): Import[] {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       const clause = node.importClause;
       const named = clause?.namedBindings && ts.isNamedImports(clause.namedBindings) ? clause.namedBindings.elements : undefined;
-      const typeOnly = !!clause && (clause.isTypeOnly || (!clause.name && !!named && named.length > 0 && named.every((e) => e.isTypeOnly)));
+      const typeOnly = !!clause && (clause.phaseModifier === ts.SyntaxKind.TypeKeyword || (!clause.name && !!named && named.length > 0 && named.every((e) => e.isTypeOnly)));
       const names = named ? named.map((e) => (e.propertyName ?? e.name).text) : [];
       found.push({ spec: node.moduleSpecifier.text, line: lineOf(sf, node), typeOnly, names });
     } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
@@ -244,7 +244,7 @@ function inlineTypeOnly(path: string, text: string): number[] {
   const sf = parse(path, text);
   return sf.statements.flatMap((s) => {
     const clause = ts.isImportDeclaration(s) ? s.importClause : undefined;
-    if (!clause || clause.isTypeOnly || clause.name || !clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) return [];
+    if (!clause || clause.phaseModifier === ts.SyntaxKind.TypeKeyword || clause.name || !clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) return [];
     const names = clause.namedBindings.elements;
     return names.length > 0 && names.every((e) => e.isTypeOnly) ? [lineOf(sf, s)] : [];
   });
