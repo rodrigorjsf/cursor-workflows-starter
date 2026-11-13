@@ -84,12 +84,12 @@ test("a signal already aborted starts no agent: the run ends cancelled", async (
 });
 
 test("cancelling while the agent is still being created ends the run at once, and the agent that arrives late is disposed", async () => {
-  costConfig.createDelayMs = 300;
+  costConfig.createDelayMs = 3000; // far longer than the run may take, however loaded the machine
   const controller = new AbortController();
   const startedAt = Date.now();
   const outcome = await runWorkflow(oneStep, {}, { cwd, runId: "r-create", signal: controller.signal, onEvent: abortOnFirstStep(controller) });
   assert.equal(outcome.status, "cancelled");
-  assert.ok(Date.now() - startedAt < 250, "the run did not wait for the creation");
+  assert.ok(Date.now() - startedAt < 2000, "the run did not wait for the creation");
   assert.equal(stats.disposed, 0, "the agent does not exist yet");
   await waitFor("the agent that arrived late to be disposed", () => stats.disposed >= 1);
   assert.equal(stats.disposed, 1, "the agent that arrived late was disposed, not left running");

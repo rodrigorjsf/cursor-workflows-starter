@@ -144,14 +144,14 @@ test("aborting from inside the callback, on a turn, cancels the run at once: no 
 });
 
 test("a signal aborted while the agent is being created ends the attempt at once, and the agent that arrives late is disposed", async () => {
-  costConfig.createDelayMs = 200;
+  costConfig.createDelayMs = 3000; // far longer than the attempt may take, however loaded the machine
   const controller = new AbortController();
   const reason = new Error("run cancelled");
   setTimeout(() => controller.abort(reason), 10);
   const startedAt = Date.now();
   const { result, events } = await attempt("p", options(), controller.signal);
 
-  assert.ok(Date.now() - startedAt < 150, "the attempt did not wait for the creation");
+  assert.ok(Date.now() - startedAt < 2000, "the attempt did not wait for the creation");
   assert.deepEqual(outcomeOf(result), { kind: "aborted", reason });
   assert.equal(result.agentId, undefined);
   assert.equal(result.usage, undefined, "no agent existed: nothing was used");
