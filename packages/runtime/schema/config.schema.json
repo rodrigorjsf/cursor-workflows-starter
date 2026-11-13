@@ -137,7 +137,7 @@
         },
         "model": { "$ref": "#/definitions/model", "description": "Modelo da etapa, campo a campo: o que não aparece herda da camada de baixo." },
         "timeoutMs": { "type": "integer", "minimum": 1, "description": "Tempo máximo da etapa, em milissegundos." },
-        "retries": { "type": "integer", "minimum": 0, "description": "Tentativas extras quando a etapa termina em erro." },
+        "retries": { "type": "integer", "minimum": 0, "description": "Tentativas extras quando a etapa termina em erro. Um erro de configuração ou de autenticação que o SDK marca como não repetível (id de modelo inválido, chave inválida) falha a etapa na hora." },
         "schemaRetries": { "type": "integer", "minimum": 0, "description": "Re-prompts quando o agente não entrega o JSON do schema." },
         "maxTokensPerStep": { "$ref": "#/definitions/limit", "description": "Teto de tokens desta etapa. Ausente: herda o do workflow. O teto global `maxTokensPerStep` vale sempre." },
         "settingSources": {

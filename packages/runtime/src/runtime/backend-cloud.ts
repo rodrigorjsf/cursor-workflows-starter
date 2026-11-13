@@ -228,7 +228,10 @@ async function runCloudAttempt({ remote, runId, waitFloorMs = WAIT_FLOOR_MS }: C
     } catch (err) {
       if (signal.aborted) return { outcome: { kind: "aborted", reason: signal.reason } };
       // Not "gone": the agent may well be running. Starting another would pay twice, so the attempt fails and the engine reattaches again.
-      return { outcome: { ...classifyError(err), message: `could not reattach to cloud agent ${previous.agentId}: ${errorText(err)}` }, reattachFailed: true };
+      // A non-retryable error here is still no answer about the agent: the next attempt reattaches again, as for any other.
+      const error = classifyError(err);
+      const reason = error.reason === "not-retryable" ? "other" : error.reason;
+      return { outcome: { ...error, reason, message: `could not reattach to cloud agent ${previous.agentId}: ${errorText(err)}` }, reattachFailed: true };
     }
     if (typeof found === "string") onEvent({ type: "warning", message: `cloud agent ${previous.agentId}, left by an interrupted attempt, ${found}: starting a new one` });
     else resumed = found;

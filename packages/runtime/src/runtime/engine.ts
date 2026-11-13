@@ -1129,6 +1129,10 @@ async function executeRun<A, R>(
               if (outcome.reason === "rate-limit") {
                 errorKind = "rate-limit";
                 await sleep(2000 * 2 ** (attempt - 1));
+              } else if (outcome.reason === "not-retryable") {
+                // A bad model id or an invalid key: another attempt would fail the same way. The step fails now.
+                errorKind = "exception";
+                final = true;
               } else {
                 errorKind = /^timeout/.test(lastError) ? "timeout" : "exception"; // a timeout the backend itself reports in its message
               }

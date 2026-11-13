@@ -423,6 +423,11 @@
   ia em texto puro por `http://`). Agora a URL vem de `remote.<nome>.url` como configurada, sai sem credencial, e um
   remote que não é `https://` ou ssh num host falha a etapa com uma mensagem clara, antes do snapshot e sem novas
   tentativas. O redator do log ganhou o formato da senha numa URL (`https://usuario:[REDACTED]@host`).
+- **Um erro de configuração ou de autenticação do SDK falha a etapa na hora, sem gastar as novas tentativas.** O motor
+  só lia o `isRetryable` do `RateLimitError`: um `ConfigurationError` (id de modelo inválido) ou um
+  `AuthenticationError` (chave inválida) repetia a etapa até acabar o `retries`, criando um agente por tentativa. Agora
+  esses dois, quando o SDK os marca como não repetíveis, encerram a etapa na primeira tentativa; um erro de rede ou sem
+  classe continua com as novas tentativas, e uma falha ao reanexar a um cloud agent também (o agente pode estar rodando).
 
 ## 0.2.0 (pré-release, 2026-11-11)
 

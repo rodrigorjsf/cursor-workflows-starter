@@ -160,7 +160,7 @@ Os campos abaixo são os ajustes do `implement-issue`, validados pelo esquema. U
 | `resultVia` | `"json-block" \| "artifact"` | não | Como uma etapa do papel que roda na nuvem entrega o resultado estruturado. Padrão: `json-block`, o último bloco de código `json` da resposta final do agente. `artifact` pede ao agente que salve o resultado no arquivo `result.json` dos artefatos dele, e o motor o baixa depois do run; serve quando ler o resultado do texto se mostra pouco confiável. Nos dois casos o resultado é validado contra o schema da etapa, com follow-ups dentro de `schemaRetries`. Só vale em papéis, não em globs de `labels`, e só em etapas na nuvem: no local o resultado vem de uma tool. |
 | `model` | [Modelo](#modelo) | não | Modelo da etapa, campo a campo: o que não aparece herda da camada de baixo. |
 | `timeoutMs` | `integer` | não | Tempo máximo da etapa, em milissegundos. |
-| `retries` | `integer` | não | Tentativas extras quando a etapa termina em erro. |
+| `retries` | `integer` | não | Tentativas extras quando a etapa termina em erro. Um erro de configuração ou de autenticação que o SDK marca como não repetível (id de modelo inválido, chave inválida) falha a etapa na hora. |
 | `schemaRetries` | `integer` | não | Re-prompts quando o agente não entrega o JSON do schema. |
 | `maxTokensPerStep` | `integer \| null` | não | Teto de tokens desta etapa. Ausente: herda o do workflow. O teto global `maxTokensPerStep` vale sempre. |
 | `settingSources` | `array de "project" \| "user" \| "team" \| "mdm" \| "plugins" \| "all"` | não | Camadas de configuração que a etapa carrega. A interseção com `caps.allowedSettingSources` é o que vale. |
