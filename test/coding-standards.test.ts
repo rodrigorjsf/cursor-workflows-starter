@@ -269,12 +269,12 @@ test("the elapsed-time check fires on Date.now() used to time something or to se
   assert.deepEqual(wallClockMeasures("a.test.ts", sample), [1, 2, 3, 3, 9]);
 });
 
-test("no test times anything with Date.now(): a wall clock that jumps (a WSL2 resync) fails a bound that held; use performance.now(), or mark a timestamp compare with `// wall-clock-ok: <reason>`", () => {
+test("no test times anything with Date.now(): a wall clock that jumps (a WSL2 resync) fails a bound that held; use performance.now(), or mark a timestamp with `// wall-clock-ok: <reason>`", () => {
   assert.ok(TEST_CODE.length >= 100, `found ${TEST_CODE.length}`);
   assert.deepEqual(
     scan(TEST_CODE, wallClockMeasures),
     [],
-    "time a bound or a deadline with performance.now() (monotonic); Date.now() is for a timestamp a test compares with one the code under test wrote, and its line ends with `// wall-clock-ok: <reason>`",
+    "time a bound or a deadline with performance.now() (monotonic); Date.now() is for building a timestamp (`new Date(Date.now() - ms)`), or for one a test compares with, or hands to, the code under test: end its line with `// wall-clock-ok: <reason>`",
   );
 });
 
