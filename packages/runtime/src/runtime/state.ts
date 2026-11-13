@@ -38,3 +38,18 @@ export function stateDir(cwd: string, ...parts: string[]): string {
   mkdirSync(dir, { recursive: true });
   return dir;
 }
+
+/**
+ * Is `id` a plain name: letters, digits, "_" and "-" only? A job id, a run id or a lock name that comes from outside (the
+ * chat, the command line) becomes a file or folder name under `.workflows/`: one that is not plain could walk out of it
+ * (`../`). Every place that turns such an id into a path checks it with this.
+ */
+export function isPlainName(id: unknown): id is string {
+  return typeof id === "string" && /^[A-Za-z0-9_-]+$/.test(id);
+}
+
+/** `id`, when it is a plain name (`isPlainName`); otherwise throws `invalid <what> "<id>"`. */
+export function plainName(id: string, what: string): string {
+  if (!isPlainName(id)) throw new Error(`invalid ${what} ${JSON.stringify(id)}: letters, digits, "_" and "-" only (it becomes a file name)`);
+  return id;
+}

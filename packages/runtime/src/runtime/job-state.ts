@@ -17,7 +17,7 @@ import type { RunStatus } from "./events.js";
 import { type ExecutionState, type Ledger, projectExecution, replayLedger, resumeHint, withRatio } from "./projection.js";
 import { commandLineHas, isAlive } from "./pid.js";
 import { eventLogPath, readEventLog, runLockHolder } from "./run-store.js";
-import { stateDir } from "./state.js";
+import { isPlainName, stateDir } from "./state.js";
 import { writeFileAtomic } from "./state-files.js";
 
 /** How a job was started: what `wf start` (or `start_workflow`) was given, which a resume of its run gives again. */
@@ -101,11 +101,16 @@ export function jobLogPath(cwd: string, jobId: string): string {
   return join(jobsDir(cwd), `${jobId}.log`);
 }
 
-/** The job record in `file` (identity and the facts the log cannot hold), without the projection. Undefined when the file is not there or is not a record this runtime wrote. */
+/**
+ * The job record in `file` (identity and the facts the log cannot hold), without the projection. Undefined when the file is
+ * not there or is not a record this runtime wrote, which is also the case of a record whose run id is not a plain name
+ * (`isPlainName`): that id becomes the path of the run's log, and it must not lead out of the runs folder.
+ */
 function parseJobRecord(file: string): JobRecord | undefined {
   if (!existsSync(file)) return undefined;
   try {
-    return JSON.parse(readFileSync(file, "utf8")) as JobRecord;
+    const record = JSON.parse(readFileSync(file, "utf8")) as JobRecord | null;
+    return isPlainName(record?.runId) ? record : undefined;
   } catch {
     return undefined;
   }
@@ -113,13 +118,18 @@ function parseJobRecord(file: string): JobRecord | undefined {
 
 /** How job `jobId` of `repo` was started, from its record. Only reads: nothing is created. Undefined when the id is not a plain name, or the record is not there or has no `start`. */
 export function readJobStart(repo: string, jobId: string): JobStart | undefined {
-  if (!/^[A-Za-z0-9_-]+$/.test(jobId)) return undefined;
+  if (!isPlainName(jobId)) return undefined;
   const start = parseJobRecord(join(jobsDirIn(repo), `${jobId}.json`))?.start;
   return start && typeof start === "object" && "args" in start ? start : undefined;
 }
 
-/** The job record on disk (identity and the facts the log cannot hold), without the projection. */
+/**
+ * The job record on disk (identity and the facts the log cannot hold), without the projection. Undefined when the id is not
+ * a plain name (`isPlainName`: the id comes from the chat or the command line, and must not lead out of the jobs folder) or
+ * the record is not there.
+ */
 export function readJobRecord(cwd: string, jobId: string): JobRecord | undefined {
+  if (!isPlainName(jobId)) return undefined;
   return parseJobRecord(join(jobsDir(cwd), `${jobId}.json`));
 }
 
@@ -205,7 +215,7 @@ function isFrozen(cwd: string, record: JobRecord): boolean {
  * is not a plain name or the record is not there or is another run's. Only reads.
  */
 export function silentJobError(repo: string, jobId: string, runId: string): string | undefined {
-  if (!/^[A-Za-z0-9_-]+$/.test(jobId)) return undefined;
+  if (!isPlainName(jobId)) return undefined;
   const record = parseJobRecord(join(jobsDirIn(repo), `${jobId}.json`));
   if (record?.runId !== runId || typeof record.heartbeat !== "string" || typeof record.pid !== "number") return undefined;
   return isFrozen(repo, record) ? silenceOf(record) : undefined;
@@ -325,7 +335,7 @@ export async function cancelJob(cwd: string, jobId: string, timeoutMs: number): 
  * the id is not a plain name or the record is not there. Only reads: nothing is created.
  */
 export function wasKilledByCancel(repo: string, jobId: string): boolean {
-  if (!/^[A-Za-z0-9_-]+$/.test(jobId)) return false;
+  if (!isPlainName(jobId)) return false;
   return typeof parseJobRecord(join(jobsDirIn(repo), `${jobId}.json`))?.killedByCancel === "string";
 }
 

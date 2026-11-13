@@ -400,6 +400,17 @@
 - **A referência de eventos (6.1) tira o número e o rodapé do índice do livro**, em vez de uma cópia fixa no gerador:
   inserir um capítulo ao redor dela não exige mais editar `scripts/events-reference.ts`.
 
+### Corrigido
+
+- **Um id de job ou de run que não é um nome simples não sai mais da pasta `.workflows/`.** O `jobId` de
+  `wait_workflow`, `get_workflow_status`, `cancel_workflow` e de `wf status|wait|cancel`, e o run a retomar
+  (`resumeRunId`, `--resume`), viravam caminho sem conferência: `wf status ../../../fora/plantado` lia um JSON fora de
+  `.workflows/jobs`, e um `--resume ../x` abria (e criava) a pasta do run fora de `.workflows/runs`. Agora um id só vale
+  com letras, dígitos, `_` e `-` (a mesma conferência que já valia para os nomes de lock): um `jobId` assim é
+  `job not found`, um run a retomar assim é recusado com `invalid runId` antes de criar job ou pasta, e um registro de
+  job cujo `runId` não é simples é ignorado. O id de um run novo troca por `-` o que, no nome do workflow, não é letra,
+  dígito, `_` ou `-` (`team.deploy` vira `team-deploy-<sufixo>`).
+
 ## 0.2.0 (pré-release, 2026-11-11)
 
 ### Mudado

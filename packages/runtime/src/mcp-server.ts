@@ -35,6 +35,7 @@ import { INSIDE_WORKFLOW_ENV } from "./runtime/engine.js";
 import { installCrashHandlers, spawnJob } from "./runtime/jobs.js";
 import { cancelJob, readJob, waitJob } from "./runtime/job-state.js";
 import { type BrokenWorkflow, discoverWorkflows } from "./runtime/registry.js";
+import { plainName } from "./runtime/state.js";
 
 installCrashHandlers();
 
@@ -127,6 +128,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       let mcpOverrides: LimitOverrides;
       let violations;
       try {
+        if (runId !== undefined) plainName(runId, "runId"); // it becomes a path: refused before a job or the dashboard starts
         assertKitCompatible(cwd);
         mcpOverrides = parseLimitOverrides(a.overrides);
         violations = loadEffectiveConfig(def, { cwd, mcpOverrides }).violations;

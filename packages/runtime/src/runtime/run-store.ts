@@ -17,7 +17,7 @@ import { isAlive } from "./pid.js";
 import { type InterruptedCloudStep, type Ledger, interruptedCloudSteps, replayLedger } from "./projection.js";
 import { type Redactor, createRedactor } from "./redaction.js";
 import { type RetentionPolicy, pruneContent } from "./retention.js";
-import { stateDir } from "./state.js";
+import { plainName, stateDir } from "./state.js";
 import { appendJsonl, hasTornTail, readJsonl } from "./state-files.js";
 
 export const EVENTS_FILE = "events.jsonl";
@@ -173,7 +173,7 @@ export function tryAcquireRunLock(cwd: string, runId: string): (() => void) | un
  * returned function is called or the process ends; the lock of a process that died is stale and is taken over.
  */
 export function acquireNamedLock(cwd: string, name: string, runId: string): () => void {
-  if (!/^[\w-]+$/.test(name)) throw new Error(`invalid lock name ${JSON.stringify(name)}: letters, digits, "_" and "-" only (it becomes a file name)`);
+  plainName(name, "lock name"); // it becomes a file name
   const file = join(stateDir(cwd, "locks"), `${name}.lock`);
   return takeLock(file, runId, (holder) =>
     new NamedLockedError(
@@ -281,9 +281,13 @@ export class RunStore {
     openStores.add(this);
   }
 
-  /** Opens the state of the run in `dir` (created when new) and locks it. Throws `RunLockedError` when another execution holds it. */
+  /**
+   * Opens the state of the run in `dir` (created when new) and locks it. Throws `RunLockedError` when another execution holds
+   * it, and an `invalid runId` error, before anything is created, when the run id is not a plain name (`isPlainName`): a run
+   * id to resume comes from the chat or the command line, and the run's folder is named after it.
+   */
   static open(dir: string, runId: string, options: RunStoreOptions = {}): RunStore {
-    return new RunStore(dir, runId, options);
+    return new RunStore(dir, plainName(runId, "runId"), options);
   }
 
   /**

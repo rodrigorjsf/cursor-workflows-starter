@@ -460,8 +460,9 @@ async function repoIdentity(cwd: string): Promise<{ name: string; hash: string }
   return { name: basename(top), hash: sha(origin || top).slice(0, 16) };
 }
 
+/** A new run id: the workflow's name, with anything but letters, digits, "_" and "-" made a "-" (the id names the run's folder), and a random suffix. */
 export function newRunId(workflow: string): string {
-  return `${workflow}-${randomUUID().slice(0, 8)}`;
+  return `${workflow.replace(/[^A-Za-z0-9_-]/g, "-")}-${randomUUID().slice(0, 8)}`;
 }
 
 class Semaphore {
