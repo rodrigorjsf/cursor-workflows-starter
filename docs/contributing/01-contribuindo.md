@@ -90,6 +90,10 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 
 - **Inglês:** o `CLAUDE.md`, as skills distribuídas, os templates, os ADRs e qualquer texto escrito para agentes.
 - **pt-BR:** este livro e o `README.md`. O `README.en.md` é o hub em inglês, com a mesma estrutura.
+- **Comentários de código:** todo comentário novo é em inglês, mesmo num arquivo cujos comentários antigos são em pt-BR; os
+  antigos não são traduzidos. Ficam em pt-BR as fontes que o livro renderiza: o JSDoc de
+  `packages/runtime/src/runtime/events.ts` (gera a [6.1](../reference/events.md)) e as descrições de
+  `packages/runtime/schema/config.schema.json` (geram a [6.2](../reference/config.md)).
 
 ## Skills distribuídas
 

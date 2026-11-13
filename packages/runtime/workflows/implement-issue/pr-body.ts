@@ -1,6 +1,8 @@
 // Corpo do PR no template da skill pr (Summary, Evidence, Merge Danger). O agente escreve Summary e Merge Danger;
 // a Evidence é a saída real da suíte em cada fatia (falhando, depois passando), guardada pelo código.
+// The test output is redacted (redaction.ts) and its local paths replaced before it goes in.
 import { homedir } from "node:os";
+import { createRedactor } from "../../src/runtime/redaction.js";
 import type { ReviewReports } from "./review.js";
 import type { SliceRecord } from "./tdd.js";
 
@@ -16,6 +18,11 @@ const tail = (s: string | undefined, n: number) => {
   return nl >= 0 && nl < cut.length - 1 ? cut.slice(nl + 1) : cut;
 };
 const fence = (s: string) => "```text\n" + s.replace(/```/g, "ˋˋˋ") + "\n```";
+/**
+ * Model text as an inline code span. A backtick in it would close the span and give the rest its effect again (a mention,
+ * `<!--`), and a line break would end it: backticks become ˋ (U+02CB) and line breaks spaces, so the span holds.
+ */
+export const inlineCode = (s: string) => "`" + s.replace(/`/g, "ˋ").replace(/\r\n|\r|\n/g, " ") + "`";
 
 /**
  * Texto do modelo vai para um PR público: neutraliza o que teria efeito no GitHub. Palavras de fechamento citando
@@ -45,8 +52,11 @@ export function buildPrBody(input: {
   /** Achados "missing"/"wrong" cujo teste passou sem implementação: o comportamento já existia. */
   refuted?: string[];
   worktree?: string;
+  /** Redacts the test output before it goes in (default: the redactor of this process's environment, as the event log's). */
+  redact?: (text: string) => string;
 }): string {
   const { issueNumber, slices, review, deferred, refuted = [], worktree } = input;
+  const redact = input.redact ?? createRedactor().text;
   const t = {
     summary: sanitizeModelText(input.text.summary),
     door: input.text.door,
@@ -54,33 +64,37 @@ export function buildPrBody(input: {
     blastRadius: sanitizeModelText(input.text.blastRadius),
     blastNote: input.text.blastNote ? sanitizeModelText(input.text.blastNote) : undefined,
   };
-  const clean = (s: string | undefined, n: number) => redactPaths(tail(s, n), worktree);
+  // Test output can print a credential (an env dump, a token in a fixture): redacted whole, before the tail cuts a token in two.
+  const clean = (s: string | undefined, n: number) => redactPaths(tail(redact(s ?? ""), n), worktree);
   const evidence = slices
     .filter((s) => s.done)
     .map((s) =>
       s.alreadySatisfied
-        ? `- \`${s.testName ?? s.behavior}\`: o comportamento já existia (${sanitizeModelText(s.alreadySatisfied)}); o teste passou sem implementação.`
+        ? `- ${inlineCode(s.testName ?? s.behavior)}: the behaviour already existed (${sanitizeModelText(s.alreadySatisfied)}); the test passed with no implementation.`
         : [
-            `- **Before:** \`${s.testName ?? s.behavior}\` (${s.testFile ?? "teste"}) falhando`,
+            `- **Before:** ${inlineCode(s.testName ?? s.behavior)} (${s.testFile ? inlineCode(s.testFile) : "test"}) failing`,
             "",
             fence(clean(s.red, 700)),
             "",
-            "  **After:** a suíte passa",
+            "  **After:** the suite passes",
             "",
             fence(clean(s.green, 300)),
           ].join("\n"),
     )
     .join("\n\n");
 
+  // Each piece of model text is neutralized on its own: prose by sanitizeModelText, a file name as an inline code span.
+  // Sanitizing the whole line would put backticks inside the span and break it.
+  const prose = sanitizeModelText;
   const notes: string[] = [];
-  for (const f of review.standards?.findings ?? []) if (f.kind === "judgement") notes.push(`- Standards (julgamento): ${f.rule} em \`${f.file}\`: ${f.note}`);
-  for (const f of review.spec?.findings ?? []) if (f.kind === "scope-creep") notes.push(`- Spec (fora do pedido): ${f.note}`);
-  for (const f of review.security?.findings ?? []) if (f.severity === "note") notes.push(`- Segurança (nota): \`${f.file}\`: ${f.issue}`);
-  for (const r of refuted) notes.push(`- Spec (refutado por teste: o comportamento já existia): ${r}`);
+  for (const f of review.standards?.findings ?? []) if (f.kind === "judgement") notes.push(`- Standards (judgement): ${prose(f.rule)} in ${inlineCode(f.file)}: ${prose(f.note)}`);
+  for (const f of review.spec?.findings ?? []) if (f.kind === "scope-creep") notes.push(`- Spec (scope creep): ${prose(f.note)}`);
+  for (const f of review.security?.findings ?? []) if (f.severity === "note") notes.push(`- Security (note): ${inlineCode(f.file)}: ${prose(f.issue)}`);
+  for (const r of refuted) notes.push(`- Spec (refuted by a test: the behaviour already existed): ${prose(r)}`);
 
-  const body = [
+  const raw = [
     // Com fatias adiadas, a issue não fica resolvida: o PR só a referencia.
-    deferred.length ? `Refs #${issueNumber} (entrega parcial: veja "Adiado")` : `Closes #${issueNumber}`,
+    deferred.length ? `Refs #${issueNumber} (partial delivery: see "Deferred")` : `Closes #${issueNumber}`,
     "",
     "## Summary",
     "",
@@ -88,7 +102,7 @@ export function buildPrBody(input: {
     "",
     "## Evidence",
     "",
-    evidence || "_Nenhuma fatia registrada._",
+    evidence || "_No slice recorded._",
     "",
     "## Merge Danger",
     "",
@@ -97,11 +111,14 @@ export function buildPrBody(input: {
     "",
     `**Blast Radius:** ${t.blastRadius}`,
     ...(t.blastNote ? ["", t.blastNote] : []),
-    ...(notes.length ? ["", "## Achados de review que não bloqueiam", "", ...notes.map(sanitizeModelText)] : []),
-    ...(deferred.length ? ["", "## Adiado (limite de fatias)", "", ...deferred.map((d) => `- ${sanitizeModelText(d)}`)] : []),
+    ...(notes.length ? ["", "## Non-blocking review findings", "", ...notes] : []),
+    ...(deferred.length ? ["", "## Deferred (slice cap)", "", ...deferred.map((d) => `- ${sanitizeModelText(d)}`)] : []),
     "",
     "---",
-    "_Gerado pelo workflow `implement-issue` (cursor-workflows-starter): TDD fatia a fatia, review em três eixos._",
+    "_Generated by the `implement-issue` workflow (cursor-workflows-starter): TDD slice by slice, review on three axes._",
   ].join("\n");
-  return body.length > MAX_BODY ? body.slice(0, MAX_BODY - 40) + "\n\n_(corpo truncado)_" : body;
+  // The whole body is redacted, the model's text included: a step result keeps the redact-only formats (JWT, `Bearer`, a
+  // URL password) for the workflow to use, but a public PR gets none of them. Redacting the Evidence twice changes nothing.
+  const body = redact(raw);
+  return body.length > MAX_BODY ? body.slice(0, MAX_BODY - 40) + "\n\n_(body truncated)_" : body;
 }

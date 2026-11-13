@@ -10,12 +10,18 @@ export const script: Array<(o: any, msg: string, n: number) => any> = [];
  * turn-ended deltas that reached onDelta on live runs. `sends`: Agent.send() calls.
  */
 export const stats = { active: 0, maxActive: 0, disposed: 0, usageReads: 0, cancels: 0, cancelled: 0, turnsDelivered: 0, sends: 0 };
+/** As in the SDK: `isRetryable` comes from the options and defaults to false (errors.d.ts, CursorSdkError). */
 export class CursorAgentError extends Error {
-  isRetryable = false;
+  isRetryable: boolean;
+  constructor(message?: string, options: { isRetryable?: boolean } = {}) {
+    super(message);
+    this.isRetryable = options.isRetryable ?? false;
+  }
 }
 export class RateLimitError extends CursorAgentError {}
 export class AgentBusyError extends CursorAgentError {}
 export class ConfigurationError extends CursorAgentError {}
+export class AuthenticationError extends CursorAgentError {}
 // Como a API: inputTokens (100) já inclui cacheRead (60) e cacheWrite (20); totalTokens = input + output.
 const TURN_USAGE = { inputTokens: 100, outputTokens: 10, cacheReadTokens: 60, cacheWriteTokens: 20 };
 /** Deltas padrão de um send(): 2 passos, 1 tool call (read) e o fim do turno com uso. */
@@ -32,6 +38,8 @@ export const costConfig: {
   modelId?: string;
   getUsageError?: string;
   createErrorCode?: string;
+  /** `Agent.create` throws what this returns (a `ConfigurationError` for a bad model id, say); `undefined` = it does not. */
+  createError?: () => Error;
   createHang?: boolean;
   createDelayMs?: number;
   /**
@@ -45,6 +53,8 @@ export const costConfig: {
   listRunsDelayMs?: number;
   /** The next this many `Agent.listRuns` calls fail like a server that is down (503): a lookup that does not say "not found". */
   lookupFailures?: number;
+  /** What those failing lookups throw instead of the 503 (a non-retryable error that is not "not found", say). */
+  lookupError?: () => Error;
   /** `Agent.listArtifacts` fails with this message, like an API that is down: a call nobody should make for a run that failed. */
   listArtifactsError?: string;
   /** Holds the creation of the agents it answers for (it gets the create options) until the promise settles; `undefined` = not held. */
@@ -350,6 +360,7 @@ export const Agent = {
     if (costConfig.createHang) return new Promise(() => {}); // a creation that never answers
     if (costConfig.createDelayMs) await new Promise((r) => setTimeout(r, costConfig.createDelayMs)); // a slow one
     await costConfig.createGate?.(o); // a slow one, chosen by agent
+    if (costConfig.createError) throw costConfig.createError();
     if (costConfig.createErrorCode) {
       // Como o SDK no plano Free: a validação local do modelo chama GET /v1/models e recebe 403.
       throw Object.assign(new CursorAgentError(`[${costConfig.createErrorCode}] Cloud Agent is not available for free users. Please upgrade to Pro.`), { code: costConfig.createErrorCode, status: 403 });
@@ -371,7 +382,7 @@ export const Agent = {
     if (costConfig.listRunsDelayMs) await new Promise((resolve) => setTimeout(resolve, costConfig.listRunsDelayMs));
     if (costConfig.lookupFailures) {
       costConfig.lookupFailures--;
-      throw Object.assign(new CursorAgentError("service unavailable"), { status: 503, isRetryable: true });
+      throw costConfig.lookupError?.() ?? Object.assign(new CursorAgentError("service unavailable"), { status: 503, isRetryable: true });
     }
     const state = cloudServer.get(agentId);
     if (!state) throw notFound(`agent ${agentId}`);

@@ -38,8 +38,8 @@ export interface PushedSnapshot {
   /** The checkout's top directory: the deletion runs from there. */
   top: string;
   remote: string;
-  /** What the remote calls its repository (`git remote get-url`). */
-  remoteUrl: string;
+  /** The repository URL the cloud agent is created with (`cloudRepoUrl` of the remote's configured URL): no credentials. */
+  repoUrl: string;
   branch: string;
   /** The snapshot's commit: what the agent starts from, and what `bringBack` checks the worktree against. */
   commit: string;
@@ -116,8 +116,17 @@ export async function pushSnapshot({ cwd, remote, branch, signal }: { cwd: strin
       throw signal?.aborted ? err : new Error(whenItFails);
     });
   const top = await asked(cwd, ["rev-parse", "--show-toplevel"], `${cwd} is not inside a git repository: a cloud step runs against a snapshot of the repository's worktree`);
-  const remoteUrl = await asked(top, ["remote", "get-url", remote], `the remote "${remote}" does not exist in ${top}: add it, or point \`cloud.remote\` in the config at one that does`);
+  // The URL as configured, before git applies `insteadOf`: the one the code host knows the repository by (an alias such as
+  // `gh:org/repo` falls back to the rewritten URL, in repoUrlOf). The push goes by the remote's name, so git still rewrites it there.
+  const remoteUrl = await asked(top, ["config", "--get", `remote.${remote}.url`], `the remote "${remote}" does not exist in ${top}: add it, or point \`cloud.remote\` in the config at one that does`);
   const head = await asked(top, ["rev-parse", "--verify", "--quiet", "HEAD"], `${top} has no commit yet: a cloud step needs one to start the snapshot from`);
+  // Refused before anything is committed or pushed: the snapshot holds uncommitted and untracked files.
+  const repoUrl = await repoUrlOf(top, remote, remoteUrl, signal);
+  // The push goes where git sends it, which `pushurl` and `pushInsteadOf` may move away from the URL above.
+  const pushUrl = await git(top, ["remote", "get-url", "--push", remote], { signal });
+  if (/^(http|git):\/\/|^[a-z][\w+.-]*::/i.test(pushUrl)) {
+    throw new UnsupportedRemoteError(`the push URL of the remote "${remote}" uses a plain-text transport or a remote helper: a cloud step pushes the snapshot only over https:// or ssh`);
+  }
 
   const tree = await worktreeTree(top, signal);
   // Nothing changed since HEAD: HEAD is the snapshot. Otherwise a commit on top of it holds the changes.
@@ -129,7 +138,31 @@ export async function pushSnapshot({ cwd, remote, branch, signal }: { cwd: strin
   // the push hands the branch to the caller, whose cleanup deletes it. A cancel during a push therefore waits for the push.
   signal?.throwIfAborted();
   await git(top, ["push", "--quiet", "--no-verify", remote, `${commit}:refs/heads/${branch}`], { timeoutMs: NETWORK_TIMEOUT_MS });
-  return { top, remote, remoteUrl, branch, commit };
+  return { top, remote, repoUrl, branch, commit };
+}
+
+/**
+ * The repository URL of `remote` for a cloud agent: `cloudRepoUrl` of the URL as configured, or, when that is refused, of the
+ * URL git rewrites it to. A `url.<base>.insteadOf` alias (`gh:org/repo` for `https://github.com/org/repo`) is no URL a code
+ * host knows, while the URL it stands for may be. When both are refused, the refusal of the configured URL is the one that
+ * tells the user what they wrote.
+ */
+async function repoUrlOf(top: string, remote: string, configured: string, signal?: AbortSignal): Promise<string> {
+  try {
+    return cloudRepoUrl(configured);
+  } catch (err) {
+    if (!(err instanceof UnsupportedRemoteError)) throw err;
+    const rewritten = await git(top, ["remote", "get-url", remote], { signal }).catch((failure: unknown) => {
+      if (signal?.aborted) throw failure;
+      return configured;
+    });
+    if (rewritten === configured) throw err;
+    try {
+      return cloudRepoUrl(rewritten);
+    } catch {
+      throw err;
+    }
+  }
 }
 
 /**
@@ -240,15 +273,30 @@ export async function bringBack({ cwd, remote, branch, base, signal }: { cwd: st
   }
 }
 
+/** The remote cannot carry a cloud step: it is not reached over https or ssh on a host. Retrying does not change that. */
+export class UnsupportedRemoteError extends Error {}
+
 /**
  * The repository URL a cloud agent is created with. The SDK wants the code host's web URL: an `ssh` remote (`git@host:org/repo.git`,
- * `ssh://git@host/org/repo.git`) and the `.git` of an `https` one are rewritten to `https://host/org/repo`. Anything else (a
- * path, a `file:` URL) is passed as it is.
+ * `ssh://git@host/org/repo.git`) and the `.git` of an `https` one are rewritten to `https://host/org/repo`. The URL's
+ * userinfo (`https://user:token@host/...`), query and fragment are dropped: they may hold a credential, and Cursor's API never
+ * needs them. Any other remote
+ * (`http://`, `git://`, `file://`, `ext::`, a local path) throws `UnsupportedRemoteError`: a cloud agent cannot clone a path,
+ * and the plain-text transports would send the snapshot unencrypted.
  */
 export function cloudRepoUrl(remoteUrl: string): string {
-  const scp = /^[\w.-]+@([\w.-]+):(?!\/)(.+?)(?:\.git)?\/?$/.exec(remoteUrl);
+  // The path stops at a `?` or `#`: the query and the fragment (`?token=...`) are dropped like the userinfo.
+  // A host is a name or a bracketed IPv6 address (`git@[2001:db8::1]:org/repo.git`).
+  const scp = /^[\w.-]+@(\[[0-9a-f:.]+\]|[\w.-]+):(?!\/)([^?#]+?)(?:\.git)?\/?(?:[?#].*)?$/i.exec(remoteUrl);
   if (scp) return `https://${scp[1]}/${scp[2]}`;
-  const ssh = /^ssh:\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/(.+?)(?:\.git)?\/?$/.exec(remoteUrl);
+  const ssh = /^ssh:\/\/(?:[^@/]+@)?(\[[0-9a-f:.]+\]|[^/:@?#[\]]+)(?::\d+)?\/([^?#]+?)(?:\.git)?\/?(?:[?#].*)?$/i.exec(remoteUrl);
   if (ssh) return `https://${ssh[1]}/${ssh[2]}`;
-  return /^https?:\/\//.test(remoteUrl) ? remoteUrl.replace(/\.git\/?$/, "") : remoteUrl;
+  const https = /^https:\/\/(?:[^@/]*@)?([^/@\s?#]+)\/([^?#]+?)(?:\.git)?\/?(?:[?#].*)?$/i.exec(remoteUrl);
+  if (https) return `https://${https[1]}/${https[2]}`;
+  // Says what kind of remote it is, never the URL itself: it may hold a credential.
+  const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(remoteUrl)?.[1];
+  const kind = scheme ? `a ${scheme.toLowerCase()}:// URL` : remoteUrl.includes("::") ? "a git remote helper (<transport>::)" : "a local path";
+  throw new UnsupportedRemoteError(
+    `a cloud step needs a remote on a code host, reached over https:// or ssh (git@host:org/repo); this remote is ${kind}. Point \`cloud.remote\` in the config at one that is`,
+  );
 }

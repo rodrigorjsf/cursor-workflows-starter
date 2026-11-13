@@ -12,8 +12,8 @@ import { PLAN, labelOf, submit, write } from "./implement-issue.fixture.js";
 const [repo, jobId, runId] = process.argv.slice(2) as [string, string, string];
 const HANG = 'import { test } from "node:test";\ntest("subtract", async () => { await new Promise((r) => setTimeout(r, 4000)); throw new Error("red"); });\n';
 const handlers: Record<string, (o: any) => unknown> = {
-  planejar: (o) => submit(o, PLAN),
-  "teste-1": (o) => {
+  plan: (o) => submit(o, PLAN),
+  "test-1": (o) => {
     write(o, "test/sub.test.js", HANG);
     submit(o, { testFile: "test/sub.test.js", testName: "subtract" });
   },

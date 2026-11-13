@@ -51,9 +51,9 @@
           "maxCents": 300,
           "roles": {
             "review": { "model": { "id": "grok-4.7", "params": [{ "id": "reasoning_effort", "value": "medium" }] }, "timeoutMs": 900000 },
-            "implement.low": { "retries": 0 }
-          },
-          "labels": { "desenhar:*": { "maxTokensPerStep": 150000 } }
+            "implement.low": { "retries": 0 },
+            "design": { "maxTokensPerStep": 150000 }
+          }
         }
       }
     }
@@ -137,7 +137,7 @@
         },
         "model": { "$ref": "#/definitions/model", "description": "Modelo da etapa, campo a campo: o que não aparece herda da camada de baixo." },
         "timeoutMs": { "type": "integer", "minimum": 1, "description": "Tempo máximo da etapa, em milissegundos." },
-        "retries": { "type": "integer", "minimum": 0, "description": "Tentativas extras quando a etapa termina em erro." },
+        "retries": { "type": "integer", "minimum": 0, "description": "Tentativas extras quando a etapa termina em erro. Um erro de configuração ou de autenticação que o SDK marca como não repetível (id de modelo inválido, chave inválida) falha a etapa na hora." },
         "schemaRetries": { "type": "integer", "minimum": 0, "description": "Re-prompts quando o agente não entrega o JSON do schema." },
         "maxTokensPerStep": { "$ref": "#/definitions/limit", "description": "Teto de tokens desta etapa. Ausente: herda o do workflow. O teto global `maxTokensPerStep` vale sempre." },
         "settingSources": {
@@ -168,7 +168,7 @@
         "labels": {
           "type": "object",
           "additionalProperties": { "$ref": "#/definitions/rolePrefs" },
-          "description": "Preferências por glob do `label` da etapa (`*` e `?`), só para etapas sem papel. Vale o glob com mais caracteres literais; empate vai para o primeiro."
+          "description": "Preferências por glob do `label` da etapa (`*` e `?`), só para etapas sem papel. Vale o glob com mais caracteres literais; empate vai para o primeiro. Toda etapa dos workflows do kit (`implement-issue`, `smoke`) tem papel, então nelas um glob de `labels` não casa com nada: configure-as por `roles`. `labels` serve às etapas sem papel de um workflow do repositório."
         }
       }
     },

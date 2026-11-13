@@ -27,10 +27,12 @@ documento explica o *porquê* das regras e traz as receitas, que a skill aponta.
 | Sandbox (`sandbox: true`) | Opção da etapa | Não testado neste kit |
 
 - **Trava de segredos.** Antes do commit, o `implement-issue` desfaz os commits que um agente tenha feito
-  (`git reset --soft` para a base, mantendo a árvore) e examina as linhas adicionadas desde a base atrás de chaves
-  `crsr_` e `sk-` e da própria chave salva do SDK (ou a de `CURSOR_API_KEY`), e os arquivos chamados `auth.json`,
-  `.env` ou `.env.*`. As mesmas regras de texto valem para o comentário das seams e para o corpo do PR, que leva
-  saída de teste. Cada acerto para o efeito que levaria o texto para fora:
+  (`git reset --soft` para a base, mantendo a árvore) e examina as linhas adicionadas desde a base atrás dos formatos
+  de credencial que o redator do log conhece (`CREDENTIAL_FORMATS` em `redaction.ts`: chaves `crsr_` e `sk-`, tokens
+  do GitHub, AWS, npm, Slack, Google e Stripe, blocos de chave privada; JWTs e `Bearer`, comuns em fixtures, só são
+  redigidos), da própria chave salva do SDK (ou a de `CURSOR_API_KEY`) e do valor de variáveis de ambiente com nome de
+  segredo, e os arquivos chamados `auth.json`, `.env` ou `.env.*`. As mesmas regras de texto valem para o comentário
+  das seams e para o corpo do PR, cuja saída de teste já entra redigida. Cada acerto para o efeito que levaria o texto para fora:
   no comentário, não comenta; no diff, não faz commit, push nem PR; no corpo do PR, o commit local já existe, mas
   não faz push nem PR. Em todos, devolve `status: "secret-blocked"`, com `reason` dizendo só a regra que disparou,
   nunca o trecho. O motivo: um corpo de issue com prompt injection pode
@@ -92,7 +94,7 @@ const known = new Map(Object.entries(ctx.settings.labelTiers as Record<string, T
 const matched = issue.labels.flatMap((l) => known.get(l.name.toLowerCase()) ?? []); // um Map: uma label "constructor" é só uma label
 const tier = matched.sort((a, b) => RANK[b] - RANK[a])[0]
   ?? (await ctx.agent<{ tier: Tier }>(`${CLASSIFY_INSTRUCTIONS}\n\n${issueBlock(issue)}`, {
-    label: "classificar", model: MODELS.CLASSIFY, tools: [], settingSources: [], memo: true, schema: TIER_SCHEMA,
+    label: "classify", model: MODELS.CLASSIFY, tools: [], settingSources: [], memo: true, schema: TIER_SCHEMA,
   })).tier;
 await ctx.agent(task, { model: MODELS[tier], cwd: worktree, schema: IMPL_SCHEMA });
 ```
@@ -124,7 +126,7 @@ a resposta antiga. Depois da correção, só os eixos que bloquearam são revist
 let t = await runTests(testCommand, worktree);
 for (let round = 1; t.kind === "failed" && round <= 2; round++) {   // timeout ou suíte morta não é falha de código
   await ctx.agent(`${FIX_INSTRUCTIONS}\n\n## Rodada ${round}\n\n## Saída dos testes\n${t.output}`, {
-    label: `corrigir-${round}`, model: MODELS.HIGH, cwd: worktree, schema: IMPL_SCHEMA,
+    label: `fix-${round}`, model: MODELS.HIGH, cwd: worktree, schema: IMPL_SCHEMA,
   });
   t = await runTests(testCommand, worktree);
 }

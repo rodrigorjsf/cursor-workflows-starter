@@ -540,7 +540,7 @@ Para validar a entrega depois, por exemplo quando o PR é aceito ou recusado, us
 **Cartão no dashboard.** `ctx.card({ title, subtitle, links, badges })` define o que o cartão do run mostra no Board do
 [dashboard](#o-quadro-board) (a issue e o tier, o link da PR…). Chame de novo quando algo mudar: o quadro mostra o último.
 
-**Labels:** dê `label` explícito às etapas (`"planejar"`, `"implementar"`). Sem label, o runtime usa
+**Labels:** dê `label` explícito às etapas (`"plan"`, `"implement"`). Sem label, o runtime usa
 `step-<hash>`, para não vazar conteúdo do prompt. Mas aí as análises por etapa ficam ilegíveis.
 
 ## 7. Privacidade e uso no time
@@ -556,10 +556,16 @@ Para validar a entrega depois, por exemplo quando o PR é aceito ou recusado, us
   - nada disso vai para o banco, para os exports dele, para os ouvintes de eventos nem para as linhas de progresso de
     `wf status` e `wait_workflow`;
   - antes de gravar, o runtime troca por `[REDACTED]` os formatos conhecidos de segredo (chaves e tokens do GitHub,
-    AWS, Slack, Google, npm, Stripe e dos provedores de modelo, JWT, `Bearer`, blocos de chave privada) e o valor de
+    AWS, Slack, Google, npm, Stripe e dos provedores de modelo, JWT, `Bearer`, blocos de chave privada, a senha numa URL como `https://usuario:senha@host`, o token sozinho no lugar do usuário, como `https://<token>@host`, com 16 caracteres ou mais) e o valor de
     toda variável de ambiente com `KEY`, `TOKEN`, `SECRET` ou `PASSWORD` no nome (valores com menos de 8 caracteres
-    ficam de fora, para não apagar palavras comuns), além da chave de API passada ao run. É um esforço, não uma
-    garantia: um segredo de outro formato, numa variável com outro nome, passa;
+    ficam de fora, para não apagar palavras comuns), além da chave de API passada ao run. A mesma redação vale para o
+    resultado de cada etapa antes de ele ir para o journal e para o memo, e o workflow já recebe o valor redigido (assim
+    um resume repete exatamente o que a primeira execução viu), menos os formatos que só são redigidos e não travam a
+    entrega do `implement-issue` (JWT, `Bearer`, a senha ou o token numa URL): o workflow pode rodar o que a etapa
+    devolve, e um comando de teste como `DATABASE_URL=postgres://u:senha@localhost/db npm test` não pode chegar a ele
+    com `[REDACTED]`. Esses formatos ficam em claro no journal e no memo, e continuam redigidos no log de eventos e no que o
+    `implement-issue` publica no GitHub (o comentário das seams e o corpo do PR passam inteiros pelo redator). É um esforço, não uma garantia: um segredo de outro
+    formato, numa variável com outro nome, passa;
   - cada texto é cortado em 32768 caracteres (`truncated` e `chars` dizem o quanto havia);
   - **retenção:** ao iniciar um run, o `text` dos runs do repositório fora dos 30 mais recentes (contando o que
     começa) ou sem atividade há mais de 14 dias é apagado. O evento fica, com tipo, ids e tamanho. O journal não

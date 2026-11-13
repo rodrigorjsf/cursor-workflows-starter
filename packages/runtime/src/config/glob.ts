@@ -1,5 +1,5 @@
 // The only glob the config needs: `*` (any run of characters) and `?` (one character). Used for the label fallback
-// (`desenhar:*`) and for the `allowedModels` cap (`composer-*`).
+// (`design:*`) and for the `allowedModels` cap (`composer-*`).
 
 export function globToRegExp(glob: string): RegExp {
   const body = [...glob].map((c) => (c === "*" ? ".*" : c === "?" ? "." : c.replace(/[.+^${}()|[\]\\]/g, "\\$&"))).join("");

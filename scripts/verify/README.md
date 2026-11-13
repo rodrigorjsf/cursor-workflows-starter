@@ -5,16 +5,16 @@ Reproduzem contra a API real as verificações registradas em
 nova, por exemplo a Enterprise do seu time, antes de adotar.
 
 **Custam tokens.** Na medição de 2026-11-11, com `composer-2.5`: `verify-structured` usou cerca de 110 mil tokens,
-`verify-context` cerca de 60 mil e `verify-cache` cerca de 46 mil. Rode sempre com `--max-tokens`. Prefira os modelos
+`verify-context` cerca de 60 mil e `verify-cache` cerca de 46 mil. Rode sempre com `--max-tokens` e `--max-cents`. Prefira os modelos
 incluídos no plano; modelos que consomem cota paga são permitidos quando o teste precisar deles
 ([política de custo](../../docs/contributing/01-contribuindo.md#testes-contra-a-api-real-política-de-custo)).
 
 ```bash
 scripts/verify/setup-probe-repo.sh ~/tmp/wf-probe-repo      # repositório descartável (AGENTS.md, hooks, mcp.json)
 export WORKFLOWS_DIR=scripts/verify WF_METRICS_DB=~/tmp/wf-verify.db
-npm run wf -- run verify-structured --cwd ~/tmp/wf-probe-repo --args '{}' --max-tokens 150000
-npm run wf -- run verify-context    --cwd ~/tmp/wf-probe-repo --args '{}' --max-tokens 120000
-npm run wf -- run verify-cache      --cwd ~/tmp/wf-probe-repo --args '{}' --max-tokens 100000
+npm run wf -- run verify-structured --cwd ~/tmp/wf-probe-repo --args '{}' --max-tokens 150000 --max-cents 25
+npm run wf -- run verify-context    --cwd ~/tmp/wf-probe-repo --args '{}' --max-tokens 120000 --max-cents 25
+npm run wf -- run verify-cache      --cwd ~/tmp/wf-probe-repo --args '{}' --max-tokens 100000 --max-cents 25
 ```
 
 `WF_VERIFY_MODEL` troca o modelo (default `composer-2.5`; confira os seus com `npm run models`).

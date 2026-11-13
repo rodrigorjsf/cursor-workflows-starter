@@ -12,7 +12,7 @@ import { calls, costConfig, finishCloudRun, lookups, resetCloud, script, seedClo
 import type { AttemptEvent, AttemptResult, StepOptions } from "../src/runtime/backend.js";
 import { createCloudBackend } from "../src/runtime/backend-cloud.js";
 import { cloudRepoUrl, snapshotBranch, snapshotBranchSegment, snapshotRunSegment } from "../src/runtime/cloud-snapshot.js";
-import { agentCommits, git, remoteBranches, remoteFiles, repoWithRemote } from "./cloud-fixtures.js";
+import { addRemote, agentCommits, git, remoteBranches, remoteFiles, repoWithRemote } from "./cloud-fixtures.js";
 import { waitFor } from "./wait-for.js";
 
 let root = "";
@@ -90,7 +90,7 @@ test("the cloud agent is created with the snapshot as its starting ref, no PR, a
   assert.deepEqual(created.agents, { sub: { description: "d", prompt: "p" } }, "subagents and MCP servers are supported in the cloud");
   assert.deepEqual(created.mcpServers, { x: { command: "x" } });
   assert.deepEqual(Object.keys(created).sort(), ["agents", "apiKey", "cloud", "mcpServers", "model", "name"], "no tools, disallowedTools, systemPrompt or local options");
-  assert.deepEqual(created.cloud, { repos: [{ url: remote, startingRef: seen[0] }], autoCreatePR: false });
+  assert.deepEqual(created.cloud, { repos: [{ url: "https://example.invalid/origin/repo", startingRef: seen[0] }], autoCreatePR: false });
   assert.match(seen[0]!, /^wf\/cloud-snapshot\/run-1\/[0-9a-f]{8}$/);
 });
 
@@ -283,7 +283,7 @@ test("a worktree that cannot be snapshotted is an error that says why, before an
   const unborn = join(root, "unborn");
   mkdirSync(unborn);
   git(unborn, "init", "-q");
-  git(unborn, "remote", "add", "origin", remote);
+  addRemote(unborn, "origin", remote);
   for (const [cwd, why] of [
     [outside, /is not inside a git repository/],
     [unborn, /has no commit yet/],
@@ -339,10 +339,10 @@ test("the repository URL a cloud agent gets is the code host's web URL", () => {
     ["ssh://git@git.example.com:2222/org/repo", "https://git.example.com/org/repo"],
     ["https://github.com/org/repo.git", "https://github.com/org/repo"],
     ["https://github.com/org/repo", "https://github.com/org/repo"],
-    ["/srv/git/origin.git", "/srv/git/origin.git"],
   ] as const) {
     assert.equal(cloudRepoUrl(remoteUrl), url, remoteUrl);
   }
+  assert.throws(() => cloudRepoUrl("/srv/git/origin.git"), /a local path/, "a cloud agent cannot clone a path (test/cloud-remote-url.test.ts covers the rest)");
 });
 
 test("a reattached attempt waits for the run still going, or else takes the newest, whatever order the cloud lists an agent's runs in", async () => {

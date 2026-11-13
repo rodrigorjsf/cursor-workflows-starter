@@ -460,8 +460,9 @@ async function repoIdentity(cwd: string): Promise<{ name: string; hash: string }
   return { name: basename(top), hash: sha(origin || top).slice(0, 16) };
 }
 
+/** A new run id: the workflow's name, with anything but letters, digits, "_" and "-" made a "-" (the id names the run's folder), and a random suffix. */
 export function newRunId(workflow: string): string {
-  return `${workflow}-${randomUUID().slice(0, 8)}`;
+  return `${workflow.replace(/[^A-Za-z0-9_-]/g, "-")}-${randomUUID().slice(0, 8)}`;
 }
 
 class Semaphore {
@@ -859,7 +860,8 @@ async function executeRun<A, R>(
         const state = await repoState(stepCwd);
         if (state) {
           memoKey = memo.key({ prompt, ...fingerprint, cwd: undefined }, state);
-          const hit = memo.get(memoKey);
+          const stored = memo.get(memoKey);
+          const hit = stored === undefined ? undefined : store.redactResult(stored); // an entry written before results were redacted
           if (hit !== undefined) {
             journal.record({ key, label, model: o.model?.id, result: hit, chargedCents: 0, totalTokens: 0 });
             servedFrom("memo");
@@ -1078,11 +1080,15 @@ async function executeRun<A, R>(
           // An attempt that could not reach the interrupted agent leaves it to the next attempt; any other ending is done with it.
           if (!result.reattachFailed) reattach = undefined;
           switch (outcome.kind) {
-            case "finished":
-              journal.record({ key, label, model: model.id, result: outcome.value, chargedCents: charge?.charged ?? 0, totalTokens: charge?.usage.totalTokens ?? 0 });
-              if (memoKey) memo.set(memoKey, outcome.value);
+            case "finished": {
+              // Secrets never reach the journal or the memo. The workflow gets the redacted value too: a resume replays the
+              // journal's copy, and the steps after this one must see the same input both times (their journal keys hash it).
+              const value = store.redactResult(outcome.value);
+              journal.record({ key, label, model: model.id, result: value, chargedCents: charge?.charged ?? 0, totalTokens: charge?.usage.totalTokens ?? 0 });
+              if (memoKey) memo.set(memoKey, value);
               endEvent(true);
-              return outcome.value as T;
+              return value as T;
+            }
             case "run-error":
               errorKind = "run-error";
               lastError = outcome.message;
@@ -1124,6 +1130,10 @@ async function executeRun<A, R>(
               if (outcome.reason === "rate-limit") {
                 errorKind = "rate-limit";
                 await sleep(2000 * 2 ** (attempt - 1));
+              } else if (outcome.reason === "not-retryable") {
+                // A bad model id or an invalid key: another attempt would fail the same way. The step fails now.
+                errorKind = "exception";
+                final = true;
               } else {
                 errorKind = /^timeout/.test(lastError) ? "timeout" : "exception"; // a timeout the backend itself reports in its message
               }

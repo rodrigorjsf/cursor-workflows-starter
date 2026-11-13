@@ -35,7 +35,7 @@ import {
 } from "./backend.js";
 import { errorText } from "./error-text.js";
 import { isGone } from "./cloud-cancel.js";
-import { BringBackError, type PushedSnapshot, bringBack, cloudRepoUrl, deleteSnapshot, pushSnapshot, snapshotBranch } from "./cloud-snapshot.js";
+import { BringBackError, type PushedSnapshot, UnsupportedRemoteError, bringBack, deleteSnapshot, pushSnapshot, snapshotBranch } from "./cloud-snapshot.js";
 import type { JsonSchema } from "./workflow.js";
 import { type Parsed, RESULT_ARTIFACT, artifactInstruction, artifactReprompt, jsonBlockInstruction, jsonBlockReprompt, resultFromArtifact, resultFromJsonBlock } from "./structured.js";
 
@@ -228,7 +228,10 @@ async function runCloudAttempt({ remote, runId, waitFloorMs = WAIT_FLOOR_MS }: C
     } catch (err) {
       if (signal.aborted) return { outcome: { kind: "aborted", reason: signal.reason } };
       // Not "gone": the agent may well be running. Starting another would pay twice, so the attempt fails and the engine reattaches again.
-      return { outcome: { ...classifyError(err), message: `could not reattach to cloud agent ${previous.agentId}: ${errorText(err)}` }, reattachFailed: true };
+      // A non-retryable error here is still no answer about the agent: the next attempt reattaches again, as for any other.
+      const error = classifyError(err);
+      const reason = error.reason === "not-retryable" ? "other" : error.reason;
+      return { outcome: { ...error, reason, message: `could not reattach to cloud agent ${previous.agentId}: ${errorText(err)}` }, reattachFailed: true };
     }
     if (typeof found === "string") onEvent({ type: "warning", message: `cloud agent ${previous.agentId}, left by an interrupted attempt, ${found}: starting a new one` });
     else resumed = found;
@@ -240,7 +243,9 @@ async function runCloudAttempt({ remote, runId, waitFloorMs = WAIT_FLOOR_MS }: C
     try {
       start = { kind: "fresh", snapshot: await pushSnapshot({ cwd: o.cwd, remote, branch: snapshotBranch(runId), signal }) };
     } catch (err) {
-      return { outcome: signal.aborted ? { kind: "aborted", reason: signal.reason } : { kind: "error", reason: "other", message: `cloud snapshot: ${errorText(err)}` } };
+      if (signal.aborted) return { outcome: { kind: "aborted", reason: signal.reason } };
+      // A remote no cloud step can use is refused the same way on every attempt: the step fails now.
+      return { outcome: { kind: "error", reason: "other", message: `cloud snapshot: ${errorText(err)}` }, ...(err instanceof UnsupportedRemoteError && { final: true as const }) };
     }
   }
   /** Where the agent of this attempt starts from. A reattached one keeps the branch the interrupted attempt pushed. */
@@ -268,7 +273,7 @@ async function runCloudAttempt({ remote, runId, waitFloorMs = WAIT_FLOOR_MS }: C
               await Agent.create({
                 ...agentBase(o),
                 // A step that writes commits on the snapshot branch itself, which the engine then fetches.
-                cloud: { repos: [{ url: cloudRepoUrl(start.snapshot.remoteUrl), startingRef: start.snapshot.branch }], autoCreatePR: false, ...(o.writes && { workOnCurrentBranch: true }) },
+                cloud: { repos: [{ url: start.snapshot.repoUrl, startingRef: start.snapshot.branch }], autoCreatePR: false, ...(o.writes && { workOnCurrentBranch: true }) },
               })),
       (exchange) => converse(rememberingGit(exchange, (git) => (pushed = git)), message, { schemaRetries: o.schemaRetries, check: schema ? check : undefined, onEvent, running: start.kind === "resumed" ? start.running : undefined }),
       settleCloudRun(o.apiKey, signal, waitFloorMs),

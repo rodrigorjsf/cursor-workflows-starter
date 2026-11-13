@@ -302,7 +302,7 @@ test("when gh cannot say what became of a PR the run is kept and gc fails: an au
 
 test("a cancelled run is not a failed one: however long ago it stopped, gc keeps it", async () => {
   const controller = new AbortController();
-  fx.handlers["teste-1"] = () => {
+  fx.handlers["test-1"] = () => {
     setTimeout(() => controller.abort(), 100);
     return { hang: true };
   };

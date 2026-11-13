@@ -274,6 +274,17 @@
 
 ### Mudado
 
+- **Os rótulos das etapas do `implement-issue` e o corpo do PR que ele abre são em inglês.** Os rótulos passam a
+  `classify`, `plan`, `design:<minimal|flexible|common>`, `judge`, `test-N`, `code-N`, `fix-N-R`, `refactor-1` e
+  `pr-text` (antes `classificar`, `planejar`, `desenhar:<minima|flexivel|comum>`, `julgar`, `teste-N`, `codigo-N`,
+  `corrigir-N-R`, `refatorar-1` e `pr-texto`), e o `step` de um `tdd-violation` no refactor passa a `refactor-1`. O
+  histórico de métricas por rótulo se divide na troca: os runs antigos ficam com os rótulos antigos, e uma análise por
+  etapa que cruza a troca precisa somar os dois nomes. Os globs de `labels` na configuração não entram na troca: eles só valem
+  para etapas sem papel, e toda etapa do `implement-issue` tem papel (um `desenhar:*` nunca casou com elas; ajuste essas
+  etapas por `roles`). A configuração por papel (`roles`) não muda.
+  Um resume de um run começado antes da troca reaproveita as etapas prontas (a chave do journal não leva o rótulo),
+  menos o `judge`, cujo prompt leva o nome da restrição de cada design. O corpo do PR (Evidence, achados que não bloqueiam, fatias adiadas, rodapé) também é em inglês, e um teste
+  confere que nenhuma string dos workflows embutidos é em português.
 - **Cancelar um run para os cloud agents dele, em qualquer estado do job** ([ADR-0007](docs/adr/0007-cancel-stops-cloud-agents.md),
   que substitui o ADR-0006). Um job que executa recebe SIGTERM; um job congelado (processo vivo, sem heartbeat) é morto, o
   que não desfaz a etapa em andamento, e os agentes que o log mostra sem fim são cancelados pela API da Cursor; um job cujo
@@ -399,6 +410,74 @@
   location. Como registrar um novo: [9.2](docs/contributing/02-convencoes-do-livro.md#adrs).
 - **A referência de eventos (6.1) tira o número e o rodapé do índice do livro**, em vez de uma cópia fixa no gerador:
   inserir um capítulo ao redor dela não exige mais editar `scripts/events-reference.ts`.
+
+### Corrigido
+
+- **Um id de job ou de run que não é um nome simples não sai mais da pasta `.workflows/`.** O `jobId` de
+  `wait_workflow`, `get_workflow_status`, `cancel_workflow` e de `wf status|wait|cancel`, e o run a retomar
+  (`resumeRunId`, `--resume`), viravam caminho sem conferência: `wf status ../../../fora/plantado` lia um JSON fora de
+  `.workflows/jobs`, e um `--resume ../x` abria (e criava) a pasta do run fora de `.workflows/runs`. Agora um id só vale
+  com letras, dígitos, `_` e `-` (a mesma conferência que já valia para os nomes de lock): um `jobId` assim é
+  `job not found`, um run a retomar assim é recusado com `invalid runId` antes de criar job ou pasta, e um registro de
+  job cujo `runId` não é simples é ignorado. O id de um run novo troca por `-` o que, no nome do workflow, não é letra,
+  dígito, `_` ou `-` (`team.deploy` vira `team-deploy-<sufixo>`). **Ao atualizar:** um run criado antes desta versão
+  por um workflow com um desses caracteres no nome (`team.deploy-1a2b3c4d`) não pode mais ser retomado, e o job dele
+  some de `wf status`, `wait`, `cancel` e `jobs` (e das tools MCP correspondentes). Termine ou abandone esses runs antes
+  de atualizar; o log e o journal deles em `.workflows/runs/` continuam lá.
+- **`wait_workflow` não espera mais para sempre com um `timeoutSec` que não é número.** Um `"30s"` virava `NaN`, o
+  teto de 50 s deixava de valer e a chamada só voltava quando o job terminava, acima do timeout do cliente MCP. Agora um
+  `timeoutSec` que não é número é um erro (`isError`, com `timeoutSec must be a number of seconds`), o número é levado
+  para 1 a 50 (45 sem ele ou com `null`), um texto numérico como `"30"` vale como o número, como antes, e `waitJob` não espera nada com um tempo que não é um número finito. O `cancel_workflow`
+  espera um tempo fixo (20 s) e não tinha o problema.
+- **`job not found` no servidor MCP é um erro de tool.** `wait_workflow`, `get_workflow_status` e `cancel_workflow`
+  devolviam `{ "error": "job not found" }` como uma resposta normal, sem o `isError` que todas as outras falhas do
+  servidor levam; agora vem com `isError: true`. O corpo não muda: um retorno com `error` e sem `status` continua
+  encerrando a espera da skill `run-workflow`. No `wf status|wait|cancel`, um job desconhecido imprimia o mesmo JSON no
+  stdout e saía com 0; agora é um erro como os outros, uma linha no stderr (`job not found: <jobId>`) e código 1.
+- **O `wf` trata argumentos errados como erro de uso: uma linha no stderr e código 2.** `--days abc` falhava com um
+  `Invalid time value` sem nome de flag, `--format xml` gravava CSV calado, e uma flag desconhecida (ou sem valor)
+  despejava o stack trace do `parseArgs`. Agora `--days` precisa ser um número de dias maior que 0
+  (`--days must be a number of days, more than 0`), `--format` só aceita `csv` ou `json` (nada é exportado nem criado
+  antes da recusa), um `--args` ou `--overrides` que não é JSON diz qual flag (`--args must be JSON: ...`, antes saía o
+  texto cru do `JSON.parse` com código 1), e uma flag desconhecida ou sem valor sai numa linha só. Esses erros, o `--timeout` e os
+  `--max-cents`/`--max-tokens` inválidos e as linhas `usage:` de `config` e `metrics` saem com código 2 (antes 1); os
+  demais erros continuam com 1. Corrigido junto: dentro de uma etapa (`WF_INSIDE_WORKFLOW=1`), o `wf run --job` (o
+  modo filho do `wf start`) escapava da recusa que já valia para `run` e `start`.
+- **A trava de segredos do `implement-issue` conhece todos os formatos que o redator do log conhece.** Ela só procurava
+  chaves `crsr_`, `sk-` e a chave salva do Cursor, então um token do GitHub, da AWS, do npm, do Slack, do Google ou do
+  Stripe, ou um bloco de chave privada, passava para o commit, o comentário das seams ou o corpo do PR. Agora a lista de
+  formatos é uma só (`CREDENTIAL_FORMATS` em `redaction.ts`) para o redator e para a trava, que também bloqueia o valor
+  de uma variável de ambiente com nome de segredo (`KEY`, `TOKEN`, `SECRET`, `PASSWORD`; 16 caracteres ou mais). JWTs e
+  cabeçalhos `Bearer`, comuns em fixtures de teste, são redigidos mas não bloqueiam. A saída de teste que vai para a
+  Evidence do PR passa pelo redator antes de entrar, além da troca dos caminhos locais.
+- **O comentário das seams neutraliza o texto do modelo, como o corpo do PR.** O nome e o porquê de cada seam, o
+  comportamento, a seam e a ideia de teste de cada fatia e a justificativa do plano iam crus para a issue: um
+  `Fixes #12` fecharia outra issue, um `@usuario` notificaria alguém e um `<!--` esconderia o resto do comentário. Agora
+  passam por `sanitizeModelText`. A interface e o comando de teste vão em código inline, e o nome e o arquivo do teste
+  na Evidence do PR e o arquivo dos achados que não bloqueiam também (`inlineCode`): uma crase no texto do modelo
+  fecharia o trecho e devolveria o efeito à menção e ao `<!--` depois dela, então as crases viram `ˋ` e as quebras de
+  linha viram espaço.
+- **O resultado de uma etapa é redigido antes de ir para o journal e para o memo.** Só os eventos passavam pelo
+  redator: uma etapa que devolvia uma chave a gravava em claro em `journal.jsonl` e em `.workflows/memo/`. Agora o
+  resultado passa pela mesma redação antes de ser guardado, e o workflow recebe o valor já redigido, para que um resume
+  (que repete o journal) veja o mesmo que a primeira execução e não refaça as etapas seguintes. Os formatos que só são
+  redigidos e não travam a entrega (JWT, `Bearer`, a senha ou o token numa URL) ficam no resultado: o workflow pode rodar
+  o que a etapa devolve, e um `testCommand` como `DATABASE_URL=postgres://u:senha@localhost/db npm test` rodaria com
+  `[REDACTED]`. Esses ficam em claro no journal e no memo; o log de eventos continua os redigindo, e o
+  comentário das seams e o corpo do PR passam inteiros pelo redator antes de ir para o GitHub.
+- **Uma etapa na nuvem não manda para a Cursor a credencial embutida na URL do remote, e recusa remotes inseguros.**
+  `cloudRepoUrl` mantinha o `usuario:token` de um remote `https://usuario:token@host/...` na URL do repositório enviada
+  à API da Cursor, e passava `http://`, `ext::` e caminhos locais como estavam (o snapshot, com arquivos não commitados,
+  ia em texto puro por `http://`). Agora a URL vem de `remote.<nome>.url` como configurada (um apelido de `url.<base>.insteadOf`, como `gh:org/repo`,
+  vale pela URL que o git põe no lugar dele), sai sem credencial, sem query e sem fragmento (`?token=...`), e um
+  remote que não é `https://` ou ssh num host falha a etapa com uma mensagem clara, antes do snapshot e sem novas
+  tentativas; uma URL de push (`pushurl`, `pushInsteadOf`) em `http://`, `git://` ou remote helper também. O redator do log ganhou o formato da senha numa URL (`https://usuario:[REDACTED]@host`) e o do token
+  sozinho no lugar do usuário, com 16 caracteres ou mais (`https://[REDACTED]@host`).
+- **Um erro de configuração ou de autenticação do SDK falha a etapa na hora, sem gastar as novas tentativas.** O motor
+  só lia o `isRetryable` do `RateLimitError`: um `ConfigurationError` (id de modelo inválido) ou um
+  `AuthenticationError` (chave inválida) repetia a etapa até acabar o `retries`, criando um agente por tentativa. Agora
+  esses dois, quando o SDK os marca como não repetíveis, encerram a etapa na primeira tentativa; um erro de rede ou sem
+  classe continua com as novas tentativas, e uma falha ao reanexar a um cloud agent também (o agente pode estar rodando).
 
 ## 0.2.0 (pré-release, 2026-11-11)
 

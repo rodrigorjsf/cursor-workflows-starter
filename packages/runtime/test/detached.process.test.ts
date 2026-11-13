@@ -160,9 +160,13 @@ test("cancelling a job that already ended changes nothing and says so; an unknow
   const again = wf("cancel", started.jobId);
   assert.equal(again.status, "finished");
   assert.match(again.note, /already ended/);
-  assert.deepEqual(wf("cancel", "nope"), { error: "job not found" }, "the MCP server's wording");
-  assert.deepEqual(wf("wait", "nope", "--timeout", "0"), { error: "job not found" });
-  assert.deepEqual(wf("status", "nope"), { error: "job not found" });
+  // An unknown job is an error like any other: one line on stderr (the MCP server's wording first), nothing on stdout, exit 1.
+  for (const args of [["cancel", "nope"], ["wait", "nope", "--timeout", "0"], ["status", "nope"]]) {
+    const r = spawnSync(process.execPath, [...tsx("cli.ts"), ...args, "--cwd", repo], { env, encoding: "utf8" });
+    assert.equal(r.status, 1, `${args[0]}: ${r.stderr}`);
+    assert.equal(r.stdout, "", args[0]);
+    assert.equal(r.stderr, "job not found: nope\n", args[0]);
+  }
 });
 
 test("cancel does not signal a process that is not the job's (a recycled pid)", async () => {
@@ -257,7 +261,7 @@ test("a frozen job (alive, heartbeat stale) shows as failed with its run id; can
 test("a --timeout that is not a number of seconds is an error, not a wait that returns at once", () => {
   for (const command of ["wait", "cancel"]) {
     const r = spawnSync(process.execPath, [...tsx("cli.ts"), command, "anyjob", "--timeout", "soon", "--cwd", repo], { env, encoding: "utf8" });
-    assert.equal(r.status, 1, command);
+    assert.equal(r.status, 2, `${command}: a usage error`);
     assert.match(r.stderr, /--timeout must be a number of seconds/, command);
   }
 });

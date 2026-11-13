@@ -199,13 +199,13 @@ test("an unknown role in a config file is an error naming the path; so is an unk
 
 test("label globs are the fallback for steps without a role; the glob with the most literal characters wins; a role beats labels", async () => {
   writeRepoConfig(cwd, {
-    workflows: { cfg: { labels: { "desenhar:*": { model: { id: "label-wide" } }, "desenhar:a*": { model: { id: "label-narrow" }, retries: 0 }, "*": { settingSources: [] } }, roles: { classify: { model: { id: "from-role" } } } } },
+    workflows: { cfg: { labels: { "design:*": { model: { id: "label-wide" } }, "design:a*": { model: { id: "label-narrow" }, retries: 0 }, "*": { settingSources: [] } }, roles: { classify: { model: { id: "from-role" } } } } },
   });
   const wf = configWorkflow(async (ctx) => {
-    await ctx.agent("1", { label: "desenhar:alpha" });
-    await ctx.agent("2", { label: "desenhar:beta" });
+    await ctx.agent("1", { label: "design:alpha" });
+    await ctx.agent("2", { label: "design:beta" });
     await ctx.agent("3", { label: "other" });
-    await ctx.agent("4", { label: "desenhar:alpha-again", role: "classify" });
+    await ctx.agent("4", { label: "design:alpha-again", role: "classify" });
   });
   const r = await runWorkflow(wf, {}, { cwd });
   assert.equal(r.status, "finished", r.error);
@@ -216,8 +216,8 @@ test("label globs are the fallback for steps without a role; the glob with the m
   assert.deepEqual(calls[2].local.settingSources, [], "the catch-all glob applies to the step no other glob matches");
   assert.deepEqual(calls[3].local.settingSources, ["project", "team", "mdm"], "a step with a role ignores the label globs");
   const start = runStartOf(logOf(r.runId));
-  assert.deepEqual(Object.keys(start.config.labels).sort(), ["*", "desenhar:*", "desenhar:a*"]);
-  assert.deepEqual(start.provenance["/labels/desenhar:a*/retries"], { layer: "repo", ref: repoConfigPath(cwd) });
+  assert.deepEqual(Object.keys(start.config.labels).sort(), ["*", "design:*", "design:a*"]);
+  assert.deepEqual(start.provenance["/labels/design:a*/retries"], { layer: "repo", ref: repoConfigPath(cwd) });
 });
 
 test("the global caps clamp the result: numbers take the minimum, and a repo preference above a cap is a violation with no effect", async () => {
@@ -438,10 +438,10 @@ test("a config that sends a role declared `cloud: never` to the cloud is refused
 });
 
 test("a label cannot be sent to the cloud: only roles declare a cloud capability", async () => {
-  writeGlobalConfig({ caps: { allowedLocations: ["local", "cloud"] }, workflows: { cfg: { labels: { "desenhar:*": { location: "cloud" } } } } });
+  writeGlobalConfig({ caps: { allowedLocations: ["local", "cloud"] }, workflows: { cfg: { labels: { "design:*": { location: "cloud" } } } } });
   const r = await runWorkflow(configWorkflow(), {}, { cwd });
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /\/workflows\/cfg\/labels\/desenhar:\*\/location: location is set per role/);
+  assert.match(r.error!, /\/workflows\/cfg\/labels\/design:\*\/location: location is set per role/);
   assert.equal(calls.length, 0);
 });
 
@@ -469,10 +469,10 @@ test("a role's resultVia is absent from the effective config until a layer sets 
 });
 
 test("a label cannot choose how a cloud step delivers its result either: its steps never run in the cloud", async () => {
-  writeGlobalConfig({ workflows: { cfg: { labels: { "desenhar:*": { resultVia: "artifact" } } } } });
+  writeGlobalConfig({ workflows: { cfg: { labels: { "design:*": { resultVia: "artifact" } } } } });
   const r = await runWorkflow(configWorkflow(), {}, { cwd });
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /\/workflows\/cfg\/labels\/desenhar:\*\/resultVia: resultVia is set per role/);
+  assert.match(r.error!, /\/workflows\/cfg\/labels\/design:\*\/resultVia: resultVia is set per role/);
   assert.equal(calls.length, 0);
 });
 

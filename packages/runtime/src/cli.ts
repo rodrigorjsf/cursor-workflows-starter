@@ -23,6 +23,11 @@
 //
 // `start` runs the job in a detached process. SIGINT (Ctrl-C) or SIGTERM on a running `run` cancels it, like `wf cancel`.
 // `run` and `start` also take --overrides '<json>': limits tighter than the config's, for this run only (the chat's layer).
+// Inside a workflow step (WF_INSIDE_WORKFLOW=1) `run` and `start` are refused, `run --job` (the child mode of `start`) too.
+//
+// stdout carries the result (one JSON document); errors go to stderr, one line. Exit codes: 0 done; 1 an error; 2 a usage
+// error (an unknown flag, a flag with no value, a flag value the command cannot use, such as `--days abc` or
+// `--format xml`); `run` exits 130 when the run was cancelled.
 //
 // STATUS: verificado contra a API real num plano Premium em 2026-11-11 (docs/research/verificacoes-locais.md).
 
@@ -44,36 +49,65 @@ import { cancelJob, listJobs, readJob, readJobRecord, waitJob } from "./runtime/
 import { loadWorkflows } from "./runtime/registry.js";
 import { applyGc, directCommands, formatPlan, planGc } from "../workflows/implement-issue/gc.js";
 
-const { positionals, values } = parseArgs({
-  allowPositionals: true,
-  options: {
-    args: { type: "string", default: "{}" },
-    cwd: { type: "string", default: process.cwd() },
-    "max-cents": { type: "string" },
-    "max-tokens": { type: "string" },
-    overrides: { type: "string" },
-    resume: { type: "string" },
-    job: { type: "string" },
-    timeout: { type: "string", default: "240" },
-    days: { type: "string", default: "30" },
-    format: { type: "string", default: "csv" },
-    out: { type: "string" },
-    "no-anonymize": { type: "boolean", default: false },
-    "no-agents-md": { type: "boolean", default: false },
-    remove: { type: "boolean", default: false },
-    json: { type: "boolean", default: false },
-    "dry-run": { type: "boolean", default: false },
-  },
-});
+/** The command line itself is wrong (an unknown flag, a flag value the command cannot use, a missing argument): exit 2. */
+class UsageError extends Error {}
 
+/** Exit codes: 0 done; 1 an error; 2 a usage error, printed as one line on stderr. */
+function exitWithError(err: unknown): never {
+  process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+  process.exit(err instanceof UsageError ? 2 : 1);
+}
+
+const FLAGS = {
+  args: { type: "string", default: "{}" },
+  cwd: { type: "string", default: process.cwd() },
+  "max-cents": { type: "string" },
+  "max-tokens": { type: "string" },
+  overrides: { type: "string" },
+  resume: { type: "string" },
+  job: { type: "string" },
+  timeout: { type: "string", default: "240" },
+  days: { type: "string", default: "30" },
+  format: { type: "string", default: "csv" },
+  out: { type: "string" },
+  "no-anonymize": { type: "boolean", default: false },
+  "no-agents-md": { type: "boolean", default: false },
+  remove: { type: "boolean", default: false },
+  json: { type: "boolean", default: false },
+  "dry-run": { type: "boolean", default: false },
+} as const;
+
+/** The command line, parsed. An unknown flag or a flag with no value is a usage error, not a stack trace. */
+function parseCommandLine() {
+  try {
+    return parseArgs({ allowPositionals: true, options: FLAGS });
+  } catch (err) {
+    const code = (err as { code?: unknown } | null)?.code;
+    if (typeof code === "string" && code.startsWith("ERR_PARSE_ARGS_")) exitWithError(new UsageError((err as Error).message.replace(/\s*\n\s*/g, " "))); // one line, as every error
+    throw err;
+  }
+}
+
+const { positionals, values } = parseCommandLine();
 const [command, name] = positionals;
 const cwd = resolve(values.cwd!);
 const out = (v: unknown) => process.stdout.write(JSON.stringify(v, null, 2) + "\n");
 /** `--timeout`, in milliseconds. A value that is not a number of seconds is an error: it would make the wait return at once. */
 const timeoutMs = (): number => {
   const seconds = Number(values.timeout);
-  if (values.timeout!.trim() === "" || !Number.isFinite(seconds) || seconds < 0) throw new Error(`--timeout must be a number of seconds, 0 or more; got "${values.timeout}"`);
+  if (values.timeout!.trim() === "" || !Number.isFinite(seconds) || seconds < 0) throw new UsageError(`--timeout must be a number of seconds, 0 or more; got "${values.timeout}"`);
   return seconds * 1000;
+};
+/** `--days`: how far back `stats` and `metrics export` look. A value that is not a number would fail deep in the query. */
+const daysFlag = (): number => {
+  const days = Number(values.days);
+  if (values.days!.trim() === "" || !Number.isFinite(days) || days <= 0) throw new UsageError(`--days must be a number of days, more than 0; got "${values.days}"`);
+  return days;
+};
+/** `--format` of `metrics export`: `csv` or `json`. Anything else is refused, not written as CSV. */
+const formatFlag = (): "csv" | "json" => {
+  if (values.format !== "csv" && values.format !== "json") throw new UsageError(`--format must be csv or json; got "${values.format}"`);
+  return values.format;
 };
 /** The flag layer of the config: only what the command line says. WF_MAX_* are the env layer, read by the config. */
 const flagLimits = () => {
@@ -81,13 +115,25 @@ const flagLimits = () => {
     const raw = values[flag];
     if (raw === undefined) return undefined;
     const n = Number(raw);
-    if (raw.trim() === "" || !Number.isFinite(n) || n < 0) throw new Error(`--${flag} must be a number, 0 or more; got "${raw}"`);
+    if (raw.trim() === "" || !Number.isFinite(n) || n < 0) throw new UsageError(`--${flag} must be a number, 0 or more; got "${raw}"`);
     return n;
   };
   return { maxCents: number("max-cents"), maxTokens: number("max-tokens") };
 };
+/** The JSON value of a flag (`--args`, `--overrides`); text that is not JSON is a usage error that names the flag. */
+const jsonFlag = (flag: string, raw: string): unknown => {
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new UsageError(`--${flag} must be JSON: ${(err as Error).message}`);
+  }
+};
+/** An unknown job id is an error (exit 1), on stderr like any other; it starts with the MCP server's wording, `job not found`. */
+const jobNotFound = (): never => {
+  throw new Error(`job not found: ${name ?? ""}`);
+};
 /** The chat's layer of the config (`--overrides`): only what the MCP server forwards to the process it spawns. */
-const overridesFlag = () => (values.overrides === undefined ? undefined : parseLimitOverrides(JSON.parse(values.overrides)));
+const overridesFlag = () => (values.overrides === undefined ? undefined : parseLimitOverrides(jsonFlag("overrides", values.overrides)));
 const runOpts = () => ({
   cwd,
   runId: values.resume,
@@ -106,7 +152,8 @@ async function resolveWorkflow() {
 
 async function main(): Promise<number> {
   installCrashHandlers();
-  if ((command === "run" || command === "start") && process.env[INSIDE_WORKFLOW_ENV] === "1" && !values.job) {
+  // `run --job` (the child mode of `start`) included: a step must not start a workflow through a job record either.
+  if ((command === "run" || command === "start") && process.env[INSIDE_WORKFLOW_ENV] === "1") {
     throw new Error("workflows cannot be started from inside a workflow step");
   }
   if (command === "run" || command === "start") assertKitCompatible(cwd); // before anything starts: a kit outside the repo's declared range is refused
@@ -157,7 +204,7 @@ async function main(): Promise<number> {
       return 0;
     }
     case "config": {
-      if (name !== "show") throw new Error("usage: wf config show [workflow] [--max-tokens N] [--max-cents N]");
+      if (name !== "show") throw new UsageError("usage: wf config show [workflow] [--max-tokens N] [--max-cents N]");
       const known = await loadWorkflows(cwd);
       const wanted = positionals[2];
       if (wanted !== undefined && !known.has(wanted)) throw new Error(`unknown workflow: ${wanted}. Use \`wf list\`.`);
@@ -171,7 +218,7 @@ async function main(): Promise<number> {
     }
     case "run": {
       const def = await resolveWorkflow();
-      const args = JSON.parse(values.args!);
+      const args = jsonFlag("args", values.args!);
       const opts = { ...runOpts(), signal: cancelOnSignals() }; // SIGINT and SIGTERM cancel the run, the same as `wf cancel`
       if (values.job) {
         // Child mode of `wf start` and `start_workflow`: the parent already created the job.
@@ -189,7 +236,7 @@ async function main(): Promise<number> {
     case "start": {
       // Valida no pai, antes do spawn, para o erro aparecer aqui e não sumir num processo destacado.
       const def = await resolveWorkflow();
-      const args = JSON.parse(values.args!);
+      const args = jsonFlag("args", values.args!);
       const overrides = overridesFlag();
       const { violations } = loadEffectiveConfig(def, { cwd, flags: flagLimits(), mcpOverrides: overrides }); // an unusable config fails here, with its field path
       const { job, log } = spawnJob({ cwd, workflow: def.meta.name, args, resumeRunId: values.resume, ...flagLimits(), overrides });
@@ -197,11 +244,11 @@ async function main(): Promise<number> {
       return 0;
     }
     case "status": {
-      out(readJob(cwd, name ?? "") ?? { error: "job not found" });
+      out(readJob(cwd, name ?? "") ?? jobNotFound());
       return 0;
     }
     case "wait": {
-      out((await waitJob(cwd, name ?? "", timeoutMs())) ?? { error: "job not found" });
+      out((await waitJob(cwd, name ?? "", timeoutMs())) ?? jobNotFound());
       return 0;
     }
     case "cancel": {
@@ -209,7 +256,7 @@ async function main(): Promise<number> {
       // end. A frozen job (no heartbeat) is killed (SIGKILL): no revert, no run end, the job stays `failed`, and once its process
       // is gone its cloud agents are cancelled through the Cursor API. A job whose process already ended gets no signal: only
       // the cloud agents it left are cancelled. See `cancelJob`.
-      out((await cancelJob(cwd, name ?? "", Math.min(timeoutMs(), 30_000))) ?? { error: "job not found" });
+      out((await cancelJob(cwd, name ?? "", Math.min(timeoutMs(), 30_000))) ?? jobNotFound());
       return 0;
     }
     case "jobs": {
@@ -235,8 +282,9 @@ async function main(): Promise<number> {
     case "stats": {
       const { openDb } = await import("./observability/db.js");
       const { summary } = await import("./observability/queries.js");
+      const days = daysFlag(); // before the database is opened
       const db = await openDb();
-      const s = summary(db, Number(values.days));
+      const s = summary(db, days);
       for (const [section, rows] of Object.entries(s)) {
         process.stdout.write(`\n== ${section}\n`);
         if (rows.length) console.table(rows);
@@ -248,18 +296,21 @@ async function main(): Promise<number> {
     case "metrics": {
       const { openDb } = await import("./observability/db.js");
       const q = await import("./observability/queries.js");
+      const sub = name;
+      // The flags of `export`, checked before the database is opened and the folder is made.
+      const exportFlags = sub === "export" ? { days: daysFlag(), format: formatFlag() } : undefined;
       const db = await openDb();
       try {
-        const sub = name;
-        if (sub === "export") {
-          const rows = q.exportRows(db, Number(values.days), !values["no-anonymize"]);
+        if (exportFlags) {
+          const { days, format } = exportFlags;
+          const rows = q.exportRows(db, days, !values["no-anonymize"]);
           const { mkdirSync, writeFileSync } = await import("node:fs");
           const { join } = await import("node:path");
           const dir = resolve(values.out ?? "metrics-export");
           mkdirSync(dir, { recursive: true });
           for (const [table, data] of Object.entries(rows)) {
-            const file = join(dir, `${table}.${values.format === "json" ? "json" : "csv"}`);
-            writeFileSync(file, values.format === "json" ? JSON.stringify(data, null, 2) : q.toCsv(data));
+            const file = join(dir, `${table}.${format}`);
+            writeFileSync(file, format === "json" ? JSON.stringify(data, null, 2) : q.toCsv(data));
           }
           out({ exported: dir, anonymized: !values["no-anonymize"], counts: Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, v.length])) });
           return 0;
@@ -270,11 +321,11 @@ async function main(): Promise<number> {
         }
         if (sub === "mark") {
           const [, , runId, verdict] = positionals;
-          if (!runId || (verdict !== "accepted" && verdict !== "rejected")) throw new Error("usage: wf metrics mark <runId> accepted|rejected");
+          if (!runId || (verdict !== "accepted" && verdict !== "rejected")) throw new UsageError("usage: wf metrics mark <runId> accepted|rejected");
           out({ runId, verdict, updated: q.markRun(db, runId, verdict) });
           return 0;
         }
-        throw new Error("usage: wf metrics <export|reconcile|mark> ...");
+        throw new UsageError("usage: wf metrics <export|reconcile|mark> ...");
       } finally {
         db.close();
       }
@@ -285,10 +336,4 @@ async function main(): Promise<number> {
   }
 }
 
-main().then(
-  (code) => process.exit(code),
-  (err: unknown) => {
-    process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
-    process.exit(1);
-  },
-);
+main().then((code) => process.exit(code), exitWithError);

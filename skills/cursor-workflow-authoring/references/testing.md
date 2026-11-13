@@ -17,7 +17,7 @@ returned fields, the events. Do not assert on internal calls.
 
 ### The fake SDK
 
-Import `{ script, calls, stats, costConfig }` from `@cursor/sdk` in the test; the fake is substituted.
+Import `{ script, calls, stats, costConfig, resetCloud }` from `@cursor/sdk` in the test; the fake is substituted.
 
 - `script.push(fn)` defines what each `send()` does, in order:
   - `() => ({ result: "text" })` simulates free text;
@@ -29,7 +29,9 @@ Import `{ script, calls, stats, costConfig }` from `@cursor/sdk` in the test; th
 - `stats` counts concurrency (`active`, `maxActive`), disposals (`disposed`) and usage reads (`usageReads`).
 - `costConfig` sets what `getUsage()` reports: `raw` and `charged` cents (`raw: undefined` for a missing cost),
   `getUsageError` (for example `"feature_unavailable: ..."`), `createErrorCode` (an account without access).
-- Reset `script`, `calls`, `stats` and `costConfig` in an `afterEach`.
+- In an `afterEach`, reset every fake-SDK export the file uses: empty `script` and `calls`, zero `stats`, restore
+  `costConfig`, and call `resetCloud()` when the file runs cloud steps (it forgets the fake cloud's agents and the
+  `resumes` and `lookups` it recorded). State left by one test leaks into the next.
 
 ### Harness for flows with `ctx.parallel`, `gh` or `git`
 

@@ -59,7 +59,7 @@ As violações aparecem no `run-start` do log, como aviso no andamento do run, n
 2. o workflow declara o papel `ok` ou `read-only` em `meta.roles`. Um papel `never` na nuvem é erro de configuração, recusado antes do run (e uma etapa de papel `read-only` que pode escrever falha antes de gastar). `location` só vale em papéis: num glob de `labels` é erro;
 3. se a etapa escreve (as `tools` dela não são só de leitura), o papel não é `read-only`: a etapa que escreve roda na nuvem só num papel `ok`, e o trabalho dela volta para o worktree (veja "Etapas que escrevem").
 
-Antes da etapa o motor empurra o estado do worktree da etapa, o não commitado inclusive, como uma branch descartável `wf/cloud-snapshot/<run>/<id>` para o remote `cloud.remote` (padrão `origin`), e a apaga quando a etapa termina, de qualquer jeito que termine. O cloud agent só enxerga o que foi empurrado. **CI:** cada snapshot é um push, e uma pipeline que roda em toda branch rodaria a cada etapa. Exclua o prefixo `wf/cloud-snapshot/` (ou `wf/**`) da pipeline do remote, ou aponte `cloud.remote` para um fork. A etapa precisa de um plano da Cursor com Cloud Agents e de um code host conectado com acesso de escrita.
+Antes da etapa o motor empurra o estado do worktree da etapa, o não commitado inclusive, como uma branch descartável `wf/cloud-snapshot/<run>/<id>` para o remote `cloud.remote` (padrão `origin`), e a apaga quando a etapa termina, de qualquer jeito que termine. O cloud agent só enxerga o que foi empurrado. O remote precisa ser `https://` ou ssh (`git@host:org/repo`, `ssh://`) num host, como está em `remote.<nome>.url` (um apelido de `url.<base>.insteadOf`, como `gh:org/repo`, vale pela URL que o git põe no lugar dele): um `http://`, `git://`, `file://`, `ext::` ou caminho local falha a etapa na hora, sem novas tentativas e antes de o snapshot sair da máquina, e o mesmo vale para a URL de push (`remote.<nome>.pushurl`, `pushInsteadOf`) que usa `http://`, `git://` ou um remote helper; a credencial embutida na URL (`https://usuario:token@host/...`), a query e o fragmento (`?token=...`) são tirados antes de a URL ir para a API da Cursor. **CI:** cada snapshot é um push, e uma pipeline que roda em toda branch rodaria a cada etapa. Exclua o prefixo `wf/cloud-snapshot/` (ou `wf/**`) da pipeline do remote, ou aponte `cloud.remote` para um fork. A etapa precisa de um plano da Cursor com Cloud Agents e de um code host conectado com acesso de escrita.
 
 Uma etapa na nuvem é um subconjunto estrito de uma local: o cloud agent não recebe custom tools, allowlist de tools nem camadas de configuração (o motor avisa que as `settingSources` são ignoradas), o memo não vale, e a saída estruturada vem de um bloco `json` no fim da resposta, validado com o mesmo Ajv e corrigido por follow-ups dentro dos `schemaRetries` (ou do arquivo `result.json`, com `resultVia: "artifact"`: veja "Resultado estruturado"). Tokens e custo vêm do uso do cloud agent e entram nos mesmos tetos. O `step-start` e o `step-end` do log trazem `location`. Uma branch de snapshot que ficou para trás (o processo morreu entre o push e a exclusão, ou o remote recusou apagá-la) é varrida pelo `wf gc`, no remote `cloud.remote`: sai quando o run que a fez é deste repositório, nenhum processo o executa e o último evento dele tem mais de `gcSnapshotGraceHours` horas (padrão 24, em `workflows.implement-issue.settings`: o cloud agent que o processo morto iniciou pode ainda estar partindo da branch); senão fica, com o motivo no plano. A de um run cortado no meio da etapa dona dela fica por `gcFailedAfterDays` dias, e a de um run cancelado sem limite (o gc também mantém o run), porque um resume pode reanexar ao agente e trazer o trabalho dessa branch (o gc não pergunta à nuvem se o run do agente foi cancelado, caso em que o resume cria outro: veja "Ciclo de vida"). A que um crash deixou também é apagada pelo resume que retoma a etapa, reanexe ele ao agente ou crie outro.
 
@@ -124,7 +124,7 @@ Valida os dois arquivos de configuração do kit: o global (`~/.cursor-workflows
 | `execTimeoutMs` | `integer` | não | Tempo máximo, em milissegundos, de um comando que o workflow roda com `ctx.exec` e não passa o próprio `timeoutMs`. Passado esse tempo o comando é morto. Padrão: 600000 (10 minutos). |
 | `settings` | [Ajustes de um workflow](#ajustes-de-um-workflow) | não | Ajustes do próprio workflow, pelo nome que ele declara em `meta.settings`: o padrão está no código do workflow e só o arquivo global e o do repositório o trocam. Um nome que o workflow não declara é erro. Os ajustes que o kit distribui estão na seção de ajustes de um workflow. |
 | `roles` | objeto: nome → [Preferências de um papel ou de um glob de label](#preferências-de-um-papel-ou-de-um-glob-de-label) | não | Preferências por papel nomeado (o `meta.roles` do workflow). Um papel que o workflow não declara é erro. |
-| `labels` | objeto: nome → [Preferências de um papel ou de um glob de label](#preferências-de-um-papel-ou-de-um-glob-de-label) | não | Preferências por glob do `label` da etapa (`*` e `?`), só para etapas sem papel. Vale o glob com mais caracteres literais; empate vai para o primeiro. |
+| `labels` | objeto: nome → [Preferências de um papel ou de um glob de label](#preferências-de-um-papel-ou-de-um-glob-de-label) | não | Preferências por glob do `label` da etapa (`*` e `?`), só para etapas sem papel. Vale o glob com mais caracteres literais; empate vai para o primeiro. Toda etapa dos workflows do kit (`implement-issue`, `smoke`) tem papel, então nelas um glob de `labels` não casa com nada: configure-as por `roles`. `labels` serve às etapas sem papel de um workflow do repositório. |
 
 ## Ajustes de um workflow
 
@@ -160,7 +160,7 @@ Os campos abaixo são os ajustes do `implement-issue`, validados pelo esquema. U
 | `resultVia` | `"json-block" \| "artifact"` | não | Como uma etapa do papel que roda na nuvem entrega o resultado estruturado. Padrão: `json-block`, o último bloco de código `json` da resposta final do agente. `artifact` pede ao agente que salve o resultado no arquivo `result.json` dos artefatos dele, e o motor o baixa depois do run; serve quando ler o resultado do texto se mostra pouco confiável. Nos dois casos o resultado é validado contra o schema da etapa, com follow-ups dentro de `schemaRetries`. Só vale em papéis, não em globs de `labels`, e só em etapas na nuvem: no local o resultado vem de uma tool. |
 | `model` | [Modelo](#modelo) | não | Modelo da etapa, campo a campo: o que não aparece herda da camada de baixo. |
 | `timeoutMs` | `integer` | não | Tempo máximo da etapa, em milissegundos. |
-| `retries` | `integer` | não | Tentativas extras quando a etapa termina em erro. |
+| `retries` | `integer` | não | Tentativas extras quando a etapa termina em erro. Um erro de configuração ou de autenticação que o SDK marca como não repetível (id de modelo inválido, chave inválida) falha a etapa na hora. |
 | `schemaRetries` | `integer` | não | Re-prompts quando o agente não entrega o JSON do schema. |
 | `maxTokensPerStep` | `integer \| null` | não | Teto de tokens desta etapa. Ausente: herda o do workflow. O teto global `maxTokensPerStep` vale sempre. |
 | `settingSources` | `array de "project" \| "user" \| "team" \| "mdm" \| "plugins" \| "all"` | não | Camadas de configuração que a etapa carrega. A interseção com `caps.allowedSettingSources` é o que vale. |
@@ -230,10 +230,8 @@ Os campos abaixo são os ajustes do `implement-issue`, validados pelo esquema. U
         },
         "implement.low": {
           "retries": 0
-        }
-      },
-      "labels": {
-        "desenhar:*": {
+        },
+        "design": {
           "maxTokensPerStep": 150000
         }
       }

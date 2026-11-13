@@ -86,14 +86,13 @@ test("a recorded worktree path that is not a worktree (an interrupted `git workt
   assert.equal(git(fx.repo, "status", "--porcelain").trim(), "", "and no change in its files");
 });
 
-test("run ids that a branch name cannot hold still get a branch each, and two such ids never get the same one", async () => {
+test("a run id that a branch name cannot hold is refused before the run makes a branch; a plain one gets a valid branch", async () => {
   issue(["complexity:low"]);
-  const a = await run({}, "release 1.0");
-  const b = await run({}, "release-1-0"); // what the first id looks like once cleaned
-  assert.equal(res(a).status, "done", JSON.stringify(res(a)));
+  await assert.rejects(run({}, "release 1.0"), /invalid runId/); // run ids are plain names: it would also name the run's folder
+  assert.equal(git(fx.repo, "branch", "--list", "wf/*release*").trim(), "");
+  const b = await run({}, "release-1-0");
   assert.equal(res(b).status, "done", JSON.stringify(res(b)));
-  assert.notEqual(res(a).branch, res(b).branch);
-  for (const branch of [res(a).branch, res(b).branch]) git(fx.repo, "check-ref-format", "--branch", branch);
+  git(fx.repo, "check-ref-format", "--branch", res(b).branch);
 });
 
 // ── One active run per issue ──────────────────────────────────────────────────────────
@@ -105,7 +104,7 @@ test("a second run on an issue that has an active run is refused with that run's
   let reached!: () => void;
   const atCodeStep = new Promise<void>((resolve) => (reached = resolve));
   let held = false;
-  fx.handlers["codigo-1"] = async (o) => {
+  fx.handlers["code-1"] = async (o) => {
     if (!held) {
       held = true;
       reached();
@@ -140,7 +139,7 @@ test("the lock is on the issue of one repository: issue #7 of another --repo is 
   let reached!: () => void;
   const atCodeStep = new Promise<void>((resolve) => (reached = resolve));
   let held = false;
-  fx.handlers["codigo-1"] = async (o) => {
+  fx.handlers["code-1"] = async (o) => {
     if (!held) {
       held = true;
       reached();
@@ -196,7 +195,7 @@ async function whileActive(active: Record<string, unknown>, others: Array<[Recor
   let reached!: () => void;
   const atCodeStep = new Promise<void>((resolve) => (reached = resolve));
   let held = false;
-  fx.handlers["codigo-1"] = async (o) => {
+  fx.handlers["code-1"] = async (o) => {
     if (!held) {
       held = true;
       reached();

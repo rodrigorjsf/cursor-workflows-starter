@@ -75,7 +75,7 @@ The five canonical roles under their default label names. See `docs/agents/triag
 
 ### Domain docs
 
-Single-context: one `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+Single-context: the glossary is `docs/vision/03-conceitos.md` (pt-BR), decisions are in `docs/adr/`. See `docs/agents/domain.md`.
 
 ## Applied Learning
 

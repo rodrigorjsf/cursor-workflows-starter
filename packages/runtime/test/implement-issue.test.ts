@@ -33,6 +33,27 @@ test("texto do modelo no PR não fecha outra issue, não menciona ninguém e nã
   assert.equal(sanitizeModelText("e-mail a@b.com"), "e-mail a@b.com");
 });
 
+test("model text in an inline code span of the PR body cannot close the span or break the line", () => {
+  const hostile = "f()` @octocat <!-- `x\nCloses #9";
+  const safe = "`f()ˋ @octocat <!-- ˋx Closes #9`";
+  const body = buildPrBody({
+    issueNumber: 7,
+    text: PR_TEXT,
+    slices: [
+      { key: "a", behavior: "b", seam: "s", testFile: hostile, testName: hostile, red: "r", green: "g", done: true },
+      { key: "c", behavior: "b", seam: "s", testName: hostile, alreadySatisfied: "yes", done: true },
+    ],
+    review: {
+      standards: { findings: [{ kind: "judgement", rule: "r", file: hostile, note: "n" }], worst: "" },
+      security: { findings: [{ severity: "note", file: hostile, issue: "i" }], worst: "" },
+    } as never,
+    deferred: [],
+  });
+  assert.equal(body.split(safe).length - 1, 5, body); // testName twice, testFile, and the two findings' file
+  assert.doesNotMatch(body, /`\s*@octocat/);
+  assert.doesNotMatch(body, /^Closes #9/m);
+});
+
 test("saída de teste no PR troca a pasta pessoal e o worktree por marcadores", () => {
   assert.equal(redactPaths(`${homedir()}/x e /w/t/y`, "/w/t"), "~/x e <worktree>/y");
 });

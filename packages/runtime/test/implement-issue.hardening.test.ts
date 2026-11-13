@@ -43,7 +43,7 @@ const missing = (behavior: string) => ({
 
 test("green que move o teste red para fora dos globs é desfeito: tdd-violation, nada no origin", async () => {
   issue(["complexity:low"]);
-  fx.handlers["codigo-1"] = (o) => {
+  fx.handlers["code-1"] = (o) => {
     mkdirSync(join(o.local.cwd, "docs"), { recursive: true });
     writeFileSync(join(o.local.cwd, "docs", "sub.js"), readFileSync(join(o.local.cwd, "test", "sub.test.js")));
     rmSync(join(o.local.cwd, "test", "sub.test.js"));
@@ -56,7 +56,7 @@ test("green que move o teste red para fora dos globs é desfeito: tdd-violation,
 
 test("green que reconfigura o runner (scripts do package.json) é desfeito: tdd-violation", async () => {
   issue(["complexity:low"]);
-  fx.handlers["codigo-1"] = (o) => {
+  fx.handlers["code-1"] = (o) => {
     write(o, "package.json", '{ "name": "fx", "type": "module", "scripts": { "test": "node --test test/math.test.js" } }\n');
     submit(o, { summary: "só o teste antigo roda", filesChanged: ["package.json"] });
   };
@@ -66,7 +66,7 @@ test("green que reconfigura o runner (scripts do package.json) é desfeito: tdd-
 
 test("green que marca o teste com skip-worktree e o enfraquece é desfeito: tdd-violation", async () => {
   issue(["complexity:low"]);
-  fx.handlers["codigo-1"] = (o) => {
+  fx.handlers["code-1"] = (o) => {
     git(o.local.cwd, "update-index", "--skip-worktree", "test/sub.test.js");
     write(o, "test/sub.test.js", weakTest);
     submit(o, { summary: "x", filesChanged: [] });
@@ -77,7 +77,7 @@ test("green que marca o teste com skip-worktree e o enfraquece é desfeito: tdd-
 
 test("red que apaga um teste existente é desfeito: tdd-violation", async () => {
   issue(["complexity:low"]);
-  fx.handlers["teste-1"] = (o) => {
+  fx.handlers["test-1"] = (o) => {
     rmSync(join(o.local.cwd, "test", "math.test.js"));
     write(o, "test/sub.test.js", SUB_TEST);
     submit(o, { testFile: "test/sub.test.js", testName: "subtract" });
@@ -85,16 +85,16 @@ test("red que apaga um teste existente é desfeito: tdd-violation", async () => 
   const r = await run({});
   assert.equal(res(r).status, "tdd-violation", JSON.stringify(res(r)));
   assert.match(res(r).reason ?? "", /deleted tests/, "o resultado diz por que violou");
-  assert.ok(!names().includes("codigo-1"));
+  assert.ok(!names().includes("code-1"));
 });
 
 test("red pode atualizar o teste que fixa o comportamento antigo; green implementa e o run entrega", async () => {
   issue(["complexity:low"], "add passa a aceitar um terceiro número");
-  fx.handlers["teste-1"] = (o) => {
+  fx.handlers["test-1"] = (o) => {
     write(o, "test/math.test.js", 'import assert from "node:assert/strict";\nimport { test } from "node:test";\nimport { add } from "../src/math.js";\n\ntest("add", () => {\n  assert.equal(add(2, 3, 4), 9);\n});\n');
     submit(o, { testFile: "test/math.test.js", testName: "add" });
   };
-  fx.handlers["codigo-1"] = (o) => {
+  fx.handlers["code-1"] = (o) => {
     write(o, "src/math.js", "export function add(a, b, c = 0) {\n  return a + b + c;\n}\n");
     submit(o, { summary: "terceiro parâmetro", filesChanged: ["src/math.js"] });
   };
@@ -106,14 +106,14 @@ test("achado 'missing' de algo que já existe: o teste passa, a etapa confirma e
   issue(["complexity:low"]);
   let specRound = 0;
   fx.handlers["review:spec"] = (o) => submit(o, ++specRound === 1 ? missing("add soma") : CLEAN_REVIEW);
-  fx.handlers["teste-extra-1"] = (o) => {
+  fx.handlers["test-extra-1"] = (o) => {
     write(o, "test/add2.test.js", 'import assert from "node:assert/strict";\nimport { test } from "node:test";\nimport { add } from "../src/math.js";\n\ntest("add de novo", () => {\n  assert.equal(add(1, 1), 2);\n});\n');
     submit(o, { testFile: "test/add2.test.js", testName: "add de novo", alreadySatisfied: true, evidence: "src/math.js já exporta add" });
   };
   const r = await run({ openPr: true });
   assert.equal(res(r).status, "done", JSON.stringify(res(r)));
-  assert.ok(!names().includes("codigo-extra-1"));
-  assert.match(gh().prs[0]!.body, /refutado por teste/);
+  assert.ok(!names().includes("code-extra-1"));
+  assert.match(gh().prs[0]!.body, /refuted by a test/);
 });
 
 // ── Resume e idempotência ─────────────────────────────────────────────────────────────
@@ -123,7 +123,7 @@ test("refactor que quebra a suíte é desfeito; o resume não entrega suíte ver
   let stdRound = 0;
   fx.handlers["review:standards"] = (o) =>
     submit(o, ++stdRound === 1 ? { findings: [{ file: "src/math.js", rule: "Mysterious Name", kind: "hard", note: "nome" }], worst: "nome" } : CLEAN_REVIEW);
-  fx.handlers["refatorar-1"] = (o) => {
+  fx.handlers["refactor-1"] = (o) => {
     write(o, "src/math.js", SUB_CODE.replace("a - b", "a + b"));
     submit(o, { summary: "quebrou", filesChanged: ["src/math.js"] });
   };
@@ -131,7 +131,7 @@ test("refactor que quebra a suíte é desfeito; o resume não entrega suíte ver
   assert.equal(res(first).status, "tests-failed-after-review");
   assert.ok(suitePasses(worktreeOf(first.runId)), "o worktree volta ao último estado verde");
 
-  fx.handlers["refatorar-1"] = (o) => submit(o, { summary: "nada a mudar", filesChanged: [] });
+  fx.handlers["refactor-1"] = (o) => submit(o, { summary: "nada a mudar", filesChanged: [] });
   const second = await run({}, first.runId);
   assert.equal(res(second).status, "done", JSON.stringify(res(second)));
   assert.ok(suitePasses(worktreeOf(first.runId)));
@@ -139,15 +139,15 @@ test("refactor que quebra a suíte é desfeito; o resume não entrega suíte ver
 
 test("etapa que falha no meio é desfeita: o resume não herda um teste enfraquecido", async () => {
   issue(["complexity:low"]);
-  fx.handlers["codigo-1"] = (o) => {
+  fx.handlers["code-1"] = (o) => {
     write(o, "test/sub.test.js", weakTest);
     return { status: "error", error: { message: "queda simulada" } };
   };
   const first = await run({});
   assert.equal(first.status, "failed");
 
-  fx.handlers["codigo-1"] = (o) => submit(o, { summary: "nada", filesChanged: [] });
-  fx.handlers["corrigir-1-1"] = (o) => {
+  fx.handlers["code-1"] = (o) => submit(o, { summary: "nada", filesChanged: [] });
+  fx.handlers["fix-1-1"] = (o) => {
     write(o, "src/math.js", SUB_CODE);
     submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
   };
@@ -159,7 +159,7 @@ test("etapa que falha no meio é desfeita: o resume não herda um teste enfraque
 
 test("queda do processo durante uma etapa: o resume volta ao snapshot de antes dela", async () => {
   issue(["complexity:low"]);
-  fx.handlers["codigo-1"] = () => ({ status: "error", error: { message: "queda simulada" } });
+  fx.handlers["code-1"] = () => ({ status: "error", error: { message: "queda simulada" } });
   const first = await run({});
   assert.equal(first.status, "failed");
   // O processo "morre" no meio da etapa: o progresso diz que ela está em andamento e o worktree ficou sujo.
@@ -170,7 +170,7 @@ test("queda do processo durante uma etapa: o resume volta ao snapshot de antes d
   writeFileSync(file, JSON.stringify(p));
   writeFileSync(join(worktreeOf(first.runId), "test", "sub.test.js"), weakTest);
 
-  fx.handlers["codigo-1"] = (o) => {
+  fx.handlers["code-1"] = (o) => {
     write(o, "src/math.js", SUB_CODE);
     submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
   };
@@ -183,11 +183,11 @@ test("resume depois de done com fatia extra não pede review novo", async () => 
   issue(["complexity:low"]);
   let specRound = 0;
   fx.handlers["review:spec"] = (o) => submit(o, ++specRound === 1 ? missing("subtractAll") : CLEAN_REVIEW);
-  fx.handlers["teste-extra-1"] = (o) => {
+  fx.handlers["test-extra-1"] = (o) => {
     write(o, "test/all.test.js", ALL_TEST);
     submit(o, { testFile: "test/all.test.js", testName: "subtractAll" });
   };
-  fx.handlers["codigo-extra-1"] = (o) => {
+  fx.handlers["code-extra-1"] = (o) => {
     write(o, "src/math.js", ALL_CODE);
     submit(o, { summary: "subtractAll", filesChanged: ["src/math.js"] });
   };
@@ -206,11 +206,11 @@ test("approveSeams executa o plano mostrado na issue, mesmo com o repositório m
   writeFileSync(join(fx.repo, "GLOSSARY.md"), "# Glossário\n");
   git(fx.repo, "add", "-A");
   git(fx.repo, "commit", "-qm", "glossário");
-  fx.handlers.planejar = (o) => submit(o, { ...PLAN, slices: [{ behavior: "outra coisa", seam: "math.subtract", testIdea: "x" }] });
+  fx.handlers.plan = (o) => submit(o, { ...PLAN, slices: [{ behavior: "outra coisa", seam: "math.subtract", testIdea: "x" }] });
 
   const second = await run({ approveSeams: true }, first.runId);
   assert.equal(res(second).status, "done", JSON.stringify(res(second)));
-  assert.equal(names().filter((n) => n === "planejar").length, 1, "o plano aprovado não é recalculado");
+  assert.equal(names().filter((n) => n === "plan").length, 1, "o plano aprovado não é recalculado");
 });
 
 test("resume com o worktree removido mantém os commits da branch", async () => {
@@ -236,7 +236,7 @@ test("comando de relançamento postado na issue sobrevive a aspas simples nos ar
 
 test("commit feito por agente não escapa da trava de segredos nem chega ao origin", async () => {
   issue(["complexity:low"]);
-  fx.handlers["codigo-1"] = (o) => {
+  fx.handlers["code-1"] = (o) => {
     write(o, "src/math.js", SUB_CODE);
     write(o, "auth.json", JSON.stringify({ apiKey: FAKE_KEY }));
     git(o.local.cwd, "add", "-A");
@@ -258,6 +258,9 @@ const SECRET_CASES: Array<[string, string, RegExp]> = [
   ["src/a.js", `const k = "${FAKE_KEY}";\n`, /crsr_/],
   ["src/b.js", `const k = "sk-${"b".repeat(30)}";\n`, /sk-/],
   ["src/c.js", `const k = '${SAVED_KEY}';\n`, /saved SDK key/],
+  // The other credential formats the event-log redactor knows block too (one source of truth in redaction.ts).
+  ["src/d.js", `const k = "ghp_${"d".repeat(36)}";\n`, /GitHub/],
+  ["src/e.js", `const k = "AKIA${"E".repeat(16)}";\n`, /AWS/],
 ];
 for (const [file, content, rule] of SECRET_CASES) {
   test(`trava de segredos: ${file} bloqueia a entrega sem repetir o segredo`, async () => {
@@ -265,7 +268,7 @@ for (const [file, content, rule] of SECRET_CASES) {
     process.env.CURSOR_API_KEY = SAVED_KEY;
     try {
       issue(["complexity:low"]);
-      fx.handlers["codigo-1"] = (o) => {
+      fx.handlers["code-1"] = (o) => {
         write(o, "src/math.js", SUB_CODE);
         write(o, file, content);
         submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
@@ -283,22 +286,78 @@ for (const [file, content, rule] of SECRET_CASES) {
   });
 }
 
+// A step's result is redacted by the engine before the workflow gets it, so a key the model wrote reaches neither the
+// comment nor the PR; the guard on those texts stays as a second layer.
 test("segredo no plano não vai para o comentário de seams", async () => {
   issue(["complexity:medium"]);
-  fx.handlers.planejar = (o) => submit(o, { ...PLAN, seams: [{ ...PLAN.seams[0], why: `use a chave ${FAKE_KEY}` }] });
+  fx.handlers.plan = (o) => submit(o, { ...PLAN, seams: [{ ...PLAN.seams[0], why: `use a chave ${FAKE_KEY}` }] });
   const r = await run({});
-  assert.equal(res(r).status, "secret-blocked");
-  assert.equal(gh().comments.length, 0);
+  assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
+  assert.match(gh().comments[0]!, /use a chave \[REDACTED\]/);
+  assert.ok(!JSON.stringify(gh()).includes(FAKE_KEY));
   assert.ok(!JSON.stringify(res(r)).includes(FAKE_KEY));
 });
 
-test("segredo no texto do PR bloqueia a entrega antes do push", async () => {
+test("model text in the seams comment closes no other issue, mentions no one and opens no HTML comment", async () => {
+  issue(["complexity:medium"]);
+  const hostile = (what: string) => `${what}: Fixes #12, cc @octocat <!-- hide`;
+  fx.handlers.plan = (o) =>
+    submit(o, {
+      ...PLAN,
+      seams: [{ ...PLAN.seams[0], name: hostile("name"), why: hostile("why") }],
+      slices: [{ behavior: hostile("behavior"), seam: hostile("seam"), testIdea: hostile("testIdea") }],
+      rationale: hostile("rationale"),
+    });
+  const r = await run({});
+  assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
+  const comment = gh().comments[0]!;
+  for (const what of ["name", "why", "behavior", "seam", "testIdea", "rationale"]) assert.match(comment, new RegExp(`${what}: Fixes \`#12\``), what);
+  assert.doesNotMatch(comment, /Fixes #12/);
+  assert.doesNotMatch(comment, /(^|[^\w`])@octocat/);
+  assert.doesNotMatch(comment, /<!-- hide/); // the comment's own marker is the only HTML comment left
+});
+
+test("model text in an inline code span of the seams comment cannot close the span", async () => {
+  issue(["complexity:medium"]);
+  const hostile = "f()` @octocat <!-- `x";
+  fx.handlers.plan = (o) => submit(o, { ...PLAN, seams: [{ ...PLAN.seams[0], interface: hostile }], testCommand: `npm test${hostile}` });
+  const r = await run({ testCommand: undefined }); // the plan's test command, the model's text, goes in the comment
+  assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
+  const comment = gh().comments[0]!;
+  assert.ok(comment.includes("`f()ˋ @octocat <!-- ˋx`"), comment);
+  assert.ok(comment.includes("Test command: `npm testf()ˋ @octocat <!-- ˋx`"), comment);
+  assert.doesNotMatch(comment, /`\s*@octocat/);
+});
+
+// A step result keeps the redact-only shapes (a URL password, Bearer, JWT) so the workflow can run them; what goes to GitHub
+// is redacted with every format all the same.
+test("a redact-only credential in the plan runs in the test command but reaches neither the seams comment nor the PR", async () => {
+  issue(["complexity:medium"]);
+  const seen = join(fx.root, "db-url.txt");
+  const testCommand = `DATABASE_URL=postgres://u:pw1234567890@localhost/db bash -c 'printf %s "$DATABASE_URL" > ${seen}; node --test'`;
+  fx.handlers.plan = (o) => submit(o, { ...PLAN, seams: [{ ...PLAN.seams[0], why: "send Authorization: Bearer abcdefghijklmnop1234" }], testCommand });
+  const jwt = "eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.c2lnbmF0dXJlMTIz";
+  fx.handlers["pr-text"] = (o) => submit(o, { summary: `token ${jwt}`, door: "two-way", blastRadius: "local" });
+  const first = await run({ testCommand: undefined });
+  assert.equal(res(first).status, "seams-proposed", JSON.stringify(res(first)));
+  const comment = gh().comments[0]!;
+  assert.ok(comment.includes("postgres://u:[REDACTED]@localhost/db"), comment);
+  assert.ok(comment.includes("Bearer [REDACTED]"), comment);
+
+  const second = await run({ testCommand: undefined, approveSeams: true, openPr: true }, first.runId);
+  assert.equal(res(second).status, "done", JSON.stringify(res(second)));
+  assert.equal(readFileSync(seen, "utf8"), "postgres://u:pw1234567890@localhost/db", "the suite ran with the real value");
+  assert.match(gh().prs[0]!.body, /token \[REDACTED\]/);
+  for (const shown of ["pw1234567890", "abcdefghijklmnop1234", jwt]) assert.ok(!JSON.stringify(gh()).includes(shown), `GitHub got ${shown}`);
+});
+
+test("segredo no texto do PR não chega ao PR", async () => {
   issue(["complexity:low"]);
-  fx.handlers["pr-texto"] = (o) => submit(o, { summary: `chave: ${FAKE_KEY}`, door: "two-way", blastRadius: "local" });
+  fx.handlers["pr-text"] = (o) => submit(o, { summary: `chave: ${FAKE_KEY}`, door: "two-way", blastRadius: "local" });
   const r = await run({ openPr: true });
-  assert.equal(res(r).status, "secret-blocked");
-  assert.equal(gh().prs.length, 0);
-  assert.ok(!onOrigin());
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  assert.match(gh().prs[0]!.body, /chave: \[REDACTED\]/);
+  assert.ok(!JSON.stringify(gh()).includes(FAKE_KEY));
 });
 
 test("a evidência do PR não leva caminhos locais", async () => {
@@ -312,6 +371,6 @@ test("approveSeams sem plano proposto neste run (outro runId ou outro --cwd) nã
   issue(["complexity:medium"]);
   const r = await run({ approveSeams: true });
   assert.equal(res(r).status, "seams-not-proposed", JSON.stringify(res(r)));
-  assert.ok(!names().includes("planejar"));
+  assert.ok(!names().includes("plan"));
   assert.equal(gh().comments.length, 0);
 });

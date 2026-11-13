@@ -115,13 +115,13 @@ export const CLEAN_REVIEW = { findings: [], worst: "" };
 
 function defaults(): Record<string, Handler> {
   return {
-    "teste-1": (o) => { write(o, "test/sub.test.js", SUB_TEST); submit(o, { testFile: "test/sub.test.js", testName: "subtract" }); },
-    "codigo-1": (o) => { write(o, "src/math.js", SUB_CODE); submit(o, { summary: "subtract exportado", filesChanged: ["src/math.js"] }); },
-    planejar: (o) => submit(o, PLAN),
+    "test-1": (o) => { write(o, "test/sub.test.js", SUB_TEST); submit(o, { testFile: "test/sub.test.js", testName: "subtract" }); },
+    "code-1": (o) => { write(o, "src/math.js", SUB_CODE); submit(o, { summary: "subtract exportado", filesChanged: ["src/math.js"] }); },
+    plan: (o) => submit(o, PLAN),
     "review:standards": (o) => submit(o, CLEAN_REVIEW),
     "review:spec": (o) => submit(o, CLEAN_REVIEW),
     "review:security": (o) => submit(o, CLEAN_REVIEW),
-    "pr-texto": (o) => submit(o, { summary: "```diff\n+export function subtract(a, b)\n```", door: "two-way", blastRadius: "local" }),
+    "pr-text": (o) => submit(o, { summary: "```diff\n+export function subtract(a, b)\n```", door: "two-way", blastRadius: "local" }),
   };
 }
 const dispatcher = (o: any, msg: string) => {

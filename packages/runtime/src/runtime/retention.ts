@@ -4,6 +4,10 @@
 // the log stays, so the history of runs (what ran, how long, what it cost) is never lost.
 //
 // Pruning runs when a run starts, for the other runs of the same repo.
+//
+// A job's log (`.workflows/jobs/<jobId>.log`) needs no pruning: it is the job process's stdout and stderr, and `wf run`
+// copies there only what reaches `onEvent`. Content events never do (the engine appends them to the event log alone), so
+// a job log holds the run's other events, which the event log keeps too. `test/job-log-content.process.test.ts` pins it.
 
 import { readFileSync, readdirSync, statSync, utimesSync } from "node:fs";
 import { join } from "node:path";

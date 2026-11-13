@@ -53,16 +53,16 @@
 // Custo por etapa (passo 4 da /skill-to-workflow). "[]" = settingSources vazio: sem AGENTS.md, regras, hooks, MCP e
 // sem as skills que o SDK carrega com qualquer outra camada (medido: 58).
 //   etapa            modelo                 tools                    settingSources   memo
-//   classificar      composer-2.5           nenhuma                  []               sim
-//   planejar (MED)   grok-4.7               só leitura               []               sim
-//   desenhar ×3      composer-2.5           só leitura               []               sim
-//   julgar (HIGH)    grok-4.7 high          só leitura               []               sim
-//   teste-N          do tier                todas                    default          não
-//   codigo-N         do tier                todas                    default          não
-//   corrigir-N-R     tier acima             todas                    default          não
+//   classify         composer-2.5           nenhuma                  []               sim
+//   plan (MED)       grok-4.7               só leitura               []               sim
+//   design ×3        composer-2.5           só leitura               []               sim
+//   judge (HIGH)     grok-4.7 high          só leitura               []               sim
+//   test-N           do tier                todas                    default          não
+//   code-N           do tier                todas                    default          não
+//   fix-N-R          tier acima             todas                    default          não
 //   review ×3        grok-4.7 high          só leitura, sem shell    []               sim (o diff e a rodada no prompt)
-//   refatorar-1      do tier                todas                    default          não
-//   pr-texto         composer-2.5           só leitura, sem shell    []               sim
+//   refactor-1       do tier                todas                    default          não
+//   pr-text          composer-2.5           só leitura, sem shell    []               sim
 // Exceção ao checklist (docs/operating/02-custos-e-cache.md §6): as etapas que escrevem ficam com todas as tools, "task" inclusive, e o default
 // do engine (project, team, mdm). A allowlist de escrita do SDK ainda não foi medida, e os hooks do time e do MDM
 // têm de valer onde o agente escreve.
@@ -90,9 +90,10 @@ import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import { wasKilledByCancel } from "../src/runtime/job-state.js";
+import { createRedactor, findCredential, findSecretEnvValue } from "../src/runtime/redaction.js";
 import { NamedLockedError, acquireNamedLock, eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { defineWorkflow, type AgentCallOptions, type WorkflowCard } from "../src/runtime/workflow.js";
-import { buildPrBody, type PrText } from "./implement-issue/pr-body.js";
+import { buildPrBody, inlineCode, sanitizeModelText, type PrText } from "./implement-issue/pr-body.js";
 import { CommandError, Commands, NETWORK_TIMEOUT_SEC, SNAPSHOT_GRACE_HOURS, WORKFLOW_BRANCH_PREFIX, worktreeOf } from "./implement-issue/commands.js";
 import * as P from "./implement-issue/prompts.js";
 import { AXES, AXIS_SCHEMAS, blockingAxes, blockingOf, type Axis, type ReviewReports } from "./implement-issue/review.js";
@@ -327,13 +328,11 @@ function executionsOf(cwd: string, runId: string): Array<{ jobId?: string; ended
 const issueBranch = (issue: number) => `${WORKFLOW_BRANCH_PREFIX}issue-${issue}`;
 
 /**
- * The branch of a run: one per run, named after the issue and the run id, so two runs on an issue never share one. A run id
- * with characters a branch name cannot hold is cleaned, and a short hash of the whole id keeps two such ids apart.
+ * The branch of a run: one per run, named after the issue and the run id, so two runs on an issue never share one. The engine
+ * accepts only plain run ids (letters, digits, `_` and `-`), so the id goes into the branch name as it is.
  */
 function runBranch(issue: number, runId: string): string {
-  const id = runId.replace(/^implement-issue-/, "");
-  const clean = id.replace(/[^\w-]+/g, "-");
-  return `${issueBranch(issue)}-${clean === id ? clean : `${clean}-${createHash("sha256").update(runId).digest("hex").slice(0, 6)}`}`;
+  return `${issueBranch(issue)}-${runId.replace(/^implement-issue-/, "")}`;
 }
 
 /** Is `dir` the root of a worktree, and not a directory inside some other repository (where git would act on that repository)? */
@@ -421,12 +420,17 @@ async function diffSinceBase(cmd: Commands, cwd: string, base: string, maxChars:
   return `(diff truncated: read the files for the rest)\n\n${stat}\n\n\`\`\`diff\n${diff.slice(0, maxChars)}\n\`\`\``;
 }
 
-/** Regras de segredo para qualquer texto que vai sair da máquina. Devolve a regra que disparou, nunca o trecho. */
-export function findSecretInText(text: string, knownSecrets: string[] = savedSecrets()): string | undefined {
-  if (/crsr_[A-Za-z0-9_-]{16,}/.test(text)) return "Cursor key (crsr_)";
-  if (/\bsk-[A-Za-z0-9_-]{20,}/.test(text)) return "sk- key";
+/**
+ * Regras de segredo para qualquer texto que vai sair da máquina. Devolve a regra que disparou, nunca o trecho.
+ * The credential formats are the event-log redactor's (redaction.ts, one list for both), plus the saved Cursor key and the
+ * value of every secret-named environment variable (16 characters or more) of `env`.
+ */
+export function findSecretInText(text: string, knownSecrets: string[] = savedSecrets(), env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const format = findCredential(text);
+  if (format) return format;
   if (knownSecrets.some((k) => k.length >= 16 && text.includes(k))) return "the saved SDK key or CURSOR_API_KEY";
-  return undefined;
+  const variable = findSecretEnvValue(text, env, 16);
+  return variable ? `the value of the secret-named environment variable ${variable}` : undefined;
 }
 
 /**
@@ -551,7 +555,7 @@ export default defineWorkflow<Args>({
       let tier = labelTier;
       if (!tier) {
         const c = await ctx.agent<{ tier: Tier; reason: string }>(`${CLASSIFY_INSTRUCTIONS}\n\n${issueBlock(issue)}`, {
-          label: "classificar",
+          label: "classify",
           role: "classify", // the role's settingSources is []: no AGENTS.md, hooks, MCP or the skills any other layer loads (measured)
           tools: [], // só texto: classificar não precisa ler o repositório
           memo: true,
@@ -593,7 +597,7 @@ export default defineWorkflow<Args>({
         const planData = `${issueBlock(issue)}\n\n${capBlock}\n\n${contextBlock}${approved ? `\n\n${approved}` : ""}`;
         if (tier === "MED") {
           plan = await ctx.agent<Plan>(`${P.PLAN_INSTRUCTIONS}\n\n${planData}`, {
-            label: "planejar",
+            label: "plan",
             role: "design",
             model: GROK,
             tools: READ_ONLY,
@@ -601,11 +605,11 @@ export default defineWorkflow<Args>({
             memo: true,
           });
         } else {
-          const kinds = ["minima", "flexivel", "comum"] as const;
+          const kinds = ["minimal", "flexible", "common"] as const;
           const designs = await ctx.parallel(
             kinds.map((k) => () =>
               ctx.agent<Record<string, string>>(`${P.DESIGN_INSTRUCTIONS}\n\n## Constraint\n${P.DESIGN_CONSTRAINTS[k]}\n\n${issueBlock(issue)}\n\n${contextBlock}`, {
-                label: `desenhar:${k}`,
+                label: `design:${k}`,
                 phase: "Plan",
                 role: "design",
                 model: COMPOSER,
@@ -618,7 +622,7 @@ export default defineWorkflow<Args>({
           const done = designs.flatMap((d, i) => (d ? [{ constraint: kinds[i], ...d }] : []));
           if (done.length < 2) return { ...base, status: "design-failed", designs: done.length };
           plan = await ctx.agent<Plan>(`${P.JUDGE_INSTRUCTIONS}\n\n${planData}\n\n## Designs\n${JSON.stringify(done, null, 2)}`, {
-            label: "julgar",
+            label: "judge",
             role: "design",
             model: GROK_HIGH,
             tools: READ_ONLY,
@@ -631,23 +635,30 @@ export default defineWorkflow<Args>({
           progress.data.proposedPlan = plan;
           progress.save();
           const relaunch = `npm run wf -- run implement-issue --args ${shellQuote(JSON.stringify({ ...ctx.args, approveSeams: true }))} --resume ${ctx.runId}`;
-          const comment = [
+          // Model text goes to a public issue: neutralized like the PR body's (closing keywords, mentions, `<!--`). The
+          // interface and the test command sit in inline code spans, where GitHub gives them no effect only while the span
+          // holds: inlineCode turns their backticks and line breaks into characters that cannot close it.
+          const prose = sanitizeModelText;
+          // Redacted with every credential format: a step result keeps the redact-only ones (a URL password in the test
+          // command, a `Bearer` header) for the workflow to run, but a public comment gets none of them.
+          const redactOutbound = createRedactor({ extra: savedSecrets() }).text;
+          const comment = redactOutbound([
             SEAMS_MARKER,
             `## Seams proposed by the \`implement-issue\` workflow (tier ${tier})`,
             "",
-            ...plan.seams.map((s) => `- **${s.name}**: \`${s.interface}\` — ${s.why}`),
+            ...plan.seams.map((s) => `- **${prose(s.name)}**: ${inlineCode(s.interface)} — ${prose(s.why)}`),
             "",
             "### Slices (one per red → green cycle)",
             "",
             ...plan.slices.map(
-              (s, i) => `${i + 1}. ${s.behavior} (seam: ${s.seam}; test: ${s.testIdea})${i >= sliceCap ? " (deferred)" : ""}`,
+              (s, i) => `${i + 1}. ${prose(s.behavior)} (seam: ${prose(s.seam)}; test: ${prose(s.testIdea)})${i >= sliceCap ? " (deferred)" : ""}`,
             ),
             ...(plan.slices.length > sliceCap
               ? ["", `The slices marked deferred are left out by the tier ${tier} slice cap (${sliceCap} slices): the PR only references the issue, without closing it.`]
               : []),
             "",
-            `Test command: \`${ctx.args.testCommand ?? plan.testCommand}\``,
-            ...(plan.rationale ? ["", `### Why this design\n\n${plan.rationale}`] : []),
+            `Test command: ${inlineCode(ctx.args.testCommand ?? plan.testCommand)}`,
+            ...(plan.rationale ? ["", `### Why this design\n\n${prose(plan.rationale)}`] : []),
             "",
             "### To approve",
             "",
@@ -658,7 +669,7 @@ export default defineWorkflow<Args>({
             "```",
             "",
             `In the chat: \`/run-workflow implement-issue\` with \`resumeRunId: "${ctx.runId}"\` and \`approveSeams: true\`. To change the seams, pass \`seams: [...]\` instead of \`approveSeams\`.`,
-          ].join("\n");
+          ].join("\n"));
           const leak = findSecretInText(comment);
           if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the seams comment` };
           const existing = JSON.parse(await cmd.gh(ctx.cwd, "issue", "view", String(issue.number), ...repoFlag, "--json", "comments")) as { comments: Array<{ body: string }> };
@@ -822,7 +833,7 @@ export default defineWorkflow<Args>({
             const { value: t, before } = await writeStep<TestOut>(
               `red:${key}:${attempt}`,
               `${P.TEST_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Test command\n\`${testCommand}\`${problem ? `\n\n## Fix\n${problem}` : ""}`,
-              { label: attempt === 1 ? `teste-${sfx}` : `teste-${sfx}:${attempt}`, role: implementRole(tier), schema: TEST_SCHEMA },
+              { label: attempt === 1 ? `test-${sfx}` : `test-${sfx}:${attempt}`, role: implementRole(tier), schema: TEST_SCHEMA },
             );
             let after = await snapshotTree(cmd, worktree);
             const changes = await changesBetween(cmd, worktree, before, after);
@@ -889,7 +900,7 @@ export default defineWorkflow<Args>({
             const { before } = await writeStep<Impl>(
               `green:${key}:${attempt}`,
               `${P.CODE_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Failing test\n\`${rec.testName}\` in \`${rec.testFile}\`\n\n## Suite output\n${tail(rec.red)}${problem ? `\n\n## Fix\n${problem}` : ""}`,
-              { label: attempt === 1 ? `codigo-${sfx}` : `codigo-${sfx}:${attempt}`, role: implementRole(tier), schema: IMPL_SCHEMA },
+              { label: attempt === 1 ? `code-${sfx}` : `code-${sfx}:${attempt}`, role: implementRole(tier), schema: IMPL_SCHEMA },
             );
             problem = await codeViolation(before, await snapshotTree(cmd, worktree), rec);
             if (problem) {
@@ -913,7 +924,7 @@ export default defineWorkflow<Args>({
         for (let round = (rec.fixRound ?? 0) + 1; res.kind === "failed" && round <= settings.fixRounds; round++) {
           ctx.log(`slice ${sfx}: tests failed; fix ${round}/${settings.fixRounds}`);
           const { before } = await writeStep<Impl>(`fix:${key}:${round}`, `${P.FIX_INSTRUCTIONS}\n\n${sliceBlock(sl)}\n\n## Test output\n${res.output}`, {
-            label: `corrigir-${sfx}-${round}`,
+            label: `fix-${sfx}-${round}`,
             role: "fix",
             model: tier === "LOW" ? GROK : GROK_HIGH, // escala o modelo na correção
             schema: IMPL_SCHEMA,
@@ -1022,13 +1033,13 @@ export default defineWorkflow<Args>({
           const { value: fix, before } = await writeStep<Impl>(
             "refactor",
             `${P.REFACTOR_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n## Findings\n${JSON.stringify(toRefactor, null, 2)}`,
-            { label: "refatorar-1", role: implementRole(tier), schema: IMPL_SCHEMA },
+            { label: "refactor-1", role: implementRole(tier), schema: IMPL_SCHEMA },
           );
           const refactorProblem = await codeViolation(before, await snapshotTree(cmd, worktree));
           if (refactorProblem) {
             await revertTo(cmd, worktree, before);
             settle();
-            return { ...base, status: "tdd-violation", step: "refatorar-1", reason: refactorProblem, worktree };
+            return { ...base, status: "tdd-violation", step: "refactor-1", reason: refactorProblem, worktree };
           }
           const after = await suite("refactor");
           if (!after.ok) {
@@ -1080,7 +1091,7 @@ export default defineWorkflow<Args>({
         if (!prUrl) {
           const text = await ctx.agent<PrText>(
             `${P.PR_INSTRUCTIONS}\n\n${contextBlock}\n\n${issueBlock(issue)}\n\n## Diff\n${await diffSinceBase(cmd, worktree, baseCommit, settings.maxDiffChars)}`,
-            { label: "pr-texto", role: "pr-text", cwd: worktree, tools: REVIEW_TOOLS, schema: PR_SCHEMA, memo: true },
+            { label: "pr-text", role: "pr-text", cwd: worktree, tools: REVIEW_TOOLS, schema: PR_SCHEMA, memo: true },
           );
           body = buildPrBody({
             issueNumber: issue.number,
@@ -1090,6 +1101,7 @@ export default defineWorkflow<Args>({
             deferred,
             refuted,
             worktree,
+            redact: createRedactor({ extra: savedSecrets() }).text, // the saved Cursor key is in no env var
           });
           const leak = findSecretInText(body);
           if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the PR body`, branch, worktree };

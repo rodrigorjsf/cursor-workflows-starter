@@ -66,7 +66,7 @@ test("a refactor suite that outlives its limit ends tests-timeout like every oth
   let standards = 0;
   fx.handlers["review:standards"] = (o) =>
     submit(o, ++standards === 1 ? { findings: [{ file: "src/math.js", rule: "Mysterious Name", kind: "hard", note: "name" }], worst: "name" } : { findings: [], worst: "" });
-  fx.handlers["refatorar-1"] = (o) => {
+  fx.handlers["refactor-1"] = (o) => {
     write(o, "src/math.js", `${SUB_CODE}\nawait new Promise((r) => setTimeout(r, 60_000));\n`); // every import of it hangs
     submit(o, { summary: "hangs", filesChanged: ["src/math.js"] });
   };
@@ -81,7 +81,7 @@ test("a refactor suite killed by a signal ends tests-killed like every other sui
   let standards = 0;
   fx.handlers["review:standards"] = (o) =>
     submit(o, ++standards === 1 ? { findings: [{ file: "src/math.js", rule: "Mysterious Name", kind: "hard", note: "name" }], worst: "name" } : { findings: [], worst: "" });
-  fx.handlers["refatorar-1"] = (o) => {
+  fx.handlers["refactor-1"] = (o) => {
     write(o, "src/math.js", `${SUB_CODE}\nprocess.kill(process.ppid, "SIGKILL");\n`); // a test file that imports it kills the runner
     submit(o, { summary: "kills", filesChanged: ["src/math.js"] });
   };
@@ -253,7 +253,7 @@ test("a git push that hangs fails the step at its limit instead of hanging the r
 test("a secret at the top of a diff longer than the tail of a command's output still blocks the delivery", async () => {
   issue(["complexity:low"]);
   const key = "crsr_" + "x".repeat(40);
-  fx.handlers["codigo-1"] = (o) => {
+  fx.handlers["code-1"] = (o) => {
     write(o, "src/math.js", SUB_CODE);
     write(o, "src/data.js", `export const k = "${key}";\n${LONG}`); // the key is the first line the diff adds; the last 32768 characters are filler
     submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
@@ -279,7 +279,7 @@ test("a git that times out is an error, not 'there is no package.json': a step i
 
 test("cancelling in the middle of a write step leaves the worktree as before the step, and the resume goes on to deliver", async () => {
   issue(["complexity:low"]);
-  fx.handlers["codigo-1"] = (o) => {
+  fx.handlers["code-1"] = (o) => {
     write(o, "src/math.js", `${SUB_CODE}// half-made edit\n`);
     return { hang: true };
   };
@@ -288,7 +288,7 @@ test("cancelling in the middle of a write step leaves the worktree as before the
     cwd: fx.repo,
     signal: controller.signal,
     onEvent: (e) => {
-      if (e.type === "step-start" && e.label === "codigo-1") setTimeout(() => controller.abort(), 100);
+      if (e.type === "step-start" && e.label === "code-1") setTimeout(() => controller.abort(), 100);
     },
   });
   assert.equal(first.status, "cancelled");
@@ -296,7 +296,7 @@ test("cancelling in the middle of a write step leaves the worktree as before the
   assert.ok(!math.includes("half-made"), "the step's edit is undone");
   assert.equal(readFileSync(join(worktreeOf(first.runId), "test", "sub.test.js"), "utf8"), SUB_TEST, "the slice's test, made before the step, stays");
 
-  fx.handlers["codigo-1"] = (o) => {
+  fx.handlers["code-1"] = (o) => {
     write(o, "src/math.js", SUB_CODE);
     submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
   };
