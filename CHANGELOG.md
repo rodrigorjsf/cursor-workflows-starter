@@ -413,6 +413,10 @@
   comportamento, a seam e a ideia de teste de cada fatia e a justificativa do plano iam crus para a issue: um
   `Fixes #12` fecharia outra issue, um `@usuario` notificaria alguém e um `<!--` esconderia o resto do comentário. Agora
   passam por `sanitizeModelText`; a interface e o comando de teste, em blocos de código, ficam como estão.
+- **O resultado de uma etapa é redigido antes de ir para o journal e para o memo.** Só os eventos passavam pelo
+  redator: uma etapa que devolvia uma chave a gravava em claro em `journal.jsonl` e em `.workflows/memo/`. Agora o
+  resultado passa pela mesma redação antes de ser guardado, e o workflow recebe o valor já redigido, para que um resume
+  (que repete o journal) veja o mesmo que a primeira execução e não refaça as etapas seguintes.
 
 ## 0.2.0 (pré-release, 2026-11-11)
 

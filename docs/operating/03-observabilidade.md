@@ -558,8 +558,10 @@ Para validar a entrega depois, por exemplo quando o PR é aceito ou recusado, us
   - antes de gravar, o runtime troca por `[REDACTED]` os formatos conhecidos de segredo (chaves e tokens do GitHub,
     AWS, Slack, Google, npm, Stripe e dos provedores de modelo, JWT, `Bearer`, blocos de chave privada) e o valor de
     toda variável de ambiente com `KEY`, `TOKEN`, `SECRET` ou `PASSWORD` no nome (valores com menos de 8 caracteres
-    ficam de fora, para não apagar palavras comuns), além da chave de API passada ao run. É um esforço, não uma
-    garantia: um segredo de outro formato, numa variável com outro nome, passa;
+    ficam de fora, para não apagar palavras comuns), além da chave de API passada ao run. A mesma redação vale para o
+    resultado de cada etapa antes de ele ir para o journal e para o memo, e o workflow já recebe o valor redigido (assim
+    um resume repete exatamente o que a primeira execução viu). É um esforço, não uma garantia: um segredo de outro
+    formato, numa variável com outro nome, passa;
   - cada texto é cortado em 32768 caracteres (`truncated` e `chars` dizem o quanto havia);
   - **retenção:** ao iniciar um run, o `text` dos runs do repositório fora dos 30 mais recentes (contando o que
     começa) ou sem atividade há mais de 14 dias é apagado. O evento fica, com tipo, ids e tamanho. O journal não

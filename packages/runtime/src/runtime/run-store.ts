@@ -294,6 +294,14 @@ export class RunStore {
     return this.redactor.value(event);
   }
 
+  /**
+   * A step result with every secret in it replaced, the same way as an event's. A result goes through this before it is stored
+   * (journal, memo) and before the workflow gets it, so a resume replays exactly what the first execution saw.
+   */
+  redactResult<T>(result: T): T {
+    return this.redactor.value(result);
+  }
+
   /** Redacts, from now on, the values of the secret-named variables of `env` too: the environment a command is about to run with. */
   learnSecrets(env: Record<string, string | undefined>): void {
     this.redactor.learn(env);

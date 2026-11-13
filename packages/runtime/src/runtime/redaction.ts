@@ -1,4 +1,5 @@
-// Secrets never reach the run's event log. Two things are replaced with `[REDACTED]` before an event is written (and before
+// Secrets never reach the run's event log, nor its journal and memo (a step's result is redacted before it is stored, and
+// the workflow gets that redacted value). Two things are replaced with `[REDACTED]` before an event is written (and before
 // any listener sees it):
 //   - text that has the shape of a well-known credential (GitHub, AWS, Slack, Google, npm, Stripe and Cursor keys, JWTs,
 //     bearer tokens, private key blocks, and the `sk-` keys of the model providers);

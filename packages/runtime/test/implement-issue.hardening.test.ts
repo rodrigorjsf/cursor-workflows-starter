@@ -286,12 +286,15 @@ for (const [file, content, rule] of SECRET_CASES) {
   });
 }
 
+// A step's result is redacted by the engine before the workflow gets it, so a key the model wrote reaches neither the
+// comment nor the PR; the guard on those texts stays as a second layer.
 test("segredo no plano não vai para o comentário de seams", async () => {
   issue(["complexity:medium"]);
   fx.handlers.planejar = (o) => submit(o, { ...PLAN, seams: [{ ...PLAN.seams[0], why: `use a chave ${FAKE_KEY}` }] });
   const r = await run({});
-  assert.equal(res(r).status, "secret-blocked");
-  assert.equal(gh().comments.length, 0);
+  assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
+  assert.match(gh().comments[0]!, /use a chave \[REDACTED\]/);
+  assert.ok(!JSON.stringify(gh()).includes(FAKE_KEY));
   assert.ok(!JSON.stringify(res(r)).includes(FAKE_KEY));
 });
 
@@ -314,13 +317,13 @@ test("model text in the seams comment closes no other issue, mentions no one and
   assert.doesNotMatch(comment, /<!-- hide/); // the comment's own marker is the only HTML comment left
 });
 
-test("segredo no texto do PR bloqueia a entrega antes do push", async () => {
+test("segredo no texto do PR não chega ao PR", async () => {
   issue(["complexity:low"]);
   fx.handlers["pr-texto"] = (o) => submit(o, { summary: `chave: ${FAKE_KEY}`, door: "two-way", blastRadius: "local" });
   const r = await run({ openPr: true });
-  assert.equal(res(r).status, "secret-blocked");
-  assert.equal(gh().prs.length, 0);
-  assert.ok(!onOrigin());
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  assert.match(gh().prs[0]!.body, /chave: \[REDACTED\]/);
+  assert.ok(!JSON.stringify(gh()).includes(FAKE_KEY));
 });
 
 test("a evidência do PR não leva caminhos locais", async () => {
