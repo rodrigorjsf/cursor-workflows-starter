@@ -19,6 +19,7 @@ import { type RunOptions, newRunId, runWorkflow } from "./engine.js";
 import { HEARTBEAT_MS, type JobRecord, type JobStart, type JobState, fromEnv, jobLogPath, jobsDir, readJob, writeJob } from "./job-state.js";
 import { resumeHint } from "./projection.js";
 import { abortOpenRuns } from "./run-store.js";
+import { plainName } from "./state.js";
 import type { WorkflowDefinition } from "./workflow.js";
 
 /** What a new job record may be given; the rest is generated: a new run id, a random job id, this process's pid. */
@@ -31,8 +32,12 @@ export interface NewJob {
   start?: JobStart;
 }
 
-/** Creates the job record before the run (the CLI `start` writes it in the parent, before the spawn). */
+/**
+ * Creates the job record before the run (the CLI `start` writes it in the parent, before the spawn). Throws an `invalid runId`
+ * error, before anything is written, when the run to resume is not a plain name (`isPlainName`): it becomes a path.
+ */
 export function createJob(cwd: string, workflow: string, { runId, jobId = randomUUID().slice(0, 8), pid = process.pid, start }: NewJob = {}): JobRecord {
+  if (runId !== undefined) plainName(runId, "runId");
   // Date and time stay in the record, not in the workflow: the script must be deterministic for the resume.
   const record: JobRecord = { jobId, runId: runId ?? newRunId(workflow), pid, heartbeat: new Date().toISOString(), ...(start ? { start } : {}) };
   writeJob(cwd, record);

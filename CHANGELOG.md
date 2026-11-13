@@ -400,6 +400,34 @@
 - **A referência de eventos (6.1) tira o número e o rodapé do índice do livro**, em vez de uma cópia fixa no gerador:
   inserir um capítulo ao redor dela não exige mais editar `scripts/events-reference.ts`.
 
+### Corrigido
+
+- **Um id de job ou de run que não é um nome simples não sai mais da pasta `.workflows/`.** O `jobId` de
+  `wait_workflow`, `get_workflow_status`, `cancel_workflow` e de `wf status|wait|cancel`, e o run a retomar
+  (`resumeRunId`, `--resume`), viravam caminho sem conferência: `wf status ../../../fora/plantado` lia um JSON fora de
+  `.workflows/jobs`, e um `--resume ../x` abria (e criava) a pasta do run fora de `.workflows/runs`. Agora um id só vale
+  com letras, dígitos, `_` e `-` (a mesma conferência que já valia para os nomes de lock): um `jobId` assim é
+  `job not found`, um run a retomar assim é recusado com `invalid runId` antes de criar job ou pasta, e um registro de
+  job cujo `runId` não é simples é ignorado. O id de um run novo troca por `-` o que, no nome do workflow, não é letra,
+  dígito, `_` ou `-` (`team.deploy` vira `team-deploy-<sufixo>`).
+- **`wait_workflow` não espera mais para sempre com um `timeoutSec` que não é número.** Um `"30s"` virava `NaN`, o
+  teto de 50 s deixava de valer e a chamada só voltava quando o job terminava, acima do timeout do cliente MCP. Agora um
+  `timeoutSec` que não é número é um erro (`isError`, com `timeoutSec must be a number of seconds`), o número é levado
+  para 1 a 50 (45 sem ele), e `waitJob` não espera nada com um tempo que não é um número finito. O `cancel_workflow`
+  espera um tempo fixo (20 s) e não tinha o problema.
+- **`job not found` no servidor MCP é um erro de tool.** `wait_workflow`, `get_workflow_status` e `cancel_workflow`
+  devolviam `{ "error": "job not found" }` como uma resposta normal, sem o `isError` que todas as outras falhas do
+  servidor levam; agora vem com `isError: true`. O corpo não muda: um retorno com `error` e sem `status` continua
+  encerrando a espera da skill `run-workflow`.
+- **O `wf` trata argumentos errados como erro de uso: uma linha no stderr e código 2.** `--days abc` falhava com um
+  `Invalid time value` sem nome de flag, `--format xml` gravava CSV calado, e uma flag desconhecida (ou sem valor)
+  despejava o stack trace do `parseArgs`. Agora `--days` precisa ser um número de dias maior que 0
+  (`--days must be a number of days, more than 0`), `--format` só aceita `csv` ou `json` (nada é exportado nem criado
+  antes da recusa), e uma flag desconhecida ou sem valor sai numa linha só. Esses erros, o `--timeout` e os
+  `--max-cents`/`--max-tokens` inválidos e as linhas `usage:` de `config` e `metrics` saem com código 2 (antes 1); os
+  demais erros continuam com 1. Corrigido junto: dentro de uma etapa (`WF_INSIDE_WORKFLOW=1`), o `wf run --job` (o
+  modo filho do `wf start`) escapava da recusa que já valia para `run` e `start`.
+
 ## 0.2.0 (pré-release, 2026-11-11)
 
 ### Mudado

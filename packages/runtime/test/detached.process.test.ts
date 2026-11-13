@@ -257,7 +257,7 @@ test("a frozen job (alive, heartbeat stale) shows as failed with its run id; can
 test("a --timeout that is not a number of seconds is an error, not a wait that returns at once", () => {
   for (const command of ["wait", "cancel"]) {
     const r = spawnSync(process.execPath, [...tsx("cli.ts"), command, "anyjob", "--timeout", "soon", "--cwd", repo], { env, encoding: "utf8" });
-    assert.equal(r.status, 1, command);
+    assert.equal(r.status, 2, `${command}: a usage error`);
     assert.match(r.stderr, /--timeout must be a number of seconds/, command);
   }
 });
