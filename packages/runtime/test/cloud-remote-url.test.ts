@@ -64,6 +64,16 @@ test("the repository URL a cloud agent gets drops the query and the fragment of 
   }
 });
 
+test("an ssh remote on an IPv6 host is a host, not a remote helper", () => {
+  for (const [remoteUrl, url] of [
+    ["git@[2001:db8::1]:org/repo.git", "https://[2001:db8::1]/org/repo"],
+    ["ssh://[2001:db8::1]:22/org/repo.git", "https://[2001:db8::1]/org/repo"],
+    ["ssh://git@[2001:db8::1]/org/repo", "https://[2001:db8::1]/org/repo"],
+  ] as const) {
+    assert.equal(cloudRepoUrl(remoteUrl), url, remoteUrl);
+  }
+});
+
 test("a remote that is not https or ssh on a host is refused with a message that says why", () => {
   for (const remoteUrl of ["http://github.com/org/repo.git", "git://github.com/org/repo.git", "file:///srv/git/repo.git", "ext::sh -c x", "/srv/git/origin.git", "../origin.git", "https:///org/repo"]) {
     assert.throws(() => cloudRepoUrl(remoteUrl), /cloud step.*https:\/\/ or ssh/, remoteUrl);

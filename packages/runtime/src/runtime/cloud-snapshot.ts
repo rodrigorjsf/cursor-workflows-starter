@@ -281,9 +281,10 @@ export class UnsupportedRemoteError extends Error {}
  */
 export function cloudRepoUrl(remoteUrl: string): string {
   // The path stops at a `?` or `#`: the query and the fragment (`?token=...`) are dropped like the userinfo.
-  const scp = /^[\w.-]+@([\w.-]+):(?!\/)([^?#]+?)(?:\.git)?\/?(?:[?#].*)?$/.exec(remoteUrl);
+  // A host is a name or a bracketed IPv6 address (`git@[2001:db8::1]:org/repo.git`).
+  const scp = /^[\w.-]+@(\[[0-9a-f:.]+\]|[\w.-]+):(?!\/)([^?#]+?)(?:\.git)?\/?(?:[?#].*)?$/i.exec(remoteUrl);
   if (scp) return `https://${scp[1]}/${scp[2]}`;
-  const ssh = /^ssh:\/\/(?:[^@/]+@)?([^/:@?#]+)(?::\d+)?\/([^?#]+?)(?:\.git)?\/?(?:[?#].*)?$/i.exec(remoteUrl);
+  const ssh = /^ssh:\/\/(?:[^@/]+@)?(\[[0-9a-f:.]+\]|[^/:@?#[\]]+)(?::\d+)?\/([^?#]+?)(?:\.git)?\/?(?:[?#].*)?$/i.exec(remoteUrl);
   if (ssh) return `https://${ssh[1]}/${ssh[2]}`;
   const https = /^https:\/\/(?:[^@/]*@)?([^/@\s?#]+)\/([^?#]+?)(?:\.git)?\/?(?:[?#].*)?$/i.exec(remoteUrl);
   if (https) return `https://${https[1]}/${https[2]}`;
