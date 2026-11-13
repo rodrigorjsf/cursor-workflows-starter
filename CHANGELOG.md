@@ -419,7 +419,10 @@
   com letras, dígitos, `_` e `-` (a mesma conferência que já valia para os nomes de lock): um `jobId` assim é
   `job not found`, um run a retomar assim é recusado com `invalid runId` antes de criar job ou pasta, e um registro de
   job cujo `runId` não é simples é ignorado. O id de um run novo troca por `-` o que, no nome do workflow, não é letra,
-  dígito, `_` ou `-` (`team.deploy` vira `team-deploy-<sufixo>`).
+  dígito, `_` ou `-` (`team.deploy` vira `team-deploy-<sufixo>`). **Ao atualizar:** um run criado antes desta versão
+  por um workflow com um desses caracteres no nome (`team.deploy-1a2b3c4d`) não pode mais ser retomado, e o job dele
+  some de `wf status`, `wait`, `cancel` e `jobs` (e das tools MCP correspondentes). Termine ou abandone esses runs antes
+  de atualizar; o log e o journal deles em `.workflows/runs/` continuam lá.
 - **`wait_workflow` não espera mais para sempre com um `timeoutSec` que não é número.** Um `"30s"` virava `NaN`, o
   teto de 50 s deixava de valer e a chamada só voltava quando o job terminava, acima do timeout do cliente MCP. Agora um
   `timeoutSec` que não é número é um erro (`isError`, com `timeoutSec must be a number of seconds`), o número é levado
