@@ -272,7 +272,7 @@ async function main(): Promise<number> {
       if (typeof graceHours !== "number") throw new Error("workflows.implement-issue.settings.gcSnapshotGraceHours must be a number of hours");
       if (typeof networkTimeoutSec !== "number") throw new Error("workflows.implement-issue.settings.networkTimeoutSec must be a number of seconds");
       const commands = directCommands(networkTimeoutSec);
-      const plan = await planGc({ cwd, commands, failedAfterDays, snapshots: { remote: config.cloud.remote, graceHours } });
+      const plan = await planGc({ cwd, commands, failedAfterDays, snapshots: { remote: config.cloud.remote, graceHours }, forges: config.forges });
       process.stderr.write(formatPlan(plan)); // the plan first, then the removal
       if (values["dry-run"]) process.stderr.write("wf gc: dry run, nothing was changed.\n");
       else await applyGc(plan, commands);

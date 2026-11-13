@@ -36,7 +36,7 @@ import { outcomeClass } from "../../src/runtime/outcome.js";
 import { interruptedCloudSteps } from "../../src/runtime/projection.js";
 import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn, runsDirIn, tryAcquireRunLock } from "../../src/runtime/run-store.js";
 import { type Exec, Commands, LOCAL_GIT_TIMEOUT_MS, NETWORK_TIMEOUT_SEC, ORIGIN, WORKFLOW_BRANCH_PREFIX, worktreeOf, worktreesDirIn } from "./commands.js";
-import { DEFAULT_FORGE, type Forge, type PrState, createForge, detectForge, forgeNameOf } from "./forge.js";
+import { DEFAULT_FORGE, type Forge, type ForgeName, type PrState, createForge, detectForge, forgeNameOf } from "./forge.js";
 import { type Progress, ProgressStore } from "./tdd.js";
 
 /** Why something is cleaned up: its PR was merged or closed, its run failed longer ago than the limit, or it is a cloud snapshot branch its step never deleted. */
@@ -183,8 +183,15 @@ const SHARED_BRANCH = new RegExp(`^${WORKFLOW_BRANCH_PREFIX}issue-\\d+$`);
  * Looks at every run of the repo and decides what to remove; changes nothing. The runs are the repo's own (`.workflows/runs/`):
  * the global runs index is for tools that are not inside a repo.
  */
-export async function planGc(options: { cwd: string; commands: Commands; failedAfterDays: number; snapshots: SnapshotSweep }): Promise<GcPlan> {
-  const { cwd, commands, failedAfterDays, snapshots } = options;
+export async function planGc(options: {
+  cwd: string;
+  commands: Commands;
+  failedAfterDays: number;
+  snapshots: SnapshotSweep;
+  /** The config's `forges` map: the forge of an origin host the kit does not know (ADR-0009). */
+  forges?: Readonly<Record<string, ForgeName>>;
+}): Promise<GcPlan> {
+  const { cwd, commands, failedAfterDays, snapshots, forges = {} } = options;
   const now = Date.now();
   const plan: GcPlan = { repo: cwd, failedAfterDays, remove: [], kept: [], errors: [] };
   const worktreesDir = worktreesDirIn(cwd);
@@ -270,7 +277,7 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
     }
     if (owned.has(branch) || SHARED_BRANCH.test(branch)) continue;
     try {
-      originForge ??= createForge(await detectForge(commands, cwd), commands);
+      originForge ??= createForge(await detectForge(commands, cwd, forges), commands);
       const state = await originForge.prState(cwd, branch);
       const done = state && DONE_PR[state];
       if (done) plan.remove.push({ reason: done, actions: [{ kind: "remote-branch", target: branch, head }], notes: [] });
