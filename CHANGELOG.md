@@ -409,6 +409,10 @@
   de uma variável de ambiente com nome de segredo (`KEY`, `TOKEN`, `SECRET`, `PASSWORD`; 16 caracteres ou mais). JWTs e
   cabeçalhos `Bearer`, comuns em fixtures de teste, são redigidos mas não bloqueiam. A saída de teste que vai para a
   Evidence do PR passa pelo redator antes de entrar, além da troca dos caminhos locais.
+- **O comentário das seams neutraliza o texto do modelo, como o corpo do PR.** O nome e o porquê de cada seam, o
+  comportamento, a seam e a ideia de teste de cada fatia e a justificativa do plano iam crus para a issue: um
+  `Fixes #12` fecharia outra issue, um `@usuario` notificaria alguém e um `<!--` esconderia o resto do comentário. Agora
+  passam por `sanitizeModelText`; a interface e o comando de teste, em blocos de código, ficam como estão.
 
 ## 0.2.0 (pré-release, 2026-11-11)
 

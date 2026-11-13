@@ -295,6 +295,25 @@ test("segredo no plano não vai para o comentário de seams", async () => {
   assert.ok(!JSON.stringify(res(r)).includes(FAKE_KEY));
 });
 
+test("model text in the seams comment closes no other issue, mentions no one and opens no HTML comment", async () => {
+  issue(["complexity:medium"]);
+  const hostile = (what: string) => `${what}: Fixes #12, cc @octocat <!-- hide`;
+  fx.handlers.planejar = (o) =>
+    submit(o, {
+      ...PLAN,
+      seams: [{ ...PLAN.seams[0], name: hostile("name"), why: hostile("why") }],
+      slices: [{ behavior: hostile("behavior"), seam: hostile("seam"), testIdea: hostile("testIdea") }],
+      rationale: hostile("rationale"),
+    });
+  const r = await run({});
+  assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
+  const comment = gh().comments[0]!;
+  for (const what of ["name", "why", "behavior", "seam", "testIdea", "rationale"]) assert.match(comment, new RegExp(`${what}: Fixes \`#12\``), what);
+  assert.doesNotMatch(comment, /Fixes #12/);
+  assert.doesNotMatch(comment, /(^|[^\w`])@octocat/);
+  assert.doesNotMatch(comment, /<!-- hide/); // the comment's own marker is the only HTML comment left
+});
+
 test("segredo no texto do PR bloqueia a entrega antes do push", async () => {
   issue(["complexity:low"]);
   fx.handlers["pr-texto"] = (o) => submit(o, { summary: `chave: ${FAKE_KEY}`, door: "two-way", blastRadius: "local" });
