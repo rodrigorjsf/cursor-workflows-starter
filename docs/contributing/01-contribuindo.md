@@ -22,7 +22,7 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 ├── CODING_STANDARDS.md     # as regras de julgamento que o review aplica, em inglês (o review do implement-issue o lê)
 ├── packages/
 │   ├── dashboard/          # o dashboard local (workspace npm @cursor-workflows/dashboard): servidor HTTP sobre os runs e as métricas, que só lê, a não ser para cancelar um run
-│   │   ├── src/            # server.ts (API JSON, stream SSE e páginas), main.ts (o processo), board.ts (as colunas do quadro), pr-state.ts (estado das PRs, pelo `gh`),
+│   │   ├── src/            # server.ts (API JSON, stream SSE e páginas), main.ts (o processo), board.ts (as colunas do quadro), pr-state.ts (estado das PRs e MRs, com cache, pelo `observe` do runtime),
 │   │   │                   # web-bundle.ts (o esbuild que empacota as duas páginas quando o dashboard sobe, com cache por hash), pages.ts (o HTML delas)
 │   │   ├── app/            # a página `/`, em React (menus Runs, Board e Metrics); o esbuild a empacota quando o dashboard sobe
 │   │   ├── run-view/       # a página do run, `/runs/<runId>` (React, React Flow, elkjs; tsconfig próprio, sem Node nem runtime):
@@ -47,6 +47,7 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   │   ├── run-view.ts     # os runs de todos os repositórios, lidos do índice global e do log, para quem observa de fora (o dashboard)
 │       │   │   ├── run-tail.ts     # o log de eventos de um run lido por posição (cada linha tem um id): o stream ao vivo e o conteúdo de uma etapa
 │       │   │   ├── run-cancel.ts   # cancela um run de fora do processo que o executa (o botão Cancel do dashboard), pelo mesmo `cancelJob` do `wf cancel`
+│       │   │   ├── pr-by-url.ts    # o estado de uma PR (`gh`) ou MR (`glab api`) pela URL exata, nos hosts permitidos (github.com, gitlab.com e os do config do glab), para o dashboard
 │       │   │   ├── dashboard-instance.ts  # onde o dashboard escuta, o pid file e o `ensureDashboard` que o `start_workflow` chama
 │       │   │   ├── heartbeat-worker.mjs  # thread que atualiza o heartbeat do job mesmo com a principal bloqueada
 │       │   │   ├── worktree-snapshot.ts  # registra e restaura os arquivos de uma etapa que escreve (cancelamento)

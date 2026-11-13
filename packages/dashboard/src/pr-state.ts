@@ -1,28 +1,26 @@
-// The state of the GitHub pull requests the Board's cards link to, asked of the `gh` CLI (which holds the user's login) and
-// kept in a short-lived cache, so a board that polls every few seconds stays current without hammering GitHub.
+// The state of the GitHub pull requests and GitLab merge requests the Board's cards link to, asked of the forge's CLI (`gh`,
+// `glab`: they hold the user's login) through the runtime's `observe` entry point, and kept in a short-lived cache, so a board that
+// polls every few seconds stays current without hammering the forge.
 //
-// - It never makes a caller wait: `states()` answers with what it knows now and asks `gh` in the background for what it does
-//   not know or what has gone old, a few at a time. A state not known yet shows up on a later poll.
-// - Only the exact URL of a pull request on github.com goes to `gh`, as one argument of a fixed command line (no shell). A
-//   URL comes from a workflow's log: it is never allowed to be an option or another host's address.
-// - An answer is kept for `cacheMs` while the pull request is open (the state can change any minute), 120 times that once it
-//   is merged or closed (it rarely does), and 10 times that when `gh` could not answer (no login, no network, no such pull
-//   request), so a missing `gh` costs a failed start now and then, not one per poll.
+// - It never makes a caller wait: `states()` answers with what it knows now and asks in the background for what it does not know or
+//   what has gone old, a few at a time. A state not known yet shows up on a later poll.
+// - Only a URL that is exactly the address of a PR or an MR is asked about, and the runtime decides whether its host may be asked
+//   (`prStateOfUrl`): a URL comes from a workflow's log, so it is never allowed to be an option or an arbitrary host's address.
+// - An answer is kept for `cacheMs` while the PR is open (the state can change any minute), 120 times that once it is merged or
+//   closed (it rarely does), and 10 times that when the forge could not answer (no login, no network, no such PR, a host not
+//   allowed), so a missing CLI costs a failed start now and then, not one per poll.
 // - A refresh that fails keeps the state it had.
-import { execFile } from "node:child_process";
-/** How GitHub says a pull request stands. */
+import { type ForgePrState, isPrUrl, prStateOfUrl } from "@cursor-workflows/runtime/observe";
+
+/** How a forge says a PR or MR stands. */
 export type PrState = "open" | "merged" | "closed";
 
-/** A pull request of github.com, exactly: no query, no fragment, no path after the number. */
-const PR_URL = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d{1,9}$/;
-export const isPullRequestUrl = (url: string): boolean => PR_URL.test(url);
-
-const GH_TIMEOUT_MS = 10_000;
-/** How many `gh` processes run at once. */
+/** How many forge CLI processes run at once. */
 const MAX_PARALLEL = 4;
-/** How many pull requests the cache remembers. The oldest answer goes first. */
+/** How many PRs the cache remembers. The oldest answer goes first. */
 const MAX_ENTRIES = 1000;
-const STATES: Record<string, PrState> = { OPEN: "open", MERGED: "merged", CLOSED: "closed" };
+/** A total record: a state the runtime learns to report is a compile error here. */
+const STATES: Record<ForgePrState, PrState> = { OPEN: "open", MERGED: "merged", CLOSED: "closed" };
 
 interface Entry {
   state?: PrState;
@@ -40,12 +38,12 @@ export class PrStates {
 
   constructor(private readonly cacheMs: number) {}
 
-  /** The state of each pull request URL in `urls` that is known now. Asks `gh`, in the background, about those not known or gone old. */
+  /** The state of each PR or MR URL in `urls` that is known now. Asks the forge, in the background, about those not known or gone old. */
   states(urls: Iterable<string>): Map<string, PrState> {
     const known = new Map<string, PrState>();
     const now = Date.now();
     for (const url of urls) {
-      if (!isPullRequestUrl(url) || known.has(url)) continue;
+      if (!isPrUrl(url) || known.has(url)) continue;
       const entry = this.entries.get(url);
       if (entry?.state) known.set(url, entry.state);
       if ((!entry || now - entry.at >= entry.ttlMs) && !this.pending.has(url)) {
@@ -84,15 +82,9 @@ export class PrStates {
     if (this.entries.size > MAX_ENTRIES) this.entries.delete(this.entries.keys().next().value!);
   }
 
-  /** `gh pr view <url> --json state --jq .state`, or undefined when gh could not answer. */
-  private ask(url: string): Promise<PrState | undefined> {
-    return new Promise((resolve) => {
-      execFile(
-        "gh",
-        ["pr", "view", url, "--json", "state", "--jq", ".state"],
-        { timeout: GH_TIMEOUT_MS, signal: this.stopping.signal, maxBuffer: 4096, env: { ...process.env, GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", NO_COLOR: "1" } },
-        (err, stdout) => resolve(err ? undefined : STATES[stdout.trim()]),
-      );
-    });
+  /** What the runtime says of `url`, or undefined when the forge could not answer. */
+  private async ask(url: string): Promise<PrState | undefined> {
+    const state = await prStateOfUrl(url, this.stopping.signal);
+    return state && STATES[state];
   }
 }
