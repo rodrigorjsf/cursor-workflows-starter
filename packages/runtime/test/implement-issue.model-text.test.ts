@@ -148,3 +148,13 @@ test("the body's own closing line is kept while the model's text around it is ne
   assert.ok(partial.startsWith('Refs #7 (partial delivery: see "Deferred")\n'), partial);
   assert.match(partial, /^- `\/merge`$/m);
 });
+
+test("on GitHub the GitLab guard is not applied: fences, lines that start with a slash and GitLab's sigils stay as the model wrote them", () => {
+  for (const text of ["- step\n  ```sh\n/close\n  ```", "x\n~~~\n/close\n~~~", "> quote\n```\n/close\n```", "see !12, ~bug and %v1", "```\ncode\n```"]) {
+    assert.equal(sanitizeModelText(text, "github"), text, text);
+  }
+  // What GitHub itself acts on is still neutralized.
+  assert.equal(sanitizeModelText("Fixes #12, cc @octocat <!--", "github"), "Fixes `#12`, cc @" + ZWSP + "octocat &lt;!--");
+  const body = buildPrBody({ issueNumber: 7, text: { ...PR_TEXT, summary: "- step\n  ```sh\n  /close ~x\n  ```" }, slices: [], review: {}, deferred: [], forge: "github" });
+  assert.ok(body.includes("## Summary\n\n- step\n  ```sh\n  /close ~x\n  ```\n"), body);
+});
