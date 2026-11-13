@@ -419,6 +419,14 @@
   devolviam `{ "error": "job not found" }` como uma resposta normal, sem o `isError` que todas as outras falhas do
   servidor levam; agora vem com `isError: true`. O corpo não muda: um retorno com `error` e sem `status` continua
   encerrando a espera da skill `run-workflow`.
+- **O `wf` trata argumentos errados como erro de uso: uma linha no stderr e código 2.** `--days abc` falhava com um
+  `Invalid time value` sem nome de flag, `--format xml` gravava CSV calado, e uma flag desconhecida (ou sem valor)
+  despejava o stack trace do `parseArgs`. Agora `--days` precisa ser um número de dias maior que 0
+  (`--days must be a number of days, more than 0`), `--format` só aceita `csv` ou `json` (nada é exportado nem criado
+  antes da recusa), e uma flag desconhecida ou sem valor sai numa linha só. Esses erros, o `--timeout` e os
+  `--max-cents`/`--max-tokens` inválidos e as linhas `usage:` de `config` e `metrics` saem com código 2 (antes 1); os
+  demais erros continuam com 1. Corrigido junto: dentro de uma etapa (`WF_INSIDE_WORKFLOW=1`), o `wf run --job` (o
+  modo filho do `wf start`) escapava da recusa que já valia para `run` e `start`.
 
 ## 0.2.0 (pré-release, 2026-11-11)
 
