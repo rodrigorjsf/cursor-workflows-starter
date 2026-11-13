@@ -38,4 +38,4 @@ Consequences:
 
 To use Claude Code's own runtime instead of this kit, write the flow as a Claude Code workflow
 (`.claude/workflows/<name>.js`). The `meta` + `agent/parallel/pipeline/phase` structure is nearly the same: swap
-`ctx.agent` for `agent`, and pass `git`/`gh` to an agent step, because Claude Code's sandbox has no shell.
+`ctx.agent` for `agent`, and pass `git`/`gh`/`glab` to an agent step, because Claude Code's sandbox has no shell.

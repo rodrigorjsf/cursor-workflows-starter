@@ -86,7 +86,7 @@ Under `workflows.<name>`:
     included). A `setupCommand` past it ends the
     run `setup-failed`, as any failed setup does: before you read `setup-failed` as a broken setup command, check
     whether it ran this long.
-  - `networkTimeoutSec`: the time limit, in seconds, of each network command (`git push`, `git ls-remote`, every `gh`),
+  - `networkTimeoutSec`: the time limit, in seconds, of each network command (`git push`, `git ls-remote`, every `gh` or `glab`),
     for the workflow and `wf gc`.
   - `gcFailedAfterDays`: `wf gc` removes a failed run's worktree and branches once it failed more days ago than this; a
     cancelled run never counts as failed. A run whose PR was merged or closed goes without waiting, and the origin

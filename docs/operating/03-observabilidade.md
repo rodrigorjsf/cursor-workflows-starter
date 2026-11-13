@@ -470,12 +470,17 @@ textos (título e subtítulo em 200 caracteres, no máximo 8 links e 8 rótulos)
 O `implement-issue` põe o cartão no ar depois da triagem (`#<n> <título da issue>` e o tier) e o atualiza na entrega, com
 a branch e o link da PR.
 
-**Estado da PR.** Um link de cartão para uma pull request do GitHub (`https://github.com/<dono>/<repo>/pull/<n>`, exatamente
-esse formato) mostra se ela está `open`, `merged` ou `closed`. O servidor pergunta ao `gh pr view <url> --json state` (a
-sessão do `gh` é a do usuário) em segundo plano, no máximo quatro por vez, e **o quadro nunca espera por isso**: a primeira
-resposta traz o link sem o estado, e a seguinte, o estado. A resposta é guardada por 30 segundos enquanto a PR está
-aberta, 1 hora depois de mesclada ou fechada, e 5 minutos quando o `gh` não consegue responder (sem login, sem rede, sem
-`gh`); uma consulta que falha mantém o último estado conhecido. Só a URL exata de uma PR do github.com vai ao `gh`.
+**Estado da PR.** Um link de cartão para uma pull request do GitHub (`https://github.com/<dono>/<repo>/pull/<n>`) ou
+para um merge request do GitLab (`https://<host>/<caminho do projeto>/-/merge_requests/<n>`, com os subgrupos no
+caminho), exatamente nesse formato, mostra se ela está `open`, `merged` ou `closed`. O servidor pergunta ao CLI do forge,
+com o login do próprio usuário: o `gh` para o github.com e o `glab` para o gitlab.com e para todo host em que o usuário
+fez `glab auth login --hostname <host>`. Um link de outro host, com caminho a mais, query, fragmento ou `http` não recebe
+consulta nem estado. Da configuração do `glab` o servidor lê só os nomes de host, nunca os tokens, e não grava o arquivo no
+log. O mapa `forges` da configuração ([6.2](../reference/config.md)) não vale aqui: ele decide o forge de um run, e o
+quadro só consulta hosts que o `glab` já conhece. As consultas rodam em segundo plano, no máximo quatro por vez, e **o
+quadro nunca espera por elas**: a primeira resposta traz o link sem o estado, e a seguinte, o estado. A resposta é
+guardada por 30 segundos enquanto a PR está aberta, 1 hora depois de mesclada ou fechada, e 5 minutos quando o CLI não
+consegue responder (sem login, sem rede, sem o CLI); uma consulta que falha mantém o último estado conhecido.
 
 ### Segurança do dashboard
 
@@ -564,7 +569,7 @@ Para validar a entrega depois, por exemplo quando o PR é aceito ou recusado, us
     entrega do `implement-issue` (JWT, `Bearer`, a senha ou o token numa URL): o workflow pode rodar o que a etapa
     devolve, e um comando de teste como `DATABASE_URL=postgres://u:senha@localhost/db npm test` não pode chegar a ele
     com `[REDACTED]`. Esses formatos ficam em claro no journal e no memo, e continuam redigidos no log de eventos e no que o
-    `implement-issue` publica no GitHub (o comentário das seams e o corpo do PR passam inteiros pelo redator). É um esforço, não uma garantia: um segredo de outro
+    `implement-issue` publica no forge, GitHub ou GitLab (o comentário das seams e o corpo do PR passam inteiros pelo redator). É um esforço, não uma garantia: um segredo de outro
     formato, numa variável com outro nome, passa;
   - cada texto é cortado em 32768 caracteres (`truncated` e `chars` dizem o quanto havia);
   - **retenção:** ao iniciar um run, o `text` dos runs do repositório fora dos 30 mais recentes (contando o que

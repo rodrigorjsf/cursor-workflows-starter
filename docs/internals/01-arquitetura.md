@@ -23,7 +23,7 @@ flowchart TB
   BE --> ST[structured.ts<br/>submit_result + Ajv]
   BE -->|"Agent.create({model, local:{cwd, settingSources, customTools}})"| SDK["@cursor/sdk<br/>(loop local)"]
   SDK -->|inferência + cobrança| CUR[Backend Cursor]
-  ENG -->|"ctx.exec: git, gh, testes"| REPO[(Repo + worktrees)]
+  ENG -->|"ctx.exec: git, gh ou glab, testes"| REPO[(Repo + worktrees)]
 ```
 
 ## Ciclo de uma etapa (`ctx.agent`)
@@ -137,7 +137,7 @@ são o que o backend local faz numa tentativa.
 
 ## Comandos do workflow (`ctx.exec`)
 
-Os comandos que o workflow roda por conta própria (testes, `git`, `gh`) passam por `ctx.exec(comando, args, { label, timeoutMs })`.
+Os comandos que o workflow roda por conta própria (testes, `git`, `gh` ou `glab`) passam por `ctx.exec(comando, args, { label, timeoutMs })`.
 Nenhum fica numa chamada síncrona, que congelaria o processo do job: o sinal de cancelamento esperaria atrás dela, nada
 poderia estourar o tempo dela e a saída dela ficaria invisível.
 
@@ -310,7 +310,7 @@ stateDiagram-v2
 | Todo evento do run fica registrado, e a estrutura do run dá para refazer só com o log | Log de eventos por run (`events.jsonl`): `v`, `ts` e `runId` em todo evento; `stepId`, `parentId` e `groupId` nas etapas; `group-start`/`group-end` em `parallel` e `pipeline`. Campos em [6.1 · Referência de eventos](../reference/events.md), gerada do tipo |
 | Uma queda no meio de uma gravação não impede o resume | Log e journal em JSON Lines: a última linha incompleta é ignorada, e a seguinte começa em linha nova. Os demais arquivos de estado (job, memo, progresso do workflow) são trocados por inteiro (arquivo temporário + `rename`) |
 | Um run não roda duas vezes ao mesmo tempo | `run.lock` no diretório do run: o segundo processo é recusado com `already running`; o lock de um processo que morreu é retomado |
-| Um recurso do repositório (uma issue) não tem dois runs ao mesmo tempo | Lock nomeado no run store (`acquireNamedLock`: `.workflows/locks/<nome>.lock`, mesmo mecanismo do `run.lock`, com o id do run que o tem). O `implement-issue` trava `issue-<n>` do começo ao fim do run (com um hash do repositório no nome quando o arg `repo` aponta para outro repositório que não o do cwd, ou quando o `gh` não consegue dizer se aponta): o segundo run volta `status: "issue-locked"` com `activeRunId`, sem criar branch, worktree nem agente. O lock de um processo que morreu é retomado |
+| Um recurso do repositório (uma issue) não tem dois runs ao mesmo tempo | Lock nomeado no run store (`acquireNamedLock`: `.workflows/locks/<nome>.lock`, mesmo mecanismo do `run.lock`, com o id do run que o tem). O `implement-issue` trava `issue-<n>` do começo ao fim do run (com um hash do repositório no nome quando o arg `repo` aponta para outro repositório que não o do cwd, ou quando o CLI do forge (`gh` ou `glab`) não consegue dizer se aponta): o segundo run volta `status: "issue-locked"` com `activeRunId`, sem criar branch, worktree nem agente. O lock de um processo que morreu é retomado |
 | Retomar um run com o workflow alterado não passa em silêncio | O `workflowHash` do `run-start` é comparado ao da execução anterior; mudou, o log recebe um `warning` |
 | Os runs de todos os repositórios são encontráveis | Cada run novo acrescenta uma linha (id, repositório, workflow, início) a `~/.cursor-workflows/runs.jsonl` (`WF_HOME` muda o diretório) |
 | Workflow não dispara workflow por acidente | MCP inline `workflows` sem tools nas etapas, que encobre o do `.cursor/mcp.json` (passo 4), + `WF_INSIDE_WORKFLOW` herdado pelo shell, com recusa no CLI. Medido em 2026-11-11: sem o inline, a etapa via `start_workflow`; com ele, só `FetchMcpResource` e `submit_result`. Não é fronteira de segurança (ver abaixo) |
@@ -352,7 +352,7 @@ stateDiagram-v2
 
 | Tema | Claude Code | Este kit | Motivo |
 |---|---|---|---|
-| Sandbox do script | Ambiente isolado: sem acesso direto a filesystem e shell, sem `import()`; `Date.now()`, `Math.random()` e `new Date()` sem argumento lançam erro [DOC](https://code.claude.com/docs/en/workflows) | Node completo | Permite `git`, `gh` e testes no próprio workflow, sem gastar tokens. Em troca, a disciplina de determinismo é sua |
+| Sandbox do script | Ambiente isolado: sem acesso direto a filesystem e shell, sem `import()`; `Date.now()`, `Math.random()` e `new Date()` sem argumento lançam erro [DOC](https://code.claude.com/docs/en/workflows) | Node completo | Permite `git`, `gh`, `glab` e testes no próprio workflow, sem gastar tokens. Em troca, a disciplina de determinismo é sua |
 | Chave de resume | Maior prefixo inalterado na ordem de início [DOC](https://code.claude.com/docs/en/workflows#which-agents-run-again) | Hash de prompt e opções + ocorrência | `pipeline` muda a ordem de conclusão; o hash tolera isso |
 | `agent()` com falha | Devolve `null` só se você interromper o agente ou num erro de API irrecuperável; schema contraditório, validação que falha 5 vezes e agente travado em todas as tentativas lançam erro ([DOC](https://code.claude.com/docs/en/workflows)) | **Lança erro** | "Garantir execução completa": falha precisa ser visível. Em `parallel`/`pipeline` vira `null`, como no Claude Code |
 | Concorrência | 16 por padrão, ajustável [DOC](https://code.claude.com/docs/en/workflows#behavior-and-limits) | 4 (configurável) | O Cursor não documenta o rate limit por usuário |
