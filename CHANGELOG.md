@@ -400,6 +400,16 @@
 - **A referência de eventos (6.1) tira o número e o rodapé do índice do livro**, em vez de uma cópia fixa no gerador:
   inserir um capítulo ao redor dela não exige mais editar `scripts/events-reference.ts`.
 
+### Corrigido
+
+- **A trava de segredos do `implement-issue` conhece todos os formatos que o redator do log conhece.** Ela só procurava
+  chaves `crsr_`, `sk-` e a chave salva do Cursor, então um token do GitHub, da AWS, do npm, do Slack, do Google ou do
+  Stripe, ou um bloco de chave privada, passava para o commit, o comentário das seams ou o corpo do PR. Agora a lista de
+  formatos é uma só (`CREDENTIAL_FORMATS` em `redaction.ts`) para o redator e para a trava, que também bloqueia o valor
+  de uma variável de ambiente com nome de segredo (`KEY`, `TOKEN`, `SECRET`, `PASSWORD`; 16 caracteres ou mais). JWTs e
+  cabeçalhos `Bearer`, comuns em fixtures de teste, são redigidos mas não bloqueiam. A saída de teste que vai para a
+  Evidence do PR passa pelo redator antes de entrar, além da troca dos caminhos locais.
+
 ## 0.2.0 (pré-release, 2026-11-11)
 
 ### Mudado

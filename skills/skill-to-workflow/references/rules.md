@@ -36,8 +36,10 @@ can make a decision, code **makes** it.
    (through `ctx.exec`) in the workflow, after the checks. Everything that leaves the machine first passes a **secrets guard**, because an
    issue body with a prompt injection can lead a step to copy `~/.cursor/sdk/auth.json` into the worktree and the
    sandbox does not restrict reads. The guard: before the commit, reset any commits an agent made (`git reset --soft`
-   to the base, keeping the tree) and scan the lines added since the base for `crsr_` and `sk-` keys, the SDK's saved
-   key (or the one in `CURSOR_API_KEY`), and files named `auth.json`, `.env` or `.env.*`; before publishing any text
+   to the base, keeping the tree) and scan the lines added since the base for every credential format the event-log
+   redactor knows (`CREDENTIAL_FORMATS` in `src/runtime/redaction.ts`: `crsr_` and `sk-` keys, GitHub, AWS, npm, Slack,
+   Google and Stripe tokens, private key blocks), the SDK's saved key (or the one in `CURSOR_API_KEY`), the value of any
+   secret-named environment variable, and files named `auth.json`, `.env` or `.env.*`; before publishing any text
    (PR body, comment) scan it with the same text rules. A hit stops exactly the effect that would have carried the
    text out, and the run returns `status: "secret-blocked"` with a `reason` naming only the rule that fired, never the
    snippet. A security review is a second layer, not the only one.

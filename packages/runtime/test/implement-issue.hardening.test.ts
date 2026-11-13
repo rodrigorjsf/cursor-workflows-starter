@@ -258,6 +258,9 @@ const SECRET_CASES: Array<[string, string, RegExp]> = [
   ["src/a.js", `const k = "${FAKE_KEY}";\n`, /crsr_/],
   ["src/b.js", `const k = "sk-${"b".repeat(30)}";\n`, /sk-/],
   ["src/c.js", `const k = '${SAVED_KEY}';\n`, /saved SDK key/],
+  // The other credential formats the event-log redactor knows block too (one source of truth in redaction.ts).
+  ["src/d.js", `const k = "ghp_${"d".repeat(36)}";\n`, /GitHub/],
+  ["src/e.js", `const k = "AKIA${"E".repeat(16)}";\n`, /AWS/],
 ];
 for (const [file, content, rule] of SECRET_CASES) {
   test(`trava de segredos: ${file} bloqueia a entrega sem repetir o segredo`, async () => {

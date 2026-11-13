@@ -90,6 +90,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import { wasKilledByCancel } from "../src/runtime/job-state.js";
+import { createRedactor, findCredential, findSecretEnvValue } from "../src/runtime/redaction.js";
 import { NamedLockedError, acquireNamedLock, eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { defineWorkflow, type AgentCallOptions, type WorkflowCard } from "../src/runtime/workflow.js";
 import { buildPrBody, type PrText } from "./implement-issue/pr-body.js";
@@ -421,12 +422,17 @@ async function diffSinceBase(cmd: Commands, cwd: string, base: string, maxChars:
   return `(diff truncated: read the files for the rest)\n\n${stat}\n\n\`\`\`diff\n${diff.slice(0, maxChars)}\n\`\`\``;
 }
 
-/** Regras de segredo para qualquer texto que vai sair da máquina. Devolve a regra que disparou, nunca o trecho. */
-export function findSecretInText(text: string, knownSecrets: string[] = savedSecrets()): string | undefined {
-  if (/crsr_[A-Za-z0-9_-]{16,}/.test(text)) return "Cursor key (crsr_)";
-  if (/\bsk-[A-Za-z0-9_-]{20,}/.test(text)) return "sk- key";
+/**
+ * Regras de segredo para qualquer texto que vai sair da máquina. Devolve a regra que disparou, nunca o trecho.
+ * The credential formats are the event-log redactor's (redaction.ts, one list for both), plus the saved Cursor key and the
+ * value of every secret-named environment variable (16 characters or more) of `env`.
+ */
+export function findSecretInText(text: string, knownSecrets: string[] = savedSecrets(), env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const format = findCredential(text);
+  if (format) return format;
   if (knownSecrets.some((k) => k.length >= 16 && text.includes(k))) return "the saved SDK key or CURSOR_API_KEY";
-  return undefined;
+  const variable = findSecretEnvValue(text, env, 16);
+  return variable ? `the value of the secret-named environment variable ${variable}` : undefined;
 }
 
 /**
@@ -1090,6 +1096,7 @@ export default defineWorkflow<Args>({
             deferred,
             refuted,
             worktree,
+            redact: createRedactor({ extra: savedSecrets() }).text, // the saved Cursor key is in no env var
           });
           const leak = findSecretInText(body);
           if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the PR body`, branch, worktree };
