@@ -33,7 +33,9 @@ falhas de segurança.
 - **Uma etapa na nuvem manda o seu código para fora da máquina.** Com `location: "cloud"` num papel (só vale se o teto
   global `allowedLocations` incluir `cloud`, o que o instalador não faz), o motor empurra um snapshot do worktree,
   **inclusive as mudanças não commitadas**, para uma branch `wf/cloud-snapshot/...` no remote `cloud.remote` (padrão
-  `origin`), e a etapa roda numa VM da Cursor a partir dele. Detalhes em
+  `origin`), e a etapa roda numa VM da Cursor a partir dele. O remote precisa ser `https://` ou ssh num host: um
+  `http://`, `git://`, `file://`, `ext::` ou caminho local é recusado antes do snapshot, e a credencial embutida numa URL
+  (`https://usuario:token@host/...`) é tirada antes de a URL ir para a API da Cursor. Detalhes em
   [6.2 §Etapas na nuvem](docs/reference/config.md#etapas-na-nuvem).
 
 ## A chave do Cursor
@@ -42,7 +44,9 @@ falhas de segurança.
   `~/.cursor/sdk/auth.json` (permissão 0600). Qualquer etapa de workflow consegue ler esse arquivo, mesmo com o
   sandbox ligado.
 - O `implement-issue` bloqueia a entrega (`status: "secret-blocked"`, sem commit, push nem PR) se o diff staged tiver
-  um arquivo `auth.json`, `.env` ou `.env.*`, uma chave `crsr_`/`sk-` ou a própria chave salva. Isso fecha o caminho
+  um arquivo `auth.json`, `.env` ou `.env.*`, uma credencial num dos formatos que o redator do log conhece (chaves
+  `crsr_` e `sk-`, tokens do GitHub, AWS, npm, Slack, Google e Stripe, blocos de chave privada), a própria chave salva
+  ou o valor de uma variável de ambiente com nome de segredo. Isso fecha o caminho
   "issue com prompt injection → etapa copia a chave → PR público", mas não impede outros vazamentos (por exemplo,
   rede).
 - **Revogue a chave no dashboard do Cursor** depois de testar o kit, e imediatamente em caso de suspeita.

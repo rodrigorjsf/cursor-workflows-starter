@@ -26,6 +26,8 @@
 import {
   Agent,
   AgentBusyError,
+  AuthenticationError,
+  ConfigurationError,
   RateLimitError,
   type AgentUsage,
   type ModelSelection,
@@ -110,8 +112,10 @@ export type UsageReading = { report: AgentUsage } | { failed: string };
 /**
  * Why an attempt ended with an error. `account` is a problem of the account, not the step (no plan access): the run
  * ends. `usage-limit` is the plan's usage cap, and `rate-limit` a throttle that passes: the step may try again.
+ * `not-retryable` is a configuration or authentication error the SDK marks `isRetryable: false` (a bad model id, an
+ * invalid key): it calls for a fix, so the step fails without its remaining retries.
  */
-export type AttemptErrorReason = "account" | "usage-limit" | "rate-limit" | "other";
+export type AttemptErrorReason = "account" | "usage-limit" | "rate-limit" | "not-retryable" | "other";
 
 /** How an attempt ended. */
 export type AttemptOutcome =
@@ -169,6 +173,9 @@ export function classifyError(err: unknown): Extract<AttemptOutcome, { kind: "er
   if (typeof code === "string" && ACCOUNT_ERROR_CODES.has(code)) return { kind: "error", reason: "account", message, code };
   // A rate limit that is not retryable is the plan's usage cap (the SDK doc: "Usage limit exceeded"): trying again does not help.
   if (err instanceof RateLimitError) return { kind: "error", reason: err.isRetryable ? "rate-limit" : "usage-limit", message };
+  // The SDK doc: "Use isRetryable to drive retry logic". Only these two classes are trusted with a `false`: the SDK defaults
+  // the flag to false, so an unclassified error (UnknownAgentError) would otherwise lose the retries that may get past it.
+  if ((err instanceof ConfigurationError || err instanceof AuthenticationError) && !err.isRetryable) return { kind: "error", reason: "not-retryable", message };
   return { kind: "error", reason: "other", message };
 }
 

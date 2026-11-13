@@ -90,9 +90,10 @@ import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import { wasKilledByCancel } from "../src/runtime/job-state.js";
+import { createRedactor, findCredential, findSecretEnvValue } from "../src/runtime/redaction.js";
 import { NamedLockedError, acquireNamedLock, eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { defineWorkflow, type AgentCallOptions, type WorkflowCard } from "../src/runtime/workflow.js";
-import { buildPrBody, type PrText } from "./implement-issue/pr-body.js";
+import { buildPrBody, sanitizeModelText, type PrText } from "./implement-issue/pr-body.js";
 import { CommandError, Commands, NETWORK_TIMEOUT_SEC, SNAPSHOT_GRACE_HOURS, WORKFLOW_BRANCH_PREFIX, worktreeOf } from "./implement-issue/commands.js";
 import * as P from "./implement-issue/prompts.js";
 import { AXES, AXIS_SCHEMAS, blockingAxes, blockingOf, type Axis, type ReviewReports } from "./implement-issue/review.js";
@@ -421,12 +422,17 @@ async function diffSinceBase(cmd: Commands, cwd: string, base: string, maxChars:
   return `(diff truncated: read the files for the rest)\n\n${stat}\n\n\`\`\`diff\n${diff.slice(0, maxChars)}\n\`\`\``;
 }
 
-/** Regras de segredo para qualquer texto que vai sair da máquina. Devolve a regra que disparou, nunca o trecho. */
-export function findSecretInText(text: string, knownSecrets: string[] = savedSecrets()): string | undefined {
-  if (/crsr_[A-Za-z0-9_-]{16,}/.test(text)) return "Cursor key (crsr_)";
-  if (/\bsk-[A-Za-z0-9_-]{20,}/.test(text)) return "sk- key";
+/**
+ * Regras de segredo para qualquer texto que vai sair da máquina. Devolve a regra que disparou, nunca o trecho.
+ * The credential formats are the event-log redactor's (redaction.ts, one list for both), plus the saved Cursor key and the
+ * value of every secret-named environment variable (16 characters or more) of `env`.
+ */
+export function findSecretInText(text: string, knownSecrets: string[] = savedSecrets(), env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const format = findCredential(text);
+  if (format) return format;
   if (knownSecrets.some((k) => k.length >= 16 && text.includes(k))) return "the saved SDK key or CURSOR_API_KEY";
-  return undefined;
+  const variable = findSecretEnvValue(text, env, 16);
+  return variable ? `the value of the secret-named environment variable ${variable}` : undefined;
 }
 
 /**
@@ -631,23 +637,26 @@ export default defineWorkflow<Args>({
           progress.data.proposedPlan = plan;
           progress.save();
           const relaunch = `npm run wf -- run implement-issue --args ${shellQuote(JSON.stringify({ ...ctx.args, approveSeams: true }))} --resume ${ctx.runId}`;
+          // Model text goes to a public issue: neutralized like the PR body's (closing keywords, mentions, `<!--`). The
+          // interface and the test command sit in code spans, where GitHub gives them no effect.
+          const prose = sanitizeModelText;
           const comment = [
             SEAMS_MARKER,
             `## Seams proposed by the \`implement-issue\` workflow (tier ${tier})`,
             "",
-            ...plan.seams.map((s) => `- **${s.name}**: \`${s.interface}\` — ${s.why}`),
+            ...plan.seams.map((s) => `- **${prose(s.name)}**: \`${s.interface}\` — ${prose(s.why)}`),
             "",
             "### Slices (one per red → green cycle)",
             "",
             ...plan.slices.map(
-              (s, i) => `${i + 1}. ${s.behavior} (seam: ${s.seam}; test: ${s.testIdea})${i >= sliceCap ? " (deferred)" : ""}`,
+              (s, i) => `${i + 1}. ${prose(s.behavior)} (seam: ${prose(s.seam)}; test: ${prose(s.testIdea)})${i >= sliceCap ? " (deferred)" : ""}`,
             ),
             ...(plan.slices.length > sliceCap
               ? ["", `The slices marked deferred are left out by the tier ${tier} slice cap (${sliceCap} slices): the PR only references the issue, without closing it.`]
               : []),
             "",
             `Test command: \`${ctx.args.testCommand ?? plan.testCommand}\``,
-            ...(plan.rationale ? ["", `### Why this design\n\n${plan.rationale}`] : []),
+            ...(plan.rationale ? ["", `### Why this design\n\n${prose(plan.rationale)}`] : []),
             "",
             "### To approve",
             "",
@@ -1090,6 +1099,7 @@ export default defineWorkflow<Args>({
             deferred,
             refuted,
             worktree,
+            redact: createRedactor({ extra: savedSecrets() }).text, // the saved Cursor key is in no env var
           });
           const leak = findSecretInText(body);
           if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the PR body`, branch, worktree };

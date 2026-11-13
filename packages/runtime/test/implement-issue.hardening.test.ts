@@ -258,6 +258,9 @@ const SECRET_CASES: Array<[string, string, RegExp]> = [
   ["src/a.js", `const k = "${FAKE_KEY}";\n`, /crsr_/],
   ["src/b.js", `const k = "sk-${"b".repeat(30)}";\n`, /sk-/],
   ["src/c.js", `const k = '${SAVED_KEY}';\n`, /saved SDK key/],
+  // The other credential formats the event-log redactor knows block too (one source of truth in redaction.ts).
+  ["src/d.js", `const k = "ghp_${"d".repeat(36)}";\n`, /GitHub/],
+  ["src/e.js", `const k = "AKIA${"E".repeat(16)}";\n`, /AWS/],
 ];
 for (const [file, content, rule] of SECRET_CASES) {
   test(`trava de segredos: ${file} bloqueia a entrega sem repetir o segredo`, async () => {
@@ -283,22 +286,44 @@ for (const [file, content, rule] of SECRET_CASES) {
   });
 }
 
+// A step's result is redacted by the engine before the workflow gets it, so a key the model wrote reaches neither the
+// comment nor the PR; the guard on those texts stays as a second layer.
 test("segredo no plano não vai para o comentário de seams", async () => {
   issue(["complexity:medium"]);
   fx.handlers.plan = (o) => submit(o, { ...PLAN, seams: [{ ...PLAN.seams[0], why: `use a chave ${FAKE_KEY}` }] });
   const r = await run({});
-  assert.equal(res(r).status, "secret-blocked");
-  assert.equal(gh().comments.length, 0);
+  assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
+  assert.match(gh().comments[0]!, /use a chave \[REDACTED\]/);
+  assert.ok(!JSON.stringify(gh()).includes(FAKE_KEY));
   assert.ok(!JSON.stringify(res(r)).includes(FAKE_KEY));
 });
 
-test("segredo no texto do PR bloqueia a entrega antes do push", async () => {
+test("model text in the seams comment closes no other issue, mentions no one and opens no HTML comment", async () => {
+  issue(["complexity:medium"]);
+  const hostile = (what: string) => `${what}: Fixes #12, cc @octocat <!-- hide`;
+  fx.handlers.planejar = (o) =>
+    submit(o, {
+      ...PLAN,
+      seams: [{ ...PLAN.seams[0], name: hostile("name"), why: hostile("why") }],
+      slices: [{ behavior: hostile("behavior"), seam: hostile("seam"), testIdea: hostile("testIdea") }],
+      rationale: hostile("rationale"),
+    });
+  const r = await run({});
+  assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
+  const comment = gh().comments[0]!;
+  for (const what of ["name", "why", "behavior", "seam", "testIdea", "rationale"]) assert.match(comment, new RegExp(`${what}: Fixes \`#12\``), what);
+  assert.doesNotMatch(comment, /Fixes #12/);
+  assert.doesNotMatch(comment, /(^|[^\w`])@octocat/);
+  assert.doesNotMatch(comment, /<!-- hide/); // the comment's own marker is the only HTML comment left
+});
+
+test("segredo no texto do PR não chega ao PR", async () => {
   issue(["complexity:low"]);
   fx.handlers["pr-text"] = (o) => submit(o, { summary: `chave: ${FAKE_KEY}`, door: "two-way", blastRadius: "local" });
   const r = await run({ openPr: true });
-  assert.equal(res(r).status, "secret-blocked");
-  assert.equal(gh().prs.length, 0);
-  assert.ok(!onOrigin());
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  assert.match(gh().prs[0]!.body, /chave: \[REDACTED\]/);
+  assert.ok(!JSON.stringify(gh()).includes(FAKE_KEY));
 });
 
 test("a evidência do PR não leva caminhos locais", async () => {

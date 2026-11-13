@@ -1,6 +1,8 @@
 // Corpo do PR no template da skill pr (Summary, Evidence, Merge Danger). O agente escreve Summary e Merge Danger;
 // a Evidence é a saída real da suíte em cada fatia (falhando, depois passando), guardada pelo código.
+// The test output is redacted (redaction.ts) and its local paths replaced before it goes in.
 import { homedir } from "node:os";
+import { createRedactor } from "../../src/runtime/redaction.js";
 import type { ReviewReports } from "./review.js";
 import type { SliceRecord } from "./tdd.js";
 
@@ -45,8 +47,11 @@ export function buildPrBody(input: {
   /** Achados "missing"/"wrong" cujo teste passou sem implementação: o comportamento já existia. */
   refuted?: string[];
   worktree?: string;
+  /** Redacts the test output before it goes in (default: the redactor of this process's environment, as the event log's). */
+  redact?: (text: string) => string;
 }): string {
   const { issueNumber, slices, review, deferred, refuted = [], worktree } = input;
+  const redact = input.redact ?? createRedactor().text;
   const t = {
     summary: sanitizeModelText(input.text.summary),
     door: input.text.door,
@@ -54,7 +59,8 @@ export function buildPrBody(input: {
     blastRadius: sanitizeModelText(input.text.blastRadius),
     blastNote: input.text.blastNote ? sanitizeModelText(input.text.blastNote) : undefined,
   };
-  const clean = (s: string | undefined, n: number) => redactPaths(tail(s, n), worktree);
+  // Test output can print a credential (an env dump, a token in a fixture): redacted whole, before the tail cuts a token in two.
+  const clean = (s: string | undefined, n: number) => redactPaths(tail(redact(s ?? ""), n), worktree);
   const evidence = slices
     .filter((s) => s.done)
     .map((s) =>

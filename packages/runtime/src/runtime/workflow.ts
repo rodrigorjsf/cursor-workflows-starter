@@ -97,7 +97,7 @@ export interface AgentCallOptions {
   mcpServers?: Record<string, McpServerConfig>;
   /** Tempo máximo da etapa. Ao estourar, a run é cancelada. Default 20 min. */
   timeoutMs?: number;
-  /** Tentativas extras quando a run termina em erro/cancelada. Default 1. */
+  /** Tentativas extras quando a run termina em erro/cancelada. Default 1. A configuration or authentication error the SDK marks not retryable fails at once. */
   retries?: number;
   /** Re-prompts quando o agente não chama `submit_result` ou envia JSON inválido. Default 2. */
   schemaRetries?: number;

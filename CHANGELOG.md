@@ -437,6 +437,32 @@
   `--max-cents`/`--max-tokens` inválidos e as linhas `usage:` de `config` e `metrics` saem com código 2 (antes 1); os
   demais erros continuam com 1. Corrigido junto: dentro de uma etapa (`WF_INSIDE_WORKFLOW=1`), o `wf run --job` (o
   modo filho do `wf start`) escapava da recusa que já valia para `run` e `start`.
+- **A trava de segredos do `implement-issue` conhece todos os formatos que o redator do log conhece.** Ela só procurava
+  chaves `crsr_`, `sk-` e a chave salva do Cursor, então um token do GitHub, da AWS, do npm, do Slack, do Google ou do
+  Stripe, ou um bloco de chave privada, passava para o commit, o comentário das seams ou o corpo do PR. Agora a lista de
+  formatos é uma só (`CREDENTIAL_FORMATS` em `redaction.ts`) para o redator e para a trava, que também bloqueia o valor
+  de uma variável de ambiente com nome de segredo (`KEY`, `TOKEN`, `SECRET`, `PASSWORD`; 16 caracteres ou mais). JWTs e
+  cabeçalhos `Bearer`, comuns em fixtures de teste, são redigidos mas não bloqueiam. A saída de teste que vai para a
+  Evidence do PR passa pelo redator antes de entrar, além da troca dos caminhos locais.
+- **O comentário das seams neutraliza o texto do modelo, como o corpo do PR.** O nome e o porquê de cada seam, o
+  comportamento, a seam e a ideia de teste de cada fatia e a justificativa do plano iam crus para a issue: um
+  `Fixes #12` fecharia outra issue, um `@usuario` notificaria alguém e um `<!--` esconderia o resto do comentário. Agora
+  passam por `sanitizeModelText`; a interface e o comando de teste, em blocos de código, ficam como estão.
+- **O resultado de uma etapa é redigido antes de ir para o journal e para o memo.** Só os eventos passavam pelo
+  redator: uma etapa que devolvia uma chave a gravava em claro em `journal.jsonl` e em `.workflows/memo/`. Agora o
+  resultado passa pela mesma redação antes de ser guardado, e o workflow recebe o valor já redigido, para que um resume
+  (que repete o journal) veja o mesmo que a primeira execução e não refaça as etapas seguintes.
+- **Uma etapa na nuvem não manda para a Cursor a credencial embutida na URL do remote, e recusa remotes inseguros.**
+  `cloudRepoUrl` mantinha o `usuario:token` de um remote `https://usuario:token@host/...` na URL do repositório enviada
+  à API da Cursor, e passava `http://`, `ext::` e caminhos locais como estavam (o snapshot, com arquivos não commitados,
+  ia em texto puro por `http://`). Agora a URL vem de `remote.<nome>.url` como configurada, sai sem credencial, e um
+  remote que não é `https://` ou ssh num host falha a etapa com uma mensagem clara, antes do snapshot e sem novas
+  tentativas. O redator do log ganhou o formato da senha numa URL (`https://usuario:[REDACTED]@host`).
+- **Um erro de configuração ou de autenticação do SDK falha a etapa na hora, sem gastar as novas tentativas.** O motor
+  só lia o `isRetryable` do `RateLimitError`: um `ConfigurationError` (id de modelo inválido) ou um
+  `AuthenticationError` (chave inválida) repetia a etapa até acabar o `retries`, criando um agente por tentativa. Agora
+  esses dois, quando o SDK os marca como não repetíveis, encerram a etapa na primeira tentativa; um erro de rede ou sem
+  classe continua com as novas tentativas, e uma falha ao reanexar a um cloud agent também (o agente pode estar rodando).
 
 ## 0.2.0 (pré-release, 2026-11-11)
 

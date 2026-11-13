@@ -10,7 +10,7 @@ import "./isolate-home.js";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { calls, cloudRunsOf, costConfig, finishCloudRun, forgetCloudAgent, killCloudClients, lookups, resetCloud, resumes, script, stats } from "@cursor/sdk";
+import { ConfigurationError, calls, cloudRunsOf, costConfig, finishCloudRun, forgetCloudAgent, killCloudClients, lookups, resetCloud, resumes, script, stats } from "@cursor/sdk";
 import { createCloudBackend } from "../src/runtime/backend-cloud.js";
 import { openDb } from "../src/observability/db.js";
 import { reconcile } from "../src/observability/queries.js";
@@ -42,7 +42,7 @@ afterEach(() => {
   calls.length = 0;
   resetCloud();
   Object.assign(stats, { active: 0, maxActive: 0, disposed: 0, usageReads: 0, cancels: 0, cancelled: 0, turnsDelivered: 0, sends: 0 });
-  Object.assign(costConfig, { raw: 9, charged: 7, getUsageError: undefined, createErrorCode: undefined, cloudWaitLimitMs: undefined, lookupFailures: undefined, listRunsDelayMs: undefined });
+  Object.assign(costConfig, { raw: 9, charged: 7, getUsageError: undefined, createErrorCode: undefined, cloudWaitLimitMs: undefined, lookupFailures: undefined, lookupError: undefined, listRunsDelayMs: undefined });
 });
 
 const READ = ["read", "grep"] as const;
@@ -319,6 +319,22 @@ test("a cloud agent that cannot be reached is not replaced: the attempt fails an
     assert.match(ends[0]!.error!, /could not reattach to cloud agent bc-1: service unavailable/);
     assert.equal(ends[1]!.attemptId, crashed.agent.attemptId);
     assert.deepEqual(remoteBranches(remote), []);
+  } finally {
+    await crashed.end();
+  }
+});
+
+test("a reattach that meets an SDK error the SDK calls not retryable still leaves the next attempt to reattach: the agent may be running", async () => {
+  const crashed = await crashWhileTheAgentRuns("life-5b");
+  try {
+    finishCloudRun("bc-1", { result: "done while away" });
+    costConfig.lookupFailures = 1;
+    costConfig.lookupError = () => Object.assign(new ConfigurationError("[bad_request] lookup refused"), { status: 400 }); // not "not found"
+    const r = await runWorkflow(reviewStep({ retries: 1 }), {}, { cwd, runId: "life-5b" });
+
+    assert.equal(r.status, "finished", r.error);
+    assert.equal(r.result, "done while away");
+    assert.deepEqual([calls.length, resumes], [1, ["bc-1", "bc-1"]], "no second agent was paid for");
   } finally {
     await crashed.end();
   }

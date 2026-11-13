@@ -73,7 +73,7 @@ export default defineWorkflow<{ target: string }>({
 | `agents` | Inline subagents for this step (`{ name: { description, prompt, model } }`); needs `"task"` in `tools`. |
 | `mcpServers` | MCP servers for this step only. |
 | `timeoutMs` | Time limit of each send (the request and each schema re-prompt get their own). Default 20 min. |
-| `retries` | Extra attempts when the run ends in error or is cancelled. Default 1. |
+| `retries` | Extra attempts when the run ends in error or is cancelled. Default 1. A configuration or authentication error the SDK marks not retryable (a bad model id, an invalid key) fails the step at once. |
 | `schemaRetries` | Re-prompts when the agent skips `submit_result` or sends invalid JSON. Default 2. |
 | `settingSources` | Which config layers the step loads: `"project"` (AGENTS.md, rules, skills, hooks, project MCP), `"team"`, `"mdm"`, `"user"`, `"plugins"`, `"all"` (the global cap `allowedSettingSources` leaves `"all"` out by default). Default when omitted: `["project","team","mdm"]`. Every layer adds fixed context to every call (cost.md). |
 | `memo` | Result cache across runs, keyed by prompt, model, schema, tools, context and repository state. Accepted only with read-only `tools`. |

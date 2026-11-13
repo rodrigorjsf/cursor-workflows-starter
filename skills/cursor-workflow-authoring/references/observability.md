@@ -49,7 +49,9 @@ global index `~/.cursor-workflows/runs.jsonl` (run id, repo path, workflow, star
 - Step content (prompts, what the agent said, tool calls, shell output) is in the log as `content` events, and nowhere
   else: not in the metrics database or its exports, and not in what `wait_workflow` shows. Known secret formats and the
   values of environment variables named like `KEY`, `TOKEN`, `SECRET` or `PASSWORD` are replaced with `[REDACTED]`
-  before it is written. When a run starts, the `text` of the content of runs beyond the last 30 or older than 14 days is
+  before it is written. A step's result gets the same redaction before it reaches the journal, the memo and the
+  workflow itself: `ctx.agent` returns `[REDACTED]` where the agent wrote a secret, on the first run and on a resume.
+  When a run starts, the `text` of the content of runs beyond the last 30 or older than 14 days is
   deleted; the events around it stay.
 - `wait_workflow` and `wf status` are projections of the log: `recent` holds at most 20 one-line summaries, never prompt or
   output text. `result` is whatever the workflow returned, so return structured facts, not raw agent text.

@@ -11,7 +11,7 @@ import { calls, costConfig, script, stats } from "@cursor/sdk";
 import { runWorkflow } from "../src/runtime/engine.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { clearConfig, configWorkflow, runStartOf, writeGlobalConfig, writeRepoConfig } from "./config-fixtures.js";
-import { git, remoteBranches, remoteFiles, repoWithRemote, worktreeState } from "./cloud-fixtures.js";
+import { addRemote, git, remoteBranches, remoteFiles, repoWithRemote, worktreeState } from "./cloud-fixtures.js";
 
 const root = join(import.meta.dirname, ".tmp", `cloud-${process.pid}`);
 const cwd = join(root, "repo");
@@ -54,7 +54,7 @@ test("a read-only step of a role configured for the cloud runs as a cloud agent 
   assert.equal(r.result, "all good");
   assert.equal(calls.length, 1);
   const [created] = calls;
-  assert.deepEqual(created.cloud.repos, [{ url: remote, startingRef: created.cloud.repos[0].startingRef }]);
+  assert.deepEqual(created.cloud.repos, [{ url: "https://example.invalid/origin/repo", startingRef: created.cloud.repos[0].startingRef }]);
   assert.match(created.cloud.repos[0].startingRef, /^wf\/cloud-snapshot\//, "a throwaway branch under the workflow's prefix");
   assert.equal(created.cloud.autoCreatePR, false, "the workflow keeps delivery");
   assert.equal(created.name, "cfg:look");
@@ -78,7 +78,7 @@ test("a read-only step of a role configured for the cloud runs as a cloud agent 
 test("the snapshot goes to the remote the cloud.remote preference names (the origin by default), and a repo file may choose a fork", async () => {
   const fork = join(root, "fork.git");
   git(root, "init", "-q", "--bare", fork);
-  git(cwd, "remote", "add", "fork", fork);
+  addRemote(cwd, "fork", fork);
   const wf = configWorkflow((ctx) => ctx.agent<string>("look", { role: "review", label: "look", tools: [...READ] }));
   const where = async () => {
     const seen: { origin: string[]; fork: string[]; url?: string } = { origin: [], fork: [] };
@@ -93,12 +93,12 @@ test("the snapshot goes to the remote the cloud.remote preference names (the ori
 
   writeGlobalConfig({ caps: { allowedLocations: ["local", "cloud"] }, workflows: { cfg: { roles: { review: { location: "cloud" } } } } });
   const byDefault = await where();
-  assert.deepEqual([byDefault.seen.origin.length, byDefault.seen.fork.length, byDefault.seen.url], [1, 0, remote]);
+  assert.deepEqual([byDefault.seen.origin.length, byDefault.seen.fork.length, byDefault.seen.url], [1, 0, "https://example.invalid/origin/repo"]);
   assert.deepEqual(runStartOf(logOf(byDefault.run.runId)).config.cloud, { remote: "origin" });
 
   writeGlobalConfig({ caps: { allowedLocations: ["local", "cloud"] }, cloud: { remote: "fork" }, workflows: { cfg: { roles: { review: { location: "cloud" } } } } });
   const global = await where();
-  assert.deepEqual([global.seen.origin.length, global.seen.fork.length, global.seen.url], [0, 1, fork]);
+  assert.deepEqual([global.seen.origin.length, global.seen.fork.length, global.seen.url], [0, 1, "https://example.invalid/fork/repo"]);
   assert.deepEqual(runStartOf(logOf(global.run.runId)).provenance["/cloud/remote"], { layer: "global", ref: join(process.env.WF_HOME!, "config.json") });
 
   writeRepoConfig(cwd, { cloud: { remote: "origin" } });
