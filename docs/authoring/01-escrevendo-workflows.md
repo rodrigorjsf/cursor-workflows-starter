@@ -237,8 +237,9 @@ etapa interrompida deixaria edições pela metade. Por isso o `implement-issue`:
   cabeça atual da branch padrão e nunca reaproveita o worktree de outro; o lock `issue-<n>` (em `.workflows/locks/`)
   recusa um segundo run na mesma issue. A issue do próprio repositório do cwd trava `issue-<n>`, com ou sem o arg
   `repo`; o nome só ganha um hash do repositório quando `repo` aponta para outro repositório (comparado pela URL que o
-  `gh repo view --json url` devolve, em minúsculas; se o `gh` não responde, o hash é do valor de `repo` em minúsculas,
-  mesmo que ele nomeie o repositório do cwd, e o run registra isso no log);
+  forge devolve, em minúsculas: `gh repo view --json url` no GitHub, o `web_url` de `glab api projects/<caminho>` no
+  GitLab; se o CLI do forge não responde, o hash é do valor de `repo` em minúsculas, mesmo que ele nomeie o
+  repositório do cwd, e o run registra isso no log);
 - entrega com `git push --force-with-lease=<branch>:<commit que o origin tem>`, só em branch `wf/`, e só quando esse
   commit é de um push do próprio run (o resume refaz o commit depois do PR; o commit de outra pessoa não é
   sobrescrito).
