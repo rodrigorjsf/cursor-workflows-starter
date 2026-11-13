@@ -113,6 +113,8 @@ const dashboardFields = (d: DashboardStatus, runId: string) =>
 
 const text = (v: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(v, null, 2) }] });
 const fail = (v: unknown) => ({ ...text(v), isError: true });
+/** A job's state, or the `job not found` error (flagged, like every failure) when there is no such job. */
+const found = (state: unknown) => (state === undefined ? fail({ error: "job not found" }) : text(state));
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (nested) return fail({ error: "workflows cannot be started from inside a workflow step" });
@@ -150,12 +152,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         if (err instanceof Error) return fail({ error: err.message });
         throw err;
       }
-      return text((await waitJob(cwd, String(a.jobId), secs * 1000)) ?? { error: "job not found" });
+      return found(await waitJob(cwd, String(a.jobId), secs * 1000));
     }
     case "get_workflow_status":
-      return text(readJob(cwd, String(a.jobId)) ?? { error: "job not found" });
+      return found(readJob(cwd, String(a.jobId)));
     case "cancel_workflow":
-      return text((await cancelJob(cwd, String(a.jobId), 20_000)) ?? { error: "job not found" });
+      return found(await cancelJob(cwd, String(a.jobId), 20_000));
     default:
       return fail({ error: `unknown tool: ${req.params.name}` });
   }

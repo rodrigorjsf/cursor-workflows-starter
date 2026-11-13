@@ -415,6 +415,10 @@
   `timeoutSec` que não é número é um erro (`isError`, com `timeoutSec must be a number of seconds`), o número é levado
   para 1 a 50 (45 sem ele), e `waitJob` não espera nada com um tempo que não é um número finito. O `cancel_workflow`
   espera um tempo fixo (20 s) e não tinha o problema.
+- **`job not found` no servidor MCP é um erro de tool.** `wait_workflow`, `get_workflow_status` e `cancel_workflow`
+  devolviam `{ "error": "job not found" }` como uma resposta normal, sem o `isError` que todas as outras falhas do
+  servidor levam; agora vem com `isError: true`. O corpo não muda: um retorno com `error` e sem `status` continua
+  encerrando a espera da skill `run-workflow`.
 
 ## 0.2.0 (pré-release, 2026-11-11)
 
