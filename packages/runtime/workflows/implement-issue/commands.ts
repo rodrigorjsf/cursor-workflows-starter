@@ -126,6 +126,12 @@ export class Commands {
     await this.push(cwd, `--force-with-lease=${branch}:${expected ?? ""}`, "-u", "origin", branch);
   }
 
+  /** The URL `remote` (the origin by default) has in the repository's configuration, as written there (`url.<base>.insteadOf` is not applied); undefined when there is no such remote. */
+  async remoteUrl(cwd: string, remote = ORIGIN): Promise<string | undefined> {
+    if (!(await this.gitIs(cwd, "config", "--get", `remote.${remote}.url`))) return undefined;
+    return (await this.gitRead(cwd, "config", "--get", `remote.${remote}.url`)).trim() || undefined;
+  }
+
   /**
    * Every branch `remote` (the origin by default) has under `prefix` (the workflow's own by default), by name, with the commit each
    * points at. A network command. Empty when the repository has no such remote: there is no remote branch to find.

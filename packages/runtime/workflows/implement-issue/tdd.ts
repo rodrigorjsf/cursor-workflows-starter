@@ -249,9 +249,12 @@ export interface Progress {
 export class ProgressStore {
   readonly file: string;
   data: Progress;
+  /** Did the run have a progress file when this store was made? A run with none is fresh: nothing of it was recorded yet. */
+  readonly existed: boolean;
   constructor(cwd: string, runId: string) {
     this.file = join(runDirIn(cwd, runId), "tdd-progress.json");
-    this.data = existsSync(this.file) ? (JSON.parse(readFileSync(this.file, "utf8")) as Progress) : { slices: [] };
+    this.existed = existsSync(this.file);
+    this.data = this.existed ? (JSON.parse(readFileSync(this.file, "utf8")) as Progress) : { slices: [] };
   }
   slice(key: string): SliceRecord | undefined {
     return this.data.slices.find((s) => s.key === key);

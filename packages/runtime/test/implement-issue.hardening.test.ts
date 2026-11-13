@@ -4,7 +4,6 @@
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, test } from "node:test";
 import {
   ALL_CODE,
   ALL_TEST,
@@ -13,23 +12,19 @@ import {
   SUB_CODE,
   SUB_TEST,
   branchOf,
+  forgeState,
+  forgeTest,
   fx,
-  gh,
   git,
   issue,
   names,
   onOrigin,
   run,
-  setup,
   submit,
   suitePasses,
-  teardown,
   worktreeOf,
   write,
 } from "./implement-issue.fixture.js";
-
-beforeEach(setup);
-afterEach(teardown);
 
 const FAKE_KEY = "crsr_" + "x".repeat(40);
 const res = (r: { result?: unknown }) => r.result as any;
@@ -41,7 +36,7 @@ const missing = (behavior: string) => ({
 
 // ── Laço TDD ──────────────────────────────────────────────────────────────────────────
 
-test("green que move o teste red para fora dos globs é desfeito: tdd-violation, nada no origin", async () => {
+forgeTest("green que move o teste red para fora dos globs é desfeito: tdd-violation, nada no origin", async () => {
   issue(["complexity:low"]);
   fx.handlers["code-1"] = (o) => {
     mkdirSync(join(o.local.cwd, "docs"), { recursive: true });
@@ -54,7 +49,7 @@ test("green que move o teste red para fora dos globs é desfeito: tdd-violation,
   assert.ok(!onOrigin());
 });
 
-test("green que reconfigura o runner (scripts do package.json) é desfeito: tdd-violation", async () => {
+forgeTest("green que reconfigura o runner (scripts do package.json) é desfeito: tdd-violation", async () => {
   issue(["complexity:low"]);
   fx.handlers["code-1"] = (o) => {
     write(o, "package.json", '{ "name": "fx", "type": "module", "scripts": { "test": "node --test test/math.test.js" } }\n');
@@ -64,7 +59,7 @@ test("green que reconfigura o runner (scripts do package.json) é desfeito: tdd-
   assert.equal(res(r).status, "tdd-violation", JSON.stringify(res(r)));
 });
 
-test("green que marca o teste com skip-worktree e o enfraquece é desfeito: tdd-violation", async () => {
+forgeTest("green que marca o teste com skip-worktree e o enfraquece é desfeito: tdd-violation", async () => {
   issue(["complexity:low"]);
   fx.handlers["code-1"] = (o) => {
     git(o.local.cwd, "update-index", "--skip-worktree", "test/sub.test.js");
@@ -75,7 +70,7 @@ test("green que marca o teste com skip-worktree e o enfraquece é desfeito: tdd-
   assert.equal(res(r).status, "tdd-violation", JSON.stringify(res(r)));
 });
 
-test("red que apaga um teste existente é desfeito: tdd-violation", async () => {
+forgeTest("red que apaga um teste existente é desfeito: tdd-violation", async () => {
   issue(["complexity:low"]);
   fx.handlers["test-1"] = (o) => {
     rmSync(join(o.local.cwd, "test", "math.test.js"));
@@ -88,7 +83,7 @@ test("red que apaga um teste existente é desfeito: tdd-violation", async () => 
   assert.ok(!names().includes("code-1"));
 });
 
-test("red pode atualizar o teste que fixa o comportamento antigo; green implementa e o run entrega", async () => {
+forgeTest("red pode atualizar o teste que fixa o comportamento antigo; green implementa e o run entrega", async () => {
   issue(["complexity:low"], "add passa a aceitar um terceiro número");
   fx.handlers["test-1"] = (o) => {
     write(o, "test/math.test.js", 'import assert from "node:assert/strict";\nimport { test } from "node:test";\nimport { add } from "../src/math.js";\n\ntest("add", () => {\n  assert.equal(add(2, 3, 4), 9);\n});\n');
@@ -102,7 +97,7 @@ test("red pode atualizar o teste que fixa o comportamento antigo; green implemen
   assert.equal(res(r).status, "done", JSON.stringify(res(r)));
 });
 
-test("achado 'missing' de algo que já existe: o teste passa, a etapa confirma e o run entrega com o achado refutado", async () => {
+forgeTest("achado 'missing' de algo que já existe: o teste passa, a etapa confirma e o run entrega com o achado refutado", async () => {
   issue(["complexity:low"]);
   let specRound = 0;
   fx.handlers["review:spec"] = (o) => submit(o, ++specRound === 1 ? missing("add soma") : CLEAN_REVIEW);
@@ -113,12 +108,12 @@ test("achado 'missing' de algo que já existe: o teste passa, a etapa confirma e
   const r = await run({ openPr: true });
   assert.equal(res(r).status, "done", JSON.stringify(res(r)));
   assert.ok(!names().includes("code-extra-1"));
-  assert.match(gh().prs[0]!.body, /refuted by a test/);
+  assert.match(forgeState().prs[0]!.body, /refuted by a test/);
 });
 
 // ── Resume e idempotência ─────────────────────────────────────────────────────────────
 
-test("refactor que quebra a suíte é desfeito; o resume não entrega suíte vermelha", async () => {
+forgeTest("refactor que quebra a suíte é desfeito; o resume não entrega suíte vermelha", async () => {
   issue(["complexity:low"]);
   let stdRound = 0;
   fx.handlers["review:standards"] = (o) =>
@@ -137,7 +132,7 @@ test("refactor que quebra a suíte é desfeito; o resume não entrega suíte ver
   assert.ok(suitePasses(worktreeOf(first.runId)));
 });
 
-test("etapa que falha no meio é desfeita: o resume não herda um teste enfraquecido", async () => {
+forgeTest("etapa que falha no meio é desfeita: o resume não herda um teste enfraquecido", async () => {
   issue(["complexity:low"]);
   fx.handlers["code-1"] = (o) => {
     write(o, "test/sub.test.js", weakTest);
@@ -157,7 +152,7 @@ test("etapa que falha no meio é desfeita: o resume não herda um teste enfraque
   assert.match(readFileSync(join(worktreeOf(first.runId), "src", "math.js"), "utf8"), /subtract/);
 });
 
-test("queda do processo durante uma etapa: o resume volta ao snapshot de antes dela", async () => {
+forgeTest("queda do processo durante uma etapa: o resume volta ao snapshot de antes dela", async () => {
   issue(["complexity:low"]);
   fx.handlers["code-1"] = () => ({ status: "error", error: { message: "queda simulada" } });
   const first = await run({});
@@ -179,7 +174,7 @@ test("queda do processo durante uma etapa: o resume volta ao snapshot de antes d
   assert.equal(readFileSync(join(worktreeOf(first.runId), "test", "sub.test.js"), "utf8"), SUB_TEST);
 });
 
-test("resume depois de done com fatia extra não pede review novo", async () => {
+forgeTest("resume depois de done com fatia extra não pede review novo", async () => {
   issue(["complexity:low"]);
   let specRound = 0;
   fx.handlers["review:spec"] = (o) => submit(o, ++specRound === 1 ? missing("subtractAll") : CLEAN_REVIEW);
@@ -199,7 +194,7 @@ test("resume depois de done com fatia extra não pede review novo", async () => 
   assert.deepEqual(names().slice(before), [], "o resume reaproveita o review guardado");
 });
 
-test("approveSeams executa o plano mostrado na issue, mesmo com o repositório mudado", async () => {
+forgeTest("approveSeams executa o plano mostrado na issue, mesmo com o repositório mudado", async () => {
   issue(["complexity:medium"]);
   const first = await run({});
   assert.equal(res(first).status, "seams-proposed");
@@ -213,7 +208,7 @@ test("approveSeams executa o plano mostrado na issue, mesmo com o repositório m
   assert.equal(names().filter((n) => n === "plan").length, 1, "o plano aprovado não é recalculado");
 });
 
-test("resume com o worktree removido mantém os commits da branch", async () => {
+forgeTest("resume com o worktree removido mantém os commits da branch", async () => {
   issue(["complexity:low"]);
   const first = await run({});
   assert.equal(res(first).status, "done");
@@ -225,16 +220,16 @@ test("resume com o worktree removido mantém os commits da branch", async () => 
   assert.match(readFileSync(join(worktreeOf(first.runId), "src", "math.js"), "utf8"), /subtract/);
 });
 
-test("comando de relançamento postado na issue sobrevive a aspas simples nos args", async () => {
+forgeTest("comando de relançamento postado na issue sobrevive a aspas simples nos args", async () => {
   issue(["complexity:medium"]);
   const r = await run({ testCommand: "node --test # it's" });
   assert.equal(res(r).status, "seams-proposed");
-  assert.match(gh().comments[0]!, /it'\\''s/);
+  assert.match(forgeState().comments[0]!, /it'\\''s/);
 });
 
 // ── Segurança ─────────────────────────────────────────────────────────────────────────
 
-test("commit feito por agente não escapa da trava de segredos nem chega ao origin", async () => {
+forgeTest("commit feito por agente não escapa da trava de segredos nem chega ao origin", async () => {
   issue(["complexity:low"]);
   fx.handlers["code-1"] = (o) => {
     write(o, "src/math.js", SUB_CODE);
@@ -247,7 +242,7 @@ test("commit feito por agente não escapa da trava de segredos nem chega ao orig
   assert.equal(res(r).status, "secret-blocked", JSON.stringify(res(r)));
   assert.ok(!JSON.stringify(res(r)).includes(FAKE_KEY));
   assert.ok(!onOrigin());
-  assert.equal(gh().prs.length, 0);
+  assert.equal(forgeState().prs.length, 0);
 });
 
 // A trava olha o diff desde a base: auth.json, .env, as chaves crsr_/sk- e a chave salva (aqui, CURSOR_API_KEY).
@@ -263,7 +258,7 @@ const SECRET_CASES: Array<[string, string, RegExp]> = [
   ["src/e.js", `const k = "AKIA${"E".repeat(16)}";\n`, /AWS/],
 ];
 for (const [file, content, rule] of SECRET_CASES) {
-  test(`trava de segredos: ${file} bloqueia a entrega sem repetir o segredo`, async () => {
+  forgeTest(`trava de segredos: ${file} bloqueia a entrega sem repetir o segredo`, async () => {
     const saved = process.env.CURSOR_API_KEY;
     process.env.CURSOR_API_KEY = SAVED_KEY;
     try {
@@ -278,7 +273,7 @@ for (const [file, content, rule] of SECRET_CASES) {
       assert.match(res(r).reason, rule);
       assert.ok(!JSON.stringify(res(r)).includes(FAKE_KEY) && !JSON.stringify(res(r)).includes(SAVED_KEY), "o motivo não pode conter o segredo");
       assert.ok(!onOrigin());
-      assert.equal(gh().prs.length, 0);
+      assert.equal(forgeState().prs.length, 0);
     } finally {
       if (saved === undefined) delete process.env.CURSOR_API_KEY;
       else process.env.CURSOR_API_KEY = saved;
@@ -288,17 +283,17 @@ for (const [file, content, rule] of SECRET_CASES) {
 
 // A step's result is redacted by the engine before the workflow gets it, so a key the model wrote reaches neither the
 // comment nor the PR; the guard on those texts stays as a second layer.
-test("segredo no plano não vai para o comentário de seams", async () => {
+forgeTest("segredo no plano não vai para o comentário de seams", async () => {
   issue(["complexity:medium"]);
   fx.handlers.plan = (o) => submit(o, { ...PLAN, seams: [{ ...PLAN.seams[0], why: `use a chave ${FAKE_KEY}` }] });
   const r = await run({});
   assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
-  assert.match(gh().comments[0]!, /use a chave \[REDACTED\]/);
-  assert.ok(!JSON.stringify(gh()).includes(FAKE_KEY));
+  assert.match(forgeState().comments[0]!, /use a chave \[REDACTED\]/);
+  assert.ok(!JSON.stringify(forgeState()).includes(FAKE_KEY));
   assert.ok(!JSON.stringify(res(r)).includes(FAKE_KEY));
 });
 
-test("model text in the seams comment closes no other issue, mentions no one and opens no HTML comment", async () => {
+forgeTest("model text in the seams comment closes no other issue, mentions no one and opens no HTML comment", async () => {
   issue(["complexity:medium"]);
   const hostile = (what: string) => `${what}: Fixes #12, cc @octocat <!-- hide`;
   fx.handlers.plan = (o) =>
@@ -310,20 +305,20 @@ test("model text in the seams comment closes no other issue, mentions no one and
     });
   const r = await run({});
   assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
-  const comment = gh().comments[0]!;
+  const comment = forgeState().comments[0]!;
   for (const what of ["name", "why", "behavior", "seam", "testIdea", "rationale"]) assert.match(comment, new RegExp(`${what}: Fixes \`#12\``), what);
   assert.doesNotMatch(comment, /Fixes #12/);
   assert.doesNotMatch(comment, /(^|[^\w`])@octocat/);
   assert.doesNotMatch(comment, /<!-- hide/); // the comment's own marker is the only HTML comment left
 });
 
-test("model text in an inline code span of the seams comment cannot close the span", async () => {
+forgeTest("model text in an inline code span of the seams comment cannot close the span", async () => {
   issue(["complexity:medium"]);
   const hostile = "f()` @octocat <!-- `x";
   fx.handlers.plan = (o) => submit(o, { ...PLAN, seams: [{ ...PLAN.seams[0], interface: hostile }], testCommand: `npm test${hostile}` });
   const r = await run({ testCommand: undefined }); // the plan's test command, the model's text, goes in the comment
   assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
-  const comment = gh().comments[0]!;
+  const comment = forgeState().comments[0]!;
   assert.ok(comment.includes("`f()ˋ @octocat <!-- ˋx`"), comment);
   assert.ok(comment.includes("Test command: `npm testf()ˋ @octocat <!-- ˋx`"), comment);
   assert.doesNotMatch(comment, /`\s*@octocat/);
@@ -331,7 +326,7 @@ test("model text in an inline code span of the seams comment cannot close the sp
 
 // A step result keeps the redact-only shapes (a URL password, Bearer, JWT) so the workflow can run them; what goes to GitHub
 // is redacted with every format all the same.
-test("a redact-only credential in the plan runs in the test command but reaches neither the seams comment nor the PR", async () => {
+forgeTest("a redact-only credential in the plan runs in the test command but reaches neither the seams comment nor the PR", async () => {
   issue(["complexity:medium"]);
   const seen = join(fx.root, "db-url.txt");
   const testCommand = `DATABASE_URL=postgres://u:pw1234567890@localhost/db bash -c 'printf %s "$DATABASE_URL" > ${seen}; node --test'`;
@@ -340,37 +335,37 @@ test("a redact-only credential in the plan runs in the test command but reaches 
   fx.handlers["pr-text"] = (o) => submit(o, { summary: `token ${jwt}`, door: "two-way", blastRadius: "local" });
   const first = await run({ testCommand: undefined });
   assert.equal(res(first).status, "seams-proposed", JSON.stringify(res(first)));
-  const comment = gh().comments[0]!;
+  const comment = forgeState().comments[0]!;
   assert.ok(comment.includes("postgres://u:[REDACTED]@localhost/db"), comment);
   assert.ok(comment.includes("Bearer [REDACTED]"), comment);
 
   const second = await run({ testCommand: undefined, approveSeams: true, openPr: true }, first.runId);
   assert.equal(res(second).status, "done", JSON.stringify(res(second)));
   assert.equal(readFileSync(seen, "utf8"), "postgres://u:pw1234567890@localhost/db", "the suite ran with the real value");
-  assert.match(gh().prs[0]!.body, /token \[REDACTED\]/);
-  for (const shown of ["pw1234567890", "abcdefghijklmnop1234", jwt]) assert.ok(!JSON.stringify(gh()).includes(shown), `GitHub got ${shown}`);
+  assert.match(forgeState().prs[0]!.body, /token \[REDACTED\]/);
+  for (const shown of ["pw1234567890", "abcdefghijklmnop1234", jwt]) assert.ok(!JSON.stringify(forgeState()).includes(shown), `GitHub got ${shown}`);
 });
 
-test("segredo no texto do PR não chega ao PR", async () => {
+forgeTest("segredo no texto do PR não chega ao PR", async () => {
   issue(["complexity:low"]);
   fx.handlers["pr-text"] = (o) => submit(o, { summary: `chave: ${FAKE_KEY}`, door: "two-way", blastRadius: "local" });
   const r = await run({ openPr: true });
   assert.equal(res(r).status, "done", JSON.stringify(res(r)));
-  assert.match(gh().prs[0]!.body, /chave: \[REDACTED\]/);
-  assert.ok(!JSON.stringify(gh()).includes(FAKE_KEY));
+  assert.match(forgeState().prs[0]!.body, /chave: \[REDACTED\]/);
+  assert.ok(!JSON.stringify(forgeState()).includes(FAKE_KEY));
 });
 
-test("a evidência do PR não leva caminhos locais", async () => {
+forgeTest("a evidência do PR não leva caminhos locais", async () => {
   issue(["complexity:low"]);
   const r = await run({ openPr: true });
   assert.equal(res(r).status, "done");
-  assert.ok(!gh().prs[0]!.body.includes(fx.repo), "o caminho do worktree vira <worktree>");
+  assert.ok(!forgeState().prs[0]!.body.includes(fx.repo), "o caminho do worktree vira <worktree>");
 });
 
-test("approveSeams sem plano proposto neste run (outro runId ou outro --cwd) não executa um plano que ninguém viu", async () => {
+forgeTest("approveSeams sem plano proposto neste run (outro runId ou outro --cwd) não executa um plano que ninguém viu", async () => {
   issue(["complexity:medium"]);
   const r = await run({ approveSeams: true });
   assert.equal(res(r).status, "seams-not-proposed", JSON.stringify(res(r)));
   assert.ok(!names().includes("plan"));
-  assert.equal(gh().comments.length, 0);
+  assert.equal(forgeState().comments.length, 0);
 });

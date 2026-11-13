@@ -1,6 +1,6 @@
 // Seam: the source of `implement-issue` and `wf gc`, read as text with the TypeScript parser (nothing runs). The forge module
-// is the one place that names a forge's CLI (ADR-0009), so no string literal anywhere else in them says `gh`. What the forge CLI
-// is asked is asserted by the behaviour tests of the workflow and of gc, against the fake `gh` on the PATH.
+// is the one place that names a forge's CLI (ADR-0009), so no string literal anywhere else in them says `gh` or `glab`. What the
+// forge CLI is asked is asserted by the behaviour tests of the workflow and of gc, against the fake `gh` and `glab` on the PATH.
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -32,15 +32,18 @@ function literals(file: string): Array<{ line: number; text: string }> {
 }
 
 const NAMES_GH = /\bgh\b/;
+const NAMES_GLAB = /\bglab\b/;
+const NAMES_A_FORGE_CLI = /\b(gh|glab)\b/;
 
-test("only the forge module names the gh CLI: implement-issue, wf gc and the CLI that starts it call the forge instead", () => {
+test("only the forge module names the gh and glab CLIs: implement-issue, wf gc and the CLI that starts it call the forge instead", () => {
+  const named = literals(FORGE);
   assert.ok(
-    literals(FORGE).some(({ text }) => NAMES_GH.test(text)),
-    "the forge module is where `gh` is named: the scan below would pass for the wrong reason without it",
+    named.some(({ text }) => NAMES_GH.test(text)) && named.some(({ text }) => NAMES_GLAB.test(text)),
+    "the forge module is where `gh` and `glab` are named: the scan below would pass for the wrong reason without it",
   );
   const offenders = FORGE_CLIENTS.flatMap((file) =>
     literals(file)
-      .filter(({ text }) => NAMES_GH.test(text))
+      .filter(({ text }) => NAMES_A_FORGE_CLI.test(text))
       .map(({ line, text }) => `${relative(RUNTIME, file)}:${line}: ${text.slice(0, 80)}`),
   );
   assert.deepEqual(offenders, [], "route the call through the forge in workflows/implement-issue/forge.ts");

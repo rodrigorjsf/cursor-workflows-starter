@@ -6,15 +6,12 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, test } from "node:test";
+import { test } from "node:test";
 import { calls } from "@cursor/sdk";
 import type { ContentEvent, ExecStartEvent } from "../src/runtime/events.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
-import { SUB_CODE, branchOf, failGh, fx, gh, git, issue, names, run, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
-
-beforeEach(setup);
-afterEach(teardown);
+import { SUB_CODE, branchOf, failForge, forgeState, forgeTest, fx, git, issue, names, run, submit, worktreeOf, write } from "./implement-issue.fixture.js";
 
 const res = (r: { result?: unknown }) => r.result as any;
 const commitOnMain = (file: string) => {
@@ -25,7 +22,7 @@ const commitOnMain = (file: string) => {
 
 // ── Run-owned worktrees and branches ──────────────────────────────────────────────────
 
-test("a fresh run never reuses the worktree of an earlier run, and starts from the current head of the default branch", async () => {
+forgeTest("a fresh run never reuses the worktree of an earlier run, and starts from the current head of the default branch", async () => {
   issue(["complexity:low"]);
   const first = await run({});
   assert.equal(res(first).status, "done", JSON.stringify(res(first)));
@@ -47,7 +44,7 @@ test("a fresh run never reuses the worktree of an earlier run, and starts from t
   assert.equal(git(fx.repo, "rev-parse", branchOf(first.runId)).trim(), firstHead, "and so is its branch");
 });
 
-test("the base is the head of the default branch, not of whatever branch the repository has checked out", async () => {
+forgeTest("the base is the head of the default branch, not of whatever branch the repository has checked out", async () => {
   issue(["complexity:low"]);
   git(fx.repo, "push", "-q", "origin", "main");
   git(fx.repo, "remote", "set-head", "origin", "main"); // what a clone records: origin's default branch is main
@@ -60,7 +57,7 @@ test("the base is the head of the default branch, not of whatever branch the rep
   assert.ok(!existsSync(join(worktreeOf(r.runId), "feature.txt")), "work that is not on the default branch is not in the base");
 });
 
-test("a worktree that is in the run's place but that the run did not create is refused, never reused", async () => {
+forgeTest("a worktree that is in the run's place but that the run did not create is refused, never reused", async () => {
   issue(["complexity:low"]);
   git(fx.repo, "worktree", "add", "-q", "-b", "somebody-elses", worktreeOf("foreign-run")); // a leftover, with whatever base it had
   const r = await run({}, "foreign-run");
@@ -70,12 +67,12 @@ test("a worktree that is in the run's place but that the run did not create is r
   assert.equal(calls.length, 0);
 });
 
-test("a recorded worktree path that is not a worktree (an interrupted `git worktree add`) is made again, and git never acts on the repository around it", async () => {
+forgeTest("a recorded worktree path that is not a worktree (an interrupted `git worktree add`) is made again, and git never acts on the repository around it", async () => {
   issue(["complexity:low"]);
   const runId = "interrupted";
   const state = join(fx.repo, ".workflows", "runs", runId);
   mkdirSync(state, { recursive: true });
-  writeFileSync(join(state, "tdd-progress.json"), JSON.stringify({ slices: [], branch: branchOf(runId), worktree: worktreeOf(runId) })); // the run had recorded its place
+  writeFileSync(join(state, "tdd-progress.json"), JSON.stringify({ slices: [], forge: fx.forge, branch: branchOf(runId), worktree: worktreeOf(runId) })); // the run had recorded its forge and its place
   mkdirSync(worktreeOf(runId), { recursive: true }); // and `git worktree add` had made the directory when the process died
   const mainBefore = git(fx.repo, "rev-parse", "HEAD").trim();
 
@@ -86,7 +83,7 @@ test("a recorded worktree path that is not a worktree (an interrupted `git workt
   assert.equal(git(fx.repo, "status", "--porcelain").trim(), "", "and no change in its files");
 });
 
-test("a run id that a branch name cannot hold is refused before the run makes a branch; a plain one gets a valid branch", async () => {
+forgeTest("a run id that a branch name cannot hold is refused before the run makes a branch; a plain one gets a valid branch", async () => {
   issue(["complexity:low"]);
   await assert.rejects(run({}, "release 1.0"), /invalid runId/); // run ids are plain names: it would also name the run's folder
   assert.equal(git(fx.repo, "branch", "--list", "wf/*release*").trim(), "");
@@ -97,7 +94,7 @@ test("a run id that a branch name cannot hold is refused before the run makes a 
 
 // ── One active run per issue ──────────────────────────────────────────────────────────
 
-test("a second run on an issue that has an active run is refused with that run's id; the issue is free once the run ends", async () => {
+forgeTest("a second run on an issue that has an active run is refused with that run's id; the issue is free once the run ends", async () => {
   issue(["complexity:low"]);
   let release!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
@@ -132,7 +129,7 @@ test("a second run on an issue that has an active run is refused with that run's
   assert.equal(res(after).status, "done", `the run that ended released the issue: ${JSON.stringify(res(after))}`);
 });
 
-test("the lock is on the issue of one repository: issue #7 of another --repo is not locked out, the same --repo is", async () => {
+forgeTest("the lock is on the issue of one repository: issue #7 of another --repo is not locked out, the same --repo is", async () => {
   issue(["complexity:low"]);
   let release!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
@@ -217,7 +214,7 @@ async function whileActive(active: Record<string, unknown>, others: Array<[Recor
   return { activeId, results };
 }
 
-test("the lock is on the issue of the cwd's repository whether or not --repo names it: a run with and one without it refuse each other", async () => {
+forgeTest("the lock is on the issue of the cwd's repository whether or not --repo names it: a run with and one without it refuse each other", async () => {
   issue(["complexity:low"]);
   ghKnowsTheCwdRepository();
   const a = await whileActive({}, [[{ repo: "owner/repo" }, "with-repo"], [{ repo: "https://github.com/OWNER/REPO" }, "with-url"], [{ repo: "other/x" }, "other"]]);
@@ -227,17 +224,17 @@ test("the lock is on the issue of the cwd's repository whether or not --repo nam
   const b = await whileActive({ repo: "Owner/Repo" }, [[{}, "without-repo"]]);
   assert.deepEqual(b.results.map((r) => r.status), ["issue-locked"], JSON.stringify(b.results));
   assert.equal(b.results[0].activeRunId, b.activeId);
-});
+}, ["github"]);
 
-test("GitHub names ignore case: a --repo spelled in another case than gh's answer for the cwd is still the cwd's issue", async () => {
+forgeTest("GitHub names ignore case: a --repo spelled in another case than gh's answer for the cwd is still the cwd's issue", async () => {
   issue(["complexity:low"]);
   ghKnowsTheCwdRepository(true);
   const { activeId, results } = await whileActive({}, [[{ repo: "OWNER/REPO" }, "upper"]]);
   assert.deepEqual(results.map((r) => r.status), ["issue-locked"], JSON.stringify(results));
   assert.equal(results[0].activeRunId, activeId);
-});
+}, ["github"]);
 
-test("a run whose progress cannot be read fails without holding the issue: the next run on it is not locked out", async () => {
+forgeTest("a run whose progress cannot be read fails without holding the issue: the next run on it is not locked out", async () => {
   issue(["complexity:low"]);
   const first = await run({}, "run-a");
   assert.equal(res(first).status, "done", JSON.stringify(res(first)));
@@ -248,19 +245,19 @@ test("a run whose progress cannot be read fails without holding the issue: the n
   assert.equal(res(next).status, "done", `the failed run released the issue: ${JSON.stringify(res(next))}`);
 });
 
-test("a run that fails, and a run that stops with a status, release the issue", async () => {
+forgeTest("a run that fails, and a run that stops with a status, release the issue", async () => {
   issue(["complexity:low"]);
-  failGh("pr view", "HTTP 401: Bad credentials");
+  failForge("pr view", "HTTP 401: Bad credentials");
   const failed = await run({ openPr: true }, "run-a");
   assert.equal(failed.status, "failed");
-  failGh("pr view", undefined);
+  failForge("pr view", undefined);
   const stopped = await run({ testCommand: "exit 1" }, "run-b"); // the suite is red before the first slice: baseline-red
   assert.equal(res(stopped).status, "baseline-red", JSON.stringify(res(stopped)));
   const resumed = await run({}, "run-c");
   assert.equal(res(resumed).status, "done", JSON.stringify(res(resumed)));
 });
 
-test("a lock held by another live process refuses the run with the id of the run that took it", async () => {
+forgeTest("a lock held by another live process refuses the run with the id of the run that took it", async () => {
   issue(["complexity:low"]);
   mkdirSync(join(fx.repo, ".workflows", "locks"), { recursive: true });
   // process.ppid stands for the other process: it is alive, and the lock does not say it is not the one that took it
@@ -272,7 +269,7 @@ test("a lock held by another live process refuses the run with the id of the run
   assert.equal(calls.length, 0);
 });
 
-test("a lock left by a process that died does not stop the issue", async () => {
+forgeTest("a lock left by a process that died does not stop the issue", async () => {
   issue(["complexity:low"]);
   const dead = spawnSync(process.execPath, ["-e", "0"]).pid!;
   mkdirSync(join(fx.repo, ".workflows", "locks"), { recursive: true });
@@ -281,7 +278,7 @@ test("a lock left by a process that died does not stop the issue", async () => {
   assert.equal(res(r).status, "done", JSON.stringify(res(r)));
 });
 
-test("a run begun when every run shared the branch wf/issue-<n> resumes on that branch and worktree", async () => {
+forgeTest("a run begun when every run shared the branch wf/issue-<n> resumes on that branch and worktree", async () => {
   issue(["complexity:low"]);
   const first = await run({});
   assert.equal(res(first).status, "done", JSON.stringify(res(first)));
@@ -315,7 +312,7 @@ function agentCommits(worktree: string) {
   git(worktree, "commit", "-qm", "agent commit");
 }
 
-test("a resume after the PR exists redelivers over the rewritten history with a force push", async () => {
+forgeTest("a resume after the PR exists redelivers over the rewritten history with a force push", async () => {
   issue(["complexity:low"]);
   const first = await run({ openPr: true });
   assert.equal(res(first).status, "done", JSON.stringify(res(first)));
@@ -325,7 +322,7 @@ test("a resume after the PR exists redelivers over the rewritten history with a 
 
   const second = await run({ openPr: true }, first.runId);
   assert.equal(res(second).status, "done", JSON.stringify(res(second)));
-  assert.equal(gh().prs.length, 1, "the PR that exists is not created again");
+  assert.equal(forgeState().prs.length, 1, "the PR that exists is not created again");
   assert.notEqual(onOriginAt(branch), delivered, "the branch on the origin moved to the rewritten history");
   assert.equal(onOriginAt(branch), git(worktreeOf(first.runId), "rev-parse", "HEAD").trim());
   assert.equal(git(origin(), "rev-list", "--count", `${git(fx.repo, "rev-parse", "main").trim()}..${branch}`).trim(), "1", "one commit above the base, as the first delivery had");
@@ -348,7 +345,7 @@ function forgetPushes(runId: string) {
   writeFileSync(file, JSON.stringify(progress));
 }
 
-test("a run that delivered before runs recorded their pushes still redelivers on resume: the origin's commit is the workflow's own delivery on the run's base", async () => {
+forgeTest("a run that delivered before runs recorded their pushes still redelivers on resume: the origin's commit is the workflow's own delivery on the run's base", async () => {
   issue(["complexity:low"]);
   const first = await run({ openPr: true });
   assert.equal(res(first).status, "done", JSON.stringify(res(first)));
@@ -361,10 +358,10 @@ test("a run that delivered before runs recorded their pushes still redelivers on
   assert.equal(res(second).status, "done", JSON.stringify(res(second)));
   assert.notEqual(onOriginAt(branch), delivered);
   assert.equal(onOriginAt(branch), git(worktreeOf(first.runId), "rev-parse", "HEAD").trim());
-  assert.equal(gh().prs.length, 1);
+  assert.equal(forgeState().prs.length, 1);
 });
 
-test("for a run with no record of its pushes, a commit someone added on top of the delivery is still not overwritten", async () => {
+forgeTest("for a run with no record of its pushes, a commit someone added on top of the delivery is still not overwritten", async () => {
   issue(["complexity:low"]);
   const first = await run({ openPr: true });
   assert.equal(res(first).status, "done", JSON.stringify(res(first)));
@@ -386,7 +383,7 @@ test("for a run with no record of its pushes, a commit someone added on top of t
   assert.equal(onOriginAt(branch), theirs);
 });
 
-test("the push is refused when the remote branch has commits the workflow did not make; nothing on the origin is overwritten", async () => {
+forgeTest("the push is refused when the remote branch has commits the workflow did not make; nothing on the origin is overwritten", async () => {
   issue(["complexity:low"]);
   const first = await run({ openPr: true });
   assert.equal(res(first).status, "done", JSON.stringify(res(first)));
@@ -407,7 +404,7 @@ test("the push is refused when the remote branch has commits the workflow did no
   assert.equal(res(second).status, "push-refused", JSON.stringify(res(second)));
   assert.match(res(second).reason, new RegExp(`origin/${branch}.*did not make`));
   assert.equal(onOriginAt(branch), theirs, "the reviewer's commit is still the head of the branch on the origin");
-  assert.equal(gh().prs.length, 1);
+  assert.equal(forgeState().prs.length, 1);
   assert.equal(git(worktreeOf(first.runId), "log", "-1", "--format=%s").trim().includes("#7"), true, "the run's own work is kept for whoever resolves it");
 });
 

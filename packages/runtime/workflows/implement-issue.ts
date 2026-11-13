@@ -1,4 +1,4 @@
-// Workflow de referência: implementar uma issue do GitHub de ponta a ponta, seguindo em código os fluxos das skills
+// Workflow de referência: implementar uma issue do forge (GitHub ou GitLab) de ponta a ponta, seguindo em código os fluxos das skills
 // tdd e codebase-design (implementação), code-review (review) e pr (corpo do PR) de mattpocock/skills (MIT). As
 // instruções estão em workflows/implement-issue/prompts.ts; créditos em docs/vision/02-a-ideia-e-as-referencias.md.
 //
@@ -96,7 +96,7 @@ import { NamedLockedError, acquireNamedLock, eventLogPath, readEventLog } from "
 import { defineWorkflow, type AgentCallOptions, type WorkflowCard } from "../src/runtime/workflow.js";
 import { buildPrBody, inlineCode, sanitizeModelText, type PrText } from "./implement-issue/pr-body.js";
 import { CommandError, Commands, NETWORK_TIMEOUT_SEC, SNAPSHOT_GRACE_HOURS, WORKFLOW_BRANCH_PREFIX, worktreeOf } from "./implement-issue/commands.js";
-import { type Forge, createForge, forgeNameOf } from "./implement-issue/forge.js";
+import { type Forge, createForge, detectForge, forgeNameOf } from "./implement-issue/forge.js";
 import * as P from "./implement-issue/prompts.js";
 import { AXES, AXIS_SCHEMAS, blockingAxes, blockingOf, type Axis, type ReviewReports } from "./implement-issue/review.js";
 import {
@@ -260,10 +260,12 @@ const issueCard = (issue: { number: number; title: string }, tier: Tier, extra: 
   badges: [tier],
   ...extra,
 });
-/** The link text of a pull request: `PR #9` for `https://github.com/o/r/pull/9`. */
+/** The link text of a pull request, as its forge writes it: `PR #9` for `https://github.com/o/r/pull/9`, `MR !9` for `https://gitlab.com/g/p/-/merge_requests/9`. */
 const prLabel = (url: string) => {
-  const number = /\/pull\/(\d+)/.exec(url)?.[1];
-  return number ? `PR #${number}` : "Pull request";
+  const merge = /\/-\/merge_requests\/(\d+)/.exec(url)?.[1];
+  if (merge) return `MR !${merge}`;
+  const pull = /\/pull\/(\d+)/.exec(url)?.[1];
+  return pull ? `PR #${pull}` : "Pull request";
 };
 
 /** O tier das labels da issue: o mais alto entre os que casam, para a ordem das labels nunca rebaixar uma issue difícil. */
@@ -459,7 +461,7 @@ export default defineWorkflow<Args>({
   meta: {
     name: "implement-issue",
     description:
-      "Implements a GitHub issue with slice-by-slice TDD (red → green checked by the code), a three-axis review (Standards, Spec, Security) and a PR in the Summary/Evidence/Merge Danger template.",
+      "Implements an issue of the repository's forge (GitHub or GitLab) with slice-by-slice TDD (red → green checked by the code), a three-axis review (Standards, Spec, Security) and a PR in the Summary/Evidence/Merge Danger template.",
     whenToUse: "When the user asks to implement or resolve a specific issue by number.",
     phases: [{ title: "Triage" }, { title: "Plan" }, { title: "Implementation" }, { title: "Review" }, { title: "Delivery" }],
     // Roles: the keys of `workflows.implement-issue.roles` in the config. Each role's model is a code default that the
@@ -509,8 +511,9 @@ export default defineWorkflow<Args>({
     });
     // Lido antes do lock: só lê o arquivo (o engine já trava o run), e um progresso ilegível falha o run sem segurar a issue.
     const progress = new ProgressStore(ctx.cwd, ctx.runId);
-    // The forge the run started on: a resume keeps it, and a record without one is GitHub.
-    const forge = createForge(forgeNameOf(progress.data), cmd);
+    // The forge the run started on: a fresh run takes the one of its origin's host; a resume keeps the one its record names, and a
+    // record without one (a run from before the field) is GitHub, whatever the origin says now.
+    const forge = createForge(progress.existed ? forgeNameOf(progress.data) : await detectForge(cmd, ctx.cwd), cmd);
     // Uma issue tem no máximo um run ativo: dois runs na mesma issue brigariam pelo mesmo trabalho e abririam dois PRs. O lock
     // fica no run store (`.workflows/locks/issue-<n>.lock`, ou `issue-<n>-<hash do repositório>.lock` quando o `--repo` é outro
     // repositório que não o do cwd: a issue #5 de outro repositório é outra issue) e vale até o run terminar, qualquer que seja

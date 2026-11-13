@@ -1,26 +1,39 @@
-// Ambiente dos testes de fluxo do implement-issue: SDK falso com um despachante por label de etapa, `gh` falso no
-// PATH (estado num arquivo JSON), repositório git temporário com identidade e um origin bare, e `node --test` de
-// verdade como comando de teste. Cada arquivo de teste chama `beforeEach(setup)` e `afterEach(teardown)`.
+// Shared by the implement-issue tests: the environment of a run of the workflow. A fake SDK with one dispatcher per step label,
+// a fake `gh` and a fake `glab` on the PATH (one state in a JSON file, which the forge of the test owns: the other CLI fails
+// the call and records it), a temporary git repository with an identity and a bare origin that the `origin` remote reaches through
+// the URL of the forge's host, and a real `node --test` as the test command. A test file calls `beforeEach(setup)` and
+// `afterEach(teardown)` (a GitHub-only file), or registers its tests with `forgeTest`, which runs each on every forge.
 process.env.WF_METRICS = "off";
 import { execFileSync } from "node:child_process";
 import "./isolate-home.js";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { test } from "node:test";
 import { calls, script } from "@cursor/sdk";
 import { runWorkflow } from "../src/runtime/engine.js";
 import implementIssue from "../workflows/implement-issue.js";
 
 export type Handler = (o: any, msg: string) => unknown;
 
+/** The forges a test can run on. */
+export const FORGES = ["github", "gitlab"] as const;
+export type TestForge = (typeof FORGES)[number];
+
 /** Estado do teste corrente. `handlers` é a resposta de cada etapa, por label (o sufixo `:N` é opcional). */
 export const fx = {
   root: "",
   repo: "",
-  ghState: "",
+  /** The JSON file both fake forge CLIs keep their state in. */
+  forgeStateFile: "",
+  /** The forge of the running test: its host is the `origin` remote's, and its CLI is the one the fakes answer. */
+  forge: "github" as TestForge,
   savedPath: undefined as string | undefined,
   handlers: {} as Record<string, Handler>,
 };
+
+/** The URL `origin` has in each forge's tests: the host decides the forge. The bare repository behind it is reached through `url.<base>.insteadOf`. */
+const ORIGIN_URLS: Record<TestForge, string> = { github: "https://github.com/owner/repo.git", gitlab: "https://gitlab.com/owner/repo.git" };
 
 export const git = (cwd: string, ...a: string[]) => execFileSync("git", a, { cwd, encoding: "utf8" });
 export const labelOf = (o: any) => String(o.name).replace(/^implement-issue:/, "");
@@ -31,24 +44,32 @@ export const write = (o: any, file: string, content: string) => {
   mkdirSync(join(p, ".."), { recursive: true });
   writeFileSync(p, content);
 };
-export const gh = () =>
-  JSON.parse(readFileSync(fx.ghState, "utf8")) as { comments: string[]; prs: Array<{ url: string; body: string; head?: string; state?: string }>; calls: string[][]; fail?: Record<string, string> };
-/** From now on the fake gh fails `gh <command>` (for example "pr view") with `message` on stderr and exit code 1; `message` undefined restores it. */
-export function failGh(command: string, message: string | undefined) {
-  const state = JSON.parse(readFileSync(fx.ghState, "utf8"));
+/** The state of the fake forge: what the fake CLI of the test's forge was asked and holds (the comments of the issue and the PRs, or merge requests, opened). */
+export const forgeState = () =>
+  JSON.parse(readFileSync(fx.forgeStateFile, "utf8")) as {
+    comments: string[];
+    prs: Array<{ url: string; body: string; head?: string; state?: string; title?: string }>;
+    calls: string[][];
+    fail?: Record<string, string>;
+    /** The calls the CLI of the other forge got: the workflow asked the wrong one. */
+    wrongCli?: string[][];
+  };
+/** From now on the fake forge fails the operation `op` with `message` on stderr and exit code 1; `message` undefined restores it. `op` is the `gh` call it replaces: "issue view", "issue comment", "pr view" or "pr create" (glab's own commands and routes map to the same names). */
+export function failForge(op: string, message: string | undefined) {
+  const state = JSON.parse(readFileSync(fx.forgeStateFile, "utf8"));
   state.fail = { ...state.fail };
-  if (message === undefined) delete state.fail[command];
-  else state.fail[command] = message;
-  writeFileSync(fx.ghState, JSON.stringify(state));
+  if (message === undefined) delete state.fail[op];
+  else state.fail[op] = message;
+  writeFileSync(fx.forgeStateFile, JSON.stringify(state));
 }
 
-/** From now on the fake gh answers `pr view <branch> --json state` with `state` for the PR opened on `branch` (a merge or a close that happened on GitHub). */
+/** From now on the fake forge answers the state of the PR opened on `branch` with `state` (a merge or a close that happened on the forge). */
 export function setPrState(branch: string, state: "OPEN" | "MERGED" | "CLOSED") {
-  const st = JSON.parse(readFileSync(fx.ghState, "utf8")) as { prs: Array<{ head?: string; state?: string }> };
+  const st = JSON.parse(readFileSync(fx.forgeStateFile, "utf8")) as { prs: Array<{ head?: string; state?: string }> };
   const pr = st.prs.filter((p) => p.head === branch).pop();
-  if (!pr) throw new Error(`the fake gh has no PR on ${branch}`);
+  if (!pr) throw new Error(`the fake forge has no PR on ${branch}`);
   pr.state = state;
-  writeFileSync(fx.ghState, JSON.stringify(st));
+  writeFileSync(fx.forgeStateFile, JSON.stringify(st));
 }
 
 /** The branch and the worktree of a run on issue 7: each run owns its own (`wf/issue-<n>-<run>`), named after the run id without the workflow's name. */
@@ -64,9 +85,10 @@ export const onOrigin = () => originBranches().length > 0;
 
 const FAKE_GH = `#!/usr/bin/env node
 const fs = require("fs");
-const f = process.env.FAKE_GH_STATE;
+const f = process.env.FAKE_FORGE_STATE;
 const st = JSON.parse(fs.readFileSync(f, "utf8"));
 const a = process.argv.slice(2);
+if (st.forge !== "github") { (st.wrongCli = st.wrongCli || []).push(["gh", ...a]); fs.writeFileSync(f, JSON.stringify(st)); process.stderr.write("fake gh: this test's forge is " + st.forge); process.exit(99); }
 st.calls.push(a);
 const failure = (st.fail || {})[a[0] + " " + a[1]];
 if (failure !== undefined) { fs.writeFileSync(f, JSON.stringify(st)); process.stderr.write(failure); process.exit(1); }
@@ -94,10 +116,80 @@ if (a[0] === "issue" && a[1] === "view") {
 } else { save(); process.stderr.write("fake gh: unsupported " + a.join(" ")); process.exit(2); }
 `;
 
+
+// glab v1.130.0, by hand from its docs and source (spec B replaces these outputs with ones recorded from a real GitLab): the commands
+// and the `glab api` routes the forge module uses, on the state the fake gh keeps. A route it does not know exits 2.
+const FAKE_GLAB = `#!/usr/bin/env node
+const fs = require("fs");
+const f = process.env.FAKE_FORGE_STATE;
+const st = JSON.parse(fs.readFileSync(f, "utf8"));
+const a = process.argv.slice(2);
+const save = () => fs.writeFileSync(f, JSON.stringify(st));
+const fail = (text, code) => { save(); process.stderr.write(text); process.exit(code); };
+if (st.forge !== "gitlab") { (st.wrongCli = st.wrongCli || []).push(["glab", ...a]); fail("fake glab: this test's forge is " + st.forge, 99); }
+st.calls.push(a);
+const flag = (n) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };
+const has = (...n) => n.some((x) => a.includes(x));
+const NOTES_PAGE = 20; // GitLab's default page size: without --paginate a caller sees only the first page
+const STATES = { OPEN: "opened", MERGED: "merged", CLOSED: "closed" };
+const mrOf = (p, i) => ({ iid: i + 1, title: p.title, description: p.body, web_url: p.url, state: STATES[p.state || "OPEN"] || p.state, source_branch: p.head });
+const out = (value) => { save(); process.stdout.write(typeof value === "string" ? value : JSON.stringify(value) + "\\n"); };
+// which gh call each glab call stands for, so a test can fail it with failForge
+const endpoint = a[0] === "api" ? a.slice(1).find((x, i, all) => !x.startsWith("-") && !["--method", "-X", "-F", "--field", "-f", "--raw-field"].includes(all[i - 1])) : undefined;
+const post = a[0] === "api" && ["POST", "post"].includes(flag("--method") || flag("-X"));
+const route = a[0] === "issue" && a[1] === "view" ? "issue view"
+  : a[0] === "mr" && a[1] === "create" ? "pr create"
+  : endpoint && /\\/issues\\/\\d+\\/notes$/.test(endpoint) ? (post ? "issue comment" : "issue view")
+  : endpoint && /\\/merge_requests\\?/.test(endpoint) ? "pr view"
+  : endpoint && /^projects\\/[^/?]+$/.test(endpoint) ? "repo view"
+  : undefined;
+const failure = route && (st.fail || {})[route];
+if (failure !== undefined) fail(failure, 1);
+if (route === "issue view" && a[0] === "issue") {
+  if (flag("--output") !== "json") fail("fake glab: issue view without --output json", 2);
+  out({ iid: st.issue.number, title: st.issue.title, description: st.issue.body, labels: st.issue.labels.map((l) => l.name), state: "opened" });
+} else if (route === "issue view") {
+  // all the notes of the issue: GitLab's own system notes first, then the comments; --paginate prints one array per page
+  const notes = [...(st.systemNotes || []).map((body) => ({ body, system: true })), ...st.comments.map((body) => ({ body, system: false }))].map((n, i) => ({ id: i + 1, ...n }));
+  const pages = [];
+  for (let i = 0; i < notes.length || i === 0; i += NOTES_PAGE) pages.push(notes.slice(i, i + NOTES_PAGE));
+  out((has("--paginate") ? pages : pages.slice(0, 1)).map((p) => JSON.stringify(p)).join("\\n") + "\\n");
+} else if (route === "issue comment") {
+  const field = flag("-F") || flag("--field") || "";
+  const [key, ...rest] = field.split("=");
+  const value = rest.join("=");
+  if (key !== "body") fail("fake glab: a note needs -F body=@<file>", 2);
+  st.comments.push(value.startsWith("@") ? fs.readFileSync(value.slice(1), "utf8") : value);
+  out({ id: st.comments.length, body: st.comments[st.comments.length - 1], system: false });
+} else if (route === "pr view") {
+  const query = new URLSearchParams(endpoint.split("?")[1]);
+  // A PR seeded by a test has no head and answers for every branch; one made by mr create answers for its own branch only
+  let mrs = st.prs.map(mrOf).filter((m) => !m.source_branch || m.source_branch === query.get("source_branch"));
+  if (query.get("sort") !== "asc") mrs = mrs.reverse(); // created_at descending: the latest first
+  out(mrs.slice(0, Number(query.get("per_page") || NOTES_PAGE)));
+} else if (route === "pr create") {
+  if (has("-H", "--head")) fail("fake glab: -H names the head repository, not the branch: use --source-branch", 2);
+  if (!flag("--source-branch") || !has("--yes")) fail("fake glab: mr create needs --source-branch and --yes (no prompts)", 2);
+  st.prs.push({ url: "https://gitlab.com/owner/repo/-/merge_requests/" + (st.prs.length + 1), body: flag("--description"), title: flag("--title"), head: flag("--source-branch"), state: "OPEN" });
+  const mr = st.prs[st.prs.length - 1];
+  out("\\nCreating merge request for " + mr.head + " into main in owner/repo\\n\\n!" + st.prs.length + " " + mr.title + "\\n" + mr.url + "\\n");
+} else if (route === "repo view") {
+  // the project of the cwd is owner/repo; a named one comes back in GitLab's case (lower case here)
+  const named = endpoint === "projects/:fullpath" ? "owner/repo" : decodeURIComponent(endpoint.slice("projects/".length)).toLowerCase();
+  out({ path_with_namespace: named, web_url: "https://gitlab.com/" + named });
+} else fail("fake glab: unsupported " + a.join(" "), 2);
+`;
+
 export function issue(labels: string[], title = "Add subtract(a, b)") {
   writeFileSync(
-    fx.ghState,
-    JSON.stringify({ issue: { number: 7, title, body: "Exportar `subtract(a, b)` em src/math.js, que devolve a - b.", labels: labels.map((name) => ({ name })) }, comments: [], prs: [], calls: [] }),
+    fx.forgeStateFile,
+    JSON.stringify({
+      forge: fx.forge,
+      issue: { number: 7, title, body: "Exportar `subtract(a, b)` em src/math.js, que devolve a - b.", labels: labels.map((name) => ({ name })) },
+      comments: [],
+      prs: [],
+      calls: [],
+    }),
   );
 }
 
@@ -132,7 +224,14 @@ const dispatcher = (o: any, msg: string) => {
   return r && typeof r === "object" ? r : { status: "finished", result: "ok" };
 };
 
+/** The environment of a test on GitHub: what `beforeEach` calls (it hands its argument to the hook, so no parameter here). */
 export function setup() {
+  setupFor("github");
+}
+
+/** The environment of a test whose forge is `forge`. */
+function setupFor(forge: TestForge) {
+  fx.forge = forge;
   fx.root = mkdtempSync(join(tmpdir(), "wf-ii-"));
   fx.repo = join(fx.root, "repo");
   const { root, repo } = fx;
@@ -150,11 +249,14 @@ export function setup() {
   git(repo, "add", "-A");
   git(repo, "commit", "-qm", "init");
   git(root, "init", "-q", "--bare", "origin.git");
-  git(repo, "remote", "add", "origin", join(root, "origin.git"));
+  git(repo, "remote", "add", "origin", ORIGIN_URLS[forge]);
+  git(repo, "config", `url.${join(root, "origin.git")}.insteadOf`, ORIGIN_URLS[forge]); // the host is the forge's; the repository is the bare one
   writeFileSync(join(bin, "gh"), FAKE_GH);
   chmodSync(join(bin, "gh"), 0o755);
-  fx.ghState = join(root, "gh.json");
-  process.env.FAKE_GH_STATE = fx.ghState;
+  writeFileSync(join(bin, "glab"), FAKE_GLAB);
+  chmodSync(join(bin, "glab"), 0o755);
+  fx.forgeStateFile = join(root, "forge.json");
+  process.env.FAKE_FORGE_STATE = fx.forgeStateFile;
   fx.savedPath = process.env.PATH;
   process.env.PATH = `${bin}:${fx.savedPath}`;
   fx.handlers = defaults();
@@ -167,6 +269,24 @@ export function teardown() {
   script.length = 0;
   calls.length = 0;
   rmSync(fx.root, { recursive: true, force: true });
+}
+
+/**
+ * Registers `fn` as one test per forge in `forges` (every forge by default), titled `<title> [<forge>]`, each in a fresh environment
+ * of that forge, set up before and torn down after (the file does not call `beforeEach(setup)`). `fn` is told its forge, for the few
+ * assertions that name what only one forge says.
+ */
+export function forgeTest(title: string, fn: (forge: TestForge) => unknown, forges: readonly TestForge[] = FORGES): void {
+  for (const forge of forges) {
+    test(`${title} [${forge}]`, async () => {
+      setupFor(forge);
+      try {
+        await fn(forge);
+      } finally {
+        teardown();
+      }
+    });
+  }
 }
 
 export const run = (args: Record<string, unknown>, runId?: string) =>

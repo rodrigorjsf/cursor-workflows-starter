@@ -1,18 +1,20 @@
 // The forge seam (ADR-0009): everything `implement-issue` and `wf gc` ask of the service that hosts the repository (read an
 // issue, list and post its comments, open a PR, find a branch's PR and its state, name a repository), behind one interface.
-// This file is the only one that names a forge's CLI (`test/forge-seam.test.ts` enforces it); GitHub, through `gh`, is the only
-// implementation so far. Every call goes through `Commands`, so its timeout, its `CommandError` and its node in the run's log
-// are those of every other command the workflow runs.
+// This file is the only one that names a forge's CLI (`test/forge-seam.test.ts` enforces it): GitHub through `gh`, GitLab through
+// `glab`, and `glab api` (the REST API) where glab's own commands fall short. Every call goes through `Commands`, so its timeout,
+// its `CommandError` and its node in the run's log are those of every other command the workflow runs.
 //
-// A run records the forge it started on (`Progress.forge`), and `wf gc` asks the forge a record names, never one detected
-// again; a record without the field is GitHub (`forgeNameOf`), as every run before the field existed was.
+// A fresh run detects its forge from the host of the `origin` remote (`detectForge`) and records it (`Progress.forge`); `wf gc`
+// asks the forge a record names, never one detected again, and a record without the field is GitHub (`forgeNameOf`), as every run
+// before the field existed was.
+import { readFileSync } from "node:fs";
 import type { Commands } from "./commands.js";
 
 /** The state of a PR, as the forge reports it. */
 export type PrState = "OPEN" | "MERGED" | "CLOSED";
 
 /** The forges the runtime can speak to: the value a run's progress record keeps. */
-export type ForgeName = "github";
+export type ForgeName = "github" | "gitlab";
 
 /** The forge of a record that names none: the only one that existed before the field did. */
 export const DEFAULT_FORGE: ForgeName = "github";
@@ -47,12 +49,43 @@ export interface Forge {
 /** The forge a record (a run's progress) names; a record without one is GitHub. */
 export const forgeNameOf = (record: { forge?: string }): string => record.forge ?? DEFAULT_FORGE;
 
+/** The forge of each host the kit knows without being told. */
+const KNOWN_HOSTS: ReadonlyMap<string, ForgeName> = new Map([
+  ["github.com", "github"],
+  ["gitlab.com", "gitlab"],
+]);
+
+/** The host of a git remote URL (`https://…`, `ssh://…` or scp-like `git@host:path`), in lower case; undefined for a local path. */
+export function hostOfRemote(url: string): string | undefined {
+  const trimmed = url.trim();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+    try {
+      return new URL(trimmed).hostname.toLowerCase() || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return /^(?:[^@/:]+@)?([^@/:]+):(?!\/\/)/.exec(trimmed)?.[1]?.toLowerCase();
+}
+
+/**
+ * The forge a fresh run starts on: the one of the host of the cwd's `origin` remote, as the repository's configuration spells it
+ * (a `url.<base>.insteadOf` rewrite is not applied: the name the user cloned from decides). A host the kit does not know, a local
+ * path and a repository with no `origin` are GitHub, as before GitLab was supported.
+ */
+export async function detectForge(commands: Commands, cwd: string): Promise<ForgeName> {
+  const url = await commands.remoteUrl(cwd);
+  const host = url === undefined ? undefined : hostOfRemote(url);
+  return (host === undefined ? undefined : KNOWN_HOSTS.get(host)) ?? DEFAULT_FORGE;
+}
+
 /**
  * The forge `name` (as a record keeps it), speaking through `commands`. A record can name a forge this version does not know
  * (the run was recorded by a newer kit): that is an error, never a fall back to another forge's CLI.
  */
 export function createForge(name: string, commands: Commands): Forge {
   if (name === "github") return new GithubForge(commands);
+  if (name === "gitlab") return new GitlabForge(commands);
   throw new Error(`forge ${JSON.stringify(name)} (named by the run's record): this version of the kit does not know it. Upgrade the kit`);
 }
 
@@ -100,5 +133,110 @@ class GithubForge implements Forge {
 
   private gh(cwd: string, ...args: string[]): Promise<string> {
     return this.commands.forgeRead("gh", cwd, ...args);
+  }
+}
+
+/** What GitLab's REST API calls a merge request that is still being worked on or is being merged: both are a live PR. */
+const MR_STATES: Readonly<Record<string, PrState>> = { opened: "OPEN", locked: "OPEN", merged: "MERGED", closed: "CLOSED" };
+/** The URL of a merge request in the output of `glab mr create`, which prints a line of text around it. */
+const MR_URL = /https?:\/\/\S+\/-\/merge_requests\/\d+/;
+
+/** The path of a repository as the REST API takes it, from what the `repo` argument holds: `group/sub/project`, or a URL of it. */
+const repoPathOf = (repo: string): string => repo.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]+\//i, "").replace(/\/+$/, "").replace(/\.git$/, "");
+/** `projects/<repository>` in the REST API: `repo`'s path, or glab's placeholder for the repository of the cwd. */
+const projectOf = (repo: string | undefined): string => `projects/${repo ? encodeURIComponent(repoPathOf(repo)) : ":fullpath"}`;
+
+/**
+ * The JSON arrays and objects `text` holds, one after the other: `glab api --paginate` prints one array per page, or one array
+ * for all of them, and this reads both. Output that stops in the middle of a value is an error, never a shorter list.
+ */
+function jsonValues(text: string): unknown[] {
+  const values: unknown[] = [];
+  let depth = 0;
+  let start = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"') inString = false;
+    } else if (c === '"') inString = true;
+    else if (c === "[" || c === "{") {
+      if (depth++ === 0) start = i;
+    } else if ((c === "]" || c === "}") && --depth === 0) values.push(JSON.parse(text.slice(start, i + 1)));
+  }
+  if (depth !== 0 || values.length === 0) throw new Error(`glab api: the output is not complete JSON: ${text.trim().slice(0, 200) || "(empty)"}`);
+  return values;
+}
+
+interface GitlabMr {
+  web_url: string;
+  state: string;
+}
+
+/** GitLab, through `glab`. */
+class GitlabForge implements Forge {
+  readonly name = "gitlab";
+  constructor(private readonly commands: Commands) {}
+
+  async issue(cwd: string, number: number, repo?: string): Promise<ForgeIssue> {
+    const issue = JSON.parse(await this.glab(cwd, "issue", "view", String(number), ...repoFlag(repo), "--output", "json")) as {
+      iid: number;
+      title: string;
+      description?: string | null;
+      labels?: string[];
+    };
+    return { number: issue.iid, title: issue.title, body: issue.description ?? "", labels: (issue.labels ?? []).map((name) => ({ name })) };
+  }
+
+  async issueComments(cwd: string, number: number, repo?: string): Promise<string[]> {
+    const pages = jsonValues(await this.glab(cwd, "api", "--paginate", `${projectOf(repo)}/issues/${number}/notes`));
+    const notes = pages.flat() as Array<{ body: string; system?: boolean }>;
+    return notes.filter((note) => !note.system).map((note) => note.body);
+  }
+
+  async commentOnIssue(cwd: string, number: number, bodyFile: string, repo?: string): Promise<void> {
+    await this.glab(cwd, "api", "--method", "POST", `${projectOf(repo)}/issues/${number}/notes`, "-F", `body=@${bodyFile}`);
+  }
+
+  async openPr(cwd: string, pr: { branch: string; title: string; bodyFile: string; repo?: string }): Promise<string> {
+    // `glab mr create` has no body-file flag: the text goes as one argument (never through a shell). `--source-branch` names the
+    // branch; `-H` would name the head repository.
+    const description = readFileSync(pr.bodyFile, "utf8");
+    const out = await this.glab(cwd, "mr", "create", "--source-branch", pr.branch, "--title", pr.title, "--description", description, "--yes", ...repoFlag(pr.repo));
+    const url = MR_URL.exec(out)?.[0];
+    if (!url) throw new Error(`glab mr create: no merge request URL in its output: ${out.trim().slice(0, 200)}`);
+    return url;
+  }
+
+  async prUrl(cwd: string, branch: string, repo?: string): Promise<string | undefined> {
+    return (await this.latestMr(cwd, branch, repo))?.web_url;
+  }
+
+  async prState(cwd: string, branch: string, repo?: string): Promise<PrState | undefined> {
+    const mr = await this.latestMr(cwd, branch, repo);
+    if (mr === undefined) return undefined;
+    const state = MR_STATES[mr.state];
+    if (state === undefined) throw new Error(`glab api merge_requests (${branch}): unexpected state ${JSON.stringify(mr.state)}`);
+    return state;
+  }
+
+  async repoUrl(cwd: string, repo?: string): Promise<string> {
+    const project = JSON.parse(await this.glab(cwd, "api", projectOf(repo))) as { web_url: string };
+    return project.web_url.trim();
+  }
+
+  /** The latest merge request (by creation date, in any state) whose source branch is `branch`; `glab mr view` would fail when there are several. */
+  private async latestMr(cwd: string, branch: string, repo?: string): Promise<GitlabMr | undefined> {
+    const query = `source_branch=${encodeURIComponent(branch)}&order_by=created_at&sort=desc&per_page=1`;
+    const [page] = jsonValues(await this.glab(cwd, "api", `${projectOf(repo)}/merge_requests?${query}`));
+    if (!Array.isArray(page)) throw new Error(`glab api merge_requests (${branch}): expected a list`);
+    return (page as GitlabMr[])[0];
+  }
+
+  private glab(cwd: string, ...args: string[]): Promise<string> {
+    return this.commands.forgeRead("glab", cwd, ...args);
   }
 }

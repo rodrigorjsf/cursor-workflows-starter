@@ -4,22 +4,18 @@
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { afterEach, beforeEach, test } from "node:test";
 import { runWorkflow } from "../src/runtime/engine.js";
 import implementIssue from "../workflows/implement-issue.js";
-import { PLAN, SUB_CODE, SUB_TEST, branchOf, failGh, fx, git, issue, names, run, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
+import { PLAN, SUB_CODE, SUB_TEST, branchOf, failForge, forgeTest, fx, git, issue, names, run, submit, worktreeOf, write } from "./implement-issue.fixture.js";
 import { writeRepoConfig } from "./config-fixtures.js";
 import { waitFor } from "./wait-for.js";
-
-beforeEach(setup);
-afterEach(teardown);
 
 const res = (r: { result?: unknown }) => r.result as any;
 const DESIGN = { interface: "subtract(a, b)", usage: "subtract(5, 3)", hides: "nada", dependencies: "em processo", tradeoffs: "-" };
 
 // ── The tier is the highest of the matching labels ───────────────────────────────────────
 
-test("when several complexity labels match, the tier is the highest one, whatever the label order", async () => {
+forgeTest("when several complexity labels match, the tier is the highest one, whatever the label order", async () => {
   fx.handlers["design:minimal"] = (o) => submit(o, DESIGN);
   fx.handlers["design:flexible"] = (o) => submit(o, DESIGN);
   fx.handlers["design:common"] = (o) => submit(o, DESIGN);
@@ -39,7 +35,7 @@ test("when several complexity labels match, the tier is the highest one, whateve
   }
 });
 
-test("a label named like a member of Object.prototype is only a label: with no known label the classifier decides", async () => {
+forgeTest("a label named like a member of Object.prototype is only a label: with no known label the classifier decides", async () => {
   issue(["constructor", "toString"]);
   fx.handlers.classify = (o) => submit(o, { tier: "MED", reason: "typical" });
   const r = await run({});
@@ -65,7 +61,7 @@ function crashInGreen(runId: string, execution?: number) {
   writeFileSync(join(worktreeOf(runId), "stray.txt"), "half-made edit\n");
 }
 
-test("a step that crashed the process more than the limit fails instead of resuming again; raising the limit resumes it", async () => {
+forgeTest("a step that crashed the process more than the limit fails instead of resuming again; raising the limit resumes it", async () => {
   issue(["complexity:low"]);
   fx.handlers["code-1"] = FALL;
   const first = await run({});
@@ -104,7 +100,7 @@ test("a step that crashed the process more than the limit fails instead of resum
   assert.equal(res(resumed).status, "done", JSON.stringify(res(resumed)));
 });
 
-test("while a write step runs, the progress on disk says it is in flight (what a crash leaves for the resume to count) and it is cleared when the step ends", async () => {
+forgeTest("while a write step runs, the progress on disk says it is in flight (what a crash leaves for the resume to count) and it is cleared when the step ends", async () => {
   issue(["complexity:low"]);
   let inFlight: { id: string; before: string; interrupted?: boolean } | undefined;
   fx.handlers["code-1"] = (o) => {
@@ -122,7 +118,7 @@ test("while a write step runs, the progress on disk says it is in flight (what a
   assert.equal(progressOf(r.runId).inFlight, undefined);
 });
 
-test("a limit of 0 stops the step at the first crash", async () => {
+forgeTest("a limit of 0 stops the step at the first crash", async () => {
   issue(["complexity:low"]);
   writeRepoConfig(fx.repo, { workflows: { "implement-issue": { settings: { maxStepCrashes: 0 } } } });
   fx.handlers["code-1"] = FALL;
@@ -135,7 +131,7 @@ test("a limit of 0 stops the step at the first crash", async () => {
   assert.equal(res(stopped).limit, 0);
 });
 
-test("a cancel in the middle of a write step is not a crash: any number of them still resumes", async () => {
+forgeTest("a cancel in the middle of a write step is not a crash: any number of them still resumes", async () => {
   issue(["complexity:low"]);
   fx.handlers["code-1"] = (o) => {
     write(o, "src/math.js", `${SUB_CODE}// half-made edit\n`);
@@ -204,7 +200,7 @@ async function cancelAtEveryCommandAfter(label: string, runId: string) {
 }
 
 for (const [step, label] of [["red", "test-1"], ["green", "code-1"], ["refactor", "refactor-1"]] as const) {
-  test(`a cancel at any command of the ${step} step after its agent answered (the suite, a snapshot, a check) is not a crash`, async () => {
+  forgeTest(`a cancel at any command of the ${step} step after its agent answered (the suite, a snapshot, a check) is not a crash`, async () => {
     issue(["complexity:low"]);
     // The red step also writes code, which the workflow discards: one more command (the restore) inside the step.
     fx.handlers["test-1"] = (o) => {
@@ -230,17 +226,17 @@ for (const [step, label] of [["red", "test-1"], ["green", "code-1"], ["refactor"
   });
 }
 
-test("a crash is still counted when the next execution fails before it reaches the step, and when the execution that began the step ended failed", async () => {
+forgeTest("a crash is still counted when the next execution fails before it reaches the step, and when the execution that began the step ended failed", async () => {
   issue(["complexity:low"]);
   fx.handlers["code-1"] = FALL;
   const first = await run({}); // execution 1 ends failed
   assert.equal(first.status, "failed");
   crashInGreen(first.runId, 1); // a failed execution is no evidence the process lived through the step
-  failGh("issue view", "HTTP 502: Bad Gateway"); // the next execution fails in triage, before the resume looks at the step
+  failForge("issue view", "HTTP 502: Bad Gateway"); // the next execution fails in triage, before the resume looks at the step
   const triage = await run({}, first.runId);
   assert.equal(triage.status, "failed", JSON.stringify(triage));
   assert.equal(progressOf(first.runId).inFlight?.interrupted, undefined, "the failed execution did not mark a step it did not begin");
-  failGh("issue view", undefined);
+  failForge("issue view", undefined);
   fx.handlers["code-1"] = (o) => {
     write(o, "src/math.js", SUB_CODE);
     submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
@@ -250,7 +246,7 @@ test("a crash is still counted when the next execution fails before it reaches t
   assert.deepEqual(Object.values(progressOf(first.runId).crashes ?? {}), [1]);
 });
 
-test("a resume cancelled while it undoes a step that crashed the process still counts that crash, once", async () => {
+forgeTest("a resume cancelled while it undoes a step that crashed the process still counts that crash, once", async () => {
   issue(["complexity:low"]);
   fx.handlers["code-1"] = FALL;
   const first = await run({});
@@ -275,7 +271,7 @@ test("a resume cancelled while it undoes a step that crashed the process still c
   assert.deepEqual(Object.values(progressOf(first.runId).crashes ?? {}), [1], "and the cancelled undo is not a second crash");
 });
 
-test("a command that fails after a write step's agent answered is not a crash: the run's catch marks the step, and the resume counts nothing", async () => {
+forgeTest("a command that fails after a write step's agent answered is not a crash: the run's catch marks the step, and the resume counts nothing", async () => {
   issue(["complexity:low"]);
   let lock = "";
   let once = true;
@@ -299,7 +295,7 @@ test("a command that fails after a write step's agent answered is not a crash: t
   assert.equal(res(resumed).status, "done", JSON.stringify(res(resumed)));
 });
 
-test("a step begun after a cancelled execution belongs to the execution that began it: if that one did not end cancelled, the resume counts a crash", async () => {
+forgeTest("a step begun after a cancelled execution belongs to the execution that began it: if that one did not end cancelled, the resume counts a crash", async () => {
   issue(["complexity:low"]);
   const runId = "implement-issue-cancelthenfall";
   let lock = "";
@@ -350,7 +346,7 @@ const rightFix = (o: any) => {
   submit(o, { summary: "fixed", filesChanged: ["src/math.js"] });
 };
 
-test("a cancel while a fix step runs does not use up the fix round: the resume runs the same round again", async () => {
+forgeTest("a cancel while a fix step runs does not use up the fix round: the resume runs the same round again", async () => {
   issue(["complexity:low"]);
   fx.handlers["code-1"] = wrongGreen;
   fx.handlers["fix-1-1"] = rightFix;
@@ -374,7 +370,7 @@ test("a cancel while a fix step runs does not use up the fix round: the resume r
   assert.ok(!names().includes("fix-1-2"), `every cancelled step was round 1: ${names().join(", ")}`);
 });
 
-test("a fix step that ran to its end counts, even when the run is cancelled during its suite: the resume goes on to the next round", async () => {
+forgeTest("a fix step that ran to its end counts, even when the run is cancelled during its suite: the resume goes on to the next round", async () => {
   issue(["complexity:low"]);
   fx.handlers["code-1"] = wrongGreen;
   fx.handlers["fix-1-1"] = (o) => {
@@ -398,7 +394,7 @@ test("a fix step that ran to its end counts, even when the run is cancelled duri
   assert.deepEqual(names().filter((s) => s.startsWith("fix-")), ["fix-1-1", "fix-1-2"], "round 1 is not run again");
 });
 
-test("a right fix that ran to its end stays when the run is cancelled during its suite: the resume keeps it and runs no other round", async () => {
+forgeTest("a right fix that ran to its end stays when the run is cancelled during its suite: the resume keeps it and runs no other round", async () => {
   issue(["complexity:low"]);
   fx.handlers["code-1"] = wrongGreen;
   fx.handlers["fix-1-1"] = rightFix;
@@ -418,7 +414,7 @@ test("a right fix that ran to its end stays when the run is cancelled during its
   assert.deepEqual(names().filter((s) => s.startsWith("fix-")), ["fix-1-1"], "the counted fix is not undone, so no round 2");
 });
 
-test("a fix step that crashes the process again and again stops at the crash limit, like any write step", async () => {
+forgeTest("a fix step that crashes the process again and again stops at the crash limit, like any write step", async () => {
   issue(["complexity:low"]);
   fx.handlers["code-1"] = wrongGreen;
   // The fix step "crashes": what the progress held while it ran is what a dead process leaves behind.
@@ -456,7 +452,7 @@ test("a fix step that crashes the process again and again stops at the crash lim
 
 // ── A retried write step starts from a clean tree ────────────────────────────────────────
 
-test("what a failed attempt of a write step left in the worktree is gone when the step is retried, and is not delivered", async () => {
+forgeTest("what a failed attempt of a write step left in the worktree is gone when the step is retried, and is not delivered", async () => {
   issue(["complexity:low"]);
   let attempt = 0;
   const seenByRetry: boolean[] = [];

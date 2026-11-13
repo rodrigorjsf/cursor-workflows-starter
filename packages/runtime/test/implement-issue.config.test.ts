@@ -5,19 +5,15 @@
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, test } from "node:test";
+import { afterEach, test } from "node:test";
 import { calls } from "@cursor/sdk";
 import { CONFIG_SCHEMA_PATH, validateConfigData } from "../src/config/file.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import implementIssue from "../workflows/implement-issue.js";
-import { ALL_CODE, ALL_TEST, CLEAN_REVIEW, PLAN, SUB_CODE, fx, gh, issue, names, run, setup, submit, teardown, write } from "./implement-issue.fixture.js";
+import { ALL_CODE, ALL_TEST, CLEAN_REVIEW, PLAN, SUB_CODE, forgeState, forgeTest, fx, issue, names, run, submit, write } from "./implement-issue.fixture.js";
 import { globalConfigPath, runStartOf, withEnv, writeGlobalConfig, writeRepoConfig } from "./config-fixtures.js";
 
-beforeEach(setup);
-afterEach(() => {
-  rmSync(globalConfigPath(), { force: true });
-  teardown();
-});
+afterEach(() => rmSync(globalConfigPath(), { force: true }));
 
 const modelOf = (label: string) => calls.find((c) => String(c.name).endsWith(`:${label}`))!.model;
 const sourcesOf = (label: string) => calls.find((c) => String(c.name).endsWith(`:${label}`))!.local.settingSources;
@@ -30,7 +26,7 @@ test("implement-issue declares its eight roles, each with its cloud capability",
   );
 });
 
-test("with no config the steps run on the role defaults: models, params and (for read-only roles) no setting sources", async () => {
+forgeTest("with no config the steps run on the role defaults: models, params and (for read-only roles) no setting sources", async () => {
   issue(["complexity:low"]);
   const r = await run({ openPr: true });
   assert.equal(r.status, "finished", r.error);
@@ -43,7 +39,7 @@ test("with no config the steps run on the role defaults: models, params and (for
   assert.deepEqual(sourcesOf("code-1"), ["project", "team", "mdm"], "write steps keep the engine default");
 });
 
-test("the config swaps the model of a role: global file, WF_MODEL_* by role name and by the old alias, params kept or replaced", async () => {
+forgeTest("the config swaps the model of a role: global file, WF_MODEL_* by role name and by the old alias, params kept or replaced", async () => {
   issue(["complexity:low"]);
   writeGlobalConfig({ workflows: { "implement-issue": { roles: { review: { model: { params: [{ id: "reasoning_effort", value: "medium" }] }, retries: 0 }, "pr-text": { model: { id: "composer-3" } } } } } });
   const r = await withEnv({ WF_MODEL_LOW: "composer-9" }, () => run({ openPr: true }));
@@ -54,7 +50,7 @@ test("the config swaps the model of a role: global file, WF_MODEL_* by role name
   assert.deepEqual(modelOf("pr-text"), { id: "composer-3" });
 });
 
-test("a misspelled role in the repo config is an error before any step; the declared roles are the contract", async () => {
+forgeTest("a misspelled role in the repo config is an error before any step; the declared roles are the contract", async () => {
   issue(["complexity:low"]);
   mkdirSync(join(fx.repo, ".agents", "workflows"), { recursive: true });
   writeFileSync(join(fx.repo, ".agents", "workflows", "config.json"), JSON.stringify({ workflows: { "implement-issue": { roles: { "implement.lo": { retries: 0 } } } } }));
@@ -91,7 +87,7 @@ test("implement-issue declares its eleven settings with the code defaults; each 
   for (const name of Object.keys(implementIssue.meta.settings!)) assert.ok(schema.definitions.workflowSettings.properties[name], `${name} is documented in the schema (and so in the config reference)`);
 });
 
-test("the run-start records the settings the run took and where each came from", async () => {
+forgeTest("the run-start records the settings the run took and where each came from", async () => {
   issue(["complexity:medium"]);
   settings({ fixRounds: 1 });
   const r = await run({});
@@ -103,7 +99,7 @@ test("the run-start records the settings the run took and where each came from",
   assert.equal(start.provenance["/settings/sliceCaps"]?.layer, "default");
 });
 
-test("a setting that is out of range, misspelled or of the wrong shape fails the run before any step, naming the field", async () => {
+forgeTest("a setting that is out of range, misspelled or of the wrong shape fails the run before any step, naming the field", async () => {
   issue(["complexity:low"]);
   const fails = async (value: Record<string, unknown>, path: RegExp) => {
     settings(value);
@@ -120,7 +116,7 @@ test("a setting that is out of range, misspelled or of the wrong shape fails the
   assert.equal(calls.length, 0);
 });
 
-test("labelTiers is the label-to-tier map: the file's labels count (any case), the default ones no longer do", async () => {
+forgeTest("labelTiers is the label-to-tier map: the file's labels count (any case), the default ones no longer do", async () => {
   issue(["Priority-One"]);
   settings({ labelTiers: { "priority-one": "MED" } });
   const labelled = await run({});
@@ -135,7 +131,7 @@ test("labelTiers is the label-to-tier map: the file's labels count (any case), t
   assert.ok(names().includes("classify"), "complexity:high is not in this map: the classifier ran");
 });
 
-test("sliceCaps sets how many slices each tier builds: the planner is told, the comment defers the rest, and only that many run", async () => {
+forgeTest("sliceCaps sets how many slices each tier builds: the planner is told, the comment defers the rest, and only that many run", async () => {
   issue(["complexity:medium"]);
   settings({ sliceCaps: { LOW: 1, MED: 1, HIGH: 5 } });
   let planPrompt = "";
@@ -146,8 +142,8 @@ test("sliceCaps sets how many slices each tier builds: the planner is told, the 
   const first = await run({});
   assert.equal(res(first).status, "seams-proposed");
   assert.match(planPrompt, /up to 1 slices/);
-  assert.match(gh().comments[0]!, /2\. comportamento 2 .*\(deferred/);
-  assert.match(gh().comments[0]!, /tier MED slice cap \(1 slices\)/);
+  assert.match(forgeState().comments[0]!, /2\. comportamento 2 .*\(deferred/);
+  assert.match(forgeState().comments[0]!, /tier MED slice cap \(1 slices\)/);
 
   const second = await run({ approveSeams: true }, first.runId);
   assert.equal(res(second).status, "done", JSON.stringify(res(second)));
@@ -155,7 +151,7 @@ test("sliceCaps sets how many slices each tier builds: the planner is told, the 
   assert.ok(!names().some((n) => n.endsWith("-2")), `slice 2 was not built: ${names()}`);
 });
 
-test("extraSlices caps the slices a review can open", async () => {
+forgeTest("extraSlices caps the slices a review can open", async () => {
   issue(["complexity:low"]);
   settings({ extraSlices: 1 });
   let specRound = 0;
@@ -175,7 +171,7 @@ test("extraSlices caps the slices a review can open", async () => {
   assert.ok(!names().includes("test-extra-2"), "the second finding waits: one extra slice only");
 });
 
-test("fixRounds is how many times a slice whose suite fails after green is fixed before the run stops", async () => {
+forgeTest("fixRounds is how many times a slice whose suite fails after green is fixed before the run stops", async () => {
   issue(["complexity:low"]);
   settings({ fixRounds: 1 });
   fx.handlers["code-1"] = (o) => {
@@ -188,7 +184,7 @@ test("fixRounds is how many times a slice whose suite fails after green is fixed
   assert.deepEqual(names().filter((n) => n.startsWith("fix-")), ["fix-1-1"], "one round, no second");
 });
 
-test("redGreenAttempts is how many tries the green step gets before a TDD violation stops the run", async () => {
+forgeTest("redGreenAttempts is how many tries the green step gets before a TDD violation stops the run", async () => {
   issue(["complexity:low"]);
   settings({ redGreenAttempts: 3 });
   fx.handlers["code-1"] = (o) => {
@@ -201,7 +197,7 @@ test("redGreenAttempts is how many tries the green step gets before a TDD violat
   assert.equal(names().filter((n) => n.startsWith("code-1")).length, 3);
 });
 
-test("redGreenAttempts also bounds the red step: one attempt, and a test that already passes is test-not-red at once", async () => {
+forgeTest("redGreenAttempts also bounds the red step: one attempt, and a test that already passes is test-not-red at once", async () => {
   issue(["complexity:low"]);
   settings({ redGreenAttempts: 1 });
   fx.handlers["test-1"] = (o) => {
@@ -213,7 +209,7 @@ test("redGreenAttempts also bounds the red step: one attempt, and a test that al
   assert.equal(names().filter((n) => n.startsWith("test-1")).length, 1);
 });
 
-test("maxDiffChars cuts the diff the reviewers and the PR text get", async () => {
+forgeTest("maxDiffChars cuts the diff the reviewers and the PR text get", async () => {
   issue(["complexity:low"]);
   settings({ maxDiffChars: 60 });
   let prompt = "";
