@@ -62,8 +62,14 @@ export function sanitizeModelText(text: string, forge: ForgeName): string {
     )
     .replace(/(^|[^\w`])@([A-Za-z0-9][\w-]*)/g, "$1@​$2")
     .replace(/<!--/g, "&lt;!--");
-  return forge === "gitlab" ? neutralizeGitlabText(shared) : shared;
+  return FORGE_TEXT_GUARDS[forge](shared);
 }
+
+/** What each forge adds to the shared filters. A total record: a forge added to `ForgeName` is a compile error here. */
+const FORGE_TEXT_GUARDS: Readonly<Record<ForgeName, (text: string) => string>> = {
+  github: (text) => text,
+  gitlab: (text) => neutralizeGitlabText(text),
+};
 
 /** Saída de teste vai para o PR: troca caminhos locais (pasta pessoal, worktree) por marcadores. */
 export function redactPaths(text: string, worktree?: string): string {
