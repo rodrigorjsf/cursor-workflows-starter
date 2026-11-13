@@ -1,6 +1,10 @@
 // The runtime's messages are English: what it prints, returns or throws reaches agents (the MCP tools, the `wf` CLI, `wf doctor`,
 // `wf init`, `wf upgrade`), and agent-facing text is English. Scans every string literal and template text in
-// packages/runtime/src with the TypeScript parser, so comments, which keep the file's own language, are not read.
+// packages/runtime/src with the TypeScript parser, so comments are not read.
+//
+// Comments follow their own rule, which this check does not enforce: a new comment is English, even in a file whose older
+// comments are pt-BR; those older comments are not translated. Sources the book renders keep pt-BR: the JSDoc of
+// src/runtime/events.ts (docs/reference/events.md) and the descriptions in schema/config.schema.json (docs/reference/config.md).
 //
 // Wording-keyed: the check knows Portuguese by its accented letters and a list of common words, not by understanding the text.
 // A Portuguese message written without any of them passes.
@@ -12,7 +16,7 @@ import ts from "typescript";
 
 const SRC = join(import.meta.dirname, "..", "src");
 const PORTUGUESE = /[ãõçáéíóúâêôà]|\b(não|para|uma|que|dos|das|são|também|você|com o|de um|de|da|em|ou|sem|nenhuma?|chave|desconhecid[oa]s?|encontrad[oa]s?|arquivo|pasta|rode|banco|uso|falha|nem|autenticado|servidor)\b/i;
-/** Not messages: the metrics database's DDL, whose SQL comments keep the file's language, and the pricing rows it seeds. */
+/** Not messages: the metrics database's DDL, whose SQL comments are comments (the rule above), and the pricing rows it seeds. */
 const DATA = ["CREATE VIEW", "CREATE TABLE", "cursor.com/docs/models-and-pricing"];
 
 const sources = (dir: string): string[] =>
