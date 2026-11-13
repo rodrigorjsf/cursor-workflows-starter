@@ -55,6 +55,9 @@ export const CREDENTIAL_FORMATS: readonly CredentialFormat[] = [
   // The password of a URL's userinfo (`https://user:secret@host`, a git remote's, say): the scheme and user stay. Redact-only:
   // fixtures and docs are full of `postgres://user:pass@localhost`.
   { rule: "password in a URL", pattern: /\b([a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:)[^\s/@]+(?=@)/gi, redactOnly: true },
+  // A userinfo that is a token alone (`https://<token>@gitlab.com/...`, as GitLab and others take one): 16 characters or more,
+  // so a user name such as `git` or `alice` stays. Redact-only, like the password.
+  { rule: "token in a URL", pattern: /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/:@]{16,}(?=@)/gi, redactOnly: true },
 ];
 
 /** The rule of the first credential format in `text` that blocks a delivery (not `redactOnly`), or undefined. Never the match. */

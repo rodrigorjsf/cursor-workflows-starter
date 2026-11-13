@@ -114,3 +114,9 @@ test("the redactor hides the password of a URL and keeps the rest of it", () => 
   assert.equal(text(`fatal: unable to access 'https://alice:${FAKE_SECRET}@example.invalid/org/repo.git/'`), "fatal: unable to access 'https://alice:[REDACTED]@example.invalid/org/repo.git/'");
   assert.equal(text("see https://example.com/a:b@c and user@example.com"), "see https://example.com/a:b@c and user@example.com");
 });
+
+test("the redactor hides a URL's userinfo that is a token alone, and keeps a short user name", () => {
+  const { text } = createRedactor({ env: {} });
+  assert.equal(text("fatal: could not read from 'https://tok123456789012345@gitlab.com/x'"), "fatal: could not read from 'https://[REDACTED]@gitlab.com/x'");
+  assert.equal(text("ssh://git@github.com/org/repo and https://alice@example.com/x"), "ssh://git@github.com/org/repo and https://alice@example.com/x");
+});

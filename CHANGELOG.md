@@ -464,7 +464,8 @@
   ia em texto puro por `http://`). Agora a URL vem de `remote.<nome>.url` como configurada (um apelido de `url.<base>.insteadOf`, como `gh:org/repo`,
   vale pela URL que o git põe no lugar dele), sai sem credencial, sem query e sem fragmento (`?token=...`), e um
   remote que não é `https://` ou ssh num host falha a etapa com uma mensagem clara, antes do snapshot e sem novas
-  tentativas. O redator do log ganhou o formato da senha numa URL (`https://usuario:[REDACTED]@host`).
+  tentativas. O redator do log ganhou o formato da senha numa URL (`https://usuario:[REDACTED]@host`) e o do token
+  sozinho no lugar do usuário, com 16 caracteres ou mais (`https://[REDACTED]@host`).
 - **Um erro de configuração ou de autenticação do SDK falha a etapa na hora, sem gastar as novas tentativas.** O motor
   só lia o `isRetryable` do `RateLimitError`: um `ConfigurationError` (id de modelo inválido) ou um
   `AuthenticationError` (chave inválida) repetia a etapa até acabar o `retries`, criando um agente por tentativa. Agora
