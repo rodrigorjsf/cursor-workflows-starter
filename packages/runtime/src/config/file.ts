@@ -34,9 +34,12 @@ const KNOWN_FORGE_HOSTS: Readonly<Record<string, ForgeName>> = { "github.com": "
  * config check (a `forges` entry may not give a known host the other forge) and a run's detection both ask here, so they agree.
  */
 export function knownForgeOf(host: string): ForgeName | undefined {
-  const bare = host.replace(/:\d+$/, "");
+  const bare = bareHost(host);
   return Object.hasOwn(KNOWN_FORGE_HOSTS, bare) ? KNOWN_FORGE_HOSTS[bare] : undefined;
 }
+
+/** `host` without its `:port`: the host `knownForgeOf` matches, and the one a message about that match names. */
+export const bareHost = (host: string): string => host.replace(/:\d+$/, "");
 
 /** The name of each forge, as a message spells it. A total record: a forge added to `ForgeName` is a compile error here. */
 export const FORGE_TITLES: Readonly<Record<ForgeName, string>> = { github: "GitHub", gitlab: "GitLab" };

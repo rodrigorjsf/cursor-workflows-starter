@@ -11,7 +11,7 @@ import type { ResultVia, StepLocation } from "../runtime/backend.js";
 import type { ConfigSource, ConfigViolation, EffectiveCaps, EffectiveConfig, EffectiveLimits, EffectiveRole } from "../runtime/events.js";
 import type { ForgeName, WorkflowDefinition, WorkflowRole } from "../runtime/workflow.js";
 import { globMatches, literalLength } from "./glob.js";
-import { ConfigError, type ConfigIssue, FORGE_TITLES, type LoadedConfig, knownForgeOf, type Pointer, type RolePrefs, type WorkflowPrefs, pointerOf } from "./file.js";
+import { bareHost, ConfigError, type ConfigIssue, FORGE_TITLES, type LoadedConfig, knownForgeOf, type Pointer, type RolePrefs, type WorkflowPrefs, pointerOf } from "./file.js";
 
 /** The per-run limits a flag or an MCP caller can set. */
 export interface LimitOverrides {
@@ -296,10 +296,9 @@ function checkLocations(input: ResolveInput, roles: WorkflowRole[], issues: Conf
 function checkForges(input: ResolveInput, issues: ConfigIssue[]): void {
   for (const file of [input.global, input.repo]) {
     for (const [host, forge] of Object.entries(file?.data.forges ?? {})) {
-      const bare = host.replace(/:\d+$/, "");
       const known = knownForgeOf(host);
       if (known === undefined || known === forge) continue;
-      issues.push({ ref: file!.path, path: pointerOf("forges", host), message: `${bare} is ${FORGE_TITLES[known]}, a host the kit knows, so it cannot be declared as ${forge}: remove the entry` });
+      issues.push({ ref: file!.path, path: pointerOf("forges", host), message: `${bareHost(host)} is ${FORGE_TITLES[known]}, a host the kit knows, so it cannot be declared as ${forge}: remove the entry` });
     }
   }
 }
