@@ -14,7 +14,7 @@ function scripts(dir = "scripts"): string[] {
   return readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((e) => {
     const path = posix.join(dir, e.name);
     if (e.isDirectory()) return scripts(path);
-    return /\.(sh|ts|mjs|js)$/.test(e.name) ? [path] : [];
+    return /\.(sh|ts|mjs|js|py)$/.test(e.name) ? [path] : [];
   });
 }
 
