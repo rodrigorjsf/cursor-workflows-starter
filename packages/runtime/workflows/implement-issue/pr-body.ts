@@ -3,7 +3,7 @@
 // The test output is redacted (redaction.ts) and its local paths replaced before it goes in.
 import { homedir } from "node:os";
 import { createRedactor } from "../../src/runtime/redaction.js";
-import { neutralizeGitlabText } from "./forge.js";
+import { neutralizeGitlabText, type ForgeName } from "./forge.js";
 import type { ReviewReports } from "./review.js";
 import type { SliceRecord } from "./tdd.js";
 
@@ -50,19 +50,19 @@ export const inlineCode = (s: string) => "`" + s.replace(/`/g, "ˋ").replace(/\r
  *
  * The same filters serve GitLab, which reads more as a command. Its closing keywords also include `Closing`, `Fixing`,
  * `Resolving` and `Implement*`, and its issue reference can follow the word `issue` and be a path through subgroups or the
- * URL of the issue. A line that starts with a quick action (`/close`, `/merge`) runs it, and `!12`, `~label` and `%milestone`
- * link other objects (`neutralizeGitlabText`). One sanitizer for both forges: a PR body is not written for the forge it goes to.
+ * URL of the issue: those filters run on both forges. On GitLab (`forge`, the forge the text goes to) a line that starts with a
+ * quick action (`/close`, `/merge`) runs it, and `!12`, `~label` and `%milestone` link other objects: `neutralizeGitlabText`
+ * runs there only, since what it does to a fence or a sigil would change how GitHub renders the text and protect nothing.
  */
-export function sanitizeModelText(text: string): string {
-  return neutralizeGitlabText(
-    text
-      .replace(
-        /\b(clos(?:e[sd]?|ing)|fix(?:e[sd]|ing)?|resolv(?:e[sd]?|ing)|implement(?:s|ed|ing)?)(\s*:?\s+)((?:issues?\s+)?(?:(?:[\w.-]+\/)+[\w.-]+)?#\d+|(?:issues?\s+)?https?:\/\/\S+?\/-\/(?:issues|work_items)\/\d+)/gi,
-        "$1$2`$3`",
-      )
-      .replace(/(^|[^\w`])@([A-Za-z0-9][\w-]*)/g, "$1@​$2")
-      .replace(/<!--/g, "&lt;!--"),
-  );
+export function sanitizeModelText(text: string, forge: ForgeName): string {
+  const shared = text
+    .replace(
+      /\b(clos(?:e[sd]?|ing)|fix(?:e[sd]|ing)?|resolv(?:e[sd]?|ing)|implement(?:s|ed|ing)?)(\s*:?\s+)((?:issues?\s+)?(?:(?:[\w.-]+\/)+[\w.-]+)?#\d+|(?:issues?\s+)?https?:\/\/\S+?\/-\/(?:issues|work_items)\/\d+)/gi,
+      "$1$2`$3`",
+    )
+    .replace(/(^|[^\w`])@([A-Za-z0-9][\w-]*)/g, "$1@​$2")
+    .replace(/<!--/g, "&lt;!--");
+  return forge === "gitlab" ? neutralizeGitlabText(shared) : shared;
 }
 
 /** Saída de teste vai para o PR: troca caminhos locais (pasta pessoal, worktree) por marcadores. */
@@ -84,15 +84,18 @@ export function buildPrBody(input: {
   worktree?: string;
   /** Redacts the test output before it goes in (default: the redactor of this process's environment, as the event log's). */
   redact?: (text: string) => string;
+  /** The forge the PR goes to: what its model text is guarded against (`sanitizeModelText`). */
+  forge: ForgeName;
 }): string {
   const { issueNumber, slices, review, deferred, refuted = [], worktree } = input;
+  const sanitize = (text: string) => sanitizeModelText(text, input.forge);
   const redact = input.redact ?? createRedactor().text;
   const t = {
-    summary: sanitizeModelText(input.text.summary),
+    summary: sanitize(input.text.summary),
     door: input.text.door,
-    doorNote: input.text.doorNote ? sanitizeModelText(input.text.doorNote) : undefined,
-    blastRadius: sanitizeModelText(input.text.blastRadius),
-    blastNote: input.text.blastNote ? sanitizeModelText(input.text.blastNote) : undefined,
+    doorNote: input.text.doorNote ? sanitize(input.text.doorNote) : undefined,
+    blastRadius: sanitize(input.text.blastRadius),
+    blastNote: input.text.blastNote ? sanitize(input.text.blastNote) : undefined,
   };
   // Test output can print a credential (an env dump, a token in a fixture): redacted whole, before the tail cuts a token in two.
   const clean = (s: string | undefined, n: number) => redactPaths(tail(redact(s ?? ""), n), worktree);
@@ -100,7 +103,7 @@ export function buildPrBody(input: {
     .filter((s) => s.done)
     .map((s) =>
       s.alreadySatisfied
-        ? `- ${inlineCode(s.testName ?? s.behavior)}: the behaviour already existed (${sanitizeModelText(s.alreadySatisfied)}); the test passed with no implementation.`
+        ? `- ${inlineCode(s.testName ?? s.behavior)}: the behaviour already existed (${sanitize(s.alreadySatisfied)}); the test passed with no implementation.`
         : [
             `- **Before:** ${inlineCode(s.testName ?? s.behavior)} (${s.testFile ? inlineCode(s.testFile) : "test"}) failing`,
             "",
@@ -115,7 +118,7 @@ export function buildPrBody(input: {
 
   // Each piece of model text is neutralized on its own: prose by sanitizeModelText, a file name as an inline code span.
   // Sanitizing the whole line would put backticks inside the span and break it.
-  const prose = sanitizeModelText;
+  const prose = sanitize;
   const notes: string[] = [];
   for (const f of review.standards?.findings ?? []) if (f.kind === "judgement") notes.push(`- Standards (judgement): ${prose(f.rule)} in ${inlineCode(f.file)}: ${prose(f.note)}`);
   for (const f of review.spec?.findings ?? []) if (f.kind === "scope-creep") notes.push(`- Spec (scope creep): ${prose(f.note)}`);
@@ -142,7 +145,7 @@ export function buildPrBody(input: {
     `**Blast Radius:** ${t.blastRadius}`,
     ...(t.blastNote ? ["", t.blastNote] : []),
     ...(notes.length ? ["", "## Non-blocking review findings", "", ...notes] : []),
-    ...(deferred.length ? ["", "## Deferred (slice cap)", "", ...deferred.map((d) => `- ${sanitizeModelText(d)}`)] : []),
+    ...(deferred.length ? ["", "## Deferred (slice cap)", "", ...deferred.map((d) => `- ${sanitize(d)}`)] : []),
     "",
     "---",
     "_Generated by the `implement-issue` workflow (cursor-workflows-starter): TDD slice by slice, review on three axes._",

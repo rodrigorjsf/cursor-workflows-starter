@@ -250,7 +250,7 @@ export function prLabel(url: string): string {
 // GitLab acts on text the account that posts it did not mean as a command: a line of an MR description or a note that starts with
 // `/close`, `/merge` or another quick action runs it as that account, and `!12`, `~label` and `%milestone` turn into links and
 // cross-reference notes on other objects. `neutralizeGitlabText` defuses both in text a model wrote; `sanitizeModelText`
-// (`pr-body.ts`) is where every piece of model text goes through it.
+// (`pr-body.ts`) is where every piece of model text bound for GitLab goes through it.
 
 /**
  * The quick actions GitLab runs: the "Quick actions" page of its documentation (read on 2026-11-13, GitLab 18.x), plus the names

@@ -329,7 +329,7 @@ forgeTest("model text in an inline code span of the seams comment cannot close t
 const HOSTILE_ACTIONS = "/close\n/MERGE\n/assign @octocat\n/label ~bug\n/shrug";
 const QUICK_ACTION_LINE = /^\/(close|merge|assign|label|shrug)(\s|$)/im;
 
-forgeTest("a quick action written by the model reaches the forge neutralized, in the seams comment and in the MR body", async () => {
+forgeTest("a quick action written by the model reaches GitLab neutralized, in the seams comment and in the MR body; GitHub, which runs none, gets it as written", async () => {
   issue(["complexity:medium"]);
   const hostile = (what: string) => `${what}\n${HOSTILE_ACTIONS}\nafter`;
   fx.handlers.plan = (o) =>
@@ -346,7 +346,8 @@ forgeTest("a quick action written by the model reaches the forge neutralized, in
   const second = await run({ approveSeams: true, openPr: true }, first.runId);
   assert.equal(res(second).status, "done", JSON.stringify(res(second)));
   for (const [where, text] of [["seams comment", forgeState().comments[0]!], ["MR body", forgeState().prs[0]!.body]] as const) {
-    assert.doesNotMatch(text, QUICK_ACTION_LINE, `${where}: a model-written line still starts with a quick action`);
+    if (fx.forge === "gitlab") assert.doesNotMatch(text, QUICK_ACTION_LINE, `${where}: a model-written line still starts with a quick action`);
+    else assert.ok(text.includes("\n/close\n/MERGE\n"), `${where}: on GitHub the lines stay as the model wrote them`);
     assert.ok(text.includes("/close") && text.includes("/MERGE") && text.includes("/assign"), `${where}: the model's words stay readable`);
   }
 });

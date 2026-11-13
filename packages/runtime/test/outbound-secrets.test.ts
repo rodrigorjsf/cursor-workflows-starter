@@ -95,7 +95,7 @@ test("test output embedded in the PR body is redacted, and keeps its local paths
       green: `ok 1 - subtract (${token})`,
       done: true,
     };
-    const body = buildPrBody({ issueNumber: 1, text: { summary: "s", door: "two-way", blastRadius: "local" }, slices: [slice], review: {}, deferred: [] });
+    const body = buildPrBody({ issueNumber: 1, text: { summary: "s", door: "two-way", blastRadius: "local" }, slices: [slice], review: {}, deferred: [], forge: "github" });
     assert.ok(!body.includes(token), "a token printed by a test must not reach the PR");
     assert.ok(!body.includes(envValue), "a secret env value printed by a test must not reach the PR");
     assert.match(body, /\[REDACTED\]/);

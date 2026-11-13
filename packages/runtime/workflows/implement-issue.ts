@@ -623,10 +623,10 @@ export default defineWorkflow<Args>({
           progress.data.proposedPlan = plan;
           progress.save();
           const relaunch = `npm run wf -- run implement-issue --args ${shellQuote(JSON.stringify({ ...ctx.args, approveSeams: true }))} --resume ${ctx.runId}`;
-          // Model text goes to a public issue: neutralized like the PR body's (closing keywords, mentions, `<!--`, GitLab quick actions
-          // and references). The interface and the test command sit in inline code spans, where the forge gives them no effect only while
+          // Model text goes to a public issue: neutralized like the PR body's (closing keywords, mentions, `<!--`, and on GitLab its
+          // quick actions and references). The interface and the test command sit in inline code spans, where the forge gives them no effect only while
           // the span holds: inlineCode turns their backticks and line breaks into characters that cannot close it.
-          const prose = sanitizeModelText;
+          const prose = (text: string) => sanitizeModelText(text, forge.name);
           // Redacted with every credential format: a step result keeps the redact-only ones (a URL password in the test
           // command, a `Bearer` header) for the workflow to run, but a public comment gets none of them.
           const redactOutbound = createRedactor({ extra: savedSecrets() }).text;
@@ -1090,6 +1090,7 @@ export default defineWorkflow<Args>({
             refuted,
             worktree,
             redact: createRedactor({ extra: savedSecrets() }).text, // the saved Cursor key is in no env var
+            forge: forge.name,
           });
           const leak = findSecretInText(body);
           if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the PR body`, branch, worktree };

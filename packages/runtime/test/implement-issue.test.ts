@@ -17,19 +17,19 @@ import { DEFAULT_PROTECTED_GLOBS, isTestFile, looksLikeNoTests, matchesAny, slic
 const PR_TEXT = { summary: "s", door: "two-way" as const, blastRadius: "local" };
 
 test("PR com fatias adiadas referencia a issue em vez de fechá-la", () => {
-  const partial = buildPrBody({ issueNumber: 7, text: PR_TEXT, slices: [], review: {}, deferred: ["subtractAll"] });
+  const partial = buildPrBody({ issueNumber: 7, text: PR_TEXT, slices: [], review: {}, deferred: ["subtractAll"], forge: "github" });
   assert.match(partial, /^Refs #7/);
   assert.doesNotMatch(partial, /Closes #7/);
-  assert.match(buildPrBody({ issueNumber: 7, text: PR_TEXT, slices: [], review: {}, deferred: [] }), /^Closes #7/);
+  assert.match(buildPrBody({ issueNumber: 7, text: PR_TEXT, slices: [], review: {}, deferred: [], forge: "github" }), /^Closes #7/);
 });
 
 test("texto do modelo no PR não fecha outra issue, não menciona ninguém e não abre comentário HTML", () => {
-  const s = sanitizeModelText("Fixes #12 e closes org/repo#3, cc @octocat <!-- esconde o resto");
+  const s = sanitizeModelText("Fixes #12 e closes org/repo#3, cc @octocat <!-- esconde o resto", "github");
   assert.doesNotMatch(s, /Fixes #12|closes org\/repo#3/);
   assert.match(s, /`#12`/);
   assert.doesNotMatch(s, /(^|\s)@octocat/);
   assert.doesNotMatch(s, /<!--/);
-  assert.equal(sanitizeModelText("e-mail a@b.com"), "e-mail a@b.com");
+  assert.equal(sanitizeModelText("e-mail a@b.com", "github"), "e-mail a@b.com");
 });
 
 test("model text in an inline code span of the PR body cannot close the span or break the line", () => {
@@ -47,6 +47,7 @@ test("model text in an inline code span of the PR body cannot close the span or 
       security: { findings: [{ severity: "note", file: hostile, issue: "i" }], worst: "" },
     } as never,
     deferred: [],
+    forge: "github",
   });
   assert.equal(body.split(safe).length - 1, 5, body); // testName twice, testFile, and the two findings' file
   assert.doesNotMatch(body, /`\s*@octocat/);
@@ -83,7 +84,7 @@ test("a chave da fatia vem do conteúdo, não da posição", () => {
 test("a evidência do PR começa numa linha inteira, sem pedaço de linha cortada", () => {
   const red = "linha-inteira\n# Subtest: x\nnot ok 1 - x\n";
   const body = buildPrBody({
-    issueNumber: 7, text: PR_TEXT, review: {}, deferred: [],
+    issueNumber: 7, text: PR_TEXT, review: {}, deferred: [], forge: "github",
     slices: [{ key: "s", behavior: "b", seam: "s", testFile: "t.js", testName: "x", red: "x".repeat(800) + "\n" + red, green: "ok", done: true }],
   });
   assert.doesNotMatch(body, /x{5}/, "o pedaço da linha cortada pelo limite sai");
