@@ -12,6 +12,7 @@ import { calls, script, stats } from "@cursor/sdk";
 import { createJob, startJob } from "../src/runtime/jobs.js";
 import { jobsDir, readJob, writeJob } from "../src/runtime/job-state.js";
 import { defineWorkflow } from "../src/runtime/workflow.js";
+import { waitFor } from "./wait-for.js";
 
 const cwd = mkdtempSync(join(tmpdir(), "wf-heartbeat-"));
 let child: ChildProcess | undefined;
@@ -53,14 +54,22 @@ test("the heartbeat of a running job is refreshed while it runs", async () => {
   const wf = defineWorkflow({
     meta: { name: "beating", description: "beats" },
     defaults: { model: { id: "m" } },
-    run: (ctx) => ctx.agent("hold", { label: "hold", retries: 0, timeoutMs: 400 }),
+    run: (ctx) => ctx.agent("hold", { label: "hold", retries: 0, timeoutMs: 120_000 }),
   });
-  const { job, done } = startJob(wf, {}, { cwd });
+  // The job runs until the test cancels it, so a slow machine gets all the time it needs for the beats to come.
+  const controller = new AbortController();
+  const { job, done } = startJob(wf, {}, { cwd, signal: controller.signal });
   const first = heartbeatOnDisk(job.jobId);
-  await sleep(300);
-  const later = heartbeatOnDisk(job.jobId);
-  await done;
-  assert.ok(Date.parse(later) - Date.parse(first) >= 150, `the heartbeat moved from ${first} to ${later}`);
+  try {
+    const later = await waitFor("the heartbeat to move on by three beats", () => {
+      const beat = heartbeatOnDisk(job.jobId);
+      return Date.parse(beat) - Date.parse(first) >= 150 && beat;
+    });
+    assert.equal(readJob(cwd, job.jobId)!.status, "running", `the heartbeat moved from ${first} to ${later} while the job ran`);
+  } finally {
+    controller.abort();
+    await done;
+  }
 });
 
 test("the heartbeat keeps beating while the process is blocked in a synchronous call, so a long test run is not mistaken for a crash", async () => {

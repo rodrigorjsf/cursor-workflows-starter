@@ -119,7 +119,7 @@ test("a second SIGTERM ends the job at once and takes down the command that igno
   const { pid } = jobRecord(started.jobId);
 
   process.kill(pid, "SIGTERM"); // the command ignores SIGTERM: the run is stopping, for up to two seconds
-  await sleep(500);
+  await until("the job to take the first signal", () => readFileSync(started.log, "utf8").includes("[wf] SIGTERM: cancelling the run"));
   assert.ok(alive(pid) && alive(child), "still stopping");
   process.kill(pid, "SIGTERM");
   await until("the job's process to exit", () => !alive(pid), 3_000);
