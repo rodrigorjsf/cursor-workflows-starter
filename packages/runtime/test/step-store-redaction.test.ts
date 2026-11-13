@@ -64,3 +64,25 @@ test("a step result that holds a credential is stored redacted in the journal an
   assert.equal(calls.length, created, "both steps come from the journal: no agent is created again");
   assert.deepEqual(resumed.result, first.result);
 });
+
+test("a step result keeps the redact-only shapes (a URL password, Bearer, JWT): the workflow may run them; the event log still hides them", async () => {
+  mkdirSync(cwd, { recursive: true });
+  const command = "DATABASE_URL=postgres://u:pw1234567890@localhost/db npm test";
+  const header = "Authorization: Bearer abcdefghijklmnop1234";
+  const jwt = "eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.c2lnbmF0dXJlMTIz";
+  const key = "crsr_" + "y".repeat(24);
+  script.push(() => ({ status: "finished", result: `${command} | ${header} | ${jwt} | ${key}` }));
+  const wf = defineWorkflow({
+    meta: { name: "store-redact-only", description: "store-redact-only" },
+    defaults: { model: { id: "m" } },
+    async run(ctx) {
+      return ctx.agent<string>("plan the test command", { tools: ["read"] });
+    },
+  });
+  const r = await runWorkflow(wf, {}, { cwd });
+  assert.equal(r.status, "finished", r.error);
+  assert.equal(r.result, `${command} | ${header} | ${jwt} | [REDACTED]`, "only the blocking formats are redacted from the result");
+  const events = readFileSync(join(cwd, ".workflows", "runs", r.runId, "events.jsonl"), "utf8");
+  assert.ok(events.includes("postgres://u:[REDACTED]@localhost/db"), "the step's answer is in the event log, redacted");
+  for (const shown of ["pw1234567890", "abcdefghijklmnop1234", jwt, key]) assert.ok(!events.includes(shown), `the event log holds ${shown}`);
+});

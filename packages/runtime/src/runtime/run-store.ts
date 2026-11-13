@@ -15,7 +15,7 @@ import { EVENT_SCHEMA_VERSION, type RunStartEvent, type RunStatus, type Workflow
 import { Journal } from "./journal.js";
 import { isAlive } from "./pid.js";
 import { type InterruptedCloudStep, type Ledger, interruptedCloudSteps, replayLedger } from "./projection.js";
-import { type Redactor, createRedactor } from "./redaction.js";
+import { CREDENTIAL_FORMATS, type Redactor, createRedactor } from "./redaction.js";
 import { type RetentionPolicy, pruneContent } from "./retention.js";
 import { plainName, stateDir } from "./state.js";
 import { appendJsonl, hasTornTail, readJsonl } from "./state-files.js";
@@ -257,6 +257,7 @@ export class RunStore {
   private readonly eventsFile: string;
   readonly runId: string;
   private readonly redactor: Redactor;
+  private readonly resultRedactor: Redactor;
   private readonly releaseLock: () => void;
   private ended = false;
 
@@ -266,6 +267,7 @@ export class RunStore {
     this.dir = dir;
     this.runId = runId;
     this.redactor = createRedactor({ extra: options.secrets });
+    this.resultRedactor = createRedactor({ extra: options.secrets, formats: CREDENTIAL_FORMATS.filter((f) => !f.redactOnly) });
     this.eventsFile = join(dir, EVENTS_FILE);
     try {
       this.journal = new Journal(join(dir, JOURNAL_FILE));
@@ -299,16 +301,20 @@ export class RunStore {
   }
 
   /**
-   * A step result with every secret in it replaced, the same way as an event's. A result goes through this before it is stored
-   * (journal, memo) and before the workflow gets it, so a resume replays exactly what the first execution saw.
+   * A step result with its secrets replaced. A result goes through this before it is stored (journal, memo) and before the
+   * workflow gets it, so a resume replays exactly what the first execution saw. Unlike an event, it keeps the redact-only
+   * shapes (`redactOnly`: a URL's password, `Bearer`, JWT): a workflow may run what a step returns, and a test command such as
+   * `DATABASE_URL=postgres://u:pw@localhost/db npm test` would run with `[REDACTED]` in it. The trade-off: those shapes stay
+   * in the journal and the memo, in clear; the event log, and so the dashboard and the metrics, still redacts them.
    */
   redactResult<T>(result: T): T {
-    return this.redactor.value(result);
+    return this.resultRedactor.value(result);
   }
 
   /** Redacts, from now on, the values of the secret-named variables of `env` too: the environment a command is about to run with. */
   learnSecrets(env: Record<string, string | undefined>): void {
     this.redactor.learn(env);
+    this.resultRedactor.learn(env);
   }
 
   appendEvent(event: WorkflowEvent): void {

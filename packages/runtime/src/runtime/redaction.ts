@@ -1,8 +1,9 @@
 // Secrets never reach the run's event log, nor its journal and memo (a step's result is redacted before it is stored, and
-// the workflow gets that redacted value). Two things are replaced with `[REDACTED]` before an event is written (and before
+// the workflow gets that redacted value; the result keeps the `redactOnly` shapes, which a workflow may need to run, see
+// `RunStore.redactResult`). Two things are replaced with `[REDACTED]` before an event is written (and before
 // any listener sees it):
 //   - text that has the shape of a well-known credential (GitHub, AWS, Slack, Google, npm, Stripe and Cursor keys, JWTs,
-//     bearer tokens, private key blocks, the `sk-` keys of the model providers, and the password in a URL's userinfo);
+//     bearer tokens, private key blocks, the `sk-` keys of the model providers, and the password or token in a URL's userinfo);
 //   - the value of any environment variable whose name contains KEY, TOKEN, SECRET or PASSWORD, plus keys handed to the run
 //     directly (the Cursor API key arrives this way, as `CURSOR_API_KEY` or the `apiKey` option), and those of the
 //     environment each `ctx.exec` command runs with (its `env` option, and process.env as it is when the command starts).
@@ -93,7 +94,10 @@ export function secretValues(env: NodeJS.ProcessEnv, extra: ReadonlyArray<string
   return [...values].filter((v) => v.length >= MIN_SECRET_LENGTH).sort((a, b) => b.length - a.length);
 }
 
-export function createRedactor(options: { env?: NodeJS.ProcessEnv; extra?: ReadonlyArray<string | undefined> } = {}): Redactor {
+export function createRedactor(
+  options: { env?: NodeJS.ProcessEnv; extra?: ReadonlyArray<string | undefined>; /** The shapes to redact (default: all of `CREDENTIAL_FORMATS`). */ formats?: readonly CredentialFormat[] } = {},
+): Redactor {
+  const formats = options.formats ?? CREDENTIAL_FORMATS;
   let secrets = secretValues(options.env ?? process.env, options.extra);
   const learn = (env: Record<string, string | undefined>) => {
     secrets = secretValues(env, secrets);
@@ -101,7 +105,7 @@ export function createRedactor(options: { env?: NodeJS.ProcessEnv; extra?: Reado
   const text = (input: string): string => {
     let out = input;
     for (const secret of secrets) if (out.includes(secret)) out = out.split(secret).join(REDACTED);
-    for (const { pattern } of CREDENTIAL_FORMATS) out = out.replace(pattern, (_match, keep: unknown) => (typeof keep === "string" ? `${keep}${REDACTED}` : REDACTED));
+    for (const { pattern } of formats) out = out.replace(pattern, (_match, keep: unknown) => (typeof keep === "string" ? `${keep}${REDACTED}` : REDACTED));
     return out;
   };
   const value = <T>(input: T): T => {
