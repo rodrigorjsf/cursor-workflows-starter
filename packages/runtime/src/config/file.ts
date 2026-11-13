@@ -27,7 +27,16 @@ export interface ConfigCaps {
 }
 
 /** The hosts whose forge the kit knows without being told. A `forges` entry may repeat one of them, never give it the other forge. */
-export const KNOWN_FORGE_HOSTS: Readonly<Record<string, ForgeName>> = { "github.com": "github", "gitlab.com": "gitlab" };
+const KNOWN_FORGE_HOSTS: Readonly<Record<string, ForgeName>> = { "github.com": "github", "gitlab.com": "gitlab" };
+
+/**
+ * The forge the kit knows `host` as, or undefined. `host` is a bare host or `host:port`: a known host matches on any port. The
+ * config check (a `forges` entry may not give a known host the other forge) and a run's detection both ask here, so they agree.
+ */
+export function knownForgeOf(host: string): ForgeName | undefined {
+  const bare = host.replace(/:\d+$/, "");
+  return Object.hasOwn(KNOWN_FORGE_HOSTS, bare) ? KNOWN_FORGE_HOSTS[bare] : undefined;
+}
 
 /** The name of each forge, as a message spells it. A total record: a forge added to `ForgeName` is a compile error here. */
 export const FORGE_TITLES: Readonly<Record<ForgeName, string>> = { github: "GitHub", gitlab: "GitLab" };

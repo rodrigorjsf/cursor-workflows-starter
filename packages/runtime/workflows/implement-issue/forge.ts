@@ -12,7 +12,7 @@
 // What a forge makes of the text a model wrote for it (GitLab runs quick actions) is here too: `neutralizeGitlabText`.
 // `wf doctor` reads the forge of the cwd's origin (`forgeOfOrigin`) and what to ask the CLI to know it is logged in (`loginOf`).
 import { readFileSync } from "node:fs";
-import { FORGE_TITLES, KNOWN_FORGE_HOSTS } from "../../src/config/file.js";
+import { FORGE_TITLES, knownForgeOf } from "../../src/config/file.js";
 import type { ForgeName } from "../../src/runtime/workflow.js";
 import type { Commands } from "./commands.js";
 
@@ -102,7 +102,7 @@ const ownEntry = <T>(map: Readonly<Record<string, T>>, key: string): T | undefin
  * A host that is none of these is an error naming it and the key: the kit never guesses which CLI to use. `source` says where the host came from.
  */
 function forgeOfHost(remote: RemoteName, forges: Readonly<Record<string, ForgeName>>, source: string): ForgeName {
-  const forge = ownEntry(KNOWN_FORGE_HOSTS, remote.host) ?? (remote.port ? ownEntry(forges, `${remote.host}:${remote.port}`) : undefined) ?? ownEntry(forges, remote.host);
+  const forge = knownForgeOf(remote.host) ?? (remote.port ? ownEntry(forges, `${remote.host}:${remote.port}`) : undefined) ?? ownEntry(forges, remote.host);
   if (forge !== undefined) return forge;
   throw new Error(
     `${source} names the host ${remote.port ? `${remote.host}:${remote.port}` : remote.host}, which is not a known forge (the kit knows github.com as GitHub and gitlab.com as GitLab): declare it under "forges" in the config (the global file or the repo file), for example { "forges": { ${JSON.stringify(remote.host)}: "gitlab" } }`,
