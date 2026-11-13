@@ -459,7 +459,7 @@
   `cloudRepoUrl` mantinha o `usuario:token` de um remote `https://usuario:token@host/...` na URL do repositório enviada
   à API da Cursor, e passava `http://`, `ext::` e caminhos locais como estavam (o snapshot, com arquivos não commitados,
   ia em texto puro por `http://`). Agora a URL vem de `remote.<nome>.url` como configurada (um apelido de `url.<base>.insteadOf`, como `gh:org/repo`,
-  vale pela URL que o git põe no lugar dele), sai sem credencial, e um
+  vale pela URL que o git põe no lugar dele), sai sem credencial, sem query e sem fragmento (`?token=...`), e um
   remote que não é `https://` ou ssh num host falha a etapa com uma mensagem clara, antes do snapshot e sem novas
   tentativas. O redator do log ganhou o formato da senha numa URL (`https://usuario:[REDACTED]@host`).
 - **Um erro de configuração ou de autenticação do SDK falha a etapa na hora, sem gastar as novas tentativas.** O motor

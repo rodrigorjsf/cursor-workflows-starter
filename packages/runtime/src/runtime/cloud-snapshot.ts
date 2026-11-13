@@ -274,16 +274,18 @@ export class UnsupportedRemoteError extends Error {}
 /**
  * The repository URL a cloud agent is created with. The SDK wants the code host's web URL: an `ssh` remote (`git@host:org/repo.git`,
  * `ssh://git@host/org/repo.git`) and the `.git` of an `https` one are rewritten to `https://host/org/repo`. The URL's
- * userinfo (`https://user:token@host/...`) is dropped: it is a credential, and Cursor's API never needs it. Any other remote
+ * userinfo (`https://user:token@host/...`), query and fragment are dropped: they may hold a credential, and Cursor's API never
+ * needs them. Any other remote
  * (`http://`, `git://`, `file://`, `ext::`, a local path) throws `UnsupportedRemoteError`: a cloud agent cannot clone a path,
  * and the plain-text transports would send the snapshot unencrypted.
  */
 export function cloudRepoUrl(remoteUrl: string): string {
-  const scp = /^[\w.-]+@([\w.-]+):(?!\/)(.+?)(?:\.git)?\/?$/.exec(remoteUrl);
+  // The path stops at a `?` or `#`: the query and the fragment (`?token=...`) are dropped like the userinfo.
+  const scp = /^[\w.-]+@([\w.-]+):(?!\/)([^?#]+?)(?:\.git)?\/?(?:[?#].*)?$/.exec(remoteUrl);
   if (scp) return `https://${scp[1]}/${scp[2]}`;
-  const ssh = /^ssh:\/\/(?:[^@/]+@)?([^/:@]+)(?::\d+)?\/(.+?)(?:\.git)?\/?$/i.exec(remoteUrl);
+  const ssh = /^ssh:\/\/(?:[^@/]+@)?([^/:@?#]+)(?::\d+)?\/([^?#]+?)(?:\.git)?\/?(?:[?#].*)?$/i.exec(remoteUrl);
   if (ssh) return `https://${ssh[1]}/${ssh[2]}`;
-  const https = /^https:\/\/(?:[^@/]*@)?([^/@\s]+)\/(.+?)(?:\.git)?\/?$/i.exec(remoteUrl);
+  const https = /^https:\/\/(?:[^@/]*@)?([^/@\s?#]+)\/([^?#]+?)(?:\.git)?\/?(?:[?#].*)?$/i.exec(remoteUrl);
   if (https) return `https://${https[1]}/${https[2]}`;
   // Says what kind of remote it is, never the URL itself: it may hold a credential.
   const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(remoteUrl)?.[1];

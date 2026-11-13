@@ -52,6 +52,18 @@ test("the repository URL a cloud agent gets never carries the credentials of the
   }
 });
 
+test("the repository URL a cloud agent gets drops the query and the fragment of the remote URL", () => {
+  for (const [remoteUrl, url] of [
+    [`https://github.com/org/repo.git?token=${FAKE_SECRET}`, "https://github.com/org/repo"],
+    [`https://github.com/org/repo#${FAKE_SECRET}`, "https://github.com/org/repo"],
+    [`https://github.com/org/repo/?a=1#b`, "https://github.com/org/repo"],
+    [`ssh://git@github.com/org/repo.git?x=${FAKE_SECRET}`, "https://github.com/org/repo"],
+    [`git@github.com:org/repo.git#${FAKE_SECRET}`, "https://github.com/org/repo"],
+  ] as const) {
+    assert.equal(cloudRepoUrl(remoteUrl), url, remoteUrl);
+  }
+});
+
 test("a remote that is not https or ssh on a host is refused with a message that says why", () => {
   for (const remoteUrl of ["http://github.com/org/repo.git", "git://github.com/org/repo.git", "file:///srv/git/repo.git", "ext::sh -c x", "/srv/git/origin.git", "../origin.git", "https:///org/repo"]) {
     assert.throws(() => cloudRepoUrl(remoteUrl), /cloud step.*https:\/\/ or ssh/, remoteUrl);
