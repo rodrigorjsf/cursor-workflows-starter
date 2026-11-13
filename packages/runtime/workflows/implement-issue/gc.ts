@@ -12,6 +12,11 @@
 // worktree, when its PR was merged or closed and no process executes one of those runs. The run's own state
 // (`.workflows/runs/<runId>/`, its event log and journal) stays: it is the history, and the metrics read it.
 //
+// The PR's state comes from the forge (ADR-0009: `gh` or `glab`), and which one is never a guess made again: a run is asked on the
+// forge its progress recorded (a record without one is GitHub, as every run before the field was), so a config or remote change
+// after the run cannot send its deletion decision to another forge's CLI. A branch no run owns has no record, so the forge of the
+// origin's host decides.
+//
 // It also sweeps the cloud snapshot branches (`wf/cloud-snapshot/<run>/<id>`) that cloud steps push to the remote `cloud.remote`
 // names and delete when the step ends: the ones a crash, a `kill -9` or a remote that refused the deletion left behind. A snapshot
 // has no PR, so it is judged by its run (`planSnapshots`): it goes when the run is one of this repo's, no process executes it,
@@ -31,7 +36,7 @@ import { outcomeClass } from "../../src/runtime/outcome.js";
 import { interruptedCloudSteps } from "../../src/runtime/projection.js";
 import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn, runsDirIn, tryAcquireRunLock } from "../../src/runtime/run-store.js";
 import { type Exec, Commands, LOCAL_GIT_TIMEOUT_MS, NETWORK_TIMEOUT_SEC, ORIGIN, WORKFLOW_BRANCH_PREFIX, worktreeOf, worktreesDirIn } from "./commands.js";
-import { DEFAULT_FORGE, type Forge, type PrState, createForge, forgeNameOf } from "./forge.js";
+import { DEFAULT_FORGE, type Forge, type PrState, createForge, detectForge, forgeNameOf } from "./forge.js";
 import { type Progress, ProgressStore } from "./tdd.js";
 
 /** Why something is cleaned up: its PR was merged or closed, its run failed longer ago than the limit, or it is a cloud snapshot branch its step never deleted. */
@@ -247,13 +252,16 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
     plan.remove.push({ runId, reason, actions, notes });
   }
 
-  const unrecordedForge = createForge(DEFAULT_FORGE, commands); // no run owns the branches below, so no record names their forge
-  await planShared(plan, unrecordedForge, runs, locals, registered, remote);
+  // The branches every run of an issue shared belong to runs from before the forge was recorded: GitHub, as for any record without one.
+  await planShared(plan, createForge(DEFAULT_FORGE, commands), runs, locals, registered, remote);
   await planSnapshots(plan, commands, snapshots, now);
 
   // The origin's `wf/` branches that none of these runs owns: made by a run in another clone, or by one whose state is gone.
   // Nothing says whether that run is still going, so only a PR that is done (merged or closed) says the branch is a leftover.
+  // No record names the forge of such a branch, and the branch is on the origin as it is now: the forge of the origin's host decides,
+  // looked up when the first of them is met.
   const owned = new Set(runs.flatMap((r) => (r.progress.branch ? [r.progress.branch] : [])));
+  let originForge: Forge | undefined;
   for (const [branch, head] of remote ?? []) {
     if (branch.startsWith(SNAPSHOT_BRANCH_PREFIX)) {
       // A snapshot never has a PR: `planSnapshots` judges those on the remote cloud steps push to, and no other is asked about.
@@ -262,7 +270,8 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
     }
     if (owned.has(branch) || SHARED_BRANCH.test(branch)) continue;
     try {
-      const state = await unrecordedForge.prState(cwd, branch);
+      originForge ??= createForge(await detectForge(commands, cwd), commands);
+      const state = await originForge.prState(cwd, branch);
       const done = state && DONE_PR[state];
       if (done) plan.remove.push({ reason: done, actions: [{ kind: "remote-branch", target: branch, head }], notes: [] });
       else plan.kept.push({ branch, why: state === "OPEN" ? "its PR is open, and no run of this repo owns it" : "no run of this repo owns it, and it has no PR" });
