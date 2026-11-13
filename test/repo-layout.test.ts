@@ -52,8 +52,13 @@ test("CLAUDE.md is the English maintainer guide and stays within its stated line
   assert.ok(guide.trimEnd().split("\n").length <= budget, `CLAUDE.md has more than its ${budget} lines`);
 
   assert.match(guide, /contributor section/i, "CLAUDE.md must point to the docs contributor section for detail");
-  assert.match(guide, /self-contained/i, "CLAUDE.md must state that every skill is self-contained");
   assert.match(guide, /\/mattpocock-skills:writing-for-agents/, "CLAUDE.md must say skills are created and updated with writing-for-agents");
+  assert.match(guide, /`CODING_STANDARDS\.md`.*reviewing code/, "CLAUDE.md must point reviewers at CODING_STANDARDS.md");
+});
+
+test("CODING_STANDARDS.md states that every skill is self-contained, the rule the maintainer guide moved there", () => {
+  const standards = read("CODING_STANDARDS.md");
+  assert.match(standards, /each skill is self-contained/i, "CODING_STANDARDS.md must state that every skill is self-contained");
 });
 
 test("CLAUDE.md keeps the Agent skills and Applied Learning sections", () => {

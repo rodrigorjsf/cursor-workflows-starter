@@ -19,6 +19,7 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 ```
 .
 ├── CLAUDE.md               # guia canônico do mantenedor, em inglês (AGENTS.md é um link simbólico para ele)
+├── CODING_STANDARDS.md     # as regras de julgamento que o review aplica, em inglês (o review do implement-issue o lê)
 ├── packages/
 │   ├── dashboard/          # o dashboard local (workspace npm @cursor-workflows/dashboard): servidor HTTP sobre os runs e as métricas, que só lê, a não ser para cancelar um run
 │   │   ├── src/            # server.ts (API JSON, stream SSE e páginas), main.ts (o processo), board.ts (as colunas do quadro), pr-state.ts (estado das PRs, pelo `gh`),
@@ -88,19 +89,13 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 
 ## Idioma
 
-- **Inglês:** o `CLAUDE.md`, as skills distribuídas, os templates, os ADRs e qualquer texto escrito para agentes.
-- **pt-BR:** este livro e o `README.md`. O `README.en.md` é o hub em inglês, com a mesma estrutura.
-- **Comentários de código:** todo comentário novo é em inglês, mesmo num arquivo cujos comentários antigos são em pt-BR; os
-  antigos não são traduzidos. Ficam em pt-BR as fontes que o livro renderiza: o JSDoc de
-  `packages/runtime/src/runtime/events.ts` (gera a [6.1](../reference/events.md)) e as descrições de
-  `packages/runtime/schema/config.schema.json` (geram a [6.2](../reference/config.md)).
+Cada texto é escrito na língua de quem o lê (o livro em pt-BR, o que agentes leem em inglês); essa regra e a dos
+comentários de código estão no [`CODING_STANDARDS.md`](../../CODING_STANDARDS.md).
 
 ## Skills distribuídas
 
-- Cada skill é autossuficiente: toda instrução mora na pasta dela (`SKILL.md` e `references/`), e nada aponta para um
-  documento fora dela. Uma referência que duas skills dividem é copiada para as duas, e o `npm test` confere que as
-  cópias continuam idênticas.
-- Crie e atualize toda skill com `/mattpocock-skills:writing-for-agents`.
+Crie e atualize toda skill com `/mattpocock-skills:writing-for-agents`; a regra de que cada skill é autossuficiente
+está no [`CODING_STANDARDS.md`](../../CODING_STANDARDS.md).
 
 ## Testes contra a API real: política de custo
 
