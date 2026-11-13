@@ -1,13 +1,14 @@
-// Seam 2 on `wf gc`, on the forge seam (ADR-0009): the `wf` CLI as a child process against a temporary repo whose `origin` is on a
-// forge's host, with real git and the fake `gh` and `glab` of implement-issue.fixture.ts (one fake forge state; the CLI of the
-// other forge fails the call and records it in `wrongCli`). The runs gc judges are real, made by `runWorkflow` with the fake SDK.
-// What happened on the forge (an MR merged, closed, locked) is set in the fake; what happened to the origin afterwards (the remote
-// moved to another host) is set in the repo. The GitHub-only behaviour of gc stays in implement-issue.gc.process.test.ts.
+// Seam: the `wf gc` CLI as a child process on a repository whose `origin` is on a forge's host (ADR-0009), asserting what it removes, what
+// it keeps and which forge CLI it was asked. Real: git with a bare origin, the runs gc judges (made by `runWorkflow`) and the process.
+// Stand-ins: the fake SDK, and the fake `gh` and `glab` of implement-issue.fixture.ts on the PATH (one fake forge state; the CLI of the
+// other forge fails the call and records it in `wrongCli`). What happened on the forge (an MR merged, closed, locked) is set in the
+// fake; what happened to the origin afterwards (the remote moved to another host) is set in the repo. The GitHub-only behaviour of gc
+// stays in implement-issue.gc.process.test.ts.
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { branchOf, changeForgeState, failForge, forgeState, forgeTest, fx, issue, originBranches, run, setOrigin, setPrState, worktreeOf, type TestForge } from "./implement-issue.fixture.js";
-import { age, delivered, editRecord, gc, stillThere } from "./implement-issue.gc.fixture.js";
+import { type GcOutput, age, delivered, editRecord, gc, stillThere } from "./implement-issue.gc.fixture.js";
 
 /** `forgeTest`, on an issue whose label makes one slice and no planner: a run on it per scenario. */
 const gcTest = (title: string, fn: (forge: TestForge) => unknown, forges?: readonly TestForge[]) =>
@@ -19,6 +20,11 @@ const gcTest = (title: string, fn: (forge: TestForge) => unknown, forges?: reado
     },
     forges,
   );
+
+/** The CLI of the forge the test is not on was never run: a run or a branch was never asked on the wrong forge. */
+const assertWrongCliNeverRan = () => assert.equal(forgeState().wrongCli, undefined, `the other forge's CLI was run: ${JSON.stringify(forgeState().wrongCli)}`);
+/** What the plan removes, as [run, reason, [action kind, target, result]]: no run for a branch that none owns. */
+const removals = (out: GcOutput) => out.remove.map((x) => [x.runId, x.reason, x.actions.map((a) => [a.kind, a.target, a.result])]);
 
 const GONE = { worktree: false, localBranch: false, originBranch: false };
 const KEPT = { worktree: true, localBranch: true, originBranch: true };
@@ -42,7 +48,7 @@ for (const { glab, set, outcome } of [
       const r = gc();
       assert.equal(r.status, 0, r.stderr);
       assert.ok(mrLookups(since).some((c) => c.some((a) => a.includes(`source_branch=${encodeURIComponent(d.branch)}`))), "gc asked glab for the merge request of the run's branch");
-      assert.equal(forgeState().wrongCli, undefined, `gh was never run: ${JSON.stringify(forgeState().wrongCli)}`);
+      assertWrongCliNeverRan();
       if (outcome === "kept") {
         assert.deepEqual(stillThere(d), KEPT);
         assert.deepEqual(r.out.remove, []);
@@ -50,7 +56,7 @@ for (const { glab, set, outcome } of [
       } else {
         assert.deepEqual(stillThere(d), GONE);
         assert.deepEqual(
-          r.out.remove.map((x) => [x.runId, x.reason, x.actions.map((a) => [a.kind, a.target, a.result])]),
+          removals(r.out),
           [[d.runId, outcome, [["worktree", d.worktree, "removed"], ["local-branch", d.branch, "removed"], ["remote-branch", d.branch, "removed"]]]],
         );
       }
@@ -89,7 +95,7 @@ gcTest("gc asks the forge the run recorded, not the one its origin names now: th
   const r = gc();
   assert.equal(r.status, 0, r.stderr);
   assert.ok(forgeState().calls.slice(since).some((c) => c.some((a) => a.includes(d.branch) || a.includes(encodeURIComponent(d.branch)))), `${forge === "gitlab" ? "glab" : "gh"} was asked about the run's branch`);
-  assert.equal(forgeState().wrongCli, undefined, `the CLI of the forge the origin names now was never run: ${JSON.stringify(forgeState().wrongCli)}`);
+  assertWrongCliNeverRan();
   assert.deepEqual(stillThere(d), GONE);
   assert.equal(r.out.remove.find((x) => x.runId === d.runId)?.reason, "pr-merged");
 });
@@ -105,7 +111,7 @@ gcTest("gc asks gh for a run whose record has no forge, though its origin names 
 
   const r = gc();
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(forgeState().wrongCli, undefined, `glab was never run: ${JSON.stringify(forgeState().wrongCli)}`);
+  assertWrongCliNeverRan();
   assert.deepEqual(stillThere(d), GONE);
   assert.equal(r.out.remove.find((x) => x.runId === d.runId)?.reason, "pr-merged");
 }, ["github"]);
@@ -160,10 +166,10 @@ gcTest("a wf/ branch on a GitLab origin that no run of this repo owns is judged 
   const r = gc();
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.out.errors, []);
-  assert.equal(forgeState().wrongCli, undefined, `gh was never run: ${JSON.stringify(forgeState().wrongCli)}`);
+  assertWrongCliNeverRan();
   assert.deepEqual(originBranches().sort(), [opened.branch, locked.branch].sort());
   assert.deepEqual(
-    r.out.remove.map((x) => [x.runId, x.reason, x.actions.map((a) => [a.kind, a.target, a.result])]).sort(),
+    removals(r.out).sort(),
     [
       [undefined, "pr-closed", [["remote-branch", closed.branch, "removed"]]],
       [undefined, "pr-merged", [["remote-branch", merged.branch, "removed"]]],

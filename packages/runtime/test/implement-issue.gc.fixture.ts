@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { GcPlan } from "../workflows/implement-issue/gc.js";
-import { branchOf, fx, git, originBranches, run, worktreeOf } from "./implement-issue.fixture.js";
+import { branchOf, fx, git, originBranches, progressFileOf, run, worktreeOf } from "./implement-issue.fixture.js";
 import { ageRunLog } from "./run-fixtures.js";
 
 const PACKAGE = join(import.meta.dirname, "..");
@@ -51,7 +51,7 @@ export const stillThere = (r: { branch: string; worktree: string }) => ({
 
 /** Rewrites the progress record of a run: `change` edits what the workflow wrote (a run from before a field, or from a newer kit). */
 export function editRecord(runId: string, change: (record: Record<string, unknown>) => void) {
-  const file = join(fx.repo, ".workflows", "runs", runId, "tdd-progress.json");
+  const file = progressFileOf(runId);
   const record = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
   change(record);
   writeFileSync(file, JSON.stringify(record));

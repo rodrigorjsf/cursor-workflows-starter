@@ -2,6 +2,8 @@
 
 **Status:** accepted · decided on 2026-11-13 in a design session; the specs that deliver it are linked from their issues
 
+**Amended:** 2026-11-13: a `wf/` branch on the origin that no run of this repo owns has no record to read, so `wf gc` asks the forge of the origin's host for its PR; the rule "a run keeps its forge" stays for every branch a run owns.
+
 ## Context
 
 The kit opened pull requests, read issues and commented on them only through the GitHub CLI (`gh`). `gh` was called

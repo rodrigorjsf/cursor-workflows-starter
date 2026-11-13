@@ -88,6 +88,9 @@ export function setPrState(branch: string, state: "OPEN" | "MERGED" | "CLOSED" |
   });
 }
 
+/** The progress record of a run of implement-issue: what `wf gc` reads to know the run's branch, worktree and forge. */
+export const progressFileOf = (runId: string) => join(fx.repo, ".workflows", "runs", runId, "tdd-progress.json");
+
 /** The branch and the worktree of a run on issue 7: each run owns its own (`wf/issue-<n>-<run>`), named after the run id without the workflow's name. */
 const runSuffix = (runId: string) => runId.replace(/^implement-issue-/, "");
 export const branchOf = (runId: string) => `wf/issue-7-${runSuffix(runId)}`;
