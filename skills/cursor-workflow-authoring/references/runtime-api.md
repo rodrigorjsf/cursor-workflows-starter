@@ -57,6 +57,7 @@ export default defineWorkflow<{ target: string }>({
 | `ctx.card({ title, subtitle?, links?, badges? })` | What the run's card shows on the dashboard's Board. `links` is `[{ label, url }]` and `badges` is a list of short strings. Call it again to update the card: the Board shows the latest one. A link to a GitHub pull request also shows whether the pull request is open, merged or closed. A run that never calls it still has a card, titled with the run id. |
 | `ctx.args`, `ctx.cwd`, `ctx.runId` | Input, repository and run id (the same on resume). |
 | `ctx.settings` | The workflow's own tunable settings (`meta.settings`) as the config resolved them for this run: the code default, or what the global or repo file set under `workflows.<name>.settings`. A copy; read fresh at every run start. |
+| `ctx.forges` | The forge of each host the kit does not know, as the config's `forges` map declares it (`{ "git.example.com": "gitlab" }`): empty when no file declares one; `github.com` and `gitlab.com` are not in it. A copy; read fresh at every run start. |
 | `ctx.budget` | `remainingCents()` (`Infinity` without a cents cap), `spentCents()`, `chargedCents()`, `spentTokens()`, `usage()` (tokens by type), `maxCents`, `maxTokens`. Spend is the run's total: a resume starts from what earlier executions spent, failed attempts included. |
 
 ## `agent()` options

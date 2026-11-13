@@ -665,3 +665,67 @@ test("a setting the workflow does not declare is an error naming its path, like 
   assert.match(none.error!, /\/workflows\/cfg\/settings\/batchsize: unknown setting \(workflow cfg declares no settings\)/);
   assert.equal(calls.length, 0);
 });
+
+// ── forges: the hosts the kit does not know, and the forge each one is ─────────────────
+
+test("forges declares the forge of a host the kit does not know: empty by default, merged host by host from the global and the repo file (the repo wins), read by the workflow and recorded with each host's origin", async () => {
+  let seen: Readonly<Record<string, string>> | undefined;
+  const wf = configWorkflow(async (ctx) => {
+    seen = ctx.forges;
+    return "done";
+  });
+  const start = async () => {
+    const r = await runWorkflow(wf, {}, { cwd });
+    assert.equal(r.status, "finished", r.error);
+    return runStartOf(logOf(r.runId));
+  };
+
+  let at = await start();
+  assert.deepEqual(at.config.forges, {}, "github.com and gitlab.com are known to the kit: nothing to declare");
+  assert.deepEqual(seen, {});
+
+  writeGlobalConfig({ forges: { "git.example.com": "gitlab", "ghe.corp.example": "github" } });
+  at = await start();
+  assert.deepEqual(at.config.forges, { "git.example.com": "gitlab", "ghe.corp.example": "github" });
+  assert.deepEqual(at.provenance["/forges/git.example.com"], { layer: "global", ref: globalConfigPath() });
+
+  writeRepoConfig(cwd, { forges: { "git.example.com": "github", "code.other.example:8443": "gitlab" } });
+  at = await start();
+  assert.deepEqual(seen, { "ghe.corp.example": "github", "git.example.com": "github", "code.other.example:8443": "gitlab" }, "a host is decided by the highest layer that names it; the others stand");
+  assert.deepEqual(at.config.forges, seen);
+  assert.deepEqual(at.provenance["/forges/git.example.com"], { layer: "repo", ref: repoConfigPath(cwd) });
+  assert.deepEqual(at.provenance["/forges/code.other.example:8443"], { layer: "repo", ref: repoConfigPath(cwd) });
+  assert.deepEqual(at.provenance["/forges/ghe.corp.example"], { layer: "global", ref: globalConfigPath() });
+  assert.deepEqual(at.violations, [], "forges is a preference, not a cap: a repo file may set it");
+});
+
+test("a host named like a limit or a role field is still a host: no cap, chat override or role rule meets it", async () => {
+  writeGlobalConfig({ caps: { maxTokens: 1000 } });
+  writeRepoConfig(cwd, { forges: { concurrency: "gitlab", location: "github", settingsources: "gitlab" } });
+  const start = await startOf({ mcpOverrides: { concurrency: 1 } });
+  assert.deepEqual(start.config.forges, { concurrency: "gitlab", location: "github", settingsources: "gitlab" });
+  assert.equal(start.config.limits.concurrency, 1);
+  assert.deepEqual(start.violations.map((v) => v.path), []);
+});
+
+test("forges takes a lower-case host with an optional port and the value github or gitlab: a bad key, a bad value and a contradiction of a host the kit knows each name the file and the field", async () => {
+  const refused = async (forges: unknown) => {
+    writeRepoConfig(cwd, { forges });
+    const r = await runWorkflow(configWorkflow(async () => "done"), {}, { cwd });
+    assert.equal(r.status, "failed", JSON.stringify(forges));
+    assert.ok(r.error!.includes(repoConfigPath(cwd)), r.error);
+    return r.error!;
+  };
+  assert.match(await refused({ "git.example.com": "bitbucket" }), /\/forges\/git\.example\.com/);
+  assert.match(await refused({ "https://git.example.com": "gitlab" }), /\/forges\/https:~1~1git\.example\.com/, "a host, not a URL");
+  assert.match(await refused({ "Git.Example.com": "gitlab" }), /\/forges\/Git\.Example\.com/, "lower case: hosts are matched in lower case");
+  assert.match(await refused({ "git.example.com:port": "gitlab" }), /\/forges\/git\.example\.com:port/);
+  assert.match(await refused(["gitlab"]), /\/forges/);
+  assert.match(await refused({ "github.com": "gitlab" }), /\/forges\/github\.com: .*github\.com is GitHub/, "a host the kit knows cannot be given another forge");
+  assert.match(await refused({ "gitlab.com": "github" }), /\/forges\/gitlab\.com: .*gitlab\.com is GitLab/);
+  assert.equal(calls.length, 0);
+
+  writeRepoConfig(cwd, { forges: { "github.com": "github", "gitlab.com": "gitlab", "git.example.com:8443": "gitlab", "10.0.0.5": "github" } });
+  const start = await startOf();
+  assert.deepEqual(Object.keys(start.config.forges).sort(), ["10.0.0.5", "git.example.com:8443", "github.com", "gitlab.com"], "saying what the kit already knows is allowed");
+});

@@ -6,6 +6,9 @@
 
 import type { AgentDefinition, McpServerConfig, ModelSelection, SettingSource, ToolName } from "@cursor/sdk";
 
+/** The forges the kit can speak to: GitHub through `gh`, GitLab through `glab`. */
+export type ForgeName = "github" | "gitlab";
+
 /** JSON Schema (subconjunto aceito pelo Ajv). */
 export type JsonSchema = Record<string, unknown>;
 
@@ -220,6 +223,12 @@ export interface WorkflowContext<A = unknown> {
    * other run.
    */
   readonly settings: Readonly<Record<string, unknown>>;
+  /**
+   * The forge of each host the kit does not know, as the config's `forges` map declares it for this run (the global
+   * file, then the repo file, host by host): empty when no file declares one. `github.com` and `gitlab.com` are not in
+   * it: the kit knows them. A copy; read fresh at each run start, a resume included.
+   */
+  readonly forges: Readonly<Record<string, ForgeName>>;
   /** Executa uma etapa com um agente novo do Cursor SDK. Lança erro se falhar após as tentativas. */
   agent<T = string>(prompt: string, opts?: AgentCallOptions): Promise<T>;
   /** Barreira: roda tudo em paralelo e espera todos. Thunk que falha vira null. */

@@ -208,6 +208,8 @@ export interface EffectiveConfig {
   execTimeoutMs: number;
   /** Preferências das etapas na nuvem (`cloud` dos arquivos de configuração). */
   cloud: EffectiveCloud;
+  /** O forge de cada host que o kit não conhece (`forges` dos arquivos de configuração), host a host: o do repositório vale mais que o global. Vazio quando nenhum arquivo declara um; `github.com` e `gitlab.com` não aparecem, o kit os conhece. A origem de cada host está em `provenance` (`/forges/<host>`). */
+  forges: Record<string, "github" | "gitlab">;
   /** Os ajustes que o workflow declara (`meta.settings`), cada um com o padrão do código ou o valor que um arquivo de configuração trocou. A origem de cada um está em `provenance` (`/settings/<nome>`). Vazio quando o workflow não declara nenhum. */
   settings: Record<string, unknown>;
 }

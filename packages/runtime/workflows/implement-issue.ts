@@ -38,7 +38,7 @@
 //   - todo comando (testes, git, o CLI do forge) roda por `ctx.exec` (implement-issue/commands.ts): assíncrono, com teto de tempo
 //     (testes: `testTimeoutSec`; `git push` e o CLI do forge: `networkTimeoutSec`; git local: o `execTimeoutMs` da configuração) e como nó de comando no log
 //     do run. Um erro do CLI do forge ou do `git` falha o run com a mensagem dele; "sem PR" é só a resposta conhecida do forge;
-//   - the forge (host of the issue and the PR) sits behind implement-issue/forge.ts, the only file naming its CLI; the run records it in its progress;
+//   - the forge (host of the issue and the PR: github.com, gitlab.com or one the config's `forges` map declares; an unknown host fails the run before any step) sits behind implement-issue/forge.ts, the only file naming its CLI; the run records it in its progress;
 //   - cada run tem a sua branch (`wf/issue-<n>-<run>`) e o seu worktree, criados a partir da cabeça ATUAL da branch padrão; o
 //     worktree só é reaproveitado pelo run que o registrou no progresso. Uma issue tem no máximo um run ativo: o segundo run
 //     devolve "issue-locked" com o id do que está ativo (lock `issue-<n>` no run store, por repositório; um `repo` que o forge
@@ -187,7 +187,7 @@ const STANDARDS_FILES = ["CODING_STANDARDS.md", "CONTRIBUTING.md", "AGENTS.md", 
 
 interface Args {
   issue: number;
-  /** owner/repo; default: o repo do cwd. */
+  /** owner/repo, group/sub/project, or a repository URL; default: the cwd's repository. A URL names its host, which decides the forge (the host of `origin` decides otherwise). */
   repo?: string;
   /** Comando de teste; default: o que o plano sugerir, ou `npm test`. */
   testCommand?: string;
@@ -506,7 +506,7 @@ export default defineWorkflow<Args>({
     const progress = new ProgressStore(ctx.cwd, ctx.runId);
     // The forge the run started on: a fresh run takes the one of its origin's host; a resume keeps the one its record names, and a
     // record without one (a run from before the field) is GitHub, whatever the origin says now.
-    const forge = createForge(progress.existed ? forgeNameOf(progress.data) : await detectForge(cmd, ctx.cwd), cmd);
+    const forge = createForge(progress.existed ? forgeNameOf(progress.data) : await detectForge(cmd, ctx.cwd, ctx.forges, ctx.args.repo), cmd);
     // Uma issue tem no máximo um run ativo: dois runs na mesma issue brigariam pelo mesmo trabalho e abririam dois PRs. O lock
     // fica no run store (`.workflows/locks/issue-<n>.lock`, ou `issue-<n>-<hash do repositório>.lock` quando o `--repo` é outro
     // repositório que não o do cwd: a issue #5 de outro repositório é outra issue) e vale até o run terminar, qualquer que seja
