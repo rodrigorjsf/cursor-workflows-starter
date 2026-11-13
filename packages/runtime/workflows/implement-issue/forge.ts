@@ -10,6 +10,7 @@
 // the forge a record names, never one detected again, and a record without the field is GitHub (`forgeNameOf`), as every run before
 // the field existed was.
 // What a forge makes of the text a model wrote for it (GitLab runs quick actions) is here too: `neutralizeGitlabText`.
+// `wf doctor` reads the forge of the cwd's origin (`forgeOfOrigin`) and what to ask the CLI to know it is logged in (`loginOf`).
 import { readFileSync } from "node:fs";
 import { KNOWN_FORGE_HOSTS } from "../../src/config/file.js";
 import type { ForgeName } from "../../src/runtime/workflow.js";
@@ -62,6 +63,9 @@ export interface RemoteName {
   path: string;
 }
 
+/** The host to name to a forge's CLI: the web host, with its port when the URL is an http one that has it (an ssh remote's port is not the web port). */
+const webHost = (remote: RemoteName): string => (remote.web && remote.port ? `${remote.host}:${remote.port}` : remote.host);
+
 const trimmedPath = (path: string): string => path.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/, "");
 
 /** The host and path of a git remote URL (`https://…`, `ssh://…` or scp-like `git@host:path`); undefined for text that names no host: a local path, `owner/repo`, `group/sub/project`. */
@@ -98,17 +102,52 @@ function forgeOfHost(remote: RemoteName, forges: Readonly<Record<string, ForgeNa
 }
 
 /**
+ * The forge of a remote URL as the repository's configuration spells it (a `url.<base>.insteadOf` rewrite is not applied: the name
+ * the user cloned from decides), and the host to name to that forge's CLI (`glab auth status --hostname`: the web host, with its port
+ * when the URL is an http one that has it). `forges` is the config's host map. A URL that names no host (a local path) or no URL at
+ * all (no `origin`) is GitHub, as before GitLab was supported: `host` is then absent.
+ */
+export function forgeOfOrigin(url: string | undefined, forges: Readonly<Record<string, ForgeName>>): { forge: ForgeName; host?: string } {
+  const origin = url === undefined ? undefined : parseRemote(url);
+  return origin === undefined ? { forge: DEFAULT_FORGE } : { forge: forgeOfHost(origin, forges, "the origin remote"), host: webHost(origin) };
+}
+
+/**
  * The forge a fresh run starts on: the one of the host the `repo` argument names (a URL: another host than the origin's is a
- * cross-repository run), else the one of the host of the cwd's `origin` remote, as the repository's configuration spells it (a
- * `url.<base>.insteadOf` rewrite is not applied: the name the user cloned from decides). `forges` is the config's host map. A
- * repository whose origin names no host (a local path, no `origin`) is GitHub, as before GitLab was supported.
+ * cross-repository run), else the one of the host of the cwd's `origin` remote (`forgeOfOrigin`).
  */
 export async function detectForge(commands: Commands, cwd: string, forges: Readonly<Record<string, ForgeName>>, repo?: string): Promise<ForgeName> {
   const named = repo === undefined ? undefined : parseRemote(repo);
   if (named) return forgeOfHost(named, forges, "the `repo` argument");
-  const url = await commands.remoteUrl(cwd);
-  const origin = url === undefined ? undefined : parseRemote(url);
-  return origin === undefined ? DEFAULT_FORGE : forgeOfHost(origin, forges, "the origin remote");
+  return forgeOfOrigin(await commands.remoteUrl(cwd), forges).forge;
+}
+
+/** How a forge's CLI is asked whether the user is logged in, and what to tell the user when it is not (`wf doctor`). */
+export interface ForgeLogin {
+  /** The forge and where it is, for the report: `GitHub`, `GitLab at git.example.com`. */
+  service: string;
+  /** The CLI to run, and its arguments: `gh auth status`, `glab auth status --hostname <host>`. */
+  cli: string;
+  args: string[];
+  /** The hint when the CLI is not installed: where to get it, then how to log in. */
+  installHint: string;
+  /** The command that logs in; the hint when the CLI says the user is not. */
+  loginCommand: string;
+}
+
+/** The login check of `forge`. `host` (from `forgeOfOrigin`) names the GitLab instance, since glab keeps one login per host; `gh auth status` covers every GitHub host at once. */
+export function loginOf(forge: ForgeName, host?: string): ForgeLogin {
+  if (forge === "github") {
+    return { service: "GitHub", cli: "gh", args: ["auth", "status"], installHint: "Install the GitHub CLI (https://cli.github.com) and run `gh auth login`, in the environment that starts the IDE.", loginCommand: "gh auth login" };
+  }
+  const loginCommand = `glab auth login${host ? ` --hostname ${host}` : ""}`;
+  return {
+    service: host ? `GitLab at ${host}` : "GitLab",
+    cli: "glab",
+    args: ["auth", "status", ...(host ? ["--hostname", host] : [])],
+    installHint: `Install the GitLab CLI (https://gitlab.com/gitlab-org/cli) and run \`${loginCommand}\`, in the environment that starts the IDE.`,
+    loginCommand,
+  };
 }
 
 /**
@@ -271,7 +310,7 @@ const repoPathOf = (repo: string): string => parseRemote(repo)?.path ?? trimmedP
 function hostFlag(repo: string | undefined): string[] {
   const named = repo === undefined ? undefined : parseRemote(repo);
   if (!named) return [];
-  return ["--hostname", named.web && named.port ? `${named.host}:${named.port}` : named.host];
+  return ["--hostname", webHost(named)];
 }
 /** `projects/<repository>` in the REST API: `repo`'s path, or glab's placeholder for the repository of the cwd. */
 const projectOf = (repo: string | undefined): string => `projects/${repo ? encodeURIComponent(repoPathOf(repo)) : ":fullpath"}`;

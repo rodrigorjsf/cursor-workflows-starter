@@ -18,6 +18,7 @@ import { MCP_CONFIG_FILES, type McpLaunch, type McpLaunches, readMcpLaunches } f
 import { createRedactor } from "./runtime/redaction.js";
 import { loadWorkflows } from "./runtime/registry.js";
 import type { WorkflowDefinition } from "./runtime/workflow.js";
+import { forgeOfOrigin, loginOf } from "../workflows/implement-issue/forge.js";
 
 export { type CheckResult, type DoctorReport, formatReport } from "./doctor-report.js";
 
@@ -177,17 +178,57 @@ function checkMcpServer(mcp: McpLaunches, probes: ServerProbe[]): CheckResult {
   );
 }
 
-/** `gh auth status`: the workflows that open pull requests and read issues run `gh` as the user, so it must be logged in. */
-async function checkGh(): Promise<CheckResult> {
-  if (!findOnPath("gh", process.env.PATH)) {
-    return fail("gh", "`gh` is not on the PATH", "Install the GitHub CLI (https://cli.github.com) and run `gh auth login`, in the environment that starts the IDE.");
-  }
+/** The first lines of what a command printed (its stderr, else its stdout): what it said about why it failed. */
+function saidBy(err: unknown): string {
+  const { stderr, stdout } = err as { stderr?: string; stdout?: string };
+  const lines = (stderr?.trim() || stdout?.trim() || "").split("\n").map((line) => line.trim()).filter(Boolean);
+  return lines.length ? lines.slice(0, 4).join("\n") : messageOf(err);
+}
+
+/** `git` in `cwd`: how it ended (`exitCode` is undefined when it did not run or was killed at the timeout) and what it printed. */
+async function runGit(cwd: string, args: string[]): Promise<{ exitCode: number | undefined; stdout: string; stderr: string; said: string }> {
   try {
-    await promisify(execFile)("gh", ["auth", "status"], { timeout: timeoutMs() });
-    return pass("gh", "authenticated");
+    const { stdout, stderr } = await promisify(execFile)("git", args, { cwd, timeout: timeoutMs(), encoding: "utf8" });
+    return { exitCode: 0, stdout, stderr, said: "" };
   } catch (err) {
-    const said = (err as { stderr?: string }).stderr?.trim().split("\n")[0] ?? messageOf(err);
-    return fail("gh", `\`gh auth status\` failed: ${said}`, "Run `gh auth login`.");
+    const { code, stdout, stderr } = err as { code?: unknown; stdout?: string; stderr?: string };
+    return { exitCode: typeof code === "number" ? code : undefined, stdout: stdout ?? "", stderr: stderr ?? "", said: saidBy(err) };
+  }
+}
+
+/**
+ * Is this repository's forge ready: the CLI of the forge the `origin` remote names (`gh` for GitHub, `glab` for GitLab, found as
+ * a run finds it, through the `forges` map of the config), installed and logged in. The workflows that open pull requests and read
+ * issues run it as the user. Outside a git repository, or in one with no `origin`, no forge is asked for and the check passes.
+ */
+async function checkForge(cwd: string, resolution: Resolution): Promise<CheckResult> {
+  if (!findOnPath("git", process.env.PATH)) {
+    return fail("forge", "`git` is not on the PATH: the `origin` remote, which names the forge, cannot be read", "Install git (https://git-scm.com), in the environment that starts the IDE.");
+  }
+  const inside = await runGit(cwd, ["rev-parse", "--git-dir"]);
+  if (inside.exitCode === 128 && /not a git repository/i.test(inside.stderr)) return pass("forge", "not inside a git repository: there is no forge to check");
+  if (inside.exitCode !== 0) return fail("forge", `\`git rev-parse --git-dir\` failed: ${inside.said}`, "Run `git status` in the repository to see the error.");
+  const origin = await runGit(cwd, ["config", "--get", "remote.origin.url"]);
+  if (origin.exitCode === 1) return pass("forge", "the repository has no `origin` remote: there is no forge to check");
+  if (origin.exitCode !== 0) return fail("forge", `\`git config --get remote.origin.url\` failed: ${origin.said}`, "Run `git remote -v` in the repository to see the error.");
+
+  // Every workflow resolves the same `forges`: the map the config files declare. A host the kit knows needs none of it.
+  const declared = resolution.ok ? (resolution.workflows[0]?.resolved.config.forges ?? {}) : {};
+  let found: ReturnType<typeof forgeOfOrigin>;
+  try {
+    found = forgeOfOrigin(origin.stdout.trim() || undefined, declared);
+  } catch (err) {
+    return resolution.ok
+      ? fail("forge", messageOf(err), "Declare the host under `forges` in `.agents/workflows/config.json` (this repository) or in the global config, as the message shows.")
+      : fail("forge", `cannot tell which forge the origin is: ${messageOf(err)}\nThe config that may declare the host does not resolve (see the configuration check).`, "Fix the configuration first.");
+  }
+  const login = loginOf(found.forge, found.host);
+  if (!findOnPath(login.cli, process.env.PATH)) return fail("forge", `${login.service}: \`${login.cli}\` is not on the PATH`, login.installHint);
+  try {
+    await promisify(execFile)(login.cli, login.args, { timeout: timeoutMs() });
+    return pass("forge", `${login.service}: \`${login.cli}\` is authenticated`);
+  } catch (err) {
+    return fail("forge", `${login.service}: \`${[login.cli, ...login.args].join(" ")}\` failed: ${saidBy(err)}`, `Run \`${login.loginCommand}\`.`);
   }
 }
 
@@ -301,7 +342,7 @@ export async function runDoctor({ cwd }: { cwd: string }): Promise<DoctorReport>
     guarded("dependencies", () => checkDependencies(mcp)),
     guarded("login", checkLogin),
     guarded("models", async () => checkModels(await resolution)),
-    guarded("gh", checkGh),
+    guarded("forge", async () => checkForge(cwd, await resolution)),
     guarded("mcp-server", async () => checkMcpServer(mcp, await servers)),
     guarded("config", async () => checkConfig(await resolution)),
     guarded("kit-version", async () => checkKitVersion(cwd, await servers)),

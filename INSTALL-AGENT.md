@@ -82,8 +82,10 @@ wf doctor --json
 ```
 
 Done when it exits 0 (`"ok": true`). Otherwise each failing entry in `checks` has a `message` and a `hint`: do what the
-hint says if you can, hand the user what needs them (the login, a newer Node, `gh auth login`), and run the doctor again.
-The checks, in this order: `node`, `dependencies`, `login`, `models`, `gh`, `mcp-server`, `config`, `kit-version`.
+hint says if you can, hand the user what needs them (the login, a newer Node, `gh auth login` or `glab auth login`), and
+run the doctor again. The checks, in this order: `node`, `dependencies`, `login`, `models`, `forge`, `mcp-server`,
+`config`, `kit-version`. `forge` asks the CLI of the repository's forge (`gh` for GitHub, `glab` for GitLab) and passes
+outside a git repository.
 
 Run the doctor from a terminal the IDE opened when you can: `node` and `mcp-server` follow the environment the IDE
 starts.

@@ -44,7 +44,7 @@ curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starte
 bash /tmp/wf-install.sh --tag v0.3.0   # the kit at the tag, the wf command and the global skills
 wf login                               # browser login; usage bills YOUR account
 wf init                                # in your repo: writes the kit's files, shows the diff, never commits
-wf doctor                              # checks Node, login, models, gh, the MCP server and the config
+wf doctor                              # checks Node, login, models, the forge CLI (gh or glab), the MCP server and the config
 ```
 
 In the Cursor IDE, enable the `workflows` MCP server and type `/run-workflow implement-issue 123`
