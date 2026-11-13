@@ -12,7 +12,7 @@
 // What a forge makes of the text a model wrote for it (GitLab runs quick actions) is here too: `neutralizeGitlabText`.
 // `wf doctor` reads the forge of the cwd's origin (`forgeOfOrigin`) and what to ask the CLI to know it is logged in (`loginOf`).
 import { readFileSync } from "node:fs";
-import { KNOWN_FORGE_HOSTS } from "../../src/config/file.js";
+import { FORGE_TITLES, KNOWN_FORGE_HOSTS } from "../../src/config/file.js";
 import type { ForgeName } from "../../src/runtime/workflow.js";
 import type { Commands } from "./commands.js";
 
@@ -141,10 +141,10 @@ export interface ForgeLogin {
   loginCommand: string;
 }
 
-/** Per forge: its name, its CLI, and where to get that CLI. A total record: a forge added to `ForgeName` is a compile error here. */
-const FORGE_CLIS: Readonly<Record<ForgeName, { name: string; cli: string; source: string }>> = {
-  github: { name: "GitHub", cli: "gh", source: "the GitHub CLI (https://cli.github.com)" },
-  gitlab: { name: "GitLab", cli: "glab", source: "the GitLab CLI (https://gitlab.com/gitlab-org/cli)" },
+/** Per forge: its CLI, and where to get that CLI. A total record: a forge added to `ForgeName` is a compile error here. */
+const FORGE_CLIS: Readonly<Record<ForgeName, { cli: string; source: string }>> = {
+  github: { cli: "gh", source: "the GitHub CLI (https://cli.github.com)" },
+  gitlab: { cli: "glab", source: "the GitLab CLI (https://gitlab.com/gitlab-org/cli)" },
 };
 
 /**
@@ -152,7 +152,8 @@ const FORGE_CLIS: Readonly<Record<ForgeName, { name: string; cli: string; source
  * `auth status` with no host fails for a login of another host that has expired. No host (a local-path origin) asks every host.
  */
 export function loginOf(forge: ForgeName, host?: string): ForgeLogin {
-  const { name, cli, source } = FORGE_CLIS[forge];
+  const { cli, source } = FORGE_CLIS[forge];
+  const name = FORGE_TITLES[forge];
   const onHost = host === undefined ? [] : ["--hostname", host];
   const loginCommand = [cli, "auth", "login", ...onHost].join(" ");
   return {

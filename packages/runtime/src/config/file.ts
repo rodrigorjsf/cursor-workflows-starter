@@ -29,6 +29,9 @@ export interface ConfigCaps {
 /** The hosts whose forge the kit knows without being told. A `forges` entry may repeat one of them, never give it the other forge. */
 export const KNOWN_FORGE_HOSTS: Readonly<Record<string, ForgeName>> = { "github.com": "github", "gitlab.com": "gitlab" };
 
+/** The name of each forge, as a message spells it. A total record: a forge added to `ForgeName` is a compile error here. */
+export const FORGE_TITLES: Readonly<Record<ForgeName, string>> = { github: "GitHub", gitlab: "GitLab" };
+
 export interface RolePrefs {
   /** Where the role's steps run. Absent: `local`. Only roles have one (a label has no declared cloud capability). */
   location?: StepLocation;
