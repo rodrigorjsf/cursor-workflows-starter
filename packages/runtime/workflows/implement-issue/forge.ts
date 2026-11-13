@@ -4,18 +4,20 @@
 // `glab`, and `glab api` (the REST API) where glab's own commands fall short. Every call goes through `Commands`, so its timeout,
 // its `CommandError` and its node in the run's log are those of every other command the workflow runs.
 //
-// A fresh run detects its forge from the host of the `origin` remote (`detectForge`) and records it (`Progress.forge`); `wf gc`
-// asks the forge a record names, never one detected again, and a record without the field is GitHub (`forgeNameOf`), as every run
-// before the field existed was. Detection knows github.com and gitlab.com only for now: ADR-0009's `forges` map, the error for an
-// unknown host and the `repo` argument's host are not built yet, and until they are every other host is GitHub, as it was.
+// A fresh run detects its forge (`detectForge`) from the host of the `repo` argument when that names one, else from the host of the
+// `origin` remote: github.com is GitHub, gitlab.com is GitLab, any other host is the one the config's `forges` map declares, and
+// one it does not is an error that names the host and the key (ADR-0009). The run records the forge (`Progress.forge`); `wf gc` asks
+// the forge a record names, never one detected again, and a record without the field is GitHub (`forgeNameOf`), as every run before
+// the field existed was.
 import { readFileSync } from "node:fs";
+import { KNOWN_FORGE_HOSTS } from "../../src/config/file.js";
+import type { ForgeName } from "../../src/runtime/workflow.js";
 import type { Commands } from "./commands.js";
+
+export type { ForgeName };
 
 /** The state of a PR, as the forge reports it. */
 export type PrState = "OPEN" | "MERGED" | "CLOSED";
-
-/** The forges the runtime can speak to: the value a run's progress record keeps. */
-export type ForgeName = "github" | "gitlab";
 
 /** The forge of a record that names none: the only one that existed before the field did. */
 export const DEFAULT_FORGE: ForgeName = "github";
@@ -28,7 +30,7 @@ export interface ForgeIssue {
   labels: Array<{ name: string }>;
 }
 
-/** What the workflow asks of a forge. `repo` (owner/repo): where the issue or the PR lives; absent, the repository of `cwd`. */
+/** What the workflow asks of a forge. `repo` (`owner/repo`, `group/sub/project`, or a repository URL): where the issue or the PR lives; absent, the repository of `cwd`. */
 export interface Forge {
   readonly name: ForgeName;
   /** The issue `number`. */
@@ -50,35 +52,62 @@ export interface Forge {
 /** The forge a record (a run's progress) names; a record without one is GitHub. */
 export const forgeNameOf = (record: { forge?: string }): string => record.forge ?? DEFAULT_FORGE;
 
-/** The forge of each host the kit knows without being told. */
-const KNOWN_HOSTS: ReadonlyMap<string, ForgeName> = new Map([
-  ["github.com", "github"],
-  ["gitlab.com", "gitlab"],
-]);
+/** What a git remote URL or a `repo` argument spells: the host in lower case, its port when it has one, and the path of the repository on it (no `.git`, no slash at either end). */
+export interface RemoteName {
+  host: string;
+  port?: string;
+  /** An http(s) URL: its port, when it has one, is the web port. An ssh remote's port is the ssh port. */
+  web: boolean;
+  path: string;
+}
 
-/** The host of a git remote URL (`https://…`, `ssh://…` or scp-like `git@host:path`), in lower case; undefined for a local path. */
-export function hostOfRemote(url: string): string | undefined {
-  const trimmed = url.trim();
+const trimmedPath = (path: string): string => path.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/, "");
+
+/** The host and path of a git remote URL (`https://…`, `ssh://…` or scp-like `git@host:path`); undefined for text that names no host: a local path, `owner/repo`, `group/sub/project`. */
+export function parseRemote(text: string): RemoteName | undefined {
+  const trimmed = text.trim();
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
     try {
-      return new URL(trimmed).hostname.toLowerCase() || undefined;
+      const url = new URL(trimmed);
+      const host = url.hostname.toLowerCase();
+      return host ? { host, ...(url.port ? { port: url.port } : {}), web: url.protocol === "https:" || url.protocol === "http:", path: trimmedPath(url.pathname) } : undefined;
     } catch {
       return undefined;
     }
   }
-  return /^(?:[^@/:]+@)?([^@/:]+):(?!\/\/)/.exec(trimmed)?.[1]?.toLowerCase();
+  if (/^[a-z]:[\\/]/i.test(trimmed)) return undefined; // a drive path, not `host:path`
+  const scp = /^(?:[^@/:]+@)?([^@/:]+):(?!\/\/)(.*)$/.exec(trimmed);
+  return scp ? { host: scp[1]!.toLowerCase(), web: false, path: trimmedPath(scp[2]!) } : undefined;
+}
+
+/** The value `key` has in `map` itself: a host named `constructor` is no entry of Object.prototype. */
+const ownEntry = <T>(map: Readonly<Record<string, T>>, key: string): T | undefined => (Object.hasOwn(map, key) ? map[key] : undefined);
+
+/**
+ * The forge of a host: github.com and gitlab.com (on any port) are known; any other is looked up in `forges` by `host:port` when the
+ * URL has a port, then by the bare host (an ssh remote's port is not the web port, so a declaration without one matches any port).
+ * A host that is none of these is an error naming it and the key: the kit never guesses which CLI to use. `source` says where the host came from.
+ */
+function forgeOfHost(remote: RemoteName, forges: Readonly<Record<string, ForgeName>>, source: string): ForgeName {
+  const forge = ownEntry(KNOWN_FORGE_HOSTS, remote.host) ?? (remote.port ? ownEntry(forges, `${remote.host}:${remote.port}`) : undefined) ?? ownEntry(forges, remote.host);
+  if (forge !== undefined) return forge;
+  throw new Error(
+    `${source} names the host ${remote.port ? `${remote.host}:${remote.port}` : remote.host}, which is not a known forge (the kit knows github.com as GitHub and gitlab.com as GitLab): declare it under "forges" in the config (the global file or the repo file), for example { "forges": { ${JSON.stringify(remote.host)}: "gitlab" } }`,
+  );
 }
 
 /**
- * The forge a fresh run starts on: the one of the host of the cwd's `origin` remote, as the repository's configuration spells it
- * (a `url.<base>.insteadOf` rewrite is not applied: the name the user cloned from decides). Interim, until the `forges` map exists
- * (ADR-0009): a host the kit does not know, a local path and a repository with no `origin` are GitHub, as before GitLab was
- * supported; the decided behaviour for an unknown host is an error.
+ * The forge a fresh run starts on: the one of the host the `repo` argument names (a URL: another host than the origin's is a
+ * cross-repository run), else the one of the host of the cwd's `origin` remote, as the repository's configuration spells it (a
+ * `url.<base>.insteadOf` rewrite is not applied: the name the user cloned from decides). `forges` is the config's host map. A
+ * repository whose origin names no host (a local path, no `origin`) is GitHub, as before GitLab was supported.
  */
-export async function detectForge(commands: Commands, cwd: string): Promise<ForgeName> {
+export async function detectForge(commands: Commands, cwd: string, forges: Readonly<Record<string, ForgeName>>, repo?: string): Promise<ForgeName> {
+  const named = repo === undefined ? undefined : parseRemote(repo);
+  if (named) return forgeOfHost(named, forges, "the `repo` argument");
   const url = await commands.remoteUrl(cwd);
-  const host = url === undefined ? undefined : hostOfRemote(url);
-  return (host === undefined ? undefined : KNOWN_HOSTS.get(host)) ?? DEFAULT_FORGE;
+  const origin = url === undefined ? undefined : parseRemote(url);
+  return origin === undefined ? DEFAULT_FORGE : forgeOfHost(origin, forges, "the origin remote");
 }
 
 /**
@@ -155,7 +184,13 @@ export function prLabel(url: string): string {
 }
 
 /** The path of a repository as the REST API takes it, from what the `repo` argument holds: `group/sub/project`, or a URL of it. */
-const repoPathOf = (repo: string): string => repo.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]+\//i, "").replace(/\/+$/, "").replace(/\.git$/, "");
+const repoPathOf = (repo: string): string => parseRemote(repo)?.path ?? trimmedPath(repo.trim());
+/** `glab api` takes the host of a request apart from its path: the one a URL `repo` names (with its port, when the URL is a web one), else the cwd's own. */
+function hostFlag(repo: string | undefined): string[] {
+  const named = repo === undefined ? undefined : parseRemote(repo);
+  if (!named) return [];
+  return ["--hostname", named.web && named.port ? `${named.host}:${named.port}` : named.host];
+}
 /** `projects/<repository>` in the REST API: `repo`'s path, or glab's placeholder for the repository of the cwd. */
 const projectOf = (repo: string | undefined): string => `projects/${repo ? encodeURIComponent(repoPathOf(repo)) : ":fullpath"}`;
 
@@ -205,13 +240,13 @@ class GitlabForge implements Forge {
   }
 
   async issueComments(cwd: string, number: number, repo?: string): Promise<string[]> {
-    const pages = jsonValues(await this.glab(cwd, "api", "--paginate", `${projectOf(repo)}/issues/${number}/notes`));
+    const pages = jsonValues(await this.api(cwd, repo, "--paginate", `${projectOf(repo)}/issues/${number}/notes`));
     const notes = pages.flat() as Array<{ body: string; system?: boolean }>;
     return notes.filter((note) => !note.system).map((note) => note.body);
   }
 
   async commentOnIssue(cwd: string, number: number, bodyFile: string, repo?: string): Promise<void> {
-    await this.glab(cwd, "api", "--method", "POST", `${projectOf(repo)}/issues/${number}/notes`, "-F", `body=@${bodyFile}`);
+    await this.api(cwd, repo, "--method", "POST", `${projectOf(repo)}/issues/${number}/notes`, "-F", `body=@${bodyFile}`);
   }
 
   async openPr(cwd: string, pr: { branch: string; title: string; bodyFile: string; repo?: string }): Promise<string> {
@@ -237,19 +272,24 @@ class GitlabForge implements Forge {
   }
 
   async repoUrl(cwd: string, repo?: string): Promise<string> {
-    const project = JSON.parse(await this.glab(cwd, "api", projectOf(repo))) as { web_url: string };
+    const project = JSON.parse(await this.api(cwd, repo, projectOf(repo))) as { web_url: string };
     return project.web_url.trim();
   }
 
   /** The latest merge request (by creation date, in any state) whose source branch is `branch`; `glab mr view` would fail when there are several. */
   private async latestMr(cwd: string, branch: string, repo?: string): Promise<GitlabMr | undefined> {
     const query = `source_branch=${encodeURIComponent(branch)}&order_by=created_at&sort=desc&per_page=1`;
-    const [page] = jsonValues(await this.glab(cwd, "api", `${projectOf(repo)}/merge_requests?${query}`));
+    const [page] = jsonValues(await this.api(cwd, repo, `${projectOf(repo)}/merge_requests?${query}`));
     if (!Array.isArray(page)) throw new Error(`glab api merge_requests (${branch}): expected a list`);
     return (page as GitlabMr[])[0];
   }
 
   private glab(cwd: string, ...args: string[]): Promise<string> {
     return this.commands.forgeRead("glab", cwd, ...args);
+  }
+
+  /** `glab api`, on the host of `repo` when it names one. */
+  private api(cwd: string, repo: string | undefined, ...args: string[]): Promise<string> {
+    return this.glab(cwd, "api", ...hostFlag(repo), ...args);
   }
 }

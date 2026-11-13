@@ -7,6 +7,7 @@ import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import { Ajv, type ValidateFunction } from "ajv";
 import type { ResultVia, StepLocation } from "../runtime/backend.js";
 import { userDir } from "../runtime/state.js";
+import type { ForgeName } from "../runtime/workflow.js";
 
 /** Pointer into a JSON document (RFC 6901): `/workflows/implement-issue/roles/review`. */
 export type Pointer = string;
@@ -24,6 +25,9 @@ export interface ConfigCaps {
   maxConcurrency?: number | null;
   requireSandbox?: boolean | null;
 }
+
+/** The hosts whose forge the kit knows without being told. A `forges` entry may repeat one of them, never give it the other forge. */
+export const KNOWN_FORGE_HOSTS: Readonly<Record<string, ForgeName>> = { "github.com": "github", "gitlab.com": "gitlab" };
 
 export interface RolePrefs {
   /** Where the role's steps run. Absent: `local`. Only roles have one (a label has no declared cloud capability). */
@@ -66,6 +70,8 @@ export interface ConfigFile {
   caps?: ConfigCaps;
   dashboard?: DashboardPrefs;
   cloud?: CloudPrefs;
+  /** The forge of each host the kit does not know (`github.com` and `gitlab.com` it does): host, in lower case, with the port when the URL has one. */
+  forges?: Record<string, ForgeName>;
   workflows?: Record<string, WorkflowPrefs>;
 }
 

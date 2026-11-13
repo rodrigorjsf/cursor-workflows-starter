@@ -3,8 +3,10 @@
 // forge's CLI was asked and held afterwards, and what the run reports (its result and its progress record). The tests that hold for
 // both forges run on both (`forgeTest`); the ones that name GitLab's own commands and routes run on gitlab.com only.
 import assert from "node:assert/strict";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { calls } from "@cursor/sdk";
+import { writeGlobalConfig, writeRepoConfig } from "./config-fixtures.js";
 import { SUB_CODE, branchOf, changeForgeState, failForge, forgeState, forgeTest, fx, git, issue, run, submit, write, type TestForge } from "./implement-issue.fixture.js";
 
 const res = (r: { result?: unknown }) => r.result as any;
@@ -79,6 +81,137 @@ forgeTest(
   },
   ["github"],
 );
+
+// ── The forges map: hosts the kit does not know, and the repo argument's own host ──────
+
+/** A host the kit does not know, in each forge's tests. */
+const SELF_MANAGED: Record<TestForge, string> = { github: "ghe.corp.example", gitlab: "git.example.com" };
+const OTHER: Record<TestForge, TestForge> = { github: "gitlab", gitlab: "github" };
+/** Makes the fake CLI of `forge` the one that answers: the test's `origin` and the repository it names are on different forges. */
+const answerWith = (forge: TestForge) => changeForgeState((state) => (state.forge = forge));
+/** What a run that fails before any step leaves: no forge call, no agent, no progress record, no lock, no run branch. */
+function assertNothingStarted(message: string) {
+  assert.deepEqual(forgeState().calls, [], `${message}: no forge call`);
+  assert.equal(forgeState().wrongCli, undefined, `${message}: no wrong CLI`);
+  assert.equal(calls.length, 0, `${message}: no agent`);
+  const locks = join(fx.repo, ".workflows", "locks");
+  assert.deepEqual(existsSync(locks) ? readdirSync(locks).filter((name) => name.startsWith("issue-")) : [], [], `${message}: no issue lock held`);
+  assert.equal(git(fx.repo, "branch", "--list", "wf/*").trim(), "", `${message}: no run branch`);
+}
+
+forgeTest("an origin on a host the config declares runs with that host's forge: declared in the global file, in the repo file, and the repo file's word wins", async (forge) => {
+  const host = SELF_MANAGED[forge];
+  issue(["complexity:medium"]);
+  setOrigin(`https://${host}/group/project.git`);
+
+  writeGlobalConfig({ forges: { [host]: forge } });
+  const viaGlobal = await run({});
+  assert.equal(res(viaGlobal).status, "seams-proposed", JSON.stringify(res(viaGlobal)));
+  assert.equal(progressOf(viaGlobal.runId).forge, forge);
+
+  writeGlobalConfig({});
+  writeRepoConfig(fx.repo, { forges: { [host]: forge } });
+  const viaRepo = await run({});
+  assert.equal(res(viaRepo).status, "seams-proposed", JSON.stringify(res(viaRepo)));
+  assert.equal(progressOf(viaRepo.runId).forge, forge);
+
+  writeGlobalConfig({ forges: { [host]: OTHER[forge] } });
+  const both = await run({});
+  assert.equal(res(both).status, "seams-proposed", JSON.stringify(res(both)));
+  assert.equal(progressOf(both.runId).forge, forge, "the repo file said so, over the global file");
+  assert.equal(forgeState().wrongCli, undefined, "the other forge's CLI was never run");
+});
+
+forgeTest("an origin on a host nobody declared fails before any step, naming the host and the `forges` key", async () => {
+  issue(["complexity:low"]);
+  for (const url of ["https://git.example.com/group/project.git", "git@git.example.com:group/project.git", "ssh://git@Git.Example.com:2222/group/project.git"]) {
+    setOrigin(url);
+    const r = await run({ openPr: true });
+    assert.equal(r.status, "failed", `${url}: ${JSON.stringify(r.result)}`);
+    assert.match(r.error!, /git\.example\.com/, url);
+    assert.match(r.error!, /"forges"/, url);
+    assertNothingStarted(url);
+  }
+});
+
+forgeTest(
+  "a declared host matches by its port when the origin's URL has one, and by the bare host on any port: a port nobody declared is an unknown host",
+  async () => {
+    issue(["complexity:medium"]);
+    const cases: Array<{ origin: string; declared: string }> = [
+      { origin: "https://git.example.com:8443/group/project.git", declared: "git.example.com:8443" },
+      { origin: "https://git.example.com:8443/group/project.git", declared: "git.example.com" },
+      { origin: "ssh://git@git.example.com:2222/group/project.git", declared: "git.example.com" },
+    ];
+    for (const { origin, declared } of cases) {
+      setOrigin(origin);
+      writeGlobalConfig({ forges: { [declared]: "gitlab" } });
+      const r = await run({});
+      assert.equal(res(r).status, "seams-proposed", `${origin} with ${declared}: ${JSON.stringify(res(r))}`);
+      assert.equal(progressOf(r.runId).forge, "gitlab", `${origin} with ${declared}`);
+    }
+    setOrigin("https://git.example.com:8443/group/project.git");
+    writeGlobalConfig({ forges: { "git.example.com:9000": "gitlab" } });
+    const r = await run({});
+    assert.equal(r.status, "failed", JSON.stringify(r.result));
+    assert.match(r.error!, /git\.example\.com:8443/, "the host as the origin spells it, port included");
+    assert.match(r.error!, /"forges"/);
+  },
+  ["gitlab"],
+);
+
+forgeTest(
+  "an origin that names no host (a local path, a drive path) is GitHub, as it was before GitLab: nothing to declare, no error",
+  async () => {
+    issue(["complexity:medium"]);
+    for (const origin of ["/srv/git/repo.git", "../mirrors/repo.git", "C:/repos/repo.git"]) {
+      setOrigin(origin);
+      const r = await run({});
+      assert.equal(res(r).status, "seams-proposed", `${origin}: ${JSON.stringify(res(r))}`);
+      assert.equal(progressOf(r.runId).forge, "github", origin);
+    }
+  },
+  ["github"],
+);
+
+forgeTest("a repo argument that is a URL on another host decides the forge by that host, whatever the origin's host is", async (forge) => {
+  const other = OTHER[forge];
+  const url = other === "gitlab" ? "https://gitlab.com/group/sub/project" : "https://github.com/other/x";
+  issue(["complexity:medium"]);
+  answerWith(other);
+  const r = await run({ repo: url });
+  assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
+  assert.equal(progressOf(r.runId).forge, other);
+  const read = forgeState().calls.find((c) => c[0] === "issue" && c[1] === "view" && c[2] === "7");
+  assert.ok(read?.includes(url), `the issue is read from the repository the argument names: ${JSON.stringify(read)}`);
+  assert.equal(forgeState().wrongCli, undefined, `the CLI of the origin's forge (${forge}) was never run`);
+});
+
+forgeTest("a repo argument without a host leaves the forge to the origin's host", async (forge) => {
+  issue(["complexity:medium"]);
+  const r = await run({ repo: "group/sub/project" });
+  assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
+  assert.equal(progressOf(r.runId).forge, forge);
+  assert.equal(forgeState().wrongCli, undefined);
+});
+
+forgeTest("a repo argument on a host nobody declared fails before any step, naming that host and the `forges` key; declared, its forge answers", async (forge) => {
+  issue(["complexity:medium"]);
+  const url = "https://git.example.com/group/sub/project";
+  const r = await run({ repo: url });
+  assert.equal(r.status, "failed", JSON.stringify(r.result));
+  assert.match(r.error!, /git\.example\.com/);
+  assert.match(r.error!, /"forges"/);
+  assert.match(r.error!, /repo/, "it says the argument named the host, not the origin");
+  assertNothingStarted("an undeclared host in the repo argument");
+
+  const other = OTHER[forge];
+  writeRepoConfig(fx.repo, { forges: { "git.example.com": other } });
+  answerWith(other);
+  const declared = await run({ repo: url });
+  assert.equal(res(declared).status, "seams-proposed", JSON.stringify(res(declared)));
+  assert.equal(progressOf(declared.runId).forge, other);
+});
 
 forgeTest("the issue's title and body reach the classifier, and a label, not the classifier, chooses the tier when one matches", async () => {
   issue(["needs-triage"], "Add subtract(a, b)");
@@ -230,6 +363,79 @@ forgeTest(
     assert.match(r.error!, /glab api/);
     assert.match(r.error!, /401 Unauthorized/);
     assert.equal(forgeState().prs.length, 0);
+  },
+  ["gitlab"],
+);
+
+// ── GitLab paths with nested groups: the argument, the run's lock and the same-repository check ──
+
+/** The names of the issue locks held while a run with `args` is writing its code (the run is on its issue 7, `complexity:low`, and delivers nothing). */
+async function issueLocksDuring(args: Record<string, unknown>): Promise<string[]> {
+  let held: string[] = [];
+  fx.handlers["code-1"] = (o) => {
+    held = readdirSync(join(fx.repo, ".workflows", "locks")).filter((name) => name.startsWith("issue-"));
+    write(o, "src/math.js", SUB_CODE);
+    submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
+  };
+  issue(["complexity:low"]);
+  const r = await run(args);
+  assert.equal(res(r).status, "done", `${JSON.stringify(args)}: ${JSON.stringify(res(r))}`);
+  return held;
+}
+const OWN_LOCK = ["issue-7.lock"];
+const FOREIGN_LOCK = /^issue-7-[0-9a-f]{12}\.lock$/;
+
+forgeTest(
+  "group/sub/project works as the repo argument: glab gets it as a path, and the lock and the same-repository check tell the cwd's own repository from any other, whatever the case or the spelling",
+  async () => {
+    setOrigin("https://gitlab.com/group/sub/project.git");
+    // The repository of the cwd, as the argument can spell it, and the project route glab's REST API gets for each spelling.
+    const ownSpellings: Array<[string, string]> = [
+      ["group/sub/project", "projects/group%2Fsub%2Fproject"],
+      ["GROUP/Sub/PROJECT", "projects/GROUP%2FSub%2FPROJECT"],
+      ["https://gitlab.com/group/sub/project", "projects/group%2Fsub%2Fproject"],
+      ["https://GitLab.com/Group/Sub/Project.git/", "projects/Group%2FSub%2FProject"],
+      ["git@gitlab.com:group/sub/project.git", "projects/group%2Fsub%2Fproject"],
+    ];
+    for (const [own, route] of ownSpellings) {
+      assert.deepEqual(await issueLocksDuring({ repo: own }), OWN_LOCK, `${own} is the repository of the cwd: the lock of issue 7`);
+      const asked = forgeState().calls;
+      assert.ok(asked.some((c) => c[0] === "api" && c.at(-1) === route), `${own}: the nested path is one encoded segment of the REST route ${route}: ${JSON.stringify(asked)}`);
+      assert.ok(asked.some((c) => c.join(" ") === `issue view 7 --repo ${own} --output json`), `${own}: glab gets the repo argument as it was given`);
+    }
+
+    for (const other of ["group/sub/other", "group/project", "group/sub", "other/sub/project", "https://gitlab.com/group/sub/other"]) {
+      const held = await issueLocksDuring({ repo: other });
+      assert.equal(held.length, 1, other);
+      assert.match(held[0]!, FOREIGN_LOCK, `${other} is another repository: a lock of its own`);
+    }
+    const named = await issueLocksDuring({ repo: "group/sub/other" });
+    const again = await issueLocksDuring({ repo: "GROUP/SUB/OTHER" });
+    assert.deepEqual(again, named, "the lock of another repository is the same whatever the case of its path");
+  },
+  ["gitlab"],
+);
+
+forgeTest(
+  "a repo URL on another host of a declared forge goes to glab with --hostname, and is another repository than the cwd's even when the path is the same",
+  async () => {
+    setOrigin("https://git.example.com/group/sub/project.git");
+    writeGlobalConfig({ forges: { "git.example.com": "gitlab" } });
+    issue(["complexity:medium"]);
+    const sameHost = await run({ repo: "https://git.example.com/group/sub/project" });
+    assert.equal(res(sameHost).status, "seams-proposed", JSON.stringify(res(sameHost)));
+    assert.deepEqual(forgeState().calls.find((c) => c.includes("--paginate")), ["api", "--hostname", "git.example.com", "--paginate", "projects/group%2Fsub%2Fproject/issues/7/notes"], "the notes come from the host the argument names");
+
+    issue(["complexity:medium"]);
+    const otherPort = await run({ repo: "https://git.example.com:8443/group/sub/project" });
+    assert.equal(res(otherPort).status, "seams-proposed", JSON.stringify(res(otherPort)));
+    const calls = forgeState().calls;
+    assert.ok(calls.some((c) => c.join(" ") === "api --hostname git.example.com:8443 projects/group%2Fsub%2Fproject"), "an http(s) URL's port is part of the host glab is told");
+    assert.ok(calls.some((c) => c.join(" ") === "issue view 7 --repo https://git.example.com:8443/group/sub/project --output json"));
+
+    assert.deepEqual(await issueLocksDuring({ repo: "https://git.example.com/group/sub/project" }), OWN_LOCK, "the cwd's own repository, by URL");
+    const held = await issueLocksDuring({ repo: "https://git.example.com:8443/group/sub/project" });
+    assert.match(held[0]!, FOREIGN_LOCK, "the same path on another host is another repository");
   },
   ["gitlab"],
 );

@@ -142,7 +142,10 @@ const STATES = { OPEN: "opened", MERGED: "merged", CLOSED: "closed" };
 const mrOf = (p, i) => ({ iid: i + 1, title: p.title, description: p.body, web_url: p.url, state: STATES[p.state || "OPEN"] || p.state, source_branch: p.head });
 const out = (value) => { save(); process.stdout.write(typeof value === "string" ? value : JSON.stringify(value) + "\\n"); };
 // which gh call each glab call stands for, so a test can fail it with failForge
-const endpoint = a[0] === "api" ? a.slice(1).find((x, i, all) => !x.startsWith("-") && !["--method", "-X", "-F", "--field", "-f", "--raw-field"].includes(all[i - 1])) : undefined;
+const endpoint = a[0] === "api" ? a.slice(1).find((x, i, all) => !x.startsWith("-") && !["--method", "-X", "-F", "--field", "-f", "--raw-field", "--hostname"].includes(all[i - 1])) : undefined;
+// Where glab is: the host and the project of the cwd come from its raw \`origin\` URL (a \`url.<base>.insteadOf\` rewrite is not applied), and \`--hostname\` of \`glab api\` names another host.
+const originUrl = () => require("child_process").execFileSync("git", ["config", "--get", "remote.origin.url"], { encoding: "utf8" }).trim();
+const hostAndPath = (url) => { const m = /^[a-z][a-z0-9+.-]*:\\/\\/(?:[^@/]*@)?([^/:]+)(?::\\d+)?\\/(.+?)(?:\\.git)?\\/?$/i.exec(url) || /^(?:[^@/:]+@)?([^@/:]+):(.+?)(?:\\.git)?$/.exec(url); return { host: m[1].toLowerCase(), path: m[2] }; };
 const post = a[0] === "api" && ["POST", "post"].includes(flag("--method") || flag("-X"));
 const route = a[0] === "issue" && a[1] === "view" ? "issue view"
   : a[0] === "mr" && a[1] === "create" ? "pr create"
@@ -181,9 +184,10 @@ if (route === "issue view" && a[0] === "issue") {
   const mr = st.prs[st.prs.length - 1];
   out("\\nCreating merge request for " + mr.head + " into main in owner/repo\\n\\n!" + st.prs.length + " " + mr.title + "\\n" + mr.url + "\\n");
 } else if (route === "repo view") {
-  // the project of the cwd is owner/repo; a named one comes back in GitLab's case (lower case here)
-  const named = endpoint === "projects/:fullpath" ? "owner/repo" : decodeURIComponent(endpoint.slice("projects/".length)).toLowerCase();
-  out({ path_with_namespace: named, web_url: "https://gitlab.com/" + named });
+  // the project of the cwd is the one its origin names; a named one comes back in GitLab's case (lower case here), on the host asked for
+  const cwdRemote = hostAndPath(originUrl());
+  const named = endpoint === "projects/:fullpath" ? cwdRemote.path : decodeURIComponent(endpoint.slice("projects/".length)).toLowerCase();
+  out({ path_with_namespace: named, web_url: "https://" + (flag("--hostname") || cwdRemote.host) + "/" + named });
 } else fail("fake glab: unsupported " + a.join(" "), 2);
 `;
 
@@ -272,6 +276,7 @@ function setupFor(forge: TestForge) {
 }
 
 export function teardown() {
+  rmSync(join(process.env.WF_HOME!, "config.json"), { force: true }); // a test that declared forges in the global file leaves none behind
   process.env.PATH = fx.savedPath;
   script.length = 0;
   calls.length = 0;

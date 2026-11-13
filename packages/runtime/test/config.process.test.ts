@@ -100,6 +100,25 @@ test("wf config show prints the settings of a workflow with the repo file's valu
   rmSync(repoConfig(), { force: true });
 });
 
+test("wf config show prints the effective forges, host by host, with the file each host comes from, the same for every workflow", () => {
+  put(globalConfig(), { forges: { "git.example.com": "gitlab", "ghe.corp.example": "github" } });
+  put(repoConfig(), { forges: { "git.example.com": "github", "code.other.example:8443": "gitlab" } });
+  const r = wf("config", "show", "--max-tokens", "123456");
+  assert.equal(r.status, 0, r.stderr);
+  const { workflows } = JSON.parse(r.stdout);
+  for (const name of ["cfgwf", "implement-issue"]) {
+    const { config, provenance } = workflows[name];
+    assert.deepEqual(config.forges, { "git.example.com": "github", "ghe.corp.example": "github", "code.other.example:8443": "gitlab" }, name);
+    assert.deepEqual(provenance["/forges/git.example.com"], { layer: "repo", ref: repoConfig() }, name);
+    assert.deepEqual(provenance["/forges/ghe.corp.example"], { layer: "global", ref: globalConfig() }, name);
+    assert.deepEqual(provenance["/forges/code.other.example:8443"], { layer: "repo", ref: repoConfig() }, name);
+  }
+  rmSync(globalConfig(), { force: true });
+  rmSync(repoConfig(), { force: true });
+  const none = JSON.parse(wf("config", "show", "cfgwf").stdout).workflows.cfgwf;
+  assert.deepEqual(none.config.forges, {});
+});
+
 test("wf config show with an unusable config exits 1 and names the file and the field path; an unknown workflow is named", () => {
   put(repoConfig(), { workflows: { cfgwf: { roles: { review: { retries: -1 } } } } });
   const bad = wf("config", "show", "cfgwf");
