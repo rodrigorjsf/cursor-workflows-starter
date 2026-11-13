@@ -45,15 +45,15 @@ export interface Forge {
 }
 
 /** The forge a record (a run's progress) names; a record without one is GitHub. */
-export const forgeNameOf = (record: { forge?: ForgeName }): ForgeName => record.forge ?? DEFAULT_FORGE;
+export const forgeNameOf = (record: { forge?: string }): string => record.forge ?? DEFAULT_FORGE;
 
 /**
- * The forge `name`, speaking through `commands`. The name of a record can be one this version does not know (the run was
- * recorded by a newer kit): that is an error, never a fall back to another forge's CLI.
+ * The forge `name` (as a record keeps it), speaking through `commands`. A record can name a forge this version does not know
+ * (the run was recorded by a newer kit): that is an error, never a fall back to another forge's CLI.
  */
-export function createForge(name: ForgeName, commands: Commands): Forge {
+export function createForge(name: string, commands: Commands): Forge {
   if (name === "github") return new GithubForge(commands);
-  throw new Error(`the run's record names the forge ${JSON.stringify(name)}, which this version of the kit does not know: upgrade the kit`);
+  throw new Error(`forge ${JSON.stringify(name)} (named by the run's record): this version of the kit does not know it. Upgrade the kit`);
 }
 
 const NO_PR_FOUND = /no pull requests? found/i;

@@ -31,7 +31,7 @@ import { outcomeClass } from "../../src/runtime/outcome.js";
 import { interruptedCloudSteps } from "../../src/runtime/projection.js";
 import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn, runsDirIn, tryAcquireRunLock } from "../../src/runtime/run-store.js";
 import { type Exec, Commands, LOCAL_GIT_TIMEOUT_MS, NETWORK_TIMEOUT_SEC, ORIGIN, WORKFLOW_BRANCH_PREFIX, worktreeOf, worktreesDirIn } from "./commands.js";
-import { DEFAULT_FORGE, type PrState, createForge, forgeNameOf } from "./forge.js";
+import { DEFAULT_FORGE, type Forge, type PrState, createForge, forgeNameOf } from "./forge.js";
 import { type Progress, ProgressStore } from "./tdd.js";
 
 /** Why something is cleaned up: its PR was merged or closed, its run failed longer ago than the limit, or it is a cloud snapshot branch its step never deleted. */
@@ -247,7 +247,8 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
     plan.remove.push({ runId, reason, actions, notes });
   }
 
-  await planShared(plan, commands, runs, locals, registered, remote);
+  const unrecordedForge = createForge(DEFAULT_FORGE, commands); // no run owns the branches below, so no record names their forge
+  await planShared(plan, unrecordedForge, runs, locals, registered, remote);
   await planSnapshots(plan, commands, snapshots, now);
 
   // The origin's `wf/` branches that none of these runs owns: made by a run in another clone, or by one whose state is gone.
@@ -261,8 +262,7 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
     }
     if (owned.has(branch) || SHARED_BRANCH.test(branch)) continue;
     try {
-      // No run owns this branch, so no record names its forge: the default one, as before runs recorded theirs.
-      const state = await createForge(DEFAULT_FORGE, commands).prState(cwd, branch);
+      const state = await unrecordedForge.prState(cwd, branch);
       const done = state && DONE_PR[state];
       if (done) plan.remove.push({ reason: done, actions: [{ kind: "remote-branch", target: branch, head }], notes: [] });
       else plan.kept.push({ branch, why: state === "OPEN" ? "its PR is open, and no run of this repo owns it" : "no run of this repo owns it, and it has no PR" });
@@ -361,7 +361,7 @@ async function planSnapshots(plan: GcPlan, commands: Commands, snapshots: Snapsh
  */
 async function planShared(
   plan: GcPlan,
-  commands: Commands,
+  forge: Forge,
   runs: Array<{ runId: string; progress: Progress }>,
   locals: Set<string>,
   registered: Set<string>,
@@ -381,7 +381,7 @@ async function planShared(
     }
     let state: PrState | undefined;
     try {
-      state = await createForge(DEFAULT_FORGE, commands).prState(cwd, branch);
+      state = await forge.prState(cwd, branch);
     } catch (err) {
       plan.errors.push(`shared branch ${branch}: the state of its PR cannot be read, so it is kept: ${errorText(err)}`);
       continue;

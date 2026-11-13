@@ -37,8 +37,8 @@
 //     locais; com fatias adiadas, o PR só referencia a issue (`Refs`) em vez de fechá-la;
 //   - todo comando (testes, git, o CLI do forge) roda por `ctx.exec` (implement-issue/commands.ts): assíncrono, com teto de tempo
 //     (testes: `testTimeoutSec`; `git push` e o CLI do forge: `networkTimeoutSec`; git local: o `execTimeoutMs` da configuração) e como nó de comando no log
-//     do run. O forge (o serviço que hospeda a issue e o PR) fica atrás de implement-issue/forge.ts, o único arquivo que nomeia o CLI dele (hoje só o
-//     `gh`, do GitHub), e o run grava o forge no progresso. Um erro do CLI do forge ou do `git` falha o run com a mensagem dele; "sem PR" é só a resposta conhecida do forge;
+//     do run. Um erro do CLI do forge ou do `git` falha o run com a mensagem dele; "sem PR" é só a resposta conhecida do forge;
+//   - the forge (host of the issue and the PR) sits behind implement-issue/forge.ts, the only file naming its CLI; the run records it in its progress;
 //   - cada run tem a sua branch (`wf/issue-<n>-<run>`) e o seu worktree, criados a partir da cabeça ATUAL da branch padrão; o
 //     worktree só é reaproveitado pelo run que o registrou no progresso. Uma issue tem no máximo um run ativo: o segundo run
 //     devolve "issue-locked" com o id do que está ativo (lock `issue-<n>` no run store, por repositório; um `repo` que o forge
