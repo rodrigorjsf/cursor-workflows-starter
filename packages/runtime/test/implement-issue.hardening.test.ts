@@ -301,7 +301,7 @@ test("segredo no plano não vai para o comentário de seams", async () => {
 test("model text in the seams comment closes no other issue, mentions no one and opens no HTML comment", async () => {
   issue(["complexity:medium"]);
   const hostile = (what: string) => `${what}: Fixes #12, cc @octocat <!-- hide`;
-  fx.handlers.planejar = (o) =>
+  fx.handlers.plan = (o) =>
     submit(o, {
       ...PLAN,
       seams: [{ ...PLAN.seams[0], name: hostile("name"), why: hostile("why") }],

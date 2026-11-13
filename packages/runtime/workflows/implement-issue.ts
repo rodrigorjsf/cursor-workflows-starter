@@ -328,13 +328,11 @@ function executionsOf(cwd: string, runId: string): Array<{ jobId?: string; ended
 const issueBranch = (issue: number) => `${WORKFLOW_BRANCH_PREFIX}issue-${issue}`;
 
 /**
- * The branch of a run: one per run, named after the issue and the run id, so two runs on an issue never share one. A run id
- * with characters a branch name cannot hold is cleaned, and a short hash of the whole id keeps two such ids apart.
+ * The branch of a run: one per run, named after the issue and the run id, so two runs on an issue never share one. The engine
+ * accepts only plain run ids (letters, digits, `_` and `-`), so the id goes into the branch name as it is.
  */
 function runBranch(issue: number, runId: string): string {
-  const id = runId.replace(/^implement-issue-/, "");
-  const clean = id.replace(/[^\w-]+/g, "-");
-  return `${issueBranch(issue)}-${clean === id ? clean : `${clean}-${createHash("sha256").update(runId).digest("hex").slice(0, 6)}`}`;
+  return `${issueBranch(issue)}-${runId.replace(/^implement-issue-/, "")}`;
 }
 
 /** Is `dir` the root of a worktree, and not a directory inside some other repository (where git would act on that repository)? */
