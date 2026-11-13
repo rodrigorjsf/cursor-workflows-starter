@@ -148,10 +148,10 @@ test("a signal aborted while the agent is being created ends the attempt at once
   const controller = new AbortController();
   const reason = new Error("run cancelled");
   setTimeout(() => controller.abort(reason), 10);
-  const startedAt = Date.now();
+  const startedAt = performance.now();
   const { result, events } = await attempt("p", options(), controller.signal);
 
-  assert.ok(Date.now() - startedAt < 2000, "the attempt did not wait for the creation");
+  assert.ok(performance.now() - startedAt < 2000, "the attempt did not wait for the creation");
   assert.deepEqual(outcomeOf(result), { kind: "aborted", reason });
   assert.equal(result.agentId, undefined);
   assert.equal(result.usage, undefined, "no agent existed: nothing was used");
@@ -186,11 +186,11 @@ test("a send() that never hands back a run does not hold the attempt: it ends af
   const controller = new AbortController();
   const reason = new Error("timeout after 20 ms");
   setTimeout(() => controller.abort(reason), 20);
-  const startedAt = Date.now();
+  const startedAt = performance.now();
   const { result } = await attempt("p", options(), controller.signal);
 
   assert.deepEqual(outcomeOf(result), { kind: "aborted", reason });
-  assert.ok(Date.now() - startedAt < 1250, "the attempt gave up on the send after the grace instead of waiting for it");
+  assert.ok(performance.now() - startedAt < 1250, "the attempt gave up on the send after the grace instead of waiting for it");
   await waitFor("the run that arrived late to be cancelled", () => stats.cancelled >= 1);
   assert.equal(stats.cancelled, 1, "the run that arrived late was cancelled, not left running");
 });

@@ -60,10 +60,10 @@ const alive = (pid: number) => {
   }
 };
 async function until<T>(what: string, read: () => T | undefined | false, ms = 30_000): Promise<T> {
-  for (const stop = Date.now() + ms; ; await sleep(50)) {
+  for (const stop = performance.now() + ms; ; await sleep(50)) {
     const value = read();
     if (value) return value;
-    if (Date.now() > stop) throw new Error(`timed out waiting for ${what}`);
+    if (performance.now() > stop) throw new Error(`timed out waiting for ${what}`);
   }
 }
 
@@ -92,10 +92,10 @@ test("while a long command runs, status shows it as the step in progress, and ca
   assert.equal(state.status, "running");
   assert.ok(state.recent.some((line: string) => /^▶ nap \[bash\]$/.test(line)), `the running command is in the progress lines: ${state.recent}`);
 
-  const cancelledAt = Date.now();
+  const cancelledAt = performance.now();
   const cancelled = wf("cancel", started.jobId);
   assert.equal(cancelled.status, "cancelled", JSON.stringify(cancelled));
-  assert.ok(Date.now() - cancelledAt < 10_000, `cancel took ${Date.now() - cancelledAt} ms: the job's process was free to answer the signal`);
+  assert.ok(performance.now() - cancelledAt < 10_000, `cancel took ${performance.now() - cancelledAt} ms: the job's process was free to answer the signal`);
   assert.match(cancelled.error, new RegExp(`resumeRunId="${started.runId}"`));
   const end = eventsOf(started.runId).findLast((e) => e.type === "exec-end");
   assert.ok(end && end.type === "exec-end" && end.outcome === "cancelled");

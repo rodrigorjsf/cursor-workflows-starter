@@ -370,11 +370,11 @@ test("a wait that keeps giving up at once while the run goes on is not retried i
   const running = createCloudBackend({ remote: "origin", runId: "run-1", waitFloorMs: 80 }).run("p", options(), new AbortController().signal, () => {});
   const getRuns = () => lookups.filter((l) => l.kind === "getRun").length;
   const before = await waitFor("the first run lookup", () => getRuns());
-  const from = Date.now();
+  const from = performance.now();
   await waitFor("three more run lookups", () => getRuns() >= before + 3);
   // Read together: however slow the machine, the floor allows one more lookup per 80 ms of the time that went by, and a tight
   // loop would have made dozens in that time.
-  const [more, elapsed] = [getRuns() - before, Date.now() - from];
+  const [more, elapsed] = [getRuns() - before, performance.now() - from];
   finishCloudRun("bc-1", { result: "at last" });
   assert.deepEqual(outcomeOf(await running), { kind: "finished", value: "at last" });
   assert.ok(more <= elapsed / 80 + 1, `${more} more lookups in ${elapsed} ms, with an 80 ms floor`);

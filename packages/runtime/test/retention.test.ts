@@ -125,8 +125,8 @@ test("a run another process is executing is left alone, however old its log look
     proc.once("exit", (code) => reject(new Error(`the child exited early with code ${code}`)));
     proc.stdout!.on("data", (chunk: Buffer) => chunk.toString().includes("started") && resolve());
   });
-  for (const deadline = Date.now() + 5000; !hasText("held-run"); await new Promise((r) => setTimeout(r, 10))) {
-    if (Date.now() > deadline) throw new Error("the child never wrote its prompt to the log");
+  for (const deadline = performance.now() + 5000; !hasText("held-run"); await new Promise((r) => setTimeout(r, 10))) {
+    if (performance.now() > deadline) throw new Error("the child never wrote its prompt to the log");
   }
   age("held-run", 40 * DAY);
   await run("fresh");

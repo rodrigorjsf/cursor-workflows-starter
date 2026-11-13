@@ -67,10 +67,10 @@ const alive = (pid: number) => {
   }
 };
 async function until<T>(what: string, read: () => T | undefined | false, ms = 30_000): Promise<T> {
-  for (const stop = Date.now() + ms; ; await sleep(50)) {
+  for (const stop = performance.now() + ms; ; await sleep(50)) {
     const value = read();
     if (value) return value;
-    if (Date.now() > stop) throw new Error(`timed out waiting for ${what}`);
+    if (performance.now() > stop) throw new Error(`timed out waiting for ${what}`);
   }
 }
 
@@ -111,7 +111,7 @@ test("start_workflow runs the job in a detached process: killing the MCP server 
 
   const state = await withServer(async (call) => {
     let current = await call("get_workflow_status", { jobId });
-    for (const stop = Date.now() + 40_000; current.status === "running" && Date.now() < stop; ) current = await call("wait_workflow", { jobId, timeoutSec: 5 });
+    for (const stop = performance.now() + 40_000; current.status === "running" && performance.now() < stop; ) current = await call("wait_workflow", { jobId, timeoutSec: 5 });
     return current;
   });
   assert.equal(state.status, "finished", JSON.stringify(state));
@@ -224,10 +224,10 @@ test("a second signal while the run is still stopping ends the process at once, 
   process.kill(pid, "SIGTERM"); // the fake agent run takes 5 s to cancel
   await until("the job to take the first signal", () => readFileSync(started.log, "utf8").includes("[wf] SIGTERM: cancelling the run"));
   assert.ok(alive(pid), "still stopping");
-  const signalledAt = Date.now();
+  const signalledAt = performance.now();
   process.kill(pid, "SIGTERM");
   await until("the process to exit", () => !alive(pid), 3000);
-  assert.ok(Date.now() - signalledAt < 3000);
+  assert.ok(performance.now() - signalledAt < 3000);
   const end = eventsOf(started.runId).findLast((e) => e.type === "run-end");
   assert.ok(end && end.type === "run-end" && end.status === "cancelled", "the log says cancelled, not a crash");
   assert.equal(wf("status", started.jobId).status, "cancelled");

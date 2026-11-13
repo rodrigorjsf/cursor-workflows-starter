@@ -68,9 +68,9 @@ test("npm run dash: the dashboard builds its web app as it starts, before any pa
   let log = "";
   dash.stderr!.on("data", (chunk: Buffer) => (log += chunk));
   try {
-    const deadline = Date.now() + 30_000;
+    const deadline = performance.now() + 30_000;
     while (!/web app built/.test(log)) {
-      assert.ok(Date.now() < deadline, `the dashboard never said its web app was built; it said: ${log}`);
+      assert.ok(performance.now() < deadline, `the dashboard never said its web app was built; it said: ${log}`);
       await new Promise((r) => setTimeout(r, 100)); // no request is made meanwhile: nothing but the start asked for the build
     }
     assert.equal((await fetch(`http://127.0.0.1:${port}/runs/any`)).status, 200);
@@ -91,12 +91,12 @@ function freePort(): Promise<number> {
 }
 
 async function fetchWhenUp(url: string): Promise<{ totals: unknown }> {
-  const deadline = Date.now() + 20_000;
+  const deadline = performance.now() + 20_000;
   for (;;) {
     try {
       return (await (await fetch(url)).json()) as { totals: unknown };
     } catch (err) {
-      if (Date.now() > deadline) throw err;
+      if (performance.now() > deadline) throw err;
       await new Promise((r) => setTimeout(r, 200));
     }
   }

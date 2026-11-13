@@ -25,8 +25,8 @@ afterEach(() => {
 
 /** Waits for something a run does in the background. */
 async function until(condition: () => boolean, ms = 3000): Promise<void> {
-  for (const deadline = Date.now() + ms; !condition(); await new Promise((r) => setTimeout(r, 5))) {
-    if (Date.now() > deadline) throw new Error("timed out waiting for the run");
+  for (const deadline = performance.now() + ms; !condition(); await new Promise((r) => setTimeout(r, 5))) {
+    if (performance.now() > deadline) throw new Error("timed out waiting for the run");
   }
 }
 

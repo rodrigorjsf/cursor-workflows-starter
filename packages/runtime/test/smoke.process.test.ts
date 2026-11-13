@@ -74,7 +74,7 @@ test("from the chat's side: list_workflows offers smoke, start_workflow runs it 
     const started = await call("start_workflow", { name: "smoke", args: {} });
     assert.match(started.jobId, /^[0-9a-f]{8}$/, JSON.stringify(started));
     let state = await call("wait_workflow", { jobId: started.jobId, timeoutSec: 5 });
-    for (const stop = Date.now() + 40_000; state.status === "running" && Date.now() < stop; ) state = await call("wait_workflow", { jobId: started.jobId, timeoutSec: 5 });
+    for (const stop = performance.now() + 40_000; state.status === "running" && performance.now() < stop; ) state = await call("wait_workflow", { jobId: started.jobId, timeoutSec: 5 });
 
     assert.equal(state.status, "finished", JSON.stringify(state));
     assert.equal(state.result.answer, "pong");
