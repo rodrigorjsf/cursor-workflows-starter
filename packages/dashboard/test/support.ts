@@ -184,11 +184,11 @@ export function openStream(url: string, path: string, opts: { host?: string; hea
         headers: res.headers,
         text: () => received,
         async take(count, timeoutMs = 3000) {
-          const deadline = Date.now() + timeoutMs;
+          const deadline = performance.now() + timeoutMs;
           while (frames.length - taken < count) {
             const have = JSON.stringify(frames.slice(taken));
             if (over) throw new Error(`the stream ended with ${frames.length - taken} of ${count} frames: ${have}`);
-            if (Date.now() > deadline) throw new Error(`timed out waiting for ${count} frames, got ${frames.length - taken}: ${have}`);
+            if (performance.now() > deadline) throw new Error(`timed out waiting for ${count} frames, got ${frames.length - taken}: ${have}`);
             await sleep(10);
           }
           taken += count;

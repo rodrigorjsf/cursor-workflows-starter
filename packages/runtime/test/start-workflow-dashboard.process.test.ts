@@ -75,7 +75,7 @@ test("start_workflow starts the dashboard once and returns the link to the run's
 
     const wait = async (jobId: string) => {
       let state = await call("wait_workflow", { jobId, timeoutSec: 5 });
-      for (const stop = Date.now() + 30_000; state.status === "running" && Date.now() < stop; ) state = await call("wait_workflow", { jobId, timeoutSec: 5 });
+      for (const stop = performance.now() + 30_000; state.status === "running" && performance.now() < stop; ) state = await call("wait_workflow", { jobId, timeoutSec: 5 });
       return state;
     };
     assert.equal((await wait(first.jobId)).status, "finished");
@@ -96,7 +96,7 @@ test("the job record keeps how the job was started: the args and the chat's over
     const record = JSON.parse(readFileSync(join(repo, ".workflows", "jobs", `${started.jobId}.json`), "utf8"));
     assert.deepEqual(record.start, { args: {}, overrides: { maxCents: 40 } });
     let state = await call("wait_workflow", { jobId: started.jobId, timeoutSec: 5 });
-    for (const stop = Date.now() + 30_000; state.status === "running" && Date.now() < stop; ) state = await call("wait_workflow", { jobId: started.jobId, timeoutSec: 5 });
+    for (const stop = performance.now() + 30_000; state.status === "running" && performance.now() < stop; ) state = await call("wait_workflow", { jobId: started.jobId, timeoutSec: 5 });
     assert.equal(state.status, "finished");
     const after = JSON.parse(readFileSync(join(repo, ".workflows", "jobs", `${started.jobId}.json`), "utf8"));
     assert.deepEqual(after.start, record.start, "the job's process and its heartbeat keep it");

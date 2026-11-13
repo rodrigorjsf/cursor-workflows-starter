@@ -40,10 +40,10 @@ test("seconds that are not a number are refused", () => {
 test("a wait for a running job that is given no usable time returns at once instead of waiting forever", { timeout: 5000 }, async () => {
   mkdirSync(repo, { recursive: true });
   writeJob(repo, { jobId: "running1", runId: "proc-12345678", pid: process.pid, heartbeat: new Date().toISOString() }); // this process: alive and beating
-  const started = Date.now();
+  const started = performance.now();
   const state = await waitJob(repo, "running1", Number.NaN);
   assert.equal(state?.status, "running");
-  assert.ok(Date.now() - started < 1000, `${Date.now() - started} ms`);
+  assert.ok(performance.now() - started < 1000, `${performance.now() - started} ms`);
 });
 
 test("wait_workflow with a timeoutSec that is not a number is an error that names it", { timeout: 20_000 }, async () => {

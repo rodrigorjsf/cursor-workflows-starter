@@ -81,6 +81,6 @@ test("the heartbeat keeps beating while the process is blocked in a synchronous 
   });
   process.env.WF_HEARTBEAT_STALE_MS = "600"; // shorter than the 1.5 s the child blocks for
   const seen = new Set<string>();
-  for (const stop = Date.now() + 1200; Date.now() < stop; await sleep(100)) seen.add(readJob(cwd, "job-blocked")!.status);
+  for (const stop = performance.now() + 1200; performance.now() < stop; await sleep(100)) seen.add(readJob(cwd, "job-blocked")!.status);
   assert.deepEqual([...seen], ["running"], "stale for 1.2 s of main-thread silence would show failed; the worker thread keeps it running");
 });

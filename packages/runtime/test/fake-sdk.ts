@@ -174,7 +174,7 @@ function serverRun(state: AgentState, raw: any): ServerRun {
   const run: ServerRun = {
     id: `run-${++runCounter}`,
     agentId: state.agentId,
-    createdAt: Date.now() + runCounter, // distinct and increasing
+    createdAt: Date.now() + runCounter, // wall-clock-ok: a creation timestamp, as the real SDK reports it; distinct and increasing
     status: "running",
     done,
     settle: (result) => {

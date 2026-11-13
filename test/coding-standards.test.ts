@@ -220,6 +220,64 @@ test("every test is a flat test() with strict asserts: no describe, it or mock f
   assert.deepEqual(scan(TEST_CODE, nestedOrLoose), [], 'use top-level test() and import assert from "node:assert/strict"');
 });
 
+const WALL_CLOCK_MARKER = /\/\/\s*wall-clock-ok:\s*\S.{4,}/;
+
+/** True for `Date.now()`. */
+const isDateNow = (node: ts.Node): boolean =>
+  ts.isCallExpression(node) &&
+  node.arguments.length === 0 &&
+  ts.isPropertyAccessExpression(node.expression) &&
+  ts.isIdentifier(node.expression.expression) &&
+  node.expression.expression.text === "Date" &&
+  node.expression.name.text === "now";
+
+/** True when `node` is, through arithmetic and parentheses only, an argument of `new Date(...)`: a timestamp being built. */
+function buildsTimestamp(node: ts.Node): boolean {
+  let at = node;
+  while (at.parent && (ts.isBinaryExpression(at.parent) || ts.isParenthesizedExpression(at.parent))) at = at.parent;
+  return !!at.parent && ts.isNewExpression(at.parent) && ts.isIdentifier(at.parent.expression) && at.parent.expression.text === "Date";
+}
+
+/**
+ * Lines with a `Date.now()` that is not building a timestamp (`new Date(Date.now() - ms)`) and has no `// wall-clock-ok: <reason>`
+ * on its line. Wording-keyed: a clock read spelled any other way (`new Date().getTime()`, an alias of `Date`) gets through.
+ */
+function wallClockMeasures(path: string, text: string): number[] {
+  const sf = parse(path, text);
+  const lines = text.split("\n");
+  const found: number[] = [];
+  walk(sf, (node) => {
+    if (!isDateNow(node) || buildsTimestamp(node)) return;
+    const line = lineOf(sf, node);
+    if (!WALL_CLOCK_MARKER.test(lines[line - 1] ?? "")) found.push(line);
+  });
+  return found;
+}
+
+test("the elapsed-time check fires on Date.now() used to time something or to set a deadline, and passes performance.now(), a built timestamp and a marked line", () => {
+  const sample = [
+    "const startedAt = Date.now();", // 1: a start mark
+    "assert.ok(Date.now() - startedAt < 2000);", // 2: an elapsed bound
+    "for (const stop = Date.now() + 5000; Date.now() < stop; ) await sleep(10);", // 3: a deadline, twice
+    "const t0 = performance.now();", // fine: monotonic
+    "assert.ok(performance.now() - t0 < 2000);", // fine
+    "const old = new Date(Date.now() - 5 * 60_000).toISOString();", // fine: a timestamp in the past
+    "const when = new Date((Date.now() - ms));", // fine: parenthesised
+    "const before = Date.now(); // wall-clock-ok: compared with a timestamp the run wrote", // fine: marked
+    "const after = Date.now(); // wall-clock-ok:", // 9: a marker with no reason
+  ].join("\n");
+  assert.deepEqual(wallClockMeasures("a.test.ts", sample), [1, 2, 3, 3, 9]);
+});
+
+test("no test times anything with Date.now(): a wall clock that jumps (a WSL2 resync) fails a bound that held; use performance.now(), or mark a timestamp compare with `// wall-clock-ok: <reason>`", () => {
+  assert.ok(TEST_CODE.length >= 100, `found ${TEST_CODE.length}`);
+  assert.deepEqual(
+    scan(TEST_CODE, wallClockMeasures),
+    [],
+    "time a bound or a deadline with performance.now() (monotonic); Date.now() is for a timestamp a test compares with one the code under test wrote, and its line ends with `// wall-clock-ok: <reason>`",
+  );
+});
+
 // --- TypeScript -------------------------------------------------------------------------------------------------------
 
 const BUILTINS = new Set(builtinModules.filter((m) => !m.startsWith("_")));

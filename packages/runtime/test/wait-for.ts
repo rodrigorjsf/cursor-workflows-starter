@@ -14,11 +14,11 @@ export interface WaitForOptions {
  * passed without one. `read` may be async; an error it throws ends the wait.
  */
 export async function waitFor<T>(what: string, read: () => T | Promise<T>, { timeoutMs = 10_000, intervalMs = 20 }: WaitForOptions = {}): Promise<NonNullable<T>> {
-  const deadline = Date.now() + timeoutMs;
+  const deadline = performance.now() + timeoutMs;
   for (;;) {
     const value = await read();
     if (value) return value as NonNullable<T>;
-    if (Date.now() > deadline) throw new Error(`timed out after ${timeoutMs} ms waiting for ${what}`);
+    if (performance.now() > deadline) throw new Error(`timed out after ${timeoutMs} ms waiting for ${what}`);
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 }

@@ -29,7 +29,7 @@ async function inRedStep(runId: string, jobId: string): Promise<number> {
   delete env.NODE_TEST_CONTEXT;
   const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), join(import.meta.dirname, "implement-issue-job.ts"), fx.repo, jobId, runId], { env, stdio: "ignore" });
   children.push(child);
-  for (const stop = Date.now() + 60_000; Date.now() < stop; await sleep(50)) {
+  for (const stop = performance.now() + 60_000; performance.now() < stop; await sleep(50)) {
     const events = readEventLog(eventLogPath(fx.repo, runId), { content: false }).events;
     const start = events.findLastIndex((e) => e.type === "run-start");
     const mine = start >= 0 && events[start]!.type === "run-start" && (events[start] as { jobId?: string }).jobId === jobId;
@@ -59,7 +59,7 @@ async function freezeAndCancel(pid: number, jobId: string) {
 /** Kills the job's process with no cancel: a crash. */
 async function crash(pid: number) {
   process.kill(pid, "SIGKILL");
-  for (const stop = Date.now() + 5000; isAlive(pid) && Date.now() < stop; ) await sleep(20);
+  for (const stop = performance.now() + 5000; isAlive(pid) && performance.now() < stop; ) await sleep(20);
   assert.ok(!isAlive(pid), "the process is gone");
 }
 
