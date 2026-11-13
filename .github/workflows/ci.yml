@@ -23,9 +23,8 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      # Testes offline: SDK falso, sem rede, sem conta Cursor e sem segredos.
-      - run: npm test
+      # Typecheck e testes offline: SDK falso, sem rede, sem conta Cursor e sem segredos.
+      - run: npm run check
 
   # Renderiza todo bloco Mermaid do repositório e falha em erro de sintaxe. Só aqui: o mermaid-cli usa um Chromium
   # headless, que trava na máquina do mantenedor (docs/contributing/03-diagramas.md).

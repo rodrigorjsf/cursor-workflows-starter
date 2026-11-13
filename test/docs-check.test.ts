@@ -248,3 +248,17 @@ test("book: a footer needs a blank line before the rule and after it", () => {
   assert.notEqual(glued, GOOD_BOOK["docs/usage/01-um.md"]);
   assertRejected(repo({ ...GOOD_BOOK, "docs/usage/01-um.md": glued }), /docs\/usage\/01-um\.md:.*footer/);
 });
+
+test("the Markdown walk skips Claude Code's agent worktrees, which are full copies of the repo, and keeps .claude's own docs", async () => {
+  const { markdownFiles } = await import("../scripts/lib/markdown.js");
+  const root = mkdtempSync(join(tmpdir(), "wf-md-walk-"));
+  try {
+    for (const file of ["README.md", ".claude/rules/diagrams.md", ".claude/worktrees/agent-x/README.md", ".claude/worktrees/agent-x/docs/a.md"]) {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+      writeFileSync(join(root, file), "# x\n");
+    }
+    assert.deepEqual(markdownFiles(root), [".claude/rules/diagrams.md", "README.md"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

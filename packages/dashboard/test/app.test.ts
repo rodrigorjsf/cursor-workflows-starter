@@ -92,7 +92,7 @@ test("the build is cached by content hash: a second start with the same sources 
   const before = statSync(built).mtimeMs;
   await dash.close();
 
-  await new Promise((r) => setTimeout(r, 30)); // a rebuild would show in the modification time
+  await new Promise((r) => setTimeout(r, 30)); // fixed-wait-ok: a rebuild would show in the modification time
   dash = await startDashboard({ port: 0 });
   assert.equal((await http(dash.url, "/")).text, first);
   assert.equal(statSync(built).mtimeMs, before, "not written again");
@@ -108,7 +108,7 @@ test("the Run view page is built with the app when the dashboard starts, and cac
   const built = statSync(join(cacheDir(), hash, "run.js")).mtimeMs;
   await dash.close();
 
-  await new Promise((r) => setTimeout(r, 30)); // a rebuild would show in the modification time
+  await new Promise((r) => setTimeout(r, 30)); // fixed-wait-ok: a rebuild would show in the modification time
   dash = await startDashboard({ port: 0 });
   assert.equal((await http(dash.url, "/runs/smoke-1")).text, page);
   assert.equal(statSync(join(cacheDir(), hash, "run.js")).mtimeMs, built, "a restart reads the Run view from the cache");

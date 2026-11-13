@@ -35,7 +35,8 @@ Workflows live in `packages/runtime/workflows/*.ts` (built in) and `.agents/work
 - Before creating or editing a workflow, load the `cursor-workflow-authoring` skill
   (`skills/cursor-workflow-authoring/`).
 - To convert existing skills and subagents, use `/skill-to-workflow`.
-- After any change run `npm run typecheck` and `npm test`. Tests are offline and use `packages/runtime/test/fake-sdk.ts`.
+- After any change run `mise exec -- npm run check` (typecheck plus every test, docs and generated pages included; `mise.toml`
+  pins Node 22.23.4). Tests are offline and use `packages/runtime/test/fake-sdk.ts`.
 - `@cursor/sdk` is pinned. When upgrading, check the `.d.ts` files in `node_modules/@cursor/sdk/dist/esm/` and rerun
   the tests.
 - Keep distributed skills, templates and other agent-facing text in English. The docs book and README are pt-BR.
@@ -83,6 +84,6 @@ When something fails repeatedly, when User has to re-explain, or when a workarou
 - Windows Chrome → WSL dashboard: use `127.0.0.1:4317`; `localhost` is refused.
 - Browser checks: use `chrome-devtools` MCP; `/chrome` fails over Remote Control.
 - `tsx -e` rejects top-level await: write a `.mts` file and run it.
-- Fresh worktree has no node_modules: `mise exec node@22.23.4 -- npm ci --prefer-offline`.
+- Fresh worktree has no node_modules: `mise exec -- npm ci --prefer-offline`.
 - Piped `gh issue view --comments` prints only comments: use `--json body,comments`.
 - Test repos: set `core.autocrlf=false`; global git here converts line endings.

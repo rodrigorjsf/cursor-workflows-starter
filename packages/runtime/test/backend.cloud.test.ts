@@ -13,6 +13,7 @@ import type { AttemptEvent, AttemptResult, StepOptions } from "../src/runtime/ba
 import { createCloudBackend } from "../src/runtime/backend-cloud.js";
 import { cloudRepoUrl, snapshotBranch, snapshotBranchSegment, snapshotRunSegment } from "../src/runtime/cloud-snapshot.js";
 import { agentCommits, git, remoteBranches, remoteFiles, repoWithRemote } from "./cloud-fixtures.js";
+import { waitFor } from "./wait-for.js";
 
 let root = "";
 let repo = "";
@@ -367,9 +368,14 @@ test("a wait that keeps giving up at once while the run goes on is not retried i
   costConfig.cloudWaitLimitMs = 1; // the client's wait fails at once, again and again; the run is still going
   script.push(() => ({ hang: true }));
   const running = createCloudBackend({ remote: "origin", runId: "run-1", waitFloorMs: 80 }).run("p", options(), new AbortController().signal, () => {});
-  await new Promise((resolve) => setTimeout(resolve, 400));
-  const lookedUp = lookups.filter((l) => l.kind === "getRun").length;
+  const getRuns = () => lookups.filter((l) => l.kind === "getRun").length;
+  const before = await waitFor("the first run lookup", () => getRuns());
+  const from = Date.now();
+  await waitFor("three more run lookups", () => getRuns() >= before + 3);
+  // Read together: however slow the machine, the floor allows one more lookup per 80 ms of the time that went by, and a tight
+  // loop would have made dozens in that time.
+  const [more, elapsed] = [getRuns() - before, Date.now() - from];
   finishCloudRun("bc-1", { result: "at last" });
   assert.deepEqual(outcomeOf(await running), { kind: "finished", value: "at last" });
-  assert.ok(lookedUp >= 2 && lookedUp <= 8, `${lookedUp} lookups in 400 ms with an 80 ms floor`);
+  assert.ok(more <= elapsed / 80 + 1, `${more} more lookups in ${elapsed} ms, with an 80 ms floor`);
 });

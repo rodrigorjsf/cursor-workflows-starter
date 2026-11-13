@@ -150,7 +150,7 @@ test("a live dashboard that is too busy to answer the probe is waited for, not r
   const up = running(await ensureDashboard());
   process.kill(up.pid, "SIGSTOP"); // alive, holds the port, answers nothing
   try {
-    await new Promise((r) => setTimeout(r, 700)); // older than the start timeout below: a record that is "old" is not a stale one
+    await new Promise((r) => setTimeout(r, 700)); // fixed-wait-ok: older than the start timeout below: a record that is "old" is not a stale one
     const status = await ensureDashboard({ startTimeoutMs: 600 });
     assert.equal(status.status, "unavailable");
     assert.match((status as { reason: string }).reason, new RegExp(`dashboard \\(pid ${up.pid}\\) does not answer`));

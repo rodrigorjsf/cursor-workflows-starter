@@ -97,7 +97,7 @@ test("only a pull request of github.com is asked about, and only by its exact ur
   runWithLinks("implement-issue-aaaa0001", 0, [PR(1), ...notPrs.slice(0, 4)]); // a card keeps at most 8 links: the others are on a second card
   runWithLinks("implement-issue-bbbb0002", 1, notPrs.slice(4));
   await until("the real pull request is answered", () => stateOf("implement-issue-aaaa0001", PR(1)), Boolean);
-  await new Promise((r) => setTimeout(r, 100)); // time for a wrong ask to show up
+  await new Promise((r) => setTimeout(r, 100)); // fixed-wait-ok: time for a wrong ask to show up
   const links = [...(await linksOf("implement-issue-aaaa0001")), ...(await linksOf("implement-issue-bbbb0002"))];
   assert.equal(links.length, 1 + notPrs.length, "every link is on the Board");
   assert.deepEqual(links.filter((l) => l.state).map((l) => l.url), [PR(1)]);
@@ -160,7 +160,7 @@ test("with no gh installed at all the Board works and the links have no state", 
     runWithLinks("implement-issue-aaaa0001", 0, [PR(1)]);
     const reply = await http(dash.url, "/api/board");
     assert.equal(reply.status, 200);
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 100)); // fixed-wait-ok: time for a state to show up, which must not
     assert.equal(await stateOf("implement-issue-aaaa0001", PR(1)), undefined);
   } finally {
     process.env.PATH = previous;
