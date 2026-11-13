@@ -173,13 +173,18 @@ export function loginOf(forge: ForgeName, host?: string): ForgeLogin {
   };
 }
 
+/** Per forge: how to make it. A total record, as `FORGE_CLIS`: a forge added to `ForgeName` is a compile error here. */
+const FORGES: Readonly<Record<ForgeName, (commands: Commands) => Forge>> = {
+  github: (commands) => new GithubForge(commands),
+  gitlab: (commands) => new GitlabForge(commands),
+};
+
 /**
  * The forge `name` (as a record keeps it), speaking through `commands`. A record can name a forge this version does not know
  * (the run was recorded by a newer kit): that is an error, never a fall back to another forge's CLI.
  */
 export function createForge(name: string, commands: Commands): Forge {
-  if (name === "github") return new GithubForge(commands);
-  if (name === "gitlab") return new GitlabForge(commands);
+  if (Object.hasOwn(FORGES, name)) return FORGES[name as ForgeName](commands);
   throw new Error(`forge ${JSON.stringify(name)} (named by the run's record): this version of the kit does not know it. Upgrade the kit`);
 }
 
