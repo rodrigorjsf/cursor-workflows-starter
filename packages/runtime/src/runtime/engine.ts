@@ -1231,7 +1231,7 @@ async function executeRun<A, R>(
     cwd: opts.cwd,
     budget,
     settings: structuredClone(resolved.config.settings),
-    forges: structuredClone(resolved.config.forges),
+    forges: structuredClone(resolved.config.forges ?? {}),
     agent: agentCall,
     exec: execCall,
     parallel: (thunks) =>
