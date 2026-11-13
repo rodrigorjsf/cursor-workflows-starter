@@ -93,7 +93,7 @@ import { wasKilledByCancel } from "../src/runtime/job-state.js";
 import { createRedactor, findCredential, findSecretEnvValue } from "../src/runtime/redaction.js";
 import { NamedLockedError, acquireNamedLock, eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { defineWorkflow, type AgentCallOptions, type WorkflowCard } from "../src/runtime/workflow.js";
-import { buildPrBody, sanitizeModelText, type PrText } from "./implement-issue/pr-body.js";
+import { buildPrBody, inlineCode, sanitizeModelText, type PrText } from "./implement-issue/pr-body.js";
 import { CommandError, Commands, NETWORK_TIMEOUT_SEC, SNAPSHOT_GRACE_HOURS, WORKFLOW_BRANCH_PREFIX, worktreeOf } from "./implement-issue/commands.js";
 import * as P from "./implement-issue/prompts.js";
 import { AXES, AXIS_SCHEMAS, blockingAxes, blockingOf, type Axis, type ReviewReports } from "./implement-issue/review.js";
@@ -636,13 +636,14 @@ export default defineWorkflow<Args>({
           progress.save();
           const relaunch = `npm run wf -- run implement-issue --args ${shellQuote(JSON.stringify({ ...ctx.args, approveSeams: true }))} --resume ${ctx.runId}`;
           // Model text goes to a public issue: neutralized like the PR body's (closing keywords, mentions, `<!--`). The
-          // interface and the test command sit in code spans, where GitHub gives them no effect.
+          // interface and the test command sit in inline code spans, where GitHub gives them no effect only while the span
+          // holds: inlineCode turns their backticks and line breaks into characters that cannot close it.
           const prose = sanitizeModelText;
           const comment = [
             SEAMS_MARKER,
             `## Seams proposed by the \`implement-issue\` workflow (tier ${tier})`,
             "",
-            ...plan.seams.map((s) => `- **${prose(s.name)}**: \`${s.interface}\` — ${prose(s.why)}`),
+            ...plan.seams.map((s) => `- **${prose(s.name)}**: ${inlineCode(s.interface)} — ${prose(s.why)}`),
             "",
             "### Slices (one per red → green cycle)",
             "",
@@ -653,7 +654,7 @@ export default defineWorkflow<Args>({
               ? ["", `The slices marked deferred are left out by the tier ${tier} slice cap (${sliceCap} slices): the PR only references the issue, without closing it.`]
               : []),
             "",
-            `Test command: \`${ctx.args.testCommand ?? plan.testCommand}\``,
+            `Test command: ${inlineCode(ctx.args.testCommand ?? plan.testCommand)}`,
             ...(plan.rationale ? ["", `### Why this design\n\n${prose(plan.rationale)}`] : []),
             "",
             "### To approve",

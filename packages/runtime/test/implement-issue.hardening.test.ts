@@ -317,6 +317,18 @@ test("model text in the seams comment closes no other issue, mentions no one and
   assert.doesNotMatch(comment, /<!-- hide/); // the comment's own marker is the only HTML comment left
 });
 
+test("model text in an inline code span of the seams comment cannot close the span", async () => {
+  issue(["complexity:medium"]);
+  const hostile = "f()` @octocat <!-- `x";
+  fx.handlers.plan = (o) => submit(o, { ...PLAN, seams: [{ ...PLAN.seams[0], interface: hostile }], testCommand: `npm test${hostile}` });
+  const r = await run({ testCommand: undefined }); // the plan's test command, the model's text, goes in the comment
+  assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
+  const comment = gh().comments[0]!;
+  assert.ok(comment.includes("`f()ˋ @octocat <!-- ˋx`"), comment);
+  assert.ok(comment.includes("Test command: `npm testf()ˋ @octocat <!-- ˋx`"), comment);
+  assert.doesNotMatch(comment, /`\s*@octocat/);
+});
+
 test("segredo no texto do PR não chega ao PR", async () => {
   issue(["complexity:low"]);
   fx.handlers["pr-text"] = (o) => submit(o, { summary: `chave: ${FAKE_KEY}`, door: "two-way", blastRadius: "local" });

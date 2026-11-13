@@ -18,6 +18,11 @@ const tail = (s: string | undefined, n: number) => {
   return nl >= 0 && nl < cut.length - 1 ? cut.slice(nl + 1) : cut;
 };
 const fence = (s: string) => "```text\n" + s.replace(/```/g, "ˋˋˋ") + "\n```";
+/**
+ * Model text as an inline code span. A backtick in it would close the span and give the rest its effect again (a mention,
+ * `<!--`), and a line break would end it: backticks become ˋ (U+02CB) and line breaks spaces, so the span holds.
+ */
+export const inlineCode = (s: string) => "`" + s.replace(/`/g, "ˋ").replace(/\r\n|\r|\n/g, " ") + "`";
 
 /**
  * Texto do modelo vai para um PR público: neutraliza o que teria efeito no GitHub. Palavras de fechamento citando
@@ -65,9 +70,9 @@ export function buildPrBody(input: {
     .filter((s) => s.done)
     .map((s) =>
       s.alreadySatisfied
-        ? `- \`${s.testName ?? s.behavior}\`: the behaviour already existed (${sanitizeModelText(s.alreadySatisfied)}); the test passed with no implementation.`
+        ? `- ${inlineCode(s.testName ?? s.behavior)}: the behaviour already existed (${sanitizeModelText(s.alreadySatisfied)}); the test passed with no implementation.`
         : [
-            `- **Before:** \`${s.testName ?? s.behavior}\` (${s.testFile ?? "test"}) failing`,
+            `- **Before:** ${inlineCode(s.testName ?? s.behavior)} (${s.testFile ? inlineCode(s.testFile) : "test"}) failing`,
             "",
             fence(clean(s.red, 700)),
             "",
@@ -78,11 +83,14 @@ export function buildPrBody(input: {
     )
     .join("\n\n");
 
+  // Each piece of model text is neutralized on its own: prose by sanitizeModelText, a file name as an inline code span.
+  // Sanitizing the whole line would put backticks inside the span and break it.
+  const prose = sanitizeModelText;
   const notes: string[] = [];
-  for (const f of review.standards?.findings ?? []) if (f.kind === "judgement") notes.push(`- Standards (judgement): ${f.rule} in \`${f.file}\`: ${f.note}`);
-  for (const f of review.spec?.findings ?? []) if (f.kind === "scope-creep") notes.push(`- Spec (scope creep): ${f.note}`);
-  for (const f of review.security?.findings ?? []) if (f.severity === "note") notes.push(`- Security (note): \`${f.file}\`: ${f.issue}`);
-  for (const r of refuted) notes.push(`- Spec (refuted by a test: the behaviour already existed): ${r}`);
+  for (const f of review.standards?.findings ?? []) if (f.kind === "judgement") notes.push(`- Standards (judgement): ${prose(f.rule)} in ${inlineCode(f.file)}: ${prose(f.note)}`);
+  for (const f of review.spec?.findings ?? []) if (f.kind === "scope-creep") notes.push(`- Spec (scope creep): ${prose(f.note)}`);
+  for (const f of review.security?.findings ?? []) if (f.severity === "note") notes.push(`- Security (note): ${inlineCode(f.file)}: ${prose(f.issue)}`);
+  for (const r of refuted) notes.push(`- Spec (refuted by a test: the behaviour already existed): ${prose(r)}`);
 
   const body = [
     // Com fatias adiadas, a issue não fica resolvida: o PR só a referencia.
@@ -103,7 +111,7 @@ export function buildPrBody(input: {
     "",
     `**Blast Radius:** ${t.blastRadius}`,
     ...(t.blastNote ? ["", t.blastNote] : []),
-    ...(notes.length ? ["", "## Non-blocking review findings", "", ...notes.map(sanitizeModelText)] : []),
+    ...(notes.length ? ["", "## Non-blocking review findings", "", ...notes] : []),
     ...(deferred.length ? ["", "## Deferred (slice cap)", "", ...deferred.map((d) => `- ${sanitizeModelText(d)}`)] : []),
     "",
     "---",
