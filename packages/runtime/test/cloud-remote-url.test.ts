@@ -109,6 +109,17 @@ for (const refused of ["http://example.invalid/org/repo.git", "git://example.inv
   });
 }
 
+test("a cloud step whose push URL is plain text fails at once, though the fetch URL is https", async () => {
+  git(repo, "remote", "set-url", "origin", "https://example.invalid/org/repo.git");
+  git(repo, "config", "remote.origin.pushurl", "http://example.invalid/org/repo.git");
+  const result = await attempt();
+  assert.equal(result.outcome.kind, "error");
+  assert.match((result.outcome as { message: string }).message, /push URL .* plain-text transport/);
+  assert.equal(result.final, true);
+  assert.deepEqual(remoteBranches(bare), [], "nothing was pushed");
+  assert.equal(calls.length, 0, "no agent was created");
+});
+
 test("the redactor hides the password of a URL and keeps the rest of it", () => {
   const { text } = createRedactor({ env: {} });
   assert.equal(text(`fatal: unable to access 'https://alice:${FAKE_SECRET}@example.invalid/org/repo.git/'`), "fatal: unable to access 'https://alice:[REDACTED]@example.invalid/org/repo.git/'");

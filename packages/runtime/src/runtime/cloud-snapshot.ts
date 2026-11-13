@@ -122,6 +122,11 @@ export async function pushSnapshot({ cwd, remote, branch, signal }: { cwd: strin
   const head = await asked(top, ["rev-parse", "--verify", "--quiet", "HEAD"], `${top} has no commit yet: a cloud step needs one to start the snapshot from`);
   // Refused before anything is committed or pushed: the snapshot holds uncommitted and untracked files.
   const repoUrl = await repoUrlOf(top, remote, remoteUrl, signal);
+  // The push goes where git sends it, which `pushurl` and `pushInsteadOf` may move away from the URL above.
+  const pushUrl = await git(top, ["remote", "get-url", "--push", remote], { signal });
+  if (/^(http|git):\/\/|^[a-z][\w+.-]*::/i.test(pushUrl)) {
+    throw new UnsupportedRemoteError(`the push URL of the remote "${remote}" uses a plain-text transport or a remote helper: a cloud step pushes the snapshot only over https:// or ssh`);
+  }
 
   const tree = await worktreeTree(top, signal);
   // Nothing changed since HEAD: HEAD is the snapshot. Otherwise a commit on top of it holds the changes.
