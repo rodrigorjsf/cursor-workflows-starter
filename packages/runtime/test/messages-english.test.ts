@@ -73,6 +73,7 @@ test("the measurement fixtures an agent reads are English: the verify workflows,
         .map(({ line, text }) => `${relative(SCRIPTS, file)}:${line}: ${text.slice(0, 100)}`),
     ),
     ...shellOffenders("verify/setup-probe-repo.sh"),
+    ...shellOffenders("verify/setup-sandbox-repo.sh"),
     ...shellOffenders("link-claude-skills.sh"),
   ];
   assert.deepEqual(offenders, []);
