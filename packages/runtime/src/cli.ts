@@ -8,7 +8,7 @@
 //   wf init [--no-agents-md | --remove]   # writes the kit's files into the repo (MCP configs, repo config, .gitignore, AGENTS.md block); prints the diff, never commits
 //   wf config show [workflow]         # effective config of the current repo and where each value came from
 //   wf upgrade                        # moves the installed kit (~/.cursor-workflows/kit) to the newest release tag and redoes its dependencies, shim and skill links
-//   wf doctor [--json]                # checks the environment the IDE uses (Node, dependencies, login, models, gh, MCP server, config, kit version); exits 1 when a check fails
+//   wf doctor [--json]                # checks the environment the IDE uses (Node, dependencies, login, models, forge CLI, MCP server, config, kit version); exits 1 when a check fails
 //   wf run <workflow> --args '<json>' [--max-cents N] [--resume <runId>]   # primeiro plano; imprime JSON no fim
 //   wf start <workflow> --args '<json>' [--resume <runId>]                 # segundo plano; imprime {jobId}
 //   wf status <jobId>
@@ -272,7 +272,7 @@ async function main(): Promise<number> {
       if (typeof graceHours !== "number") throw new Error("workflows.implement-issue.settings.gcSnapshotGraceHours must be a number of hours");
       if (typeof networkTimeoutSec !== "number") throw new Error("workflows.implement-issue.settings.networkTimeoutSec must be a number of seconds");
       const commands = directCommands(networkTimeoutSec);
-      const plan = await planGc({ cwd, commands, failedAfterDays, snapshots: { remote: config.cloud.remote, graceHours } });
+      const plan = await planGc({ cwd, commands, failedAfterDays, snapshots: { remote: config.cloud.remote, graceHours }, forges: config.forges });
       process.stderr.write(formatPlan(plan)); // the plan first, then the removal
       if (values["dry-run"]) process.stderr.write("wf gc: dry run, nothing was changed.\n");
       else await applyGc(plan, commands);

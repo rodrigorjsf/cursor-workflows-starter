@@ -38,7 +38,7 @@ Pick the task, then run its steps in order. Each step ends on a stated result.
 
 ## Check the setup
 
-1. Run `wf doctor --json`. Its `checks`, always in this order: `node`, `dependencies`, `login`, `models`, `gh`,
+1. Run `wf doctor --json`. Its `checks`, always in this order: `node`, `dependencies`, `login`, `models`, `forge`,
    `mcp-server`, `config`, `kit-version`. `ok: true` and exit code 0 mean the setup works. Done when every check is
    `pass`, or each failing check's `message` and `hint` went to the user.
    - On a Node older than 22.13 the report holds the `node` check alone.
@@ -46,7 +46,9 @@ Pick the task, then run its steps in order. Each step ends on a stated result.
 2. Fix what a `hint` lets you fix. Hand the user what needs them:
    - `login`: `wf login` opens a browser, so the user runs it; `NO_OPEN_BROWSER=1 wf login` prints the URL on stderr for
      a machine with no browser. The Cursor API key is the user's secret: keep it out of every command, log and reply.
-   - `gh`: `gh auth login`, by the user.
+   - `forge`: `gh` (GitHub) or `glab` (GitLab) is missing or logged out: the user runs `gh auth login` or
+     `glab auth login --hostname <host>`. A host the kit does not know fails with a message that names the `forges` key:
+     declaring it is the user's call (see "Read or change the config").
    - `models`: a model id in the config is not in the account's catalog; `wf models` lists the ids. Changing the
      config is the user's call (see "Read or change the config").
 3. Run `wf doctor` again. Done when it exits 0, or when the user has the remaining failures and their hints.

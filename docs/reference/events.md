@@ -8,7 +8,7 @@ Todo evento de um run é acrescentado ao **log de eventos** do run, `<repo>/.wor
 - Quem lê ignora uma última linha incompleta (queda no meio de uma gravação) e trata um `type` desconhecido, ou um `v` maior que o seu, como opaco.
 - As descrições dos campos vêm dos comentários do tipo, em `packages/runtime/src/runtime/events.ts`.
 - Tipos importados de `@cursor/sdk`: `ModelSelection`, `RunUsage`, `SettingSource`.
-- Tipos importados de `./workflow.js`: `UsageTotals`.
+- Tipos importados de `./workflow.js`: `ForgeName`, `UsageTotals`.
 
 ## EventBase
 
@@ -304,6 +304,7 @@ A configuração efetiva de um run: o que as camadas e os tetos globais decidira
 | `labels` | `Record<string, EffectiveRole>` | sim | Preferências por glob de label, para etapas sem papel. |
 | `execTimeoutMs` | `number` | sim | Tempo máximo, em milissegundos, de um comando de `ctx.exec` que não passa o próprio `timeoutMs`. |
 | `cloud` | `EffectiveCloud` | sim | Preferências das etapas na nuvem (`cloud` dos arquivos de configuração). |
+| `forges` | `Record<string, ForgeName>` | não | O forge de cada host que o kit não conhece (`forges` dos arquivos de configuração), host a host: o do repositório vale mais que o global. Vazio quando nenhum arquivo declara um; `github.com` e `gitlab.com` não precisam de entrada, o kit os conhece (uma entrada que os repete aparece). A origem de cada host está em `provenance` (`/forges/<host>`). Ausente em logs de versões antigas. |
 | `settings` | `Record<string, unknown>` | sim | Os ajustes que o workflow declara (`meta.settings`), cada um com o padrão do código ou o valor que um arquivo de configuração trocou. A origem de cada um está em `provenance` (`/settings/<nome>`). Vazio quando o workflow não declara nenhum. |
 
 ### EffectiveLimits

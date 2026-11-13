@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { createRedactor } from "../src/runtime/redaction.js";
 import { findSecretInText } from "../workflows/implement-issue.js";
 import { buildPrBody } from "../workflows/implement-issue/pr-body.js";
 import type { SliceRecord } from "../workflows/implement-issue/tdd.js";
@@ -25,6 +26,11 @@ const BLOCKED: Array<[string, string]> = [
   ["npm", `npm_${x(36)}`],
   ["Stripe", `sk_live_${x(20)}`],
 ];
+/** The prefixes of the GitLab token types ("Token overview" in GitLab's documentation, 2026-11-13): personal, project, group and impersonation
+ * tokens share `glpat-`; then OAuth application secret, deploy, runner (and runner created from a registration token), CI/CD job, trigger,
+ * feed, incoming mail, agent for Kubernetes, workspace, SCIM and feature flags client. */
+const GITLAB_PREFIXES = ["glpat-", "gloas-", "gldt-", "glrt-", "glrtr-", "glcbt-", "glptt-", "glft-", "glimt-", "glagent-", "glwt-", "glsoat-", "glffct-"];
+for (const prefix of GITLAB_PREFIXES) BLOCKED.push([`GitLab ${prefix}`, `${prefix}${x(20)}`]);
 
 for (const [name, sample] of BLOCKED) {
   test(`the outbound guard blocks a ${name} credential and names only the rule`, () => {
@@ -33,6 +39,19 @@ for (const [name, sample] of BLOCKED) {
     assert.ok(!rule.includes(sample), "the rule must not repeat the secret");
   });
 }
+
+test("the outbound guard names a GitLab token by its rule, never by its value", () => {
+  assert.match(findSecretInText(`glpat-${x(20)}`, [], {}) ?? "", /^GitLab token \(glpat-, /);
+});
+
+test("a GitLab token in the routable format, with dot-separated parts, is redacted whole; the bare prefix and shorter text are not tokens", () => {
+  const routable = `glpat-${x(27)}.01.${x(9)}`;
+  const redact = createRedactor({ env: {} }).text;
+  assert.equal(redact(`token ${routable}, done`), "token [REDACTED], done");
+  assert.equal(redact(`the glpat-${x(25)}_a-b token`), "the [REDACTED] token");
+  const text = "GitLab tokens start with `glpat-`, `gldt-` or glcbt-short, and glpat-1234";
+  assert.equal(redact(text), text);
+});
 
 test("the outbound guard keeps the reasons it already gave for Cursor and sk- keys", () => {
   assert.equal(findSecretInText(`crsr_${x(40)}`, [], {}), "Cursor key (crsr_)");
@@ -76,7 +95,7 @@ test("test output embedded in the PR body is redacted, and keeps its local paths
       green: `ok 1 - subtract (${token})`,
       done: true,
     };
-    const body = buildPrBody({ issueNumber: 1, text: { summary: "s", door: "two-way", blastRadius: "local" }, slices: [slice], review: {}, deferred: [] });
+    const body = buildPrBody({ issueNumber: 1, text: { summary: "s", door: "two-way", blastRadius: "local" }, slices: [slice], review: {}, deferred: [], forge: "github" });
     assert.ok(!body.includes(token), "a token printed by a test must not reach the PR");
     assert.ok(!body.includes(envValue), "a secret env value printed by a test must not reach the PR");
     assert.match(body, /\[REDACTED\]/);

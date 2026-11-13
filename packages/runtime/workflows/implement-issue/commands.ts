@@ -1,12 +1,10 @@
-// Every command implement-issue runs (the tests of the TDD loop, `git`, `gh`) goes through `ctx.exec`: it never blocks the
-// process (status and cancel stay responsive), it is killed at its timeout, and the run's event log shows it as a step node.
+// Every command implement-issue runs (the tests of the TDD loop, `git`, the forge's CLI) goes through `ctx.exec`: it never blocks
+// the process (status and cancel stay responsive), it is killed at its timeout, and the run's event log shows it as a step node.
+// The forge's CLI is named in forge.ts alone: this file knows only that such a CLI is a network command (`forgeRead`).
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExecOptions, ExecResult } from "../../src/runtime/workflow.js";
-
-/** The state of a pull request, as `gh` reports it. */
-export type PrState = "OPEN" | "MERGED" | "CLOSED";
 
 /** `ctx.exec`. */
 export type Exec = (command: string, args?: string[], opts?: ExecOptions) => Promise<ExecResult>;
@@ -15,13 +13,13 @@ export type Exec = (command: string, args?: string[], opts?: ExecOptions) => Pro
 export interface CommandTimeouts {
   /** Local `git`: a stuck hook or lock, never a network wait. Absent: `ctx.exec`'s default, the workflow's `execTimeoutMs`. */
   localMs?: number;
-  /** `git push` and every `gh` call: a credential prompt or a stalled connection must fail the step, not hang the run. */
+  /** `git push` and every forge CLI call: a credential prompt or a stalled connection must fail the step, not hang the run. */
   networkMs: number;
 }
 
 /** How long local `git` (add, diff, commit with hooks…) may run: past this a hook or a lock is stuck. `wf gc`'s default; a run's own local git takes the workflow's `execTimeoutMs`. */
 export const LOCAL_GIT_TIMEOUT_MS = 5 * 60_000;
-/** The default for how long `git push`, `git ls-remote` and every `gh` call may run, in seconds. */
+/** The default for how long `git push`, `git ls-remote` and every forge CLI call may run, in seconds. */
 export const NETWORK_TIMEOUT_SEC = 120;
 /**
  * The default for how long `wf gc` leaves a cloud snapshot branch alone after the last event of its run, in hours. A step that
@@ -74,8 +72,11 @@ function assertOwned(branch: string, action: string, verb: string): void {
 /** A command's output is read whole, but not without limit: this is what the old synchronous calls allowed (`maxBuffer`). */
 const MAX_STDOUT_BYTES = 64 * 1024 * 1024;
 
+/** The words of a forge CLI call that name its node in the run's log: `<cli> issue view`, not just `<cli> issue`. */
+const FORGE_LABEL_WORDS = 2;
+
 /**
- * The commands of implement-issue. `git` and `gh` answers are read from a file, not from `ExecResult.tail`: the tail holds
+ * The commands of implement-issue. `git` and forge CLI answers are read from a file, not from `ExecResult.tail`: the tail holds
  * only the last 32768 characters of stdout and stderr mixed, and a diff, a file list or an issue with its comments is
  * longer, and one warning on stderr would corrupt a value that is parsed.
  */
@@ -125,6 +126,15 @@ export class Commands {
     await this.push(cwd, `--force-with-lease=${branch}:${expected ?? ""}`, "-u", "origin", branch);
   }
 
+  /** The URL `remote` (the origin by default) has in the repository's configuration, as written there (`url.<base>.insteadOf` is not applied); undefined when there is no such remote. */
+  async remoteUrl(cwd: string, remote = ORIGIN): Promise<string | undefined> {
+    const args = ["config", "--get", `remote.${remote}.url`];
+    const r = await this.read("git", args, cwd, this.timeouts.localMs);
+    if (r.exitCode === 1) return undefined; // git config --get: the key is not set
+    if (!r.ok) throw new CommandError("git", args, r, this.timeouts.localMs);
+    return r.stdout.trim() || undefined;
+  }
+
   /**
    * Every branch `remote` (the origin by default) has under `prefix` (the workflow's own by default), by name, with the commit each
    * points at. A network command. Empty when the repository has no such remote: there is no remote branch to find.
@@ -149,37 +159,24 @@ export class Commands {
     await this.push(cwd, `--force-with-lease=${branch}:${expected}`, remote, `:refs/heads/${branch}`);
   }
 
-  /** `gh` in `cwd`, which has to succeed; returns all of its stdout. */
-  async gh(cwd: string, ...args: string[]): Promise<string> {
-    return this.succeedRead("gh", args, cwd, this.timeouts.networkMs);
+  /** The forge's CLI (`cli`) in `cwd`, which has to succeed; returns all of its stdout. A network command. */
+  async forgeRead(cli: string, cwd: string, ...args: string[]): Promise<string> {
+    return this.succeedRead(cli, args, cwd, this.timeouts.networkMs, FORGE_LABEL_WORDS);
   }
 
   /**
-   * A `gh` query that fails with a known message when there is nothing to find (`gh pr view` on a branch without a PR).
+   * A forge CLI query that fails with a known message when there is nothing to find (a PR lookup on a branch that has none).
    * Returns its stdout, or undefined for "nothing found". Any other failure (an auth error, a network stall) is an error.
    */
-  async ghOrNothing(cwd: string, nothing: RegExp, ...args: string[]): Promise<string | undefined> {
-    const r = await this.read("gh", args, cwd, this.timeouts.networkMs);
+  async forgeReadOrNothing(cli: string, cwd: string, nothing: RegExp, ...args: string[]): Promise<string | undefined> {
+    const r = await this.read(cli, args, cwd, this.timeouts.networkMs, FORGE_LABEL_WORDS);
     if (r.ok) return r.stdout;
     if (r.exitCode === 1 && nothing.test(r.tail)) return undefined;
-    throw new CommandError("gh", args, r, this.timeouts.networkMs);
+    throw new CommandError(cli, args, r, this.timeouts.networkMs);
   }
 
-  /**
-   * The state of the pull request whose head is `branch` (the latest one, when there are several), or undefined when the
-   * branch has none. `repo` (owner/repo): where the PR lives; default, the repository of `cwd`. Any other `gh` failure (an
-   * auth error, a network stall) is an error, never "no PR".
-   */
-  async prState(cwd: string, branch: string, repo?: string): Promise<PrState | undefined> {
-    const out = await this.ghOrNothing(cwd, /no pull requests? found/i, "pr", "view", branch, "--json", "state", "-q", ".state", ...(repo ? ["--repo", repo] : []));
-    const state = out?.trim().toUpperCase();
-    if (state === undefined || state === "") return undefined;
-    if (state !== "OPEN" && state !== "MERGED" && state !== "CLOSED") throw new Error(`gh pr view ${branch}: unexpected state ${JSON.stringify(out?.trim())}`);
-    return state;
-  }
-
-  private options(command: string, args: string[], cwd: string, timeoutMs: number | undefined): ExecOptions {
-    return { cwd, ...(timeoutMs === undefined ? {} : { timeoutMs }), label: `${command} ${args.slice(0, command === "gh" ? 2 : 1).join(" ")}` };
+  private options(command: string, args: string[], cwd: string, timeoutMs: number | undefined, labelWords = 1): ExecOptions {
+    return { cwd, ...(timeoutMs === undefined ? {} : { timeoutMs }), label: `${command} ${args.slice(0, labelWords).join(" ")}` };
   }
 
   private async succeed(command: string, args: string[], cwd: string, timeoutMs: number | undefined): Promise<void> {
@@ -187,21 +184,21 @@ export class Commands {
     if (!r.ok) throw new CommandError(command, args, r, timeoutMs);
   }
 
-  private async succeedRead(command: string, args: string[], cwd: string, timeoutMs: number | undefined): Promise<string> {
-    const r = await this.read(command, args, cwd, timeoutMs);
+  private async succeedRead(command: string, args: string[], cwd: string, timeoutMs: number | undefined, labelWords?: number): Promise<string> {
+    const r = await this.read(command, args, cwd, timeoutMs, labelWords);
     if (!r.ok) throw new CommandError(command, args, r, timeoutMs);
     return r.stdout;
   }
 
   /** Runs the command with its stdout going to a file, and returns the result with the whole stdout. */
-  private async read(command: string, args: string[], cwd: string, timeoutMs: number | undefined): Promise<ExecResult & { stdout: string }> {
+  private async read(command: string, args: string[], cwd: string, timeoutMs: number | undefined, labelWords?: number): Promise<ExecResult & { stdout: string }> {
     const dir = mkdtempSync(join(tmpdir(), "wf-stdout-"));
     const file = join(dir, "stdout");
     try {
       // The path goes in the environment, not in the arguments: the node's id in the log is derived from the arguments, and
       // a temp path would give the same call another id every time.
       const result = await this.exec("bash", ["-c", 'exec "$@" >"$WF_STDOUT"', "read", command, ...args], {
-        ...this.options(command, args, cwd, timeoutMs),
+        ...this.options(command, args, cwd, timeoutMs, labelWords),
         env: { WF_STDOUT: file },
       });
       if (existsSync(file) && statSync(file).size > MAX_STDOUT_BYTES) throw new Error(`${command} ${args[0] ?? ""}: the output is larger than ${MAX_STDOUT_BYTES / 1024 / 1024} MiB`);

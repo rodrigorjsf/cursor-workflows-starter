@@ -1,4 +1,4 @@
-// Workflow de referência: implementar uma issue do GitHub de ponta a ponta, seguindo em código os fluxos das skills
+// Workflow de referência: implementar uma issue do forge (GitHub ou GitLab) de ponta a ponta, seguindo em código os fluxos das skills
 // tdd e codebase-design (implementação), code-review (review) e pr (corpo do PR) de mattpocock/skills (MIT). As
 // instruções estão em workflows/implement-issue/prompts.ts; créditos em docs/vision/02-a-ideia-e-as-referencias.md.
 //
@@ -35,12 +35,13 @@
 //     das seams e o corpo do PR ("secret-blocked");
 //   - o corpo do PR segue o template da skill pr; a Evidence é a saída real red → green de cada fatia, sem caminhos
 //     locais; com fatias adiadas, o PR só referencia a issue (`Refs`) em vez de fechá-la;
-//   - todo comando (testes, git, gh) roda por `ctx.exec` (implement-issue/commands.ts): assíncrono, com teto de tempo
-//     (testes: `testTimeoutSec`; `git push` e `gh`: `networkTimeoutSec`; git local: o `execTimeoutMs` da configuração) e como nó de comando no log
-//     do run. Um erro do `gh` ou do `git` falha o run com a mensagem dele; "sem PR" é só a resposta conhecida do `gh`;
+//   - todo comando (testes, git, o CLI do forge) roda por `ctx.exec` (implement-issue/commands.ts): assíncrono, com teto de tempo
+//     (testes: `testTimeoutSec`; `git push` e o CLI do forge: `networkTimeoutSec`; git local: o `execTimeoutMs` da configuração) e como nó de comando no log
+//     do run. Um erro do CLI do forge ou do `git` falha o run com a mensagem dele; "sem PR" é só a resposta conhecida do forge;
+//   - the forge (host of the issue and the PR: github.com, gitlab.com or one the config's `forges` map declares; an unknown host fails the run before any step) sits behind implement-issue/forge.ts, the only file naming its CLI; the run records it in its progress;
 //   - cada run tem a sua branch (`wf/issue-<n>-<run>`) e o seu worktree, criados a partir da cabeça ATUAL da branch padrão; o
 //     worktree só é reaproveitado pelo run que o registrou no progresso. Uma issue tem no máximo um run ativo: o segundo run
-//     devolve "issue-locked" com o id do que está ativo (lock `issue-<n>` no run store, por repositório; um `repo` que o `gh`
+//     devolve "issue-locked" com o id do que está ativo (lock `issue-<n>` no run store, por repositório; um `repo` que o forge
 //     diz ser o repositório do cwd é o mesmo lock que um run sem `repo`);
 //   - a entrega empurra com `--force-with-lease`, só em branch `wf/`, e só quando o commit que o origin tem na branch é um que
 //     este run empurrou: o resume depois do PR refaz o commit e entrega por cima; commit de outra pessoa na branch dá
@@ -95,6 +96,7 @@ import { NamedLockedError, acquireNamedLock, eventLogPath, readEventLog } from "
 import { defineWorkflow, type AgentCallOptions, type WorkflowCard } from "../src/runtime/workflow.js";
 import { buildPrBody, inlineCode, sanitizeModelText, type PrText } from "./implement-issue/pr-body.js";
 import { CommandError, Commands, NETWORK_TIMEOUT_SEC, SNAPSHOT_GRACE_HOURS, WORKFLOW_BRANCH_PREFIX, worktreeOf } from "./implement-issue/commands.js";
+import { type Forge, createForge, detectForge, forgeNameOf, prLabel } from "./implement-issue/forge.js";
 import * as P from "./implement-issue/prompts.js";
 import { AXES, AXIS_SCHEMAS, blockingAxes, blockingOf, type Axis, type ReviewReports } from "./implement-issue/review.js";
 import {
@@ -153,7 +155,7 @@ type Settings = {
   gcSnapshotGraceHours: number;
   /** Teto de tempo de cada rodada de testes (e do `setupCommand`), em segundos. */
   testTimeoutSec: number;
-  /** Teto de tempo de cada comando de rede (`git push` e `gh`), em segundos: uma credencial pedida ou uma conexão parada falha a etapa. */
+  /** Teto de tempo de cada comando de rede (`git push` e o CLI do forge), em segundos: uma credencial pedida ou uma conexão parada falha a etapa. */
   networkTimeoutSec: number;
 };
 const SETTINGS: Settings = {
@@ -185,7 +187,7 @@ const STANDARDS_FILES = ["CODING_STANDARDS.md", "CONTRIBUTING.md", "AGENTS.md", 
 
 interface Args {
   issue: number;
-  /** owner/repo; default: o repo do cwd. */
+  /** owner/repo, group/sub/project, or a repository URL; default: the cwd's repository. A URL names its host, which decides the forge (the host of `origin` decides otherwise). */
   repo?: string;
   /** Comando de teste; default: o que o plano sugerir, ou `npm test`. */
   testCommand?: string;
@@ -200,13 +202,6 @@ interface Args {
   testGlobs?: string[];
   /** Configuração do runner que nenhuma etapa pode tocar (default: DEFAULT_PROTECTED_GLOBS). */
   protectedGlobs?: string[];
-}
-
-interface Issue {
-  number: number;
-  title: string;
-  body: string;
-  labels: Array<{ name: string }>;
 }
 
 interface Slice { behavior: string; seam: string; testIdea: string }
@@ -265,17 +260,6 @@ const issueCard = (issue: { number: number; title: string }, tier: Tier, extra: 
   badges: [tier],
   ...extra,
 });
-/** The link text of a pull request: `PR #9` for `https://github.com/o/r/pull/9`. */
-const prLabel = (url: string) => {
-  const number = /\/pull\/(\d+)/.exec(url)?.[1];
-  return number ? `PR #${number}` : "Pull request";
-};
-
-/** The URL of the branch's PR, or undefined when it has none. Any other `gh` failure (auth, network) is an error, never "no PR". */
-async function existingPr(cmd: Commands, branch: string, repoFlag: string[], cwd: string): Promise<string | undefined> {
-  const url = await cmd.ghOrNothing(cwd, /no pull requests? found/i, "pr", "view", branch, "--json", "url", "-q", ".url", ...repoFlag);
-  return url?.trim() || undefined;
-}
 
 /** O tier das labels da issue: o mais alto entre os que casam, para a ordem das labels nunca rebaixar uma issue difícil. */
 function tierOfLabels(labels: Array<{ name: string }>, labelTiers: Record<string, Tier>): Tier | undefined {
@@ -293,15 +277,15 @@ const branchExists = (cmd: Commands, cwd: string, branch: string) => cmd.gitIs(c
 /**
  * The name of the lock on an issue: `issue-<n>` for an issue of the cwd's repository, and for one of another repository a name
  * that carries a hash of that repository (GitHub names ignore case), so the same number there is another lock. A `--repo` that
- * names the cwd's own repository, in any form `gh` takes, is the cwd's issue: `gh repo view` says which repository each one is,
- * and a run without `--repo` asks nothing. When `gh` cannot say (no GitHub remote here, no network), the lock is the named
+ * names the cwd's own repository, in any form the forge's CLI takes, is the cwd's issue: the forge says which repository each one
+ * is, and a run without `--repo` asks nothing. When the forge cannot say (no remote of it here, no network), the lock is the named
  * repository's, as for another one, and the log says so.
  */
-async function issueLockName(cmd: Commands, cwd: string, issue: number, repo: string | undefined, log: (message: string) => void): Promise<string> {
+async function issueLockName(forge: Forge, cwd: string, issue: number, repo: string | undefined, log: (message: string) => void): Promise<string> {
   if (!repo) return `issue-${issue}`;
   let named = repo.toLowerCase();
   try {
-    const urlOf = async (...which: string[]) => (await cmd.gh(cwd, "repo", "view", ...which, "--json", "url", "-q", ".url")).trim().toLowerCase();
+    const urlOf = async (which?: string) => (await forge.repoUrl(cwd, which)).toLowerCase();
     const cwdRepository = await urlOf();
     named = await urlOf(repo);
     if (named === cwdRepository) return `issue-${issue}`;
@@ -470,7 +454,7 @@ export default defineWorkflow<Args>({
   meta: {
     name: "implement-issue",
     description:
-      "Implements a GitHub issue with slice-by-slice TDD (red → green checked by the code), a three-axis review (Standards, Spec, Security) and a PR in the Summary/Evidence/Merge Danger template.",
+      "Implements an issue of the repository's forge (GitHub or GitLab) with slice-by-slice TDD (red → green checked by the code), a three-axis review (Standards, Spec, Security) and a PR in the Summary/Evidence/Merge Danger template.",
     whenToUse: "When the user asks to implement or resolve a specific issue by number.",
     phases: [{ title: "Triage" }, { title: "Plan" }, { title: "Implementation" }, { title: "Review" }, { title: "Delivery" }],
     // Roles: the keys of `workflows.implement-issue.roles` in the config. Each role's model is a code default that the
@@ -513,20 +497,23 @@ export default defineWorkflow<Args>({
 
   async run(ctx) {
     const settings = ctx.settings as unknown as Settings; // o esquema da configuração valida os tipos; os padrões vêm de `meta.settings`
-    // Todo comando do workflow (testes, git, gh) passa por ctx.exec: assíncrono, com teto de tempo e visível no log do run.
+    // Todo comando do workflow (testes, git, o CLI do forge) passa por ctx.exec: assíncrono, com teto de tempo e visível no log do run.
     // O git local não passa teto: vale o `execTimeoutMs` da configuração do workflow.
     const cmd = new Commands((command, args, opts) => ctx.exec(command, args, opts), {
       networkMs: settings.networkTimeoutSec * 1000,
     });
     // Lido antes do lock: só lê o arquivo (o engine já trava o run), e um progresso ilegível falha o run sem segurar a issue.
     const progress = new ProgressStore(ctx.cwd, ctx.runId);
+    // The forge the run started on: a fresh run takes the one of its origin's host; a resume keeps the one its record names, and a
+    // record without one (a run from before the field) is GitHub, whatever the origin says now.
+    const forge = createForge(progress.existed ? forgeNameOf(progress.data) : await detectForge(cmd, ctx.cwd, ctx.forges, ctx.args.repo), cmd);
     // Uma issue tem no máximo um run ativo: dois runs na mesma issue brigariam pelo mesmo trabalho e abririam dois PRs. O lock
     // fica no run store (`.workflows/locks/issue-<n>.lock`, ou `issue-<n>-<hash do repositório>.lock` quando o `--repo` é outro
     // repositório que não o do cwd: a issue #5 de outro repositório é outra issue) e vale até o run terminar, qualquer que seja
     // o jeito (status, erro, cancelamento).
     let releaseIssue: () => void;
     try {
-      releaseIssue = acquireNamedLock(ctx.cwd, await issueLockName(cmd, ctx.cwd, ctx.args.issue, ctx.args.repo, (m) => ctx.log(m)), ctx.runId);
+      releaseIssue = acquireNamedLock(ctx.cwd, await issueLockName(forge, ctx.cwd, ctx.args.issue, ctx.args.repo, (m) => ctx.log(m)), ctx.runId);
     } catch (err) {
       if (!(err instanceof NamedLockedError)) throw err;
       return {
@@ -540,6 +527,8 @@ export default defineWorkflow<Args>({
     /** A ordem desta execução no log de eventos do run; lida na primeira etapa de escrita. */
     let execution: number | undefined;
     try {
+      progress.data.forge = forge.name; // `wf gc` asks this forge about the run's PR, whatever is detected later
+      progress.save();
       const { issue: number, repo, openPr = false } = ctx.args;
       const globs = ctx.args.testGlobs?.length ? ctx.args.testGlobs : DEFAULT_TEST_GLOBS;
       const protectedGlobs = ctx.args.protectedGlobs ?? DEFAULT_PROTECTED_GLOBS;
@@ -547,10 +536,9 @@ export default defineWorkflow<Args>({
       const testTimeout = settings.testTimeoutSec * 1000;
       const isTest = (f: string) => isTestFile(f, globs);
 
-      // ── Triagem: dados da issue via gh (código, sem modelo) ─────────────────────────────
+      // ── Triagem: dados da issue via forge (código, sem modelo) ──────────────────────────
       ctx.phase("Triage");
-      const repoFlag = repo ? ["--repo", repo] : [];
-      const issue = JSON.parse(await cmd.gh(ctx.cwd, "issue", "view", String(number), ...repoFlag, "--json", "number,title,body,labels")) as Issue;
+      const issue = await forge.issue(ctx.cwd, number, repo);
       const labelTier = tierOfLabels(issue.labels, settings.labelTiers);
       let tier = labelTier;
       if (!tier) {
@@ -635,10 +623,10 @@ export default defineWorkflow<Args>({
           progress.data.proposedPlan = plan;
           progress.save();
           const relaunch = `npm run wf -- run implement-issue --args ${shellQuote(JSON.stringify({ ...ctx.args, approveSeams: true }))} --resume ${ctx.runId}`;
-          // Model text goes to a public issue: neutralized like the PR body's (closing keywords, mentions, `<!--`). The
-          // interface and the test command sit in inline code spans, where GitHub gives them no effect only while the span
-          // holds: inlineCode turns their backticks and line breaks into characters that cannot close it.
-          const prose = sanitizeModelText;
+          // Model text goes to a public issue: neutralized like the PR body's (closing keywords, mentions, `<!--`, and on GitLab its
+          // quick actions and references). The interface and the test command sit in inline code spans, where the forge gives them no effect only while
+          // the span holds: inlineCode turns their backticks and line breaks into characters that cannot close it.
+          const prose = (text: string) => sanitizeModelText(text, forge.name);
           // Redacted with every credential format: a step result keeps the redact-only ones (a URL password in the test
           // command, a `Bearer` header) for the workflow to run, but a public comment gets none of them.
           const redactOutbound = createRedactor({ extra: savedSecrets() }).text;
@@ -672,9 +660,9 @@ export default defineWorkflow<Args>({
           ].join("\n"));
           const leak = findSecretInText(comment);
           if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the seams comment` };
-          const existing = JSON.parse(await cmd.gh(ctx.cwd, "issue", "view", String(issue.number), ...repoFlag, "--json", "comments")) as { comments: Array<{ body: string }> };
-          if (!existing.comments.some((c) => c.body.includes(SEAMS_MARKER) && c.body.includes(ctx.runId))) {
-            await withBodyFile(comment, (f) => cmd.gh(ctx.cwd, "issue", "comment", String(issue.number), ...repoFlag, "--body-file", f));
+          const existing = await forge.issueComments(ctx.cwd, issue.number, repo);
+          if (!existing.some((body) => body.includes(SEAMS_MARKER) && body.includes(ctx.runId))) {
+            await withBodyFile(comment, (f) => forge.commentOnIssue(ctx.cwd, issue.number, f, repo));
           }
           return { ...base, status: "seams-proposed", runId: ctx.runId, seams: plan.seams, slices: plan.slices, next: relaunch };
         }
@@ -1086,7 +1074,7 @@ export default defineWorkflow<Args>({
       }
       let prUrl: string | undefined;
       if (openPr) {
-        prUrl = await existingPr(cmd, branch, repoFlag, worktree);
+        prUrl = await forge.prUrl(worktree, branch, repo);
         let body: string | undefined; // sem PR ainda: o texto e a trava de segredos vêm ANTES do push, e o PR só depois dele
         if (!prUrl) {
           const text = await ctx.agent<PrText>(
@@ -1102,6 +1090,7 @@ export default defineWorkflow<Args>({
             refuted,
             worktree,
             redact: createRedactor({ extra: savedSecrets() }).text, // the saved Cursor key is in no env var
+            forge: forge.name,
           });
           const leak = findSecretInText(body);
           if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the PR body`, branch, worktree };
@@ -1109,7 +1098,7 @@ export default defineWorkflow<Args>({
         const refused = await pushDelivery(cmd, progress, worktree, branch, repo, deliveryMessage);
         if (refused) return { ...base, status: "push-refused", reason: refused, branch, worktree };
         if (body !== undefined) {
-          prUrl = (await withBodyFile(body, (f) => cmd.gh(worktree, "pr", "create", "--head", branch, "--title", `${issue.title} (#${issue.number})`, "--body-file", f, ...repoFlag))).trim();
+          prUrl = await withBodyFile(body, (bodyFile) => forge.openPr(worktree, { branch, title: `${issue.title} (#${issue.number})`, bodyFile, repo }));
         }
       }
       ctx.card(issueCard(issue, tier, { subtitle: branch, links: prUrl ? [{ label: prLabel(prUrl), url: prUrl }] : undefined }));

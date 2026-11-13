@@ -37,7 +37,7 @@ can make a decision, code **makes** it.
    issue body with a prompt injection can lead a step to copy `~/.cursor/sdk/auth.json` into the worktree and the
    sandbox does not restrict reads. The guard: before the commit, reset any commits an agent made (`git reset --soft`
    to the base, keeping the tree) and scan the lines added since the base for every credential format the event-log
-   redactor knows (`CREDENTIAL_FORMATS` in `src/runtime/redaction.ts`: `crsr_` and `sk-` keys, GitHub, AWS, npm, Slack,
+   redactor knows (`CREDENTIAL_FORMATS` in `src/runtime/redaction.ts`: `crsr_` and `sk-` keys, GitHub, GitLab, AWS, npm, Slack,
    Google and Stripe tokens, private key blocks), the SDK's saved key (or the one in `CURSOR_API_KEY`), the value of any
    secret-named environment variable, and files named `auth.json`, `.env` or `.env.*`; before publishing any text
    (PR body, comment) scan it with the same text rules. A hit stops exactly the effect that would have carried the

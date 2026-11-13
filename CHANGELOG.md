@@ -1,5 +1,28 @@
 # Changelog
 
+## Não lançado
+
+### Adicionado
+
+- **O `implement-issue` e o `wf gc` falam com o GitLab, pelo `glab`.** O forge vem do host: `github.com` é GitHub
+  (`gh`), `gitlab.com` é GitLab (`glab`), e qualquer outro host precisa de uma entrada na chave nova `forges` da
+  configuração (`{ "git.example.com": "gitlab" }`, no arquivo global ou no do repositório; o do repositório vale mais,
+  host a host). Um host que nenhum arquivo declara falha o run antes de qualquer etapa, com o host e a chave no erro. Um
+  run novo detecta o forge pelo host do argumento `repo` quando ele é uma URL, senão pelo do `origin`, e o guarda no
+  progresso; um resume e o `wf gc` usam o forge guardado (um run sem ele é GitHub, como todos os de antes). No GitLab o
+  run lê a issue e os comentários, posta o comentário dos seams e abre um MR (`glab mr create`), e o card do run no dashboard
+  mostra o link como `MR !N`. O texto do modelo que vai para o GitLab passa por um filtro que neutraliza quick actions
+  (`/close`, `/merge`) e as referências `!12`, `~label` e `%milestone`. Workflows leem o mapa em `ctx.forges`. Decisão
+  no ADR-0009.
+- **Tokens do GitLab são redigidos.** `glpat-` e os outros prefixos de token do GitLab entram nos formatos de credencial:
+  saem do log de eventos e a guarda de saída do `implement-issue` os recusa, como os tokens do GitHub.
+
+### Mudado
+
+- **`wf doctor`: o check `gh` virou `forge`.** Ele lê o `origin` do repositório, acha o forge como um run acha (com o
+  mapa `forges`), e pergunta ao CLI desse forge se há login no host do `origin` (`gh auth status --hostname <host>` ou
+  `glab auth status --hostname <host>`). Quem lê `wf doctor --json` encontra o id `forge` onde estava `gh`.
+
 ## 0.3.0 (pré-release, 2026-11-13)
 
 ### Adicionado

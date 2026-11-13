@@ -21,6 +21,12 @@
       "$ref": "#/definitions/cloudPrefs",
       "description": "Preferências das etapas na nuvem (`location: \"cloud\"`). Valem nos dois arquivos; o do repositório vale mais."
     },
+    "forges": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$" },
+      "additionalProperties": { "enum": ["github", "gitlab"] },
+      "description": "Qual forge (o serviço que hospeda o repositório, as issues e os PRs) é cada host que o kit não conhece: `{ \"git.example.com\": \"gitlab\" }`. O kit conhece `github.com` (GitHub, CLI `gh`) e `gitlab.com` (GitLab, CLI `glab`); o `origin` de um repositório em qualquer outro host, ou um argumento `repo` que o nomeia, precisa estar aqui, senão o run falha antes de qualquer etapa, com o host e esta chave no erro. A chave é o host em minúsculas, com a porta quando a URL dela tem uma (`git.example.com:8443`); sem porta, vale para o host em qualquer porta. Valem os dois arquivos, host a host: o do repositório vale mais, e os hosts que só um deles nomeia seguem valendo. É uma preferência, não um teto, e não há variável de ambiente nem flag para ela. Repetir `github.com` ou `gitlab.com` com o forge que o kit já conhece é aceito; com o outro, é erro."
+    },
     "dashboard": {
       "$ref": "#/definitions/dashboardPrefs",
       "description": "O dashboard local. Só vale no arquivo global: ele é um só por usuário, para os runs de todos os repositórios. Um `dashboard` no arquivo do repositório é registrado como violação e não tem efeito."

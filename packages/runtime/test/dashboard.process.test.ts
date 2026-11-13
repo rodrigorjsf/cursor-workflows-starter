@@ -179,10 +179,10 @@ test("a start that fails before the process exists leaves no claim, so the next 
   assert.equal(existsSync(dashboardPidPath()), false);
 
   rmSync(join(home, "dashboard.log"), { recursive: true });
-  const begun = Date.now();
+  const begun = performance.now();
   const next = running(await ensureDashboard({ startTimeoutMs: 15_000 }));
   assert.equal(next.started, true);
-  assert.ok(Date.now() - begun < 10_000, "it did not wait out the earlier claim");
+  assert.ok(performance.now() - begun < 10_000, "it did not wait out the earlier claim");
 });
 
 test("the dashboard it starts keeps CURSOR_API_KEY: its cloud-agent cancel reaches the Cursor API with the key the SDK finds there", async () => {

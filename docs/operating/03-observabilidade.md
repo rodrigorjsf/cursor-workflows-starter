@@ -556,7 +556,7 @@ Para validar a entrega depois, por exemplo quando o PR é aceito ou recusado, us
   - nada disso vai para o banco, para os exports dele, para os ouvintes de eventos nem para as linhas de progresso de
     `wf status` e `wait_workflow`;
   - antes de gravar, o runtime troca por `[REDACTED]` os formatos conhecidos de segredo (chaves e tokens do GitHub,
-    AWS, Slack, Google, npm, Stripe e dos provedores de modelo, JWT, `Bearer`, blocos de chave privada, a senha numa URL como `https://usuario:senha@host`, o token sozinho no lugar do usuário, como `https://<token>@host`, com 16 caracteres ou mais) e o valor de
+    GitLab, AWS, Slack, Google, npm, Stripe e dos provedores de modelo, JWT, `Bearer`, blocos de chave privada, a senha numa URL como `https://usuario:senha@host`, o token sozinho no lugar do usuário, como `https://<token>@host`, com 16 caracteres ou mais) e o valor de
     toda variável de ambiente com `KEY`, `TOKEN`, `SECRET` ou `PASSWORD` no nome (valores com menos de 8 caracteres
     ficam de fora, para não apagar palavras comuns), além da chave de API passada ao run. A mesma redação vale para o
     resultado de cada etapa antes de ele ir para o journal e para o memo, e o workflow já recebe o valor redigido (assim

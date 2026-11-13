@@ -160,17 +160,17 @@ test("the doctor report is kept as ok plus the id, status and message of each ch
     ok: false,
     checks: [
       { id: "node", title: "Node.js", status: "pass", message: "v22.23.4" },
-      { id: "gh", title: "GitHub CLI (gh)", status: "fail", message: "not logged in", hint: "run gh auth login" },
+      { id: "forge", title: "Forge CLI", status: "fail", message: "not logged in", hint: "run gh auth login" },
     ],
   };
   const r = run(progress([]), { doctor });
   assert.equal(r.report.doctor.ok, false);
   assert.deepEqual(
     r.report.doctor.checks.map((c: { id: string; status: string }) => [c.id, c.status]),
-    [["node", "pass"], ["gh", "fail"]],
+    [["node", "pass"], ["forge", "fail"]],
   );
   assert.equal(r.report.doctor.checks[1].hint, "run gh auth login");
-  assert.match(r.body, /gh.*fail/);
+  assert.match(r.body, /forge.*fail/);
 });
 
 test("no doctor report, or one that is not JSON, leaves doctor null instead of breaking the report", () => {

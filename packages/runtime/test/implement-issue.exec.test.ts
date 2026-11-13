@@ -13,7 +13,7 @@ import implementIssue from "../workflows/implement-issue.js";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import { runnerConfigChanged } from "../workflows/implement-issue/tdd.js";
 import { writeRepoConfig } from "./config-fixtures.js";
-import { SUB_CODE, SUB_TEST, failGh, fx, gh, git, issue, onOrigin, run, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
+import { SUB_CODE, SUB_TEST, failForge, fx, forgeState, git, issue, onOrigin, run, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
 
 beforeEach(setup);
 afterEach(teardown);
@@ -52,10 +52,10 @@ test("the test runs of the TDD loop are command nodes in the event log, each wit
 test("a test run that outlives its limit is killed: tests-timeout, and the run goes no further", async () => {
   issue(["complexity:low"]);
   writeRepoConfig(fx.repo, { workflows: { "implement-issue": { settings: { testTimeoutSec: 1 } } } });
-  const startedAt = Date.now();
+  const startedAt = performance.now();
   const r = await run({ testCommand: "sleep 60" });
   assert.equal(res(r).status, "tests-timeout", JSON.stringify(res(r)));
-  assert.ok(Date.now() - startedAt < 30_000, "the run did not wait for the command");
+  assert.ok(performance.now() - startedAt < 30_000, "the run did not wait for the command");
   const suite = execStarts(eventsOf(r.runId)).find((s) => s.label === "suite:baseline");
   assert.equal(suite?.timeoutMs, 1000, "the configured limit is the command's limit");
 });
@@ -161,7 +161,7 @@ test("a failing suite is red even when the workflow itself runs under `node --te
 test("cancelling the run while the suite is running kills the suite at once instead of waiting for it", async () => {
   issue(["complexity:low"]);
   const controller = new AbortController();
-  const startedAt = Date.now();
+  const startedAt = performance.now();
   const r = await runWorkflow(implementIssue, { issue: 7, testCommand: "sleep 60" } as any, {
     cwd: fx.repo,
     signal: controller.signal,
@@ -170,7 +170,7 @@ test("cancelling the run while the suite is running kills the suite at once inst
     },
   });
   assert.equal(r.status, "cancelled");
-  assert.ok(Date.now() - startedAt < 30_000, "the run did not wait for the suite");
+  assert.ok(performance.now() - startedAt < 30_000, "the run did not wait for the suite");
   const events = eventsOf(r.runId);
   const suite = execStarts(events).find((s) => s.label === "suite:baseline")!;
   assert.equal(execEnd(events, suite).outcome, "cancelled");
@@ -180,26 +180,26 @@ test("cancelling the run while the suite is running kills the suite at once inst
 
 test("a gh error in the existing-PR lookup fails the run with gh's error, not as 'no PR'; the resume delivers once gh works", async () => {
   issue(["complexity:low"]);
-  failGh("pr view", "HTTP 401: Bad credentials (https://api.github.com/graphql)");
+  failForge("pr view", "HTTP 401: Bad credentials (https://api.github.com/graphql)");
   const first = await run({ openPr: true });
   assert.equal(first.status, "failed", JSON.stringify(first.result));
   assert.match(first.error!, /gh pr view/);
   assert.match(first.error!, /Bad credentials/, "the error says what gh said");
-  assert.equal(gh().prs.length, 0, "no PR is created on the strength of a failed lookup");
+  assert.equal(forgeState().prs.length, 0, "no PR is created on the strength of a failed lookup");
   assert.ok(!onOrigin(), "nothing is pushed either");
 
-  failGh("pr view", undefined);
+  failForge("pr view", undefined);
   const second = await run({ openPr: true }, first.runId);
   assert.equal(res(second).status, "done", JSON.stringify(res(second)));
-  assert.equal(gh().prs.length, 1);
+  assert.equal(forgeState().prs.length, 1);
 });
 
 test("a branch with no PR yet is not an error: the lookup finds nothing and the PR is created", async () => {
   issue(["complexity:low"]);
-  failGh("pr view", 'no pull requests found for branch "wf/issue-7-x"');
+  failForge("pr view", 'no pull requests found for branch "wf/issue-7-x"');
   const r = await run({ openPr: true });
   assert.equal(res(r).status, "done", JSON.stringify(res(r)));
-  assert.equal(gh().prs.length, 1);
+  assert.equal(forgeState().prs.length, 1);
 });
 
 // ── What gh and git say is read whole ─────────────────────────────────────────────────
@@ -209,21 +209,21 @@ const LONG = "a line of context that makes the text longer than a tail\n".repeat
 
 test("an issue longer than the tail of a command's output is read whole", async () => {
   issue(["complexity:low"]);
-  const state = JSON.parse(readFileSync(fx.ghState, "utf8"));
+  const state = JSON.parse(readFileSync(fx.forgeStateFile, "utf8"));
   state.issue.body = `Exportar \`subtract(a, b)\` em src/math.js, que devolve a - b.\n${LONG}`;
-  writeFileSync(fx.ghState, JSON.stringify(state));
+  writeFileSync(fx.forgeStateFile, JSON.stringify(state));
   const r = await run({});
   assert.equal(res(r).status, "done", JSON.stringify(res(r)));
 });
 
 test("the comments of an issue longer than the tail are read whole", async () => {
   issue(["complexity:medium"]);
-  const state = JSON.parse(readFileSync(fx.ghState, "utf8"));
+  const state = JSON.parse(readFileSync(fx.forgeStateFile, "utf8"));
   state.comments = [LONG, LONG];
-  writeFileSync(fx.ghState, JSON.stringify(state));
+  writeFileSync(fx.forgeStateFile, JSON.stringify(state));
   const r = await run({});
   assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
-  assert.equal(gh().comments.length, 3);
+  assert.equal(forgeState().comments.length, 3);
 });
 
 // ── git push: a network command with a limit ──────────────────────────────────────────
@@ -234,19 +234,19 @@ test("a git push that hangs fails the step at its limit instead of hanging the r
   writeFileSync(hook, "#!/bin/sh\nexec sleep 60\n"); // a push waiting for a credential, a stalled connection
   chmodSync(hook, 0o755);
   writeRepoConfig(fx.repo, { workflows: { "implement-issue": { settings: { networkTimeoutSec: 2 } } } });
-  const startedAt = Date.now();
+  const startedAt = performance.now();
   const first = await run({ openPr: true });
   assert.equal(first.status, "failed", JSON.stringify(first.result));
   assert.match(first.error!, /git push .*timed out after 2s/);
-  assert.ok(Date.now() - startedAt < 40_000, "the run did not wait for the push");
-  assert.equal(gh().prs.length, 0, "no PR was created for a branch that was not pushed");
+  assert.ok(performance.now() - startedAt < 40_000, "the run did not wait for the push");
+  assert.equal(forgeState().prs.length, 0, "no PR was created for a branch that was not pushed");
   const push = execStarts(eventsOf(first.runId)).find((s) => s.label === "git push")!;
   assert.equal(push.timeoutMs, 2000);
 
   rmSync(hook);
   const second = await run({ openPr: true }, first.runId);
   assert.equal(res(second).status, "done", JSON.stringify(res(second)));
-  assert.equal(gh().prs.length, 1);
+  assert.equal(forgeState().prs.length, 1);
   assert.ok(onOrigin());
 });
 

@@ -7,7 +7,7 @@ export const CHECK_TITLES = {
   dependencies: "Installed dependencies",
   login: "Cursor SDK login",
   models: "Configured models",
-  gh: "GitHub CLI (gh)",
+  forge: "Forge CLI",
   "mcp-server": "MCP server",
   config: "Configuration",
   "kit-version": "Kit version",

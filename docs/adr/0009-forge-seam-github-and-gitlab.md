@@ -2,6 +2,8 @@
 
 **Status:** accepted · decided on 2026-11-13 in a design session; the specs that deliver it are linked from their issues
 
+**Amended:** 2026-11-13: a `wf/` branch on the origin that no run of this repo owns has no record to read, so `wf gc` asks the forge of the origin's host for its PR; the rule "a run keeps its forge" stays for every branch a run owns.
+
 ## Context
 
 The kit opened pull requests, read issues and commented on them only through the GitHub CLI (`gh`). `gh` was called
@@ -31,8 +33,9 @@ one implementation per forge: GitHub through `gh`, GitLab through `glab`.
 - **A run keeps its forge.** A run records the forge it resolved; `wf gc` reads it from there and never detects again, so
   a later config or remote change cannot send a deletion decision's state query to the wrong CLI. A record without the
   field is GitHub.
-- **`glab api` where the CLI falls short.** Notes (paginated), comments (`-F body=@file`), the latest MR of a branch and
-  an MR by URL go through the GitLab REST API via `glab api`; the rest uses glab's own commands. glab keeps the login.
+- **`glab api` where the CLI falls short.** Notes (paginated), comments (`-F body=@file`), the MR of a branch (the latest open
+  one, else the latest, as `gh pr view <branch>` picks) and an MR by URL go through the GitLab REST API via `glab api`;
+  the rest uses glab's own commands. glab keeps the login.
 - **"PR" stays the kit's term** on both forges: the persisted fields (`prUrl`, `PrState`) do not change, and only the
   interface shows `MR !9`. `opened` and `locked` map to `OPEN`, so `wf gc` never treats a live MR as finished.
 - **The seam is internal.** The built-in workflow, `wf gc` and `wf doctor` use it; the `observe` entry point exports only

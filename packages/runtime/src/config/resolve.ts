@@ -9,9 +9,9 @@
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import type { ResultVia, StepLocation } from "../runtime/backend.js";
 import type { ConfigSource, ConfigViolation, EffectiveCaps, EffectiveConfig, EffectiveLimits, EffectiveRole } from "../runtime/events.js";
-import type { WorkflowDefinition, WorkflowRole } from "../runtime/workflow.js";
+import type { ForgeName, WorkflowDefinition, WorkflowRole } from "../runtime/workflow.js";
 import { globMatches, literalLength } from "./glob.js";
-import { ConfigError, type ConfigIssue, type LoadedConfig, type Pointer, type RolePrefs, type WorkflowPrefs, pointerOf } from "./file.js";
+import { bareHost, ConfigError, type ConfigIssue, FORGE_TITLES, type LoadedConfig, knownForgeOf, type Pointer, type RolePrefs, type WorkflowPrefs, pointerOf } from "./file.js";
 
 /** The per-run limits a flag or an MCP caller can set. */
 export interface LimitOverrides {
@@ -292,6 +292,17 @@ function checkLocations(input: ResolveInput, roles: WorkflowRole[], issues: Conf
   }
 }
 
+/** A `forges` entry that gives a host the kit knows (github.com, gitlab.com, on any port) the other forge would be silently ignored: it is an error instead. */
+function checkForges(input: ResolveInput, issues: ConfigIssue[]): void {
+  for (const file of [input.global, input.repo]) {
+    for (const [host, forge] of Object.entries(file?.data.forges ?? {})) {
+      const known = knownForgeOf(host);
+      if (known === undefined || known === forge) continue;
+      issues.push({ ref: file!.path, path: pointerOf("forges", host), message: `${bareHost(host)} is ${FORGE_TITLES[known]}, a host the kit knows, so it cannot be declared as ${forge}: remove the entry` });
+    }
+  }
+}
+
 export function resolveConfig(input: ResolveInput): ResolvedConfig {
   const { meta, defaults, budget } = input.workflow;
   const roles = meta.roles ?? [];
@@ -299,6 +310,7 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
   checkDeclaredNames(input, "roles", "role", roles.map((r) => r.name), issues);
   checkDeclaredNames(input, "settings", "setting", Object.keys(meta.settings ?? {}), issues);
   checkLocations(input, roles, issues);
+  checkForges(input, issues);
   const entries = [
     ...(input.global ? fileEntries(input.global, "global", meta.name) : []),
     ...(input.repo ? fileEntries(input.repo, "repo", meta.name) : []),
@@ -373,6 +385,13 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
   const settings = new Map<string, Cell>(Object.entries(meta.settings ?? {}).map(([key, value]) => [key, { value, source: fromCode }]));
   for (const [layer, file] of [["global", input.global], ["repo", input.repo]] as const) {
     for (const [key, value] of Object.entries(file?.data.workflows?.[meta.name]?.settings ?? {})) settings.set(key, { value, source: { layer, ref: file!.path } });
+  }
+
+  // The forge of each host the config files declare: global, then repo, host by host. Apart from `cells`, like the settings: a
+  // host is named by anyone (`location`, `concurrency`), and the rules of `cells` go by the last segment of the pointer.
+  const forges = new Map<string, Cell>();
+  for (const [layer, file] of [["global", input.global], ["repo", input.repo]] as const) {
+    for (const [host, forge] of Object.entries(file?.data.forges ?? {})) forges.set(host, { value: forge, source: { layer, ref: file!.path } });
   }
 
   const dropped = new Set<string>();
@@ -487,12 +506,15 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
     labels: Object.fromEntries([...labels].map((glob) => [glob, settingsOf(pointerOf("labels", glob))])),
     execTimeoutMs: cells.get(pointerOf("execTimeoutMs"))!.value as number,
     cloud: { remote: cells.get(pointerOf("cloud", "remote"))!.value as string },
+    forges: Object.fromEntries([...forges].map(([host, cell]) => [host, cell.value as ForgeName])),
     settings: Object.fromEntries([...settings].map(([key, cell]) => [key, cell.value])),
   };
 
   return {
     config,
-    provenance: Object.fromEntries([...cells, ...[...settings].map(([key, cell]) => [pointerOf("settings", key), cell] as const)].map(([at, cell]) => [at, cell.source])),
+    provenance: Object.fromEntries(
+      [...cells, ...[...settings].map(([key, cell]) => [pointerOf("settings", key), cell] as const), ...[...forges].map(([host, cell]) => [pointerOf("forges", host), cell] as const)].map(([at, cell]) => [at, cell.source]),
+    ),
     violations,
     stepOverrides(role, label) {
       const best = role === undefined ? [...labels].filter((g) => globMatches(g, label)).sort((a, b) => literalLength(b) - literalLength(a))[0] : undefined;

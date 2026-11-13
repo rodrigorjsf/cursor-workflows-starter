@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { calls } from "@cursor/sdk";
 import { globToRegExp } from "../workflows/implement-issue/tdd.js";
-import { PLAN, SUB_CODE, SUB_TEST, branchOf, fx, gh, git, issue, names, run, setup, submit, teardown, write } from "./implement-issue.fixture.js";
+import { PLAN, SUB_CODE, SUB_TEST, branchOf, fx, forgeState, git, issue, names, run, setup, submit, teardown, write } from "./implement-issue.fixture.js";
 
 beforeEach(setup);
 afterEach(teardown);
@@ -19,7 +19,7 @@ test("LOW: red → green, 3 eixos de review, PR com evidência red → green; re
   assert.deepEqual(names().slice(0, 2), ["test-1", "code-1"]);
   assert.deepEqual(names().slice(2, 5).sort(), ["review:security:1", "review:spec:1", "review:standards:1"]);
   assert.equal(names()[5], "pr-text");
-  const { prs } = gh();
+  const { prs } = forgeState();
   assert.equal(prs.length, 1);
   assert.match(prs[0]!.body, /^Closes #7/m);
   assert.match(prs[0]!.body, /## Summary/);
@@ -34,7 +34,7 @@ test("LOW: red → green, 3 eixos de review, PR com evidência red → green; re
   const again = await run({ openPr: true }, r.runId);
   assert.equal((again.result as any).status, "done");
   assert.equal(calls.length, created, "resume depois de done não pode criar agentes");
-  assert.equal(gh().prs.length, 1);
+  assert.equal(forgeState().prs.length, 1);
 });
 
 test("MED: primeiro run propõe as seams na issue e para; o resume com approveSeams reaproveita o plano", async () => {
@@ -42,7 +42,7 @@ test("MED: primeiro run propõe as seams na issue e para; o resume com approveSe
   const first = await run({});
   assert.equal((first.result as any).status, "seams-proposed");
   assert.deepEqual(names(), ["plan"]);
-  const comments = gh().comments;
+  const comments = forgeState().comments;
   assert.equal(comments.length, 1);
   assert.match(comments[0]!, /math\.subtract/);
   assert.match(comments[0]!, new RegExp(`--resume ${first.runId}`));
@@ -51,7 +51,7 @@ test("MED: primeiro run propõe as seams na issue e para; o resume com approveSe
   const second = await run({ approveSeams: true }, first.runId);
   assert.equal((second.result as any).status, "done", JSON.stringify(second.result));
   assert.equal(names().filter((n) => n === "plan").length, 1, "o plano vem do progresso do run");
-  assert.equal(gh().comments.length, 1, "o comentário não se repete");
+  assert.equal(forgeState().comments.length, 1, "o comentário não se repete");
 });
 
 test("seams editadas por args replanejam com as seams aprovadas no prompt", async () => {
@@ -61,7 +61,7 @@ test("seams editadas por args replanejam com as seams aprovadas no prompt", asyn
   const r = await run({ seams: ["math.subtract(a, b)"] });
   assert.equal((r.result as any).status, "done", JSON.stringify(r.result));
   assert.match(planPrompt, /math\.subtract\(a, b\)/);
-  assert.equal(gh().comments.length, 0);
+  assert.equal(forgeState().comments.length, 0);
 });
 
 test("HIGH: três designers em paralelo e um juiz antes de propor as seams", async () => {
@@ -210,7 +210,7 @@ test("o comentário das seams avisa quais fatias ficam fora pelo limite do tier"
   fx.handlers.plan = (o) => submit(o, { ...PLAN, slices: [1, 2, 3, 4, 5].map(slice) });
   const r = await run({});
   assert.equal((r.result as any).status, "seams-proposed");
-  const comment = gh().comments[0]!;
+  const comment = forgeState().comments[0]!;
   assert.match(comment, /4\. comportamento 4 .*\(deferred/);
   assert.match(comment, /tier MED slice cap \(3 slices\)/);
   assert.doesNotMatch(comment, /3\. comportamento 3 .*\(deferred/);

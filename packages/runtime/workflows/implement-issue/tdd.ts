@@ -229,6 +229,11 @@ export interface Progress {
   pushed?: string[];
   /** O `repo` (owner/repo) do run quando ele empurrou: o PR da branch está lá. Ausente: o repositório do cwd. */
   repo?: string;
+  /**
+   * The forge the run started on, by the name on disk: `wf gc` asks that forge for the PR's state, never one detected again.
+   * Absent (a run from before the field): GitHub. A plain string, not `ForgeName`: the file may come from a kit that knows more forges.
+   */
+  forge?: string;
   inFlight?: InFlight;
   /**
    * Quantas vezes o processo caiu no meio de cada etapa de escrita (por id), contadas pelo resume que a encontrou em andamento.
@@ -244,9 +249,12 @@ export interface Progress {
 export class ProgressStore {
   readonly file: string;
   data: Progress;
+  /** Did the run have a progress file when this store was made? A run with none is fresh: nothing of it was recorded yet. */
+  readonly existed: boolean;
   constructor(cwd: string, runId: string) {
     this.file = join(runDirIn(cwd, runId), "tdd-progress.json");
-    this.data = existsSync(this.file) ? (JSON.parse(readFileSync(this.file, "utf8")) as Progress) : { slices: [] };
+    this.existed = existsSync(this.file);
+    this.data = this.existed ? (JSON.parse(readFileSync(this.file, "utf8")) as Progress) : { slices: [] };
   }
   slice(key: string): SliceRecord | undefined {
     return this.data.slices.find((s) => s.key === key);

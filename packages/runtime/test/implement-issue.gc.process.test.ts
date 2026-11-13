@@ -5,9 +5,9 @@
 // Two tests step beside the CLI: one drives gc's plan and apply apart (a run that starts between them), one asks `Commands`
 // for the guard that keeps the origin from deleting a branch outside `wf/`. Two run implement-issue itself, to show what a resume
 // finds after gc. The cloud snapshot branches are pushed by hand to the temporary remotes, as a cloud step leaves them behind
-// (cloud.lifecycle.test.ts has the ones a real crashed cloud step leaves).
+// (cloud.lifecycle.test.ts has the ones a real crashed cloud step leaves). The CLI helper and the runs it judges are shared with
+// implement-issue.gc.forges.process.test.ts (implement-issue.gc.fixture.ts), which runs gc on a GitLab repository too.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
@@ -17,54 +17,14 @@ import { tryAcquireRunLock } from "../src/runtime/run-store.js";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import implementIssue from "../workflows/implement-issue.js";
 import { type GcPlan, applyGc, directCommands, planGc } from "../workflows/implement-issue/gc.js";
-import { branchOf, failGh, fx, gh, git, issue, originBranches, run, setPrState, setup, teardown, worktreeOf } from "./implement-issue.fixture.js";
-import { ageRunLog } from "./run-fixtures.js";
+import { branchOf, failForge, fx, forgeState, git, issue, originBranches, run, setPrState, setup, teardown, worktreeOf } from "./implement-issue.fixture.js";
+import { type GcOutput, age, delivered, editRecord, failedRun, gc, localBranches, stillThere } from "./implement-issue.gc.fixture.js";
 
 beforeEach(() => {
   setup();
   issue(["complexity:low"]); // one issue, and a run on it per scenario: a LOW issue is one slice, no planner
 });
 afterEach(teardown);
-
-const PACKAGE = join(import.meta.dirname, "..");
-
-/** What `wf gc` prints on stdout: the plan, with the result of each action. */
-type GcOutput = GcPlan & { dryRun: boolean };
-
-/** `wf gc <args>` in the temp repo. The child inherits the PATH with the fake gh and the throwaway home. */
-function gc(...args: string[]): { status: number | null; stderr: string; out: GcOutput } {
-  const env = { ...process.env, TSX_TSCONFIG_PATH: join(PACKAGE, "tsconfig.test.json"), WF_METRICS: "off" };
-  delete env.NODE_TEST_CONTEXT;
-  const r = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), join(PACKAGE, "src", "cli.ts"), "gc", "--cwd", fx.repo, ...args], { encoding: "utf8", env });
-  assert.notEqual(r.stdout, "", `wf gc printed no result (exit ${r.status}): ${r.stderr}`);
-  return { status: r.status, stderr: r.stderr, out: JSON.parse(r.stdout) as GcOutput };
-}
-
-const localBranches = () => git(fx.repo, "for-each-ref", "--format=%(refname:short)", "refs/heads/wf/").split("\n").filter(Boolean);
-
-/** A run that delivered: its PR is open on GitHub, its branch is on the origin, its worktree and local branch are here. */
-async function delivered() {
-  const r = await run({ openPr: true });
-  const result = r.result as { status: string; branch: string; worktree: string };
-  assert.equal(result.status, "done", JSON.stringify(result));
-  return { runId: r.runId, branch: result.branch, worktree: result.worktree };
-}
-
-/** A run that failed before it delivered: its suite is red from the start, so it stops with `baseline-red` and leaves its worktree and branch. */
-async function failedRun() {
-  const r = await run({ testCommand: "exit 1" });
-  assert.equal((r.result as { status: string }).status, "baseline-red", JSON.stringify(r.result));
-  return { runId: r.runId, branch: branchOf(r.runId), worktree: worktreeOf(r.runId) };
-}
-
-/** Moves everything the run did `days` days into the past, as if it had happened then. */
-const age = (runId: string, days: number) => ageRunLog(fx.repo, runId, days);
-
-const stillThere = (r: { branch: string; worktree: string }) => ({
-  worktree: existsSync(r.worktree),
-  localBranch: localBranches().includes(r.branch),
-  originBranch: originBranches().includes(r.branch),
-});
 
 test("wf gc removes the worktree, the local branch and the origin branch of a run whose PR was merged, and leaves the run whose PR is still open", async () => {
   const merged = await delivered();
@@ -98,7 +58,7 @@ test("gc asks for the PR state in the repository the run delivered to (its --rep
 
   const out = gc();
   assert.equal(out.status, 0, out.stderr);
-  const stateCalls = gh().calls.filter((c) => c[0] === "pr" && c[1] === "view" && c[2] === result.branch && c.includes("state"));
+  const stateCalls = forgeState().calls.filter((c) => c[0] === "pr" && c[1] === "view" && c[2] === result.branch && c.includes("state"));
   assert.ok(stateCalls.length > 0, "gc asked for the PR state");
   for (const c of stateCalls) assert.deepEqual(c.slice(c.indexOf("--repo"), c.indexOf("--repo") + 2), ["--repo", "acme/fx"], c.join(" "));
   assert.deepEqual(stillThere(result), { worktree: false, localBranch: false, originBranch: false });
@@ -126,7 +86,7 @@ test("a run that failed more than gcFailedAfterDays ago is cleaned up; one that 
 });
 
 test("a run that failed after it pushed, and whose PR was never made, is cleaned up with its origin branch", async () => {
-  failGh("pr create", "HTTP 502");
+  failForge("pr create", "HTTP 502");
   const r = await run({ openPr: true });
   assert.equal(r.status, "failed", "the push went through, the PR did not");
   const pushed = { branch: branchOf(r.runId), worktree: worktreeOf(r.runId) };
@@ -256,7 +216,7 @@ test("gc never removes a branch outside the workflow's prefix, nor a wf/ branch 
 });
 
 test("an origin branch with a commit the run did not push is kept, though the run is cleaned up", async () => {
-  failGh("pr create", "HTTP 502");
+  failForge("pr create", "HTTP 502");
   const r = await run({ openPr: true });
   const mine = { branch: branchOf(r.runId), worktree: worktreeOf(r.runId) };
   age(r.runId, 30);
@@ -291,13 +251,41 @@ test("a failed run whose PR is still open loses its worktree and local branch, b
 test("when gh cannot say what became of a PR the run is kept and gc fails: an auth error is not \"no PR\"", async () => {
   const merged = await delivered();
   setPrState(merged.branch, "MERGED");
-  failGh("pr view", "HTTP 401: authentication required");
+  failForge("pr view", "HTTP 401: authentication required");
 
   const r = gc();
   assert.equal(r.status, 1);
   assert.deepEqual(stillThere(merged), { worktree: true, localBranch: true, originBranch: true });
   assert.match(r.out.errors.join("\n"), new RegExp(`${merged.runId}.*authentication required`));
   assert.deepEqual(r.out.remove, []);
+});
+
+test("gc reads a run whose record has no forge as GitHub: a run from before the field is cleaned up as before", async () => {
+  const merged = await delivered();
+  editRecord(merged.runId, (record) => {
+    assert.equal(record.forge, "github", "the workflow recorded it");
+    delete record.forge;
+  });
+  setPrState(merged.branch, "MERGED");
+
+  const r = gc();
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(stillThere(merged), { worktree: false, localBranch: false, originBranch: false });
+  assert.equal(r.out.remove.find((x) => x.runId === merged.runId)?.reason, "pr-merged");
+});
+
+test("gc keeps a run whose record names a forge this version does not know, and fails: it never asks gh in its place", async () => {
+  const merged = await delivered();
+  editRecord(merged.runId, (record) => (record.forge = "bitbucket"));
+  setPrState(merged.branch, "MERGED");
+  const asked = () => forgeState().calls.filter((c) => c[0] === "pr" && c.includes(merged.branch)).length;
+  const before = asked();
+
+  const r = gc();
+  assert.equal(r.status, 1);
+  assert.deepEqual(stillThere(merged), { worktree: true, localBranch: true, originBranch: true });
+  assert.match(r.out.errors.join("\n"), new RegExp(`${merged.runId}.*forge "bitbucket".*does not know`));
+  assert.equal(asked(), before, "no PR query went to gh for the run");
 });
 
 test("a cancelled run is not a failed one: however long ago it stopped, gc keeps it", async () => {
@@ -473,7 +461,7 @@ test("a cloud snapshot branch that a run of this repo left on the remote is remo
 /** What the plan keeps of the cloud snapshot branches: each branch once, with why. */
 const keptSnapshots = (out: GcOutput) => out.kept.filter((k) => k.branch?.startsWith("wf/cloud-snapshot/")).map((k) => [k.branch, k.why]);
 /** Every `gh` call that names a cloud snapshot branch: a snapshot has no PR, so there must be none. */
-const prLookupsForSnapshots = () => gh().calls.filter((c) => c.some((arg) => arg.includes("cloud-snapshot")));
+const prLookupsForSnapshots = () => forgeState().calls.filter((c) => c.some((arg) => arg.includes("cloud-snapshot")));
 
 test("a snapshot branch of a run still inside the grace period, of a run id this repo does not have, or with a name no cloud step builds, stays; the plan says why, lists each once, and no PR is looked up for any", async () => {
   const fresh = await delivered(); // its last event is from this minute: a cloud agent may still be starting from its snapshot
@@ -644,9 +632,9 @@ const settingsOfImplementIssue = (settings: Record<string, unknown>) => writeRep
 
 /** A PR on GitHub for a branch this repo has no run for (the run was made in another clone): the fake gh gets it as if `pr create` had made it. */
 function addPr(head: string, state: "OPEN" | "MERGED" | "CLOSED") {
-  const st = JSON.parse(readFileSync(fx.ghState, "utf8")) as { prs: unknown[] };
+  const st = JSON.parse(readFileSync(fx.forgeStateFile, "utf8")) as { prs: unknown[] };
   st.prs.push({ url: `https://example.invalid/pull/${st.prs.length + 1}`, body: "", head, state });
-  writeFileSync(fx.ghState, JSON.stringify(st));
+  writeFileSync(fx.forgeStateFile, JSON.stringify(st));
 }
 
 test("a wf/ branch on the origin that no run of this repo owns goes when its PR was merged or closed, and stays when its PR is open or it has none", async () => {

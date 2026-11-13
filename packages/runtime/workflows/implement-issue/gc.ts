@@ -12,6 +12,11 @@
 // worktree, when its PR was merged or closed and no process executes one of those runs. The run's own state
 // (`.workflows/runs/<runId>/`, its event log and journal) stays: it is the history, and the metrics read it.
 //
+// The PR's state comes from the forge (ADR-0009: `gh` or `glab`), and which one is never a guess made again: a run is asked on the
+// forge its progress recorded (a record without one is GitHub, as every run before the field was), so a config or remote change
+// after the run cannot send its deletion decision to another forge's CLI. A branch no run owns has no record, so the forge of the
+// origin's host decides.
+//
 // It also sweeps the cloud snapshot branches (`wf/cloud-snapshot/<run>/<id>`) that cloud steps push to the remote `cloud.remote`
 // names and delete when the step ends: the ones a crash, a `kill -9` or a remote that refused the deletion left behind. A snapshot
 // has no PR, so it is judged by its run (`planSnapshots`): it goes when the run is one of this repo's, no process executes it,
@@ -30,7 +35,8 @@ import type { WorkflowEvent } from "../../src/runtime/events.js";
 import { outcomeClass } from "../../src/runtime/outcome.js";
 import { interruptedCloudSteps } from "../../src/runtime/projection.js";
 import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn, runsDirIn, tryAcquireRunLock } from "../../src/runtime/run-store.js";
-import { type Exec, type PrState, Commands, LOCAL_GIT_TIMEOUT_MS, NETWORK_TIMEOUT_SEC, ORIGIN, WORKFLOW_BRANCH_PREFIX, worktreeOf, worktreesDirIn } from "./commands.js";
+import { type Exec, Commands, LOCAL_GIT_TIMEOUT_MS, NETWORK_TIMEOUT_SEC, ORIGIN, WORKFLOW_BRANCH_PREFIX, worktreeOf, worktreesDirIn } from "./commands.js";
+import { DEFAULT_FORGE, type Forge, type ForgeName, type PrState, createForge, detectForge, forgeNameOf } from "./forge.js";
 import { type Progress, ProgressStore } from "./tdd.js";
 
 /** Why something is cleaned up: its PR was merged or closed, its run failed longer ago than the limit, or it is a cloud snapshot branch its step never deleted. */
@@ -177,8 +183,15 @@ const SHARED_BRANCH = new RegExp(`^${WORKFLOW_BRANCH_PREFIX}issue-\\d+$`);
  * Looks at every run of the repo and decides what to remove; changes nothing. The runs are the repo's own (`.workflows/runs/`):
  * the global runs index is for tools that are not inside a repo.
  */
-export async function planGc(options: { cwd: string; commands: Commands; failedAfterDays: number; snapshots: SnapshotSweep }): Promise<GcPlan> {
-  const { cwd, commands, failedAfterDays, snapshots } = options;
+export async function planGc(options: {
+  cwd: string;
+  commands: Commands;
+  failedAfterDays: number;
+  snapshots: SnapshotSweep;
+  /** The config's `forges` map: the forge of an origin host the kit does not know (ADR-0009). */
+  forges?: Readonly<Record<string, ForgeName>>;
+}): Promise<GcPlan> {
+  const { cwd, commands, failedAfterDays, snapshots, forges = {} } = options;
   const now = Date.now();
   const plan: GcPlan = { repo: cwd, failedAfterDays, remove: [], kept: [], errors: [] };
   const worktreesDir = worktreesDirIn(cwd);
@@ -219,7 +232,8 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
 
     let state: PrState | undefined;
     try {
-      state = (progress.pushed?.length ?? 0) > 0 ? await commands.prState(cwd, branch, progress.repo) : undefined;
+      // The forge the run recorded decides, never one detected now: a config or remote change must not send this query to another forge's CLI.
+      state = (progress.pushed?.length ?? 0) > 0 ? await createForge(forgeNameOf(progress), commands).prState(cwd, branch, progress.repo) : undefined;
     } catch (err) {
       plan.errors.push(`run ${runId}: the state of its PR cannot be read, so it is kept: ${errorText(err)}`);
       continue;
@@ -245,12 +259,16 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
     plan.remove.push({ runId, reason, actions, notes });
   }
 
-  await planShared(plan, commands, runs, locals, registered, remote);
+  // The branches every run of an issue shared belong to runs from before the forge was recorded: GitHub, as for any record without one.
+  await planShared(plan, createForge(DEFAULT_FORGE, commands), runs, locals, registered, remote);
   await planSnapshots(plan, commands, snapshots, now);
 
   // The origin's `wf/` branches that none of these runs owns: made by a run in another clone, or by one whose state is gone.
   // Nothing says whether that run is still going, so only a PR that is done (merged or closed) says the branch is a leftover.
+  // No record names the forge of such a branch, and the branch is on the origin as it is now: the forge of the origin's host decides,
+  // looked up when the first of them is met.
   const owned = new Set(runs.flatMap((r) => (r.progress.branch ? [r.progress.branch] : [])));
+  let originForge: Forge | undefined;
   for (const [branch, head] of remote ?? []) {
     if (branch.startsWith(SNAPSHOT_BRANCH_PREFIX)) {
       // A snapshot never has a PR: `planSnapshots` judges those on the remote cloud steps push to, and no other is asked about.
@@ -259,7 +277,8 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
     }
     if (owned.has(branch) || SHARED_BRANCH.test(branch)) continue;
     try {
-      const state = await commands.prState(cwd, branch);
+      originForge ??= createForge(await detectForge(commands, cwd, forges), commands);
+      const state = await originForge.prState(cwd, branch);
       const done = state && DONE_PR[state];
       if (done) plan.remove.push({ reason: done, actions: [{ kind: "remote-branch", target: branch, head }], notes: [] });
       else plan.kept.push({ branch, why: state === "OPEN" ? "its PR is open, and no run of this repo owns it" : "no run of this repo owns it, and it has no PR" });
@@ -358,7 +377,7 @@ async function planSnapshots(plan: GcPlan, commands: Commands, snapshots: Snapsh
  */
 async function planShared(
   plan: GcPlan,
-  commands: Commands,
+  forge: Forge,
   runs: Array<{ runId: string; progress: Progress }>,
   locals: Set<string>,
   registered: Set<string>,
@@ -378,7 +397,7 @@ async function planShared(
     }
     let state: PrState | undefined;
     try {
-      state = await commands.prState(cwd, branch);
+      state = await forge.prState(cwd, branch);
     } catch (err) {
       plan.errors.push(`shared branch ${branch}: the state of its PR cannot be read, so it is kept: ${errorText(err)}`);
       continue;

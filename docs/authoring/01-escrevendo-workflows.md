@@ -29,7 +29,7 @@ documento explica o *porquê* das regras e traz as receitas, que a skill aponta.
 - **Trava de segredos.** Antes do commit, o `implement-issue` desfaz os commits que um agente tenha feito
   (`git reset --soft` para a base, mantendo a árvore) e examina as linhas adicionadas desde a base atrás dos formatos
   de credencial que o redator do log conhece (`CREDENTIAL_FORMATS` em `redaction.ts`: chaves `crsr_` e `sk-`, tokens
-  do GitHub, AWS, npm, Slack, Google e Stripe, blocos de chave privada; JWTs e `Bearer`, comuns em fixtures, só são
+  do GitHub, GitLab, AWS, npm, Slack, Google e Stripe, blocos de chave privada; JWTs e `Bearer`, comuns em fixtures, só são
   redigidos), da própria chave salva do SDK (ou a de `CURSOR_API_KEY`) e do valor de variáveis de ambiente com nome de
   segredo, e os arquivos chamados `auth.json`, `.env` ou `.env.*`. As mesmas regras de texto valem para o comentário
   das seams e para o corpo do PR, cuja saída de teste já entra redigida. Cada acerto para o efeito que levaria o texto para fora:
@@ -237,8 +237,9 @@ etapa interrompida deixaria edições pela metade. Por isso o `implement-issue`:
   cabeça atual da branch padrão e nunca reaproveita o worktree de outro; o lock `issue-<n>` (em `.workflows/locks/`)
   recusa um segundo run na mesma issue. A issue do próprio repositório do cwd trava `issue-<n>`, com ou sem o arg
   `repo`; o nome só ganha um hash do repositório quando `repo` aponta para outro repositório (comparado pela URL que o
-  `gh repo view --json url` devolve, em minúsculas; se o `gh` não responde, o hash é do valor de `repo` em minúsculas,
-  mesmo que ele nomeie o repositório do cwd, e o run registra isso no log);
+  forge devolve, em minúsculas: `gh repo view --json url` no GitHub, o `web_url` de `glab api projects/<caminho>` no
+  GitLab; se o CLI do forge não responde, o hash é do valor de `repo` em minúsculas, mesmo que ele nomeie o
+  repositório do cwd, e o run registra isso no log);
 - entrega com `git push --force-with-lease=<branch>:<commit que o origin tem>`, só em branch `wf/`, e só quando esse
   commit é de um push do próprio run (o resume refaz o commit depois do PR; o commit de outra pessoa não é
   sobrescrito).

@@ -302,7 +302,7 @@ const oneStep = defineWorkflow({
 });
 
 test("each run appends an entry (run id, repo path, workflow, start time) to the global runs index, once", async () => {
-  const before = Date.now();
+  const before = Date.now(); // wall-clock-ok: compared with the start time the run wrote to the index
   const first = await runWorkflow(oneStep, {}, { cwd });
   await runWorkflow(oneStep, {}, { cwd, runId: first.runId }); // a resume is the same run
   const other = await runWorkflow(oneStep, {}, { cwd });
@@ -314,7 +314,7 @@ test("each run appends an entry (run id, repo path, workflow, start time) to the
   assert.equal(entry!.workflow, "indexed");
   assert.equal(entry!.v, 1);
   const started = Date.parse(entry!.startedAt);
-  assert.ok(started >= before - 1000 && started <= Date.now(), `start time ${entry!.startedAt}`);
+  assert.ok(started >= before - 1000 && started <= Date.now(), `start time ${entry!.startedAt}`); // wall-clock-ok: compared with the start time the run wrote to the index
 });
 
 test("a global runs index that cannot be written warns but never fails the run", async () => {

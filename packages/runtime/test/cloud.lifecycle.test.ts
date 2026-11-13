@@ -551,7 +551,7 @@ for (const heartbeat of ["stale", "fresh"] as const) {
     const restore = staleAfter50ms();
     const other = bystander();
     try {
-      const at = heartbeat === "stale" ? Date.now() - 60_000 : Date.now() + 60_000; // "fresh" stays fresh for the whole test
+      const at = heartbeat === "stale" ? Date.now() - 60_000 : Date.now() + 60_000; // wall-clock-ok: a heartbeat timestamp the job record is read against; "fresh" stays fresh for the whole test
       writeJob(cwd, { jobId: `reused-${heartbeat}`, runId, pid: other.pid, heartbeat: new Date(at).toISOString() });
 
       const result = await cancelJob(cwd, `reused-${heartbeat}`, 100);

@@ -1,9 +1,9 @@
-// Seam 2, the process: `wf doctor` is spawned (against the fake Cursor SDK) in a temporary repo with a temporary home, as
+// Seam: the process. `wf doctor` is spawned (against the fake Cursor SDK) in a temporary repo with a temporary home, as
 // the IDE's environment would be: the kit sits at ~/.cursor-workflows/kit, the repo has the MCP configs `wf init` writes,
-// and `gh` and `node` are whatever the PATH of the process says. The tests read the report, the exit code and the
-// messages; they never import the doctor.
+// and `gh`, `glab` and `node` are whatever the PATH of the process says (git is the real one). The tests read the report,
+// the exit code and the messages; they never import the doctor.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -32,7 +32,9 @@ function fakeBin(name: string, script: string): string {
 }
 
 let ghLoggedIn: string;
-/** Where the real `node` that runs these tests lives: the PATH of a doctor run holds this and the fakes, nothing else. */
+/** A directory holding only `git`, the real one: the forge check reads the repository's `origin` with it. */
+let gitDir: string;
+/** Where the real `node` that runs these tests lives: the PATH of a doctor run holds this, the fakes and `git`, nothing else. */
 const NODE_DIR = dirname(process.execPath);
 
 before(() => {
@@ -41,6 +43,7 @@ before(() => {
   mkdirSync(join(home, ".cursor-workflows"), { recursive: true });
   symlinkSync(KIT_ROOT, join(home, ".cursor-workflows", "kit"));
   ghLoggedIn = fakeBin("gh", "exit 0");
+  gitDir = fakeBin("git", `exec "${execFileSync("/bin/sh", ["-c", "command -v git"], { encoding: "utf8" }).trim()}" "$@"`);
 
   initialisedRepo = join(sandbox, "initialised");
   mkdirSync(initialisedRepo);
@@ -49,11 +52,11 @@ before(() => {
 });
 after(() => rmSync(sandbox, { recursive: true, force: true }));
 
-/** The environment of a doctor run: only the given directories (then the real node's) on the PATH, so no `gh` of the machine leaks in. */
+/** The environment of a doctor run: only the given directories (then the real node's and `git`) on the PATH, so no `gh` or `glab` of the machine leaks in. */
 function env(bins: string[], extra: Record<string, string> = {}, userHome = home, kit = KIT_ROOT): Record<string, string> {
   return {
     ...getDefaultEnvironment(),
-    PATH: [...bins, NODE_DIR].join(":"),
+    PATH: [...bins, NODE_DIR, gitDir].join(":"),
     HOME: userHome,
     WF_HOME: join(userHome, ".cursor-workflows"),
     TSX_TSCONFIG_PATH: join(kit, "packages", "runtime", "tsconfig.test.json"),
@@ -75,6 +78,32 @@ function repoCopy(): string {
   return repo;
 }
 const repoConfigPath = (repo: string) => join(repo, ".agents", "workflows", "config.json");
+
+/** A copy of the initialised repo that is a git repository, with an `origin` remote when `origin` is given. */
+function gitRepoCopy(origin?: string): string {
+  const repo = repoCopy();
+  const git = (...args: string[]) => {
+    const r = spawnSync("git", args, { cwd: repo, env: env([]), encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+  };
+  git("init", "--quiet");
+  if (origin !== undefined) git("remote", "add", "origin", origin);
+  return repo;
+}
+
+/** A user's home with a global config file holding `config`, as a user declaring a self-managed host once would have. */
+function homeWithConfig(config: unknown): string {
+  const userHome = homeWithKit(KIT_ROOT);
+  put(join(userHome, ".cursor-workflows", "config.json"), config);
+  return userHome;
+}
+
+/** A forge CLI that logs its arguments, then answers `auth status` as a logged-in user (or, with `said`, a logged-out one) would. */
+function fakeForgeCli(name: "gh" | "glab", said?: string): { dir: string; calls: () => string[] } {
+  const log = join(sandbox, `${name}-${++counter}.log`);
+  const dir = fakeBin(name, `echo "$*" >> "${log}"\n${said === undefined ? "exit 0" : `echo "${said}" >&2\nexit 1`}`);
+  return { dir, calls: () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []) };
+}
 
 /** A copy of the kit at `version`: the runtime of a doctor or a server run that is not this checkout's own version. */
 const kitAt = (version: string): string => copyKit(join(sandbox, `kit-${++counter}`), version);
@@ -141,7 +170,7 @@ test("on a healthy setup every check passes: exit 0, and --json lists the eight 
   assert.equal(report.ok, true);
   assert.deepEqual(
     report.checks.map((c) => c.id),
-    ["node", "dependencies", "login", "models", "gh", "mcp-server", "config", "kit-version"],
+    ["node", "dependencies", "login", "models", "forge", "mcp-server", "config", "kit-version"],
   );
   for (const c of report.checks) assert.ok(c.status === "pass" && c.hint === undefined, `${c.id}: ${c.message}`);
   assert.equal(r.stderr, "", "the doctor writes its report to stdout and nothing to stderr");
@@ -153,14 +182,14 @@ test("without --json the report is text, one block per check with the fix hint u
   assert.match(healthy.stdout, /\[ok\]\s+Node\.js: v\d+/);
   assert.match(healthy.stdout, /All good: 8 checks passed\./);
 
-  // Logged out and no gh: login, models (no catalog without a login) and gh fail.
-  const r = doctor(repoCopy(), { args: [], bins: [], env: { FAKE_SDK_LOGGED_OUT: "1" } });
+  // Logged out and no gh in a GitHub repository: login, models (no catalog without a login) and forge fail.
+  const r = doctor(gitRepoCopy("https://github.com/acme/widgets.git"), { args: [], bins: [], env: { FAKE_SDK_LOGGED_OUT: "1" } });
   assert.equal(r.status, 1);
   assert.throws(() => JSON.parse(r.stdout), "text, not JSON");
   assert.match(r.stdout, /\[ok\]\s+Node\.js/);
   assert.match(r.stdout, /\[FAIL\]\s+Cursor SDK login: /);
   assert.match(r.stdout, /how to fix: Log in with `wf login`/);
-  assert.match(r.stdout, /\[FAIL\]\s+GitHub CLI \(gh\): /);
+  assert.match(r.stdout, /\[FAIL\]\s+Forge CLI: /);
   assert.match(r.stdout, /3 of 8 checks failed\./);
 });
 
@@ -285,22 +314,126 @@ test("the models check does not guess when the config does not resolve", () => {
   assert.ok(models.hint);
 });
 
-test("the gh check passes for a logged-in gh, and fails with what gh said and `gh auth login` when it is logged out, or with where to get it when it is missing", () => {
-  const repo = repoCopy();
-  const ok = checkOf(reportOf(doctor(repo)), "gh");
+test("the forge check of a GitHub repository runs `gh auth status` for the origin's host: it passes for a logged-in gh, and fails with what gh said and `gh auth login` when it is logged out, or with where to get it when it is missing", () => {
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  const gh = fakeForgeCli("gh");
+  const ok = checkOf(reportOf(doctor(repo, { bins: [gh.dir] })), "forge");
   assert.equal(ok.status, "pass", ok.message);
+  assert.deepEqual(gh.calls(), ["auth status --hostname github.com"]);
 
-  const loggedOutGh = fakeBin("gh", 'echo "You are not logged into any GitHub hosts." >&2\nexit 1');
-  const loggedOut = checkOf(reportOf(doctor(repo, { bins: [loggedOutGh] })), "gh");
+  const loggedOutGh = fakeForgeCli("gh", "You are not logged into any GitHub hosts.");
+  const loggedOut = checkOf(reportOf(doctor(repo, { bins: [loggedOutGh.dir] })), "forge");
   assert.equal(loggedOut.status, "fail");
   assert.match(loggedOut.message, /not logged into any GitHub hosts/);
-  assert.match(loggedOut.hint ?? "", /gh auth login/);
+  assert.match(loggedOut.hint ?? "", /gh auth login --hostname github\.com/);
 
-  const missing = checkOf(reportOf(doctor(repo, { bins: [] })), "gh");
+  const missing = checkOf(reportOf(doctor(repo, { bins: [] })), "forge");
   assert.equal(missing.status, "fail");
-  assert.match(missing.message, /PATH/);
+  assert.match(missing.message, /`gh` is not on the PATH/);
   assert.match(missing.hint ?? "", /cli\.github\.com/);
-  assert.match(missing.hint ?? "", /gh auth login/);
+  assert.match(missing.hint ?? "", /gh auth login --hostname github\.com/);
+});
+
+test("the forge check of a gitlab.com repository runs `glab auth status --hostname gitlab.com` and needs no gh: a logged-out glab fails with `glab auth login`, a missing one with where to get it", () => {
+  const repo = gitRepoCopy("https://gitlab.com/acme/sub/widgets.git");
+  const glab = fakeForgeCli("glab");
+  const gh = fakeForgeCli("gh");
+  const ok = checkOf(reportOf(doctor(repo, { bins: [glab.dir] })), "forge");
+  assert.equal(ok.status, "pass", ok.message);
+  assert.deepEqual(glab.calls(), ["auth status --hostname gitlab.com"]);
+  assert.deepEqual(gh.calls(), [], "gh is never asked about a GitLab repository");
+
+  const loggedOutGlab = fakeForgeCli("glab", "x gitlab.com: No token provided");
+  const loggedOut = checkOf(reportOf(doctor(repo, { bins: [loggedOutGlab.dir, gh.dir] })), "forge");
+  assert.equal(loggedOut.status, "fail");
+  assert.match(loggedOut.message, /No token provided/);
+  assert.match(loggedOut.hint ?? "", /glab auth login --hostname gitlab\.com/);
+
+  const missing = checkOf(reportOf(doctor(repo, { bins: [gh.dir] })), "forge");
+  assert.equal(missing.status, "fail");
+  assert.match(missing.message, /`glab` is not on the PATH/);
+  assert.match(missing.hint ?? "", /gitlab\.com\/gitlab-org\/cli/);
+  assert.match(missing.hint ?? "", /glab auth login --hostname gitlab\.com/);
+});
+
+test("a host the global config or the repo config declares as GitLab is checked with glab for that host, as the origin spells it", () => {
+  // Declared once in the user's global config: every repository on the host.
+  const glab = fakeForgeCli("glab");
+  const global = homeWithConfig({ forges: { "git.example.com": "gitlab" } });
+  const scp = checkOf(reportOf(doctor(gitRepoCopy("git@git.example.com:group/sub/project.git"), { bins: [glab.dir], home: global })), "forge");
+  assert.equal(scp.status, "pass", scp.message);
+
+  // Declared in the repository's own config; an https remote's port is the web port, an ssh remote's is not.
+  const repo = gitRepoCopy("https://git.example.com:8443/group/project.git");
+  put(repoConfigPath(repo), { forges: { "git.example.com": "gitlab" } });
+  assert.equal(checkOf(reportOf(doctor(repo, { bins: [glab.dir] })), "forge").status, "pass");
+  const ssh = gitRepoCopy("ssh://git@git.example.com:2222/group/project.git");
+  put(repoConfigPath(ssh), { forges: { "git.example.com": "gitlab" } });
+  assert.equal(checkOf(reportOf(doctor(ssh, { bins: [glab.dir] })), "forge").status, "pass");
+
+  assert.deepEqual(glab.calls(), ["auth status --hostname git.example.com", "auth status --hostname git.example.com:8443", "auth status --hostname git.example.com"]);
+});
+
+test("a declared GitHub host is checked with gh for that host, and a missing glab does not matter there", () => {
+  const repo = gitRepoCopy("git@ghe.example.com:acme/widgets.git");
+  put(repoConfigPath(repo), { forges: { "ghe.example.com": "github" } });
+  const gh = fakeForgeCli("gh");
+  const forge = checkOf(reportOf(doctor(repo, { bins: [gh.dir] })), "forge");
+  assert.equal(forge.status, "pass", forge.message);
+  assert.deepEqual(gh.calls(), ["auth status --hostname ghe.example.com"]);
+});
+
+test("an origin on a host nobody declared fails the forge check naming the host and the `forges` key, and a hint to declare it", () => {
+  const forge = checkOf(reportOf(doctor(gitRepoCopy("https://code.example.org/acme/widgets.git"), { bins: [] })), "forge");
+  assert.equal(forge.status, "fail");
+  assert.match(forge.message, /code\.example\.org/);
+  assert.match(forge.message, /"forges"/);
+  assert.match(forge.hint ?? "", /forges/);
+});
+
+test("outside a git repository, or in one with no origin, the forge check passes and says why; an origin that names no host is GitHub, as in a run", () => {
+  const outside = checkOf(reportOf(doctor(repoCopy(), { bins: [] })), "forge");
+  assert.equal(outside.status, "pass", outside.message);
+  assert.match(outside.message, /not inside a git repository/);
+
+  const noOrigin = checkOf(reportOf(doctor(gitRepoCopy(), { bins: [] })), "forge");
+  assert.equal(noOrigin.status, "pass", noOrigin.message);
+  assert.match(noOrigin.message, /no `origin` remote/);
+
+  const gh = fakeForgeCli("gh");
+  const local = checkOf(reportOf(doctor(gitRepoCopy("/srv/git/widgets.git"), { bins: [gh.dir] })), "forge");
+  assert.equal(local.status, "pass", local.message);
+  assert.deepEqual(gh.calls(), ["auth status"]);
+});
+
+test("outside a git repository the forge check passes whatever the language git speaks: git is asked in the C locale", () => {
+  // Stands in for a git that translates its messages (as the real one does) unless the caller pins the locale.
+  const realGit = join(gitDir, "git");
+  const translating = fakeBin("git", `if [ "$LC_ALL" = C ]; then exec "${realGit}" "$@"; fi\necho "fatal: kein Git-Repository (oder irgendein Elternverzeichnis): .git" >&2\nexit 128`);
+  const outside = checkOf(reportOf(doctor(repoCopy(), { bins: [translating], env: { LANG: "de_DE.UTF-8" } })), "forge");
+  assert.equal(outside.status, "pass", outside.message);
+  assert.match(outside.message, /not inside a git repository/);
+});
+
+test("a config that does not resolve fails the forge check only when the origin's host is one it could declare", () => {
+  const broken = (origin: string) => {
+    const repo = gitRepoCopy(origin);
+    put(repoConfigPath(repo), "{ not json");
+    return checkOf(reportOf(doctor(repo, { bins: [fakeForgeCli("gh").dir, fakeForgeCli("glab").dir] })), "forge");
+  };
+  assert.equal(broken("https://github.com/acme/widgets.git").status, "pass");
+  assert.equal(broken("https://gitlab.com/acme/widgets.git").status, "pass");
+  const unknown = broken("https://git.example.com/acme/widgets.git");
+  assert.equal(unknown.status, "fail");
+  assert.match(unknown.message, /git\.example\.com/);
+  assert.match(unknown.message, /configuration/);
+});
+
+test("without git on the PATH the forge check fails and says where to get it, since it cannot read the origin", () => {
+  const forge = checkOf(reportOf(doctor(gitRepoCopy("https://github.com/acme/widgets.git"), { env: { PATH: NODE_DIR } })), "forge");
+  assert.equal(forge.status, "fail");
+  assert.match(forge.message, /`git` is not on the PATH/);
+  assert.match(forge.hint ?? "", /git/);
 });
 
 /** Replaces the command of the `workflows` entry in a repo's `.mcp.json`, leaving the rest of the repo as `wf init` wrote it. */
@@ -469,7 +602,7 @@ test("a check that throws is a failed check naming the workflow, not a crashed d
   assert.equal(config.status, "fail");
   assert.match(config.message, /bad-roles/);
   assert.equal(checkOf(report, "node").status, "pass");
-  assert.equal(checkOf(report, "gh").status, "pass");
+  assert.equal(checkOf(report, "forge").status, "pass");
 });
 
 test("what a failing server printed is redacted like everything else in the report", () => {

@@ -7,6 +7,7 @@ import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import { Ajv, type ValidateFunction } from "ajv";
 import type { ResultVia, StepLocation } from "../runtime/backend.js";
 import { userDir } from "../runtime/state.js";
+import type { ForgeName } from "../runtime/workflow.js";
 
 /** Pointer into a JSON document (RFC 6901): `/workflows/implement-issue/roles/review`. */
 export type Pointer = string;
@@ -24,6 +25,24 @@ export interface ConfigCaps {
   maxConcurrency?: number | null;
   requireSandbox?: boolean | null;
 }
+
+/** The hosts whose forge the kit knows without being told. A `forges` entry may repeat one of them, never give it the other forge. */
+const KNOWN_FORGE_HOSTS: Readonly<Record<string, ForgeName>> = { "github.com": "github", "gitlab.com": "gitlab" };
+
+/**
+ * The forge the kit knows `host` as, or undefined. `host` is a bare host or `host:port`: a known host matches on any port. The
+ * config check (a `forges` entry may not give a known host the other forge) and a run's detection both ask here, so they agree.
+ */
+export function knownForgeOf(host: string): ForgeName | undefined {
+  const bare = bareHost(host);
+  return Object.hasOwn(KNOWN_FORGE_HOSTS, bare) ? KNOWN_FORGE_HOSTS[bare] : undefined;
+}
+
+/** `host` without its `:port`: the host `knownForgeOf` matches, and the one a message about that match names. */
+export const bareHost = (host: string): string => host.replace(/:\d+$/, "");
+
+/** The name of each forge, as a message spells it. A total record: a forge added to `ForgeName` is a compile error here. */
+export const FORGE_TITLES: Readonly<Record<ForgeName, string>> = { github: "GitHub", gitlab: "GitLab" };
 
 export interface RolePrefs {
   /** Where the role's steps run. Absent: `local`. Only roles have one (a label has no declared cloud capability). */
@@ -66,6 +85,8 @@ export interface ConfigFile {
   caps?: ConfigCaps;
   dashboard?: DashboardPrefs;
   cloud?: CloudPrefs;
+  /** The forge of each host the kit does not know (`github.com` and `gitlab.com` it does): host, in lower case, with the port when the URL has one. */
+  forges?: Record<string, ForgeName>;
   workflows?: Record<string, WorkflowPrefs>;
 }
 

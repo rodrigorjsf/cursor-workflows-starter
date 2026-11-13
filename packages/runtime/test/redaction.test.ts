@@ -63,6 +63,10 @@ const FORMATS: Record<string, string> = {
   "Google API key": ["AIza", "SyA1234567890abcdefghijklmnopqrstuv"].join(""),
   "npm token": ["npm", "_", "abcdefghijklmnopqrstuvwxyz0123456789"].join(""),
   "Stripe key": ["sk", "_live_", "abcdefghijklmnopqrstuvwx"].join(""),
+  "GitLab personal access token": ["glpat", "-", "a1B2c3D4e5F6g7H8i9J0"].join(""),
+  "GitLab deploy token": ["gldt", "-", "a1B2c3D4e5F6g7H8i9J0"].join(""),
+  "GitLab CI job token": ["glcbt", "-", "a1B2c3D4e5F6g7H8i9J0k1L2"].join(""),
+  "GitLab runner authentication token": ["glrt", "-", "t1_a1B2c3D4e5F6g7H8i9J0"].join(""),
   JWT: ["eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiIxMjM0NTY3ODkwIn0", "abcdefghij1234567890"].join("."),
   "private key block": ["-----BEGIN ", "RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAabc\ndefghijkl\n-----END ", "RSA PRIVATE KEY-----"].join(""),
 };

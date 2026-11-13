@@ -62,7 +62,7 @@ const DOCTOR_FAILING = {
   ok: false,
   checks: [
     { id: "node", title: "Node.js", status: "pass", message: "v22.23.4" },
-    { id: "gh", title: "GitHub CLI (gh)", status: "fail", message: "not logged in", hint: "run gh auth login" },
+    { id: "forge", title: "Forge CLI", status: "fail", message: "not logged in", hint: "run gh auth login" },
   ],
 };
 
@@ -295,7 +295,7 @@ test("a failing doctor is scenario 1 failed, with the failing check in the repor
   const report = m.report();
   assert.equal(report.scenarios[0].result, "fail");
   assert.equal(report.doctor.ok, false);
-  assert.deepEqual(report.doctor.checks.filter((c: { status: string }) => c.status === "fail").map((c: { id: string }) => c.id), ["gh"]);
+  assert.deepEqual(report.doctor.checks.filter((c: { status: string }) => c.status === "fail").map((c: { id: string }) => c.id), ["forge"]);
   assert.equal(report.summary.releaseCriterionMet, false);
 });
 
