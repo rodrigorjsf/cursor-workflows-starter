@@ -62,6 +62,7 @@ As decisões difíceis de reverter, em inglês, uma por arquivo (`docs/adr/NNNN-
 - [7.6 · ADR-0006: Cloud steps as built](adr/0006-cloud-steps-as-built.md): o ADR-0005 como foi construído: `read-only` conferido pelo motor, o trabalho que volta por fast-forward ou não volta, `resultVia` e o reanexar sem pagar duas vezes (substituído pelo ADR-0007)
 - [7.7 · ADR-0007: Cancelling a run stops its cloud agents](adr/0007-cancel-stops-cloud-agents.md): o ADR-0006 com o ciclo de vida corrigido: cancelar para os cloud agents em qualquer estado do job, e o resume depois de um cancelamento cria um agente novo e paga de novo
 - [7.8 · ADR-0008: The job record keeps what the event log cannot](adr/0008-job-record-keeps-what-the-log-cannot.md): o ADR-0002 com o registro do job corrigido: além da identidade, guarda só o que o log não pode guardar (`start`, `refused` e `killedByCancel`, a marca de um job travado que o cancelamento matou); status, gasto e resultado seguem projetados do log
+- [7.9 · ADR-0009: The forge is a seam: GitHub and GitLab](adr/0009-forge-seam-github-and-gitlab.md): o forge (GitHub via `gh`, GitLab via `glab`) detectado pelo host do `origin`, com o mapa `forges` na config para hosts self-managed; `glab api` onde o CLI não basta; "PR" segue o termo do kit
 
 ### Parte 8 · Pesquisa
 

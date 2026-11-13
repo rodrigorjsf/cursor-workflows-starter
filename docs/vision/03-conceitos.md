@@ -97,6 +97,17 @@ a capacidade de cada role. Uma etapa pode rodar em `cloud` contra um snapshot do
 escreve commita na branch de snapshot e o motor avança o worktree até o trabalho dela (um fast-forward, ou a etapa falha). A decisão é o [ADR-0006](../adr/0006-cloud-steps-as-built.md), substituído pelo [ADR-0007](../adr/0007-cancel-stops-cloud-agents.md).
 _Evite_: ambiente, runtime.
 
+**Forge**:
+O serviço que hospeda o repositório do usuário, as suas issues e os seus PRs: GitHub ou GitLab (gitlab.com ou
+self-managed). O kit descobre o forge pelo host do remote `origin`, e a configuração o declara para um host que ele não
+reconhece. Cada forge tem o seu CLI, com o login do próprio usuário.
+_Evite_: provedor, host (o host é só o endereço; dois hosts podem ser o mesmo forge), SCM.
+
+**PR**:
+A proposta de mudança que um workflow abre a partir de uma branch sua: o *pull request* do GitHub ou o *merge request*
+do GitLab. É o termo do kit nos dois forges; só a interface mostra o nome e a referência de cada um (`PR #9`, `MR !9`).
+_Evite_: MR fora da interface, change request.
+
 ## Onde cada coisa mora no disco
 
 | Conceito | Onde |

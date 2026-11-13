@@ -94,4 +94,4 @@ log.
 
 ---
 
-[← Anterior: 7.7 · ADR-0007: Cancelling a run stops its cloud agents](0007-cancel-stops-cloud-agents.md) · [Índice](../README.md) · [Próximo: 8.1 · Cursor SDK como motor de workflows determinísticos: relatório de pesquisa →](../research/relatorio-pesquisa.md)
+[← Anterior: 7.7 · ADR-0007: Cancelling a run stops its cloud agents](0007-cancel-stops-cloud-agents.md) · [Índice](../README.md) · [Próximo: 7.9 · ADR-0009: The forge is a seam: GitHub and GitLab →](0009-forge-seam-github-and-gitlab.md)
