@@ -9,7 +9,7 @@ linha _Evite_ diz qual não usar. Cada definição diz o que o conceito *é*; o 
 
 ```mermaid
 flowchart LR
-  W["workflow<br/>código TypeScript"]:::conceito -->|"cada execução"| R["run<br/>runId"]:::conceito
+  W["workflow<br/>código TypeScript"]:::conceito -->|"cada invocação"| R["run<br/>runId"]:::conceito
   R -->|"é feito de"| S["etapas<br/>agentes com schema"]:::conceito
   J["job<br/>run em segundo plano"]:::conceito -->|"executa"| R
   S -->|"resultado de cada uma"| JR["journal<br/>para o resume"]:::registro
@@ -44,10 +44,17 @@ role declara também se pode rodar na nuvem (veja *location*). Decisão em [ADR-
 _Evite_: tier (é o nível de complexidade da issue no `implement-issue`, outra coisa), tipo.
 
 **Run**:
-Uma execução de um workflow, com um `runId`, os seus `args`, o diretório `.workflows/runs/<runId>/` e o seu teto de
+Uma invocação de um workflow, com um `runId`, os seus `args`, o diretório `.workflows/runs/<runId>/` e o seu teto de
 custo. Um run pode ser interrompido e retomado (`--resume <runId>`, `resumeRunId`): retomar continua o mesmo run, não
-abre outro. Um run tem no máximo um processo executando por vez (`run.lock`).
-_Evite_: execução (ambíguo com a de uma etapa), sessão.
+abre outro, e cada passada de um processo sobre ele é uma *execução*. Um run tem no máximo um processo executando por
+vez (`run.lock`).
+_Evite_: sessão.
+
+**Execução** (*execution*):
+Uma passada de um processo sobre um run, do `run-start` que ela escreve no log de eventos ao seu `run-end` (uma execução
+que caiu não chega ao `run-end`). Um resume é uma execução nova, e um job novo, do mesmo run. O gasto, as tentativas e
+as métricas contam por execução; o status e os tetos de custo valem para o run.
+_Evite_: run (o run é o que as execuções continuam), sessão.
 
 **Job**:
 O run em segundo plano que `start_workflow` (MCP) ou `wf start` (CLI) disparam, em um processo destacado que sobrevive ao
@@ -57,6 +64,18 @@ MCP server e ao Cursor. Tem identidade própria (job id, run id, pid, heartbeat;
 terminado continua `failed`), e o run continua retomável.
 Retomar um run abre outro job sobre o mesmo run. Decisão em [ADR-0003](../adr/0003-detached-jobs.md).
 _Evite_: tarefa, processo.
+
+**Travado** (*frozen*):
+O job cujo processo está vivo, é o do job, segura o lock do run (`run.lock`) e parou de mandar heartbeat. Aparece como
+`failed`, mas ainda executa o run: um cancelamento o mata com SIGKILL. Só esse caso é travado (`isFrozen`, em
+`packages/runtime/src/runtime/job-state.ts`).
+_Evite_: terminado (o processo de um job travado ainda está lá), morto.
+
+**Terminado** (*ended*):
+O job cujo heartbeat parou e cujo processo não está mais lá: o pid morreu, ou é agora de outro processo (reusado), ou
+não segura o lock do run. O processo caiu ou acabou; um job terminado nunca é travado, e um cancelamento não manda sinal
+a ele.
+_Evite_: travado.
 
 **Journal**:
 O `journal.jsonl` do run: o resultado de cada etapa que terminou, com a chave `hash(prompt + opções) + ocorrência`. É
