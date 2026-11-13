@@ -32,6 +32,14 @@ export interface ForgeIssue {
   labels: Array<{ name: string }>;
 }
 
+/** A PR to open: from `branch`, with `title`, the text of the file `bodyFile` as its description, in `repo` (absent: the repository of the cwd). */
+export interface NewPr {
+  branch: string;
+  title: string;
+  bodyFile: string;
+  repo?: string;
+}
+
 /** What the workflow asks of a forge. `repo` (`owner/repo`, `group/sub/project`, or a repository URL): where the issue or the PR lives; absent, the repository of `cwd`. */
 export interface Forge {
   readonly name: ForgeName;
@@ -42,7 +50,7 @@ export interface Forge {
   /** Posts the text of the file `bodyFile` as a comment on the issue. */
   commentOnIssue(cwd: string, number: number, bodyFile: string, repo?: string): Promise<void>;
   /** Opens a PR from `branch`, with the text of `bodyFile` as its description; returns its URL. */
-  openPr(cwd: string, pr: { branch: string; title: string; bodyFile: string; repo?: string }): Promise<string>;
+  openPr(cwd: string, pr: NewPr): Promise<string>;
   /** The URL of the PR whose head is `branch` (the latest one, when there are several), or undefined when the branch has none. A failure that is no "not found" is an error. */
   prUrl(cwd: string, branch: string, repo?: string): Promise<string | undefined>;
   /** The state of that same PR, or undefined when the branch has none. A failure that is no "not found" is an error, never "no PR". */
@@ -196,7 +204,7 @@ class GithubForge implements Forge {
     await this.gh(cwd, "issue", "comment", String(number), ...repoFlag(repo), "--body-file", bodyFile);
   }
 
-  async openPr(cwd: string, pr: { branch: string; title: string; bodyFile: string; repo?: string }): Promise<string> {
+  async openPr(cwd: string, pr: NewPr): Promise<string> {
     return (await this.gh(cwd, "pr", "create", "--head", pr.branch, "--title", pr.title, "--body-file", pr.bodyFile, ...repoFlag(pr.repo))).trim();
   }
 
@@ -385,7 +393,7 @@ class GitlabForge implements Forge {
     await this.api(cwd, repo, "--method", "POST", `${projectOf(repo)}/issues/${number}/notes`, "-F", `body=@${bodyFile}`);
   }
 
-  async openPr(cwd: string, pr: { branch: string; title: string; bodyFile: string; repo?: string }): Promise<string> {
+  async openPr(cwd: string, pr: NewPr): Promise<string> {
     // `glab mr create` has no body-file flag: the text goes as one argument (never through a shell). `--source-branch` names the
     // branch; `-H` would name the head repository.
     const description = readFileSync(pr.bodyFile, "utf8");
