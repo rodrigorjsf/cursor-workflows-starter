@@ -17,7 +17,7 @@ returned fields, the events. Do not assert on internal calls.
 
 ### The fake SDK
 
-Import `{ script, calls, stats, costConfig }` from `@cursor/sdk` in the test; the fake is substituted.
+Import `{ script, calls, stats, costConfig, resetCloud }` from `@cursor/sdk` in the test; the fake is substituted.
 
 - `script.push(fn)` defines what each `send()` does, in order:
   - `() => ({ result: "text" })` simulates free text;
