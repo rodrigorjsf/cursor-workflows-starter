@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { runDirIn } from "../../src/runtime/run-store.js";
 import { writeFileAtomic } from "../../src/runtime/state-files.js";
 import { CommandError, type Commands } from "./commands.js";
+import type { ForgeName } from "./forge.js";
 
 /** O que conta como arquivo de teste quando o run não informa `testGlobs`. */
 export const DEFAULT_TEST_GLOBS = [
@@ -229,6 +230,8 @@ export interface Progress {
   pushed?: string[];
   /** O `repo` (owner/repo) do run quando ele empurrou: o PR da branch está lá. Ausente: o repositório do cwd. */
   repo?: string;
+  /** O forge em que o run começou: o `wf gc` pergunta a ele o estado do PR, nunca a um forge descoberto de novo. Ausente (run de antes do campo): GitHub. */
+  forge?: ForgeName;
   inFlight?: InFlight;
   /**
    * Quantas vezes o processo caiu no meio de cada etapa de escrita (por id), contadas pelo resume que a encontrou em andamento.

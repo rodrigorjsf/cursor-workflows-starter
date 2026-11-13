@@ -30,7 +30,8 @@ import type { WorkflowEvent } from "../../src/runtime/events.js";
 import { outcomeClass } from "../../src/runtime/outcome.js";
 import { interruptedCloudSteps } from "../../src/runtime/projection.js";
 import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn, runsDirIn, tryAcquireRunLock } from "../../src/runtime/run-store.js";
-import { type Exec, type PrState, Commands, LOCAL_GIT_TIMEOUT_MS, NETWORK_TIMEOUT_SEC, ORIGIN, WORKFLOW_BRANCH_PREFIX, worktreeOf, worktreesDirIn } from "./commands.js";
+import { type Exec, Commands, LOCAL_GIT_TIMEOUT_MS, NETWORK_TIMEOUT_SEC, ORIGIN, WORKFLOW_BRANCH_PREFIX, worktreeOf, worktreesDirIn } from "./commands.js";
+import { DEFAULT_FORGE, type PrState, createForge, forgeNameOf } from "./forge.js";
 import { type Progress, ProgressStore } from "./tdd.js";
 
 /** Why something is cleaned up: its PR was merged or closed, its run failed longer ago than the limit, or it is a cloud snapshot branch its step never deleted. */
@@ -219,7 +220,8 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
 
     let state: PrState | undefined;
     try {
-      state = (progress.pushed?.length ?? 0) > 0 ? await commands.prState(cwd, branch, progress.repo) : undefined;
+      // The forge the run recorded decides, never one detected now: a config or remote change must not send this query to another forge's CLI.
+      state = (progress.pushed?.length ?? 0) > 0 ? await createForge(forgeNameOf(progress), commands).prState(cwd, branch, progress.repo) : undefined;
     } catch (err) {
       plan.errors.push(`run ${runId}: the state of its PR cannot be read, so it is kept: ${errorText(err)}`);
       continue;
@@ -259,7 +261,8 @@ export async function planGc(options: { cwd: string; commands: Commands; failedA
     }
     if (owned.has(branch) || SHARED_BRANCH.test(branch)) continue;
     try {
-      const state = await commands.prState(cwd, branch);
+      // No run owns this branch, so no record names its forge: the default one, as before runs recorded theirs.
+      const state = await createForge(DEFAULT_FORGE, commands).prState(cwd, branch);
       const done = state && DONE_PR[state];
       if (done) plan.remove.push({ reason: done, actions: [{ kind: "remote-branch", target: branch, head }], notes: [] });
       else plan.kept.push({ branch, why: state === "OPEN" ? "its PR is open, and no run of this repo owns it" : "no run of this repo owns it, and it has no PR" });
@@ -378,7 +381,7 @@ async function planShared(
     }
     let state: PrState | undefined;
     try {
-      state = await commands.prState(cwd, branch);
+      state = await createForge(DEFAULT_FORGE, commands).prState(cwd, branch);
     } catch (err) {
       plan.errors.push(`shared branch ${branch}: the state of its PR cannot be read, so it is kept: ${errorText(err)}`);
       continue;

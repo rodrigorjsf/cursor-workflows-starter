@@ -300,6 +300,42 @@ test("when gh cannot say what became of a PR the run is kept and gc fails: an au
   assert.deepEqual(r.out.remove, []);
 });
 
+/** Rewrites the progress record of a run: `change` edits what the workflow wrote (a run from before a field, or from a newer kit). */
+function editRecord(runId: string, change: (record: Record<string, unknown>) => void) {
+  const file = join(fx.repo, ".workflows", "runs", runId, "tdd-progress.json");
+  const record = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+  change(record);
+  writeFileSync(file, JSON.stringify(record));
+}
+
+test("gc reads a run whose record has no forge as GitHub: a run from before the field is cleaned up as before", async () => {
+  const merged = await delivered();
+  editRecord(merged.runId, (record) => {
+    assert.equal(record.forge, "github", "the workflow recorded it");
+    delete record.forge;
+  });
+  setPrState(merged.branch, "MERGED");
+
+  const r = gc();
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(stillThere(merged), { worktree: false, localBranch: false, originBranch: false });
+  assert.equal(r.out.remove.find((x) => x.runId === merged.runId)?.reason, "pr-merged");
+});
+
+test("gc keeps a run whose record names a forge this version does not know, and fails: it never asks gh in its place", async () => {
+  const merged = await delivered();
+  editRecord(merged.runId, (record) => (record.forge = "bitbucket"));
+  setPrState(merged.branch, "MERGED");
+  const asked = () => gh().calls.filter((c) => c[0] === "pr" && c.includes(merged.branch)).length;
+  const before = asked();
+
+  const r = gc();
+  assert.equal(r.status, 1);
+  assert.deepEqual(stillThere(merged), { worktree: true, localBranch: true, originBranch: true });
+  assert.match(r.out.errors.join("\n"), new RegExp(`${merged.runId}.*forge "bitbucket".*does not know`));
+  assert.equal(asked(), before, "no PR query went to gh for the run");
+});
+
 test("a cancelled run is not a failed one: however long ago it stopped, gc keeps it", async () => {
   const controller = new AbortController();
   fx.handlers["test-1"] = () => {
