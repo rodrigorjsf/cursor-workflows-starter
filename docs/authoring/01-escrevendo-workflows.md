@@ -298,6 +298,12 @@ combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
      `<workflow>:<label>`).
 5. Para cada defeito que um review encontrar, escreva o teste que o reproduz antes da correção e confirme que ele
    falha no código antigo ([`packages/runtime/test/implement-issue.hardening.test.ts`](../../packages/runtime/test/implement-issue.hardening.test.ts)).
+6. Para esperar algo que acontece em segundo plano (um evento no log, um processo que sai, um arquivo), use `waitFor`
+   de [`packages/runtime/test/wait-for.ts`](../../packages/runtime/test/wait-for.ts): ele consulta a condição até um
+   prazo. Não durma um tempo fixo antes de um `assert`: o teste passa numa máquina ociosa e falha numa carregada, e
+   [`test/fixed-waits.test.ts`](../../test/fixed-waits.test.ts) recusa. Uma espera fixa só fica quando o próprio tempo
+   é o que se testa (nada pode acontecer na janela, um relógio precisa envelhecer), com `// fixed-wait-ok: <motivo>`
+   na linha da espera.
 
 ```bash
 npm test && npm run typecheck

@@ -9,6 +9,7 @@ import { runWorkflow } from "../src/runtime/engine.js";
 import implementIssue from "../workflows/implement-issue.js";
 import { PLAN, SUB_CODE, SUB_TEST, branchOf, failGh, fx, git, issue, names, run, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
 import { writeRepoConfig } from "./config-fixtures.js";
+import { waitFor } from "./wait-for.js";
 
 beforeEach(setup);
 afterEach(teardown);
@@ -193,7 +194,7 @@ async function cancelAtEveryCommandAfter(label: string, runId: string) {
     if (at === undefined) return { cuts, past: r };
     cuts.push(at);
     assert.equal(r.status, "cancelled", `cut ${cut} (${at}): ${JSON.stringify(r)}`);
-    await new Promise((resolve) => setTimeout(resolve, 50)); // the cancelled body is done unwinding
+    await waitFor("the cancelled body to mark the step interrupted", () => progressOf(runId).inFlight?.interrupted === true); // the body unwinds after the run ends
     const p = progressOf(runId);
     assert.ok(p.inFlight?.execution, `cut ${cut} (${at}): the step is in flight, with the execution that began it: ${JSON.stringify(p.inFlight)}`);
     delete p.inFlight.interrupted;
@@ -324,7 +325,7 @@ test("a step begun after a cancelled execution belongs to the execution that beg
       },
     });
     assert.equal(r.status, execution === 1 ? "cancelled" : "failed", `execution ${execution}: ${JSON.stringify(r)}`);
-    await new Promise((resolve) => setTimeout(resolve, 50)); // the cancelled body is done unwinding
+    await waitFor("the cancelled body to mark the step interrupted", () => progressOf(runId).inFlight?.interrupted === true); // the body unwinds after the run ends
     const p = progressOf(runId);
     assert.equal(p.inFlight?.execution, execution, `the step in flight says which execution began it: ${JSON.stringify(p.inFlight)}`);
     delete p.inFlight.interrupted; // as when the process dies before the catch writes the mark

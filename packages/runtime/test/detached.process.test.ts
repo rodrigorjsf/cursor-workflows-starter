@@ -218,7 +218,7 @@ test("a second signal while the run is still stopping ends the process at once, 
   const { pid } = jobRecord(started.jobId);
 
   process.kill(pid, "SIGTERM"); // the fake agent run takes 5 s to cancel
-  await sleep(500);
+  await until("the job to take the first signal", () => readFileSync(started.log, "utf8").includes("[wf] SIGTERM: cancelling the run"));
   assert.ok(alive(pid), "still stopping");
   const signalledAt = Date.now();
   process.kill(pid, "SIGTERM");

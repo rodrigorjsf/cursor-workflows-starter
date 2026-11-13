@@ -348,7 +348,7 @@ test("a timeout that arrives while the snapshot is being pushed still leaves no 
   assert.equal(r.status, "failed");
   assert.match(r.error!, /timeout after 200 ms/);
   assert.equal(calls.length, 0, "the agent was never created: the step ended with the push");
-  await new Promise((resolve) => setTimeout(resolve, 1500)); // a push the client gave up on is still accepted by the remote
+  await new Promise((resolve) => setTimeout(resolve, 1500)); // fixed-wait-ok: a push the client gave up on is still accepted by the remote
   assert.deepEqual(remoteBranches(remote), [], "the branch the push created is gone");
 });
 

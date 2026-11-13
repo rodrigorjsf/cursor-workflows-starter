@@ -491,7 +491,8 @@ test("cancelling the run kills the running commands, ends their nodes as cancell
   const seen: WorkflowEvent[] = [];
   const running = runWorkflow(wf, {}, { cwd, metricsDb: false, signal: controller.signal, onEvent: (e) => seen.push(e) });
   await until("both commands to start", () => seen.filter((e) => e.type === "exec-start").length === 2 || undefined);
-  await new Promise((r) => setTimeout(r, 300)); // let them print their child's pid
+  const printed = () => contentOf(eventsOf(seen[0]!.runId)).filter((c) => c.kind === "command-output").length;
+  await until("both commands to print their child's pid", () => printed() === 2 || undefined);
   const cancelledAt = Date.now();
   controller.abort();
   const r = await running;

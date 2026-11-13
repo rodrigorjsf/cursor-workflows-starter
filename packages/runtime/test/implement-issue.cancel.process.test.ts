@@ -45,7 +45,7 @@ async function freezeAndCancel(pid: number, jobId: string) {
   const staleBefore = process.env.WF_HEARTBEAT_STALE_MS;
   process.env.WF_HEARTBEAT_STALE_MS = "50"; // the readers' threshold, so the test need not wait 30 s
   try {
-    await sleep(150);
+    await sleep(150); // fixed-wait-ok: the frozen heartbeat ages past the 50 ms threshold
     const cancelled = await cancelJob(fx.repo, jobId, 5000);
     assert.match(cancelled!.note, /had no heartbeat and was killed \(SIGKILL\)/, JSON.stringify(cancelled));
     assert.equal(cancelled!.status, "failed", "the killed job never wrote its run's end");

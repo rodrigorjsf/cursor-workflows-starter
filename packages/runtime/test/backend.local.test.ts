@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { RateLimitError, calls, costConfig, script, stats } from "@cursor/sdk";
 import { type AttemptEvent, type AttemptResult, type StepOptions, localBackend } from "../src/runtime/backend.js";
+import { waitFor } from "./wait-for.js";
 
 afterEach(() => {
   script.length = 0;
@@ -143,20 +144,20 @@ test("aborting from inside the callback, on a turn, cancels the run at once: no 
 });
 
 test("a signal aborted while the agent is being created ends the attempt at once, and the agent that arrives late is disposed", async () => {
-  costConfig.createDelayMs = 200;
+  costConfig.createDelayMs = 3000; // far longer than the attempt may take, however loaded the machine
   const controller = new AbortController();
   const reason = new Error("run cancelled");
   setTimeout(() => controller.abort(reason), 10);
   const startedAt = Date.now();
   const { result, events } = await attempt("p", options(), controller.signal);
 
-  assert.ok(Date.now() - startedAt < 150, "the attempt did not wait for the creation");
+  assert.ok(Date.now() - startedAt < 2000, "the attempt did not wait for the creation");
   assert.deepEqual(outcomeOf(result), { kind: "aborted", reason });
   assert.equal(result.agentId, undefined);
   assert.equal(result.usage, undefined, "no agent existed: nothing was used");
   assert.deepEqual(events, [], "no agent, no events");
   assert.equal(stats.disposed, 0);
-  await wait(300);
+  await waitFor("the agent that arrived late to be disposed", () => stats.disposed >= 1);
   assert.equal(stats.disposed, 1, "the agent that arrived late was disposed, not left running");
   assert.equal(stats.sends, 0);
 });
@@ -190,7 +191,7 @@ test("a send() that never hands back a run does not hold the attempt: it ends af
 
   assert.deepEqual(outcomeOf(result), { kind: "aborted", reason });
   assert.ok(Date.now() - startedAt < 1250, "the attempt gave up on the send after the grace instead of waiting for it");
-  await wait(500);
+  await waitFor("the run that arrived late to be cancelled", () => stats.cancelled >= 1);
   assert.equal(stats.cancelled, 1, "the run that arrived late was cancelled, not left running");
 });
 
