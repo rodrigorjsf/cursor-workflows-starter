@@ -66,6 +66,15 @@ test("a cloud step whose remote URL holds credentials sends the agent the URL wi
   assert.ok(!JSON.stringify(calls).includes(FAKE_SECRET));
 });
 
+test("a cloud step on a remote named by a url.<base>.insteadOf alias sends the agent the URL the alias stands for", async () => {
+  git(repo, "remote", "set-url", "origin", "gh:org/repo.git");
+  git(repo, "config", "url.https://example.invalid/.insteadOf", "gh:");
+  git(repo, "config", "remote.origin.pushurl", bare); // the push still lands in the bare repository
+  const result = await attempt();
+  assert.equal(result.outcome.kind, "finished", JSON.stringify(result.outcome));
+  assert.equal(calls[0].cloud.repos[0].url, "https://example.invalid/org/repo");
+});
+
 for (const refused of ["http://example.invalid/org/repo.git", "git://example.invalid/org/repo.git"]) {
   test(`a cloud step on a ${refused.split(":")[0]}:// remote fails at once, before the snapshot leaves the machine`, async () => {
     remoteIs(refused);

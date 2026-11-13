@@ -116,12 +116,12 @@ export async function pushSnapshot({ cwd, remote, branch, signal }: { cwd: strin
       throw signal?.aborted ? err : new Error(whenItFails);
     });
   const top = await asked(cwd, ["rev-parse", "--show-toplevel"], `${cwd} is not inside a git repository: a cloud step runs against a snapshot of the repository's worktree`);
-  // The URL as configured, before git applies `insteadOf`: the one the code host knows the repository by. The push goes by
-  // the remote's name, so git still rewrites it there.
+  // The URL as configured, before git applies `insteadOf`: the one the code host knows the repository by (an alias such as
+  // `gh:org/repo` falls back to the rewritten URL, in repoUrlOf). The push goes by the remote's name, so git still rewrites it there.
   const remoteUrl = await asked(top, ["config", "--get", `remote.${remote}.url`], `the remote "${remote}" does not exist in ${top}: add it, or point \`cloud.remote\` in the config at one that does`);
   const head = await asked(top, ["rev-parse", "--verify", "--quiet", "HEAD"], `${top} has no commit yet: a cloud step needs one to start the snapshot from`);
   // Refused before anything is committed or pushed: the snapshot holds uncommitted and untracked files.
-  const repoUrl = cloudRepoUrl(remoteUrl);
+  const repoUrl = await repoUrlOf(top, remote, remoteUrl, signal);
 
   const tree = await worktreeTree(top, signal);
   // Nothing changed since HEAD: HEAD is the snapshot. Otherwise a commit on top of it holds the changes.
@@ -134,6 +134,30 @@ export async function pushSnapshot({ cwd, remote, branch, signal }: { cwd: strin
   signal?.throwIfAborted();
   await git(top, ["push", "--quiet", "--no-verify", remote, `${commit}:refs/heads/${branch}`], { timeoutMs: NETWORK_TIMEOUT_MS });
   return { top, remote, repoUrl, branch, commit };
+}
+
+/**
+ * The repository URL of `remote` for a cloud agent: `cloudRepoUrl` of the URL as configured, or, when that is refused, of the
+ * URL git rewrites it to. A `url.<base>.insteadOf` alias (`gh:org/repo` for `https://github.com/org/repo`) is no URL a code
+ * host knows, while the URL it stands for may be. When both are refused, the refusal of the configured URL is the one that
+ * tells the user what they wrote.
+ */
+async function repoUrlOf(top: string, remote: string, configured: string, signal?: AbortSignal): Promise<string> {
+  try {
+    return cloudRepoUrl(configured);
+  } catch (err) {
+    if (!(err instanceof UnsupportedRemoteError)) throw err;
+    const rewritten = await git(top, ["remote", "get-url", remote], { signal }).catch((failure: unknown) => {
+      if (signal?.aborted) throw failure;
+      return configured;
+    });
+    if (rewritten === configured) throw err;
+    try {
+      return cloudRepoUrl(rewritten);
+    } catch {
+      throw err;
+    }
+  }
 }
 
 /**
