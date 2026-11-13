@@ -53,16 +53,16 @@
 // Custo por etapa (passo 4 da /skill-to-workflow). "[]" = settingSources vazio: sem AGENTS.md, regras, hooks, MCP e
 // sem as skills que o SDK carrega com qualquer outra camada (medido: 58).
 //   etapa            modelo                 tools                    settingSources   memo
-//   classificar      composer-2.5           nenhuma                  []               sim
-//   planejar (MED)   grok-4.7               só leitura               []               sim
-//   desenhar ×3      composer-2.5           só leitura               []               sim
-//   julgar (HIGH)    grok-4.7 high          só leitura               []               sim
-//   teste-N          do tier                todas                    default          não
-//   codigo-N         do tier                todas                    default          não
-//   corrigir-N-R     tier acima             todas                    default          não
+//   classify         composer-2.5           nenhuma                  []               sim
+//   plan (MED)       grok-4.7               só leitura               []               sim
+//   design ×3        composer-2.5           só leitura               []               sim
+//   judge (HIGH)     grok-4.7 high          só leitura               []               sim
+//   test-N           do tier                todas                    default          não
+//   code-N           do tier                todas                    default          não
+//   fix-N-R          tier acima             todas                    default          não
 //   review ×3        grok-4.7 high          só leitura, sem shell    []               sim (o diff e a rodada no prompt)
-//   refatorar-1      do tier                todas                    default          não
-//   pr-texto         composer-2.5           só leitura, sem shell    []               sim
+//   refactor-1       do tier                todas                    default          não
+//   pr-text          composer-2.5           só leitura, sem shell    []               sim
 // Exceção ao checklist (docs/operating/02-custos-e-cache.md §6): as etapas que escrevem ficam com todas as tools, "task" inclusive, e o default
 // do engine (project, team, mdm). A allowlist de escrita do SDK ainda não foi medida, e os hooks do time e do MDM
 // têm de valer onde o agente escreve.
@@ -551,7 +551,7 @@ export default defineWorkflow<Args>({
       let tier = labelTier;
       if (!tier) {
         const c = await ctx.agent<{ tier: Tier; reason: string }>(`${CLASSIFY_INSTRUCTIONS}\n\n${issueBlock(issue)}`, {
-          label: "classificar",
+          label: "classify",
           role: "classify", // the role's settingSources is []: no AGENTS.md, hooks, MCP or the skills any other layer loads (measured)
           tools: [], // só texto: classificar não precisa ler o repositório
           memo: true,
@@ -593,7 +593,7 @@ export default defineWorkflow<Args>({
         const planData = `${issueBlock(issue)}\n\n${capBlock}\n\n${contextBlock}${approved ? `\n\n${approved}` : ""}`;
         if (tier === "MED") {
           plan = await ctx.agent<Plan>(`${P.PLAN_INSTRUCTIONS}\n\n${planData}`, {
-            label: "planejar",
+            label: "plan",
             role: "design",
             model: GROK,
             tools: READ_ONLY,
@@ -601,11 +601,11 @@ export default defineWorkflow<Args>({
             memo: true,
           });
         } else {
-          const kinds = ["minima", "flexivel", "comum"] as const;
+          const kinds = ["minimal", "flexible", "common"] as const;
           const designs = await ctx.parallel(
             kinds.map((k) => () =>
               ctx.agent<Record<string, string>>(`${P.DESIGN_INSTRUCTIONS}\n\n## Constraint\n${P.DESIGN_CONSTRAINTS[k]}\n\n${issueBlock(issue)}\n\n${contextBlock}`, {
-                label: `desenhar:${k}`,
+                label: `design:${k}`,
                 phase: "Plan",
                 role: "design",
                 model: COMPOSER,
@@ -618,7 +618,7 @@ export default defineWorkflow<Args>({
           const done = designs.flatMap((d, i) => (d ? [{ constraint: kinds[i], ...d }] : []));
           if (done.length < 2) return { ...base, status: "design-failed", designs: done.length };
           plan = await ctx.agent<Plan>(`${P.JUDGE_INSTRUCTIONS}\n\n${planData}\n\n## Designs\n${JSON.stringify(done, null, 2)}`, {
-            label: "julgar",
+            label: "judge",
             role: "design",
             model: GROK_HIGH,
             tools: READ_ONLY,
@@ -822,7 +822,7 @@ export default defineWorkflow<Args>({
             const { value: t, before } = await writeStep<TestOut>(
               `red:${key}:${attempt}`,
               `${P.TEST_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Test command\n\`${testCommand}\`${problem ? `\n\n## Fix\n${problem}` : ""}`,
-              { label: attempt === 1 ? `teste-${sfx}` : `teste-${sfx}:${attempt}`, role: implementRole(tier), schema: TEST_SCHEMA },
+              { label: attempt === 1 ? `test-${sfx}` : `test-${sfx}:${attempt}`, role: implementRole(tier), schema: TEST_SCHEMA },
             );
             let after = await snapshotTree(cmd, worktree);
             const changes = await changesBetween(cmd, worktree, before, after);
@@ -889,7 +889,7 @@ export default defineWorkflow<Args>({
             const { before } = await writeStep<Impl>(
               `green:${key}:${attempt}`,
               `${P.CODE_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Failing test\n\`${rec.testName}\` in \`${rec.testFile}\`\n\n## Suite output\n${tail(rec.red)}${problem ? `\n\n## Fix\n${problem}` : ""}`,
-              { label: attempt === 1 ? `codigo-${sfx}` : `codigo-${sfx}:${attempt}`, role: implementRole(tier), schema: IMPL_SCHEMA },
+              { label: attempt === 1 ? `code-${sfx}` : `code-${sfx}:${attempt}`, role: implementRole(tier), schema: IMPL_SCHEMA },
             );
             problem = await codeViolation(before, await snapshotTree(cmd, worktree), rec);
             if (problem) {
@@ -913,7 +913,7 @@ export default defineWorkflow<Args>({
         for (let round = (rec.fixRound ?? 0) + 1; res.kind === "failed" && round <= settings.fixRounds; round++) {
           ctx.log(`slice ${sfx}: tests failed; fix ${round}/${settings.fixRounds}`);
           const { before } = await writeStep<Impl>(`fix:${key}:${round}`, `${P.FIX_INSTRUCTIONS}\n\n${sliceBlock(sl)}\n\n## Test output\n${res.output}`, {
-            label: `corrigir-${sfx}-${round}`,
+            label: `fix-${sfx}-${round}`,
             role: "fix",
             model: tier === "LOW" ? GROK : GROK_HIGH, // escala o modelo na correção
             schema: IMPL_SCHEMA,
@@ -1022,13 +1022,13 @@ export default defineWorkflow<Args>({
           const { value: fix, before } = await writeStep<Impl>(
             "refactor",
             `${P.REFACTOR_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n## Findings\n${JSON.stringify(toRefactor, null, 2)}`,
-            { label: "refatorar-1", role: implementRole(tier), schema: IMPL_SCHEMA },
+            { label: "refactor-1", role: implementRole(tier), schema: IMPL_SCHEMA },
           );
           const refactorProblem = await codeViolation(before, await snapshotTree(cmd, worktree));
           if (refactorProblem) {
             await revertTo(cmd, worktree, before);
             settle();
-            return { ...base, status: "tdd-violation", step: "refatorar-1", reason: refactorProblem, worktree };
+            return { ...base, status: "tdd-violation", step: "refactor-1", reason: refactorProblem, worktree };
           }
           const after = await suite("refactor");
           if (!after.ok) {
@@ -1080,7 +1080,7 @@ export default defineWorkflow<Args>({
         if (!prUrl) {
           const text = await ctx.agent<PrText>(
             `${P.PR_INSTRUCTIONS}\n\n${contextBlock}\n\n${issueBlock(issue)}\n\n## Diff\n${await diffSinceBase(cmd, worktree, baseCommit, settings.maxDiffChars)}`,
-            { label: "pr-texto", role: "pr-text", cwd: worktree, tools: REVIEW_TOOLS, schema: PR_SCHEMA, memo: true },
+            { label: "pr-text", role: "pr-text", cwd: worktree, tools: REVIEW_TOOLS, schema: PR_SCHEMA, memo: true },
           );
           body = buildPrBody({
             issueNumber: issue.number,

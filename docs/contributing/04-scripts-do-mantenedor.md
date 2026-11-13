@@ -30,7 +30,7 @@ O `npm test` confere os dois (`test/scripts-conventions.test.ts`): um script sem
 | `scripts/verify/verify-cache.ts` | Workflow: cache de prompt entre agentes irmãos | Conta nova ou SDK novo | [`scripts/verify/README.md`](../../scripts/verify/README.md) |
 | `scripts/verify/verify-cloud.ts` | Workflow: uma etapa de leitura num cloud agent (snapshot com arquivo não commitado, resultado em bloco JSON, uso, limpeza da branch) | Conta nova ou SDK novo, e antes de confiar na configuração de nuvem de um time | [`scripts/verify/README.md`](../../scripts/verify/README.md) |
 
-Os quatro `verify-*` custam tokens: rode sempre com `--max-tokens`, e veja a
+Os quatro `verify-*` custam tokens: rode sempre com `--max-tokens` e `--max-cents`, e veja a
 política de custo em [9.1](01-contribuindo.md#testes-contra-a-api-real-política-de-custo).
 
 ---

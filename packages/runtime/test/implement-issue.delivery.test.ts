@@ -104,7 +104,7 @@ test("a second run on an issue that has an active run is refused with that run's
   let reached!: () => void;
   const atCodeStep = new Promise<void>((resolve) => (reached = resolve));
   let held = false;
-  fx.handlers["codigo-1"] = async (o) => {
+  fx.handlers["code-1"] = async (o) => {
     if (!held) {
       held = true;
       reached();
@@ -139,7 +139,7 @@ test("the lock is on the issue of one repository: issue #7 of another --repo is 
   let reached!: () => void;
   const atCodeStep = new Promise<void>((resolve) => (reached = resolve));
   let held = false;
-  fx.handlers["codigo-1"] = async (o) => {
+  fx.handlers["code-1"] = async (o) => {
     if (!held) {
       held = true;
       reached();
@@ -195,7 +195,7 @@ async function whileActive(active: Record<string, unknown>, others: Array<[Recor
   let reached!: () => void;
   const atCodeStep = new Promise<void>((resolve) => (reached = resolve));
   let held = false;
-  fx.handlers["codigo-1"] = async (o) => {
+  fx.handlers["code-1"] = async (o) => {
     if (!held) {
       held = true;
       reached();

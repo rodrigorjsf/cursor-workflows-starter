@@ -34,13 +34,13 @@ test("with no config the steps run on the role defaults: models, params and (for
   issue(["complexity:low"]);
   const r = await run({ openPr: true });
   assert.equal(r.status, "finished", r.error);
-  assert.deepEqual(names().slice(0, 2), ["teste-1", "codigo-1"]);
-  assert.deepEqual(modelOf("teste-1"), { id: "composer-2.5" });
+  assert.deepEqual(names().slice(0, 2), ["test-1", "code-1"]);
+  assert.deepEqual(modelOf("test-1"), { id: "composer-2.5" });
   assert.deepEqual(modelOf("review:spec:1"), { id: "grok-4.7", params: HIGH });
-  assert.deepEqual(modelOf("pr-texto"), { id: "composer-2.5" });
+  assert.deepEqual(modelOf("pr-text"), { id: "composer-2.5" });
   assert.deepEqual(sourcesOf("review:spec:1"), []);
-  assert.deepEqual(sourcesOf("pr-texto"), []);
-  assert.deepEqual(sourcesOf("codigo-1"), ["project", "team", "mdm"], "write steps keep the engine default");
+  assert.deepEqual(sourcesOf("pr-text"), []);
+  assert.deepEqual(sourcesOf("code-1"), ["project", "team", "mdm"], "write steps keep the engine default");
 });
 
 test("the config swaps the model of a role: global file, WF_MODEL_* by role name and by the old alias, params kept or replaced", async () => {
@@ -48,10 +48,10 @@ test("the config swaps the model of a role: global file, WF_MODEL_* by role name
   writeGlobalConfig({ workflows: { "implement-issue": { roles: { review: { model: { params: [{ id: "reasoning_effort", value: "medium" }] }, retries: 0 }, "pr-text": { model: { id: "composer-3" } } } } } });
   const r = await withEnv({ WF_MODEL_LOW: "composer-9" }, () => run({ openPr: true }));
   assert.equal(r.status, "finished", r.error);
-  assert.deepEqual(modelOf("teste-1"), { id: "composer-9" }, "WF_MODEL_LOW maps to implement.low");
-  assert.deepEqual(modelOf("codigo-1"), { id: "composer-9" });
+  assert.deepEqual(modelOf("test-1"), { id: "composer-9" }, "WF_MODEL_LOW maps to implement.low");
+  assert.deepEqual(modelOf("code-1"), { id: "composer-9" });
   assert.deepEqual(modelOf("review:spec:1"), { id: "grok-4.7", params: [{ id: "reasoning_effort", value: "medium" }] }, "the params changed, the id inherited");
-  assert.deepEqual(modelOf("pr-texto"), { id: "composer-3" });
+  assert.deepEqual(modelOf("pr-text"), { id: "composer-3" });
 });
 
 test("a misspelled role in the repo config is an error before any step; the declared roles are the contract", async () => {
@@ -125,21 +125,21 @@ test("labelTiers is the label-to-tier map: the file's labels count (any case), t
   settings({ labelTiers: { "priority-one": "MED" } });
   const labelled = await run({});
   assert.equal(res(labelled).tier, "MED");
-  assert.deepEqual(names(), ["planejar"], "the label decided: no classifier");
+  assert.deepEqual(names(), ["plan"], "the label decided: no classifier");
 
   calls.length = 0;
   issue(["complexity:high"]);
-  fx.handlers.classificar = (o) => submit(o, { tier: "MED", reason: "typical" });
+  fx.handlers.classify = (o) => submit(o, { tier: "MED", reason: "typical" });
   const unmapped = await run({});
   assert.equal(res(unmapped).tier, "MED");
-  assert.ok(names().includes("classificar"), "complexity:high is not in this map: the classifier ran");
+  assert.ok(names().includes("classify"), "complexity:high is not in this map: the classifier ran");
 });
 
 test("sliceCaps sets how many slices each tier builds: the planner is told, the comment defers the rest, and only that many run", async () => {
   issue(["complexity:medium"]);
   settings({ sliceCaps: { LOW: 1, MED: 1, HIGH: 5 } });
   let planPrompt = "";
-  fx.handlers.planejar = (o, msg) => {
+  fx.handlers.plan = (o, msg) => {
     planPrompt = msg;
     submit(o, { ...PLAN, slices: [PLAN.slices[0], slice(2)] });
   };
@@ -161,56 +161,56 @@ test("extraSlices caps the slices a review can open", async () => {
   let specRound = 0;
   const missing = (behavior: string) => ({ quote: "devolve a - b", note: `falta ${behavior}`, kind: "missing", behavior, seam: "math.subtract" });
   fx.handlers["review:spec"] = (o) => submit(o, ++specRound === 1 ? { findings: [missing("subtractAll"), missing("subtractMany")], worst: "falta" } : CLEAN_REVIEW);
-  fx.handlers["teste-extra-1"] = (o) => {
+  fx.handlers["test-extra-1"] = (o) => {
     write(o, "test/all.test.js", ALL_TEST);
     submit(o, { testFile: "test/all.test.js", testName: "subtractAll" });
   };
-  fx.handlers["codigo-extra-1"] = (o) => {
+  fx.handlers["code-extra-1"] = (o) => {
     write(o, "src/math.js", ALL_CODE);
     submit(o, { summary: "subtractAll", filesChanged: ["src/math.js"] });
   };
   const r = await run({});
   assert.equal(res(r).status, "done", JSON.stringify(res(r)));
-  assert.ok(names().includes("teste-extra-1"));
-  assert.ok(!names().includes("teste-extra-2"), "the second finding waits: one extra slice only");
+  assert.ok(names().includes("test-extra-1"));
+  assert.ok(!names().includes("test-extra-2"), "the second finding waits: one extra slice only");
 });
 
 test("fixRounds is how many times a slice whose suite fails after green is fixed before the run stops", async () => {
   issue(["complexity:low"]);
   settings({ fixRounds: 1 });
-  fx.handlers["codigo-1"] = (o) => {
+  fx.handlers["code-1"] = (o) => {
     write(o, "src/math.js", WRONG_CODE);
     submit(o, { summary: "wrong", filesChanged: ["src/math.js"] });
   };
-  fx.handlers["corrigir-1-1"] = fx.handlers["codigo-1"]!;
+  fx.handlers["fix-1-1"] = fx.handlers["code-1"]!;
   const r = await run({});
   assert.equal(res(r).status, "tests-failed", JSON.stringify(res(r)));
-  assert.deepEqual(names().filter((n) => n.startsWith("corrigir")), ["corrigir-1-1"], "one round, no second");
+  assert.deepEqual(names().filter((n) => n.startsWith("fix-")), ["fix-1-1"], "one round, no second");
 });
 
 test("redGreenAttempts is how many tries the green step gets before a TDD violation stops the run", async () => {
   issue(["complexity:low"]);
   settings({ redGreenAttempts: 3 });
-  fx.handlers["codigo-1"] = (o) => {
+  fx.handlers["code-1"] = (o) => {
     write(o, "src/math.js", SUB_CODE);
     write(o, "test/sub.test.js", "// teste apagado para passar\n");
     submit(o, { summary: "x", filesChanged: [] });
   };
   const r = await run({});
   assert.equal(res(r).status, "tdd-violation");
-  assert.equal(names().filter((n) => n.startsWith("codigo-1")).length, 3);
+  assert.equal(names().filter((n) => n.startsWith("code-1")).length, 3);
 });
 
 test("redGreenAttempts also bounds the red step: one attempt, and a test that already passes is test-not-red at once", async () => {
   issue(["complexity:low"]);
   settings({ redGreenAttempts: 1 });
-  fx.handlers["teste-1"] = (o) => {
+  fx.handlers["test-1"] = (o) => {
     write(o, "test/add2.test.js", 'import assert from "node:assert/strict";\nimport { test } from "node:test";\nimport { add } from "../src/math.js";\n\ntest("add de novo", () => {\n  assert.equal(add(1, 1), 2);\n});\n');
     submit(o, { testFile: "test/add2.test.js", testName: "add de novo" });
   };
   const r = await run({});
   assert.equal(res(r).status, "test-not-red");
-  assert.equal(names().filter((n) => n.startsWith("teste-1")).length, 1);
+  assert.equal(names().filter((n) => n.startsWith("test-1")).length, 1);
 });
 
 test("maxDiffChars cuts the diff the reviewers and the PR text get", async () => {

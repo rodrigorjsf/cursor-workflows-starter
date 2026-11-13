@@ -53,7 +53,7 @@
             "review": { "model": { "id": "grok-4.7", "params": [{ "id": "reasoning_effort", "value": "medium" }] }, "timeoutMs": 900000 },
             "implement.low": { "retries": 0 }
           },
-          "labels": { "desenhar:*": { "maxTokensPerStep": 150000 } }
+          "labels": { "design:*": { "maxTokensPerStep": 150000 } }
         }
       }
     }

@@ -4,7 +4,7 @@
 //   it.
 // WHEN: On a new account or after an SDK upgrade, to re-check what settingSources loads.
 // HOW: Run it on the repo from scripts/verify/setup-probe-repo.sh: `WORKFLOWS_DIR=scripts/verify npm run wf -- run
-//   verify-context --cwd <probe-repo> --max-tokens 120000`.
+//   verify-context --cwd <probe-repo> --max-tokens 120000 --max-cents 25`.
 
 // Verificação real: o que settingSources carrega em runs locais e a guarda contra recursão
 // (ver docs/research/verificacoes-locais.md §7). Rode sobre o repositório criado por setup-probe-repo.sh.

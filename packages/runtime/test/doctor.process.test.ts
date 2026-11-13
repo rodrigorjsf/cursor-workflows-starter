@@ -269,11 +269,11 @@ test("the models check compares every model the repo's config ends up using with
 test("the models check also covers a workflow's default model and the models of label globs", () => {
   const repo = repoCopy();
   put(join(repo, ".agents", "workflows", "modeled.mjs"), 'export default { meta: { name: "modeled", description: "a model by default" }, defaults: { model: { id: "only-in-defaults" } }, async run() { return "ok"; } };\n');
-  put(repoConfigPath(repo), { workflows: { "implement-issue": { labels: { "desenhar:*": { model: { id: "only-in-a-label" } } } } } });
+  put(repoConfigPath(repo), { workflows: { "implement-issue": { labels: { "design:*": { model: { id: "only-in-a-label" } } } } } });
   const models = checkOf(reportOf(doctor(repo)), "models");
   assert.equal(models.status, "fail");
   assert.match(models.message, /"only-in-defaults" \(modeled\.defaults\)/);
-  assert.match(models.message, /"only-in-a-label" \(implement-issue\.labels\.desenhar:\*\)/);
+  assert.match(models.message, /"only-in-a-label" \(implement-issue\.labels\.design:\*\)/);
 });
 
 test("the models check does not guess when the config does not resolve", () => {

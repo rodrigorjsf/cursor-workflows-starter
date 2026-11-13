@@ -92,7 +92,7 @@ const known = new Map(Object.entries(ctx.settings.labelTiers as Record<string, T
 const matched = issue.labels.flatMap((l) => known.get(l.name.toLowerCase()) ?? []); // um Map: uma label "constructor" é só uma label
 const tier = matched.sort((a, b) => RANK[b] - RANK[a])[0]
   ?? (await ctx.agent<{ tier: Tier }>(`${CLASSIFY_INSTRUCTIONS}\n\n${issueBlock(issue)}`, {
-    label: "classificar", model: MODELS.CLASSIFY, tools: [], settingSources: [], memo: true, schema: TIER_SCHEMA,
+    label: "classify", model: MODELS.CLASSIFY, tools: [], settingSources: [], memo: true, schema: TIER_SCHEMA,
   })).tier;
 await ctx.agent(task, { model: MODELS[tier], cwd: worktree, schema: IMPL_SCHEMA });
 ```
@@ -124,7 +124,7 @@ a resposta antiga. Depois da correção, só os eixos que bloquearam são revist
 let t = await runTests(testCommand, worktree);
 for (let round = 1; t.kind === "failed" && round <= 2; round++) {   // timeout ou suíte morta não é falha de código
   await ctx.agent(`${FIX_INSTRUCTIONS}\n\n## Rodada ${round}\n\n## Saída dos testes\n${t.output}`, {
-    label: `corrigir-${round}`, model: MODELS.HIGH, cwd: worktree, schema: IMPL_SCHEMA,
+    label: `fix-${round}`, model: MODELS.HIGH, cwd: worktree, schema: IMPL_SCHEMA,
   });
   t = await runTests(testCommand, worktree);
 }

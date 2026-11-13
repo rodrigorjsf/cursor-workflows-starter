@@ -39,10 +39,10 @@ Rules:
 - State the project's test command.`;
 
 /** Restrições dos designers do HIGH ("Design it twice"): três interfaces radicalmente diferentes. */
-export const DESIGN_CONSTRAINTS: Record<"minima" | "flexivel" | "comum", string> = {
-  minima: "Minimise the interface: 1 to 3 entry points at most, with as much leverage per entry point as possible.",
-  flexivel: "Maximise flexibility: support many use cases and extensions.",
-  comum: "Optimise for the caller's most common case: the default case must be trivial.",
+export const DESIGN_CONSTRAINTS: Record<"minimal" | "flexible" | "common", string> = {
+  minimal: "Minimise the interface: 1 to 3 entry points at most, with as much leverage per entry point as possible.",
+  flexible: "Maximise flexibility: support many use cases and extensions.",
+  common: "Optimise for the caller's most common case: the default case must be trivial.",
 };
 
 export const DESIGN_INSTRUCTIONS = `Design the interface of the module that solves the issue below. Do not edit files.

@@ -17,12 +17,12 @@
 # shellcheck disable=SC2016 # crases literais em textos Markdown, sem expansão de propósito
 set -euo pipefail
 
-repo="${1:?uso: setup-sandbox-repo.sh <dono/repositório-novo> [diretório-local]}"
+repo="${1:?usage: setup-sandbox-repo.sh <owner/new-repo> [local-dir]}"
 dir="${2:-$HOME/tmp/$(basename "$repo")}"
 visibility="${GH_VISIBILITY:---private}"
 kit="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 if [ -e "$dir" ]; then
-  echo "erro: $dir já existe" >&2
+  echo "error: $dir already exists" >&2
   exit 1
 fi
 mkdir -p "$dir/src" "$dir/test"
@@ -65,10 +65,10 @@ issue_url=$(gh issue create -R "$repo" --title "Add subtract(a, b) to src/math.j
 issue="${issue_url##*/}"
 
 cat <<MSG
-Repositório pronto: $dir ($repo), issue #$issue.
-Comando medido no §9 (rode a partir de $kit):
+Repository ready: $dir ($repo), issue #$issue.
+The command measured in docs/research/verificacoes-locais.md section 9 (run it from $kit):
   WF_METRICS_DB=~/tmp/wf-verify.db npm run wf -- run implement-issue --cwd "$dir" \\
     --args '{"issue":$issue,"testCommand":"npm test","openPr":true}' --max-tokens 300000 --max-cents 50
-E o resume, com o runId impresso no fim:
+And the resume, with the runId printed at the end:
   npm run wf -- run implement-issue --cwd "$dir" --args '{"issue":$issue,"testCommand":"npm test","openPr":true}' --resume <runId>
 MSG

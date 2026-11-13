@@ -35,7 +35,7 @@ test("part 1 has three chapters: the problem, the idea and its references, the c
   assert.deepEqual(indexPart(1), ["docs/vision/01-o-problema.md", "docs/vision/02-a-ideia-e-as-referencias.md", "docs/vision/03-conceitos.md"]);
 });
 
-test("the concepts chapter defines workflow, step, role, run, job, journal, event log and location", () => {
+test("the concepts chapter defines workflow, step, role, run, execution, job, frozen, ended, journal, event log and location", () => {
   const entries = [...read("docs/vision/03-conceitos.md").matchAll(/^\*\*([^*\n]+)\*\*/gm)].map((m) => m[1]!.toLowerCase());
   const concepts: Array<[name: string, pattern: RegExp]> = [
     ["workflow", /\bworkflow\b/],
@@ -46,6 +46,9 @@ test("the concepts chapter defines workflow, step, role, run, job, journal, even
     ["journal", /\bjournal\b/],
     ["event log", /\b(log de eventos|event log)\b/],
     ["location", /\blocation\b/],
+    ["execution", /\b(execução|execution)\b/],
+    ["frozen", /\b(travado|frozen)\b/],
+    ["ended", /\b(terminado|ended)\b/],
   ];
   for (const [name, pattern] of concepts) {
     assert.ok(
