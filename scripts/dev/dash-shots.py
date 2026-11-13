@@ -1,12 +1,15 @@
 # WHAT: Screenshots a running dashboard: the Runs, Board and Metrics pages and the Run view of every run it lists, at
 # 360 and 1440 px wide, in the light and the dark scheme, into a folder. Prints probes per page: horizontal overflow
-# (and the elements past the right edge) and console errors, warnings and page errors.
+# (and the elements past the right edge) and console errors, warnings and page errors. With the fixture manifest, the
+# files are named by fixture role, stable across builds, and each Run view is captured again focused on one node: the
+# cloud step, the failing command, the step the run stopped in.
 # WHY: Every dashboard review needs the same captures and the same checks. A harness rebuilt per session costs a
 # critic hundreds of thousands of tokens and checks something different each time.
 # WHEN: After changing the dashboard (app/, run-view/, the CSS), against fixture runs from scripts/dev/dash-fixtures.ts.
 # HOW: once per machine, `uvx --with playwright==1.65.1 playwright install chromium`; then, with the dashboard up
 # (`WF_HOME=<fixture home> WF_DASH_PORT=4399 npm run dash`),
-# `uvx --with playwright==1.65.1 python -I scripts/dev/dash-shots.py http://127.0.0.1:4399 <out-dir>`.
+# `uvx --with playwright==1.65.1 python -I scripts/dev/dash-shots.py http://127.0.0.1:4399 <out-dir>
+# [--fixtures <fixture home>/fixtures.json]`.
 # `--strict` exits 1 when a probe finds something; `--browser <path>` uses a Chrome or Chromium already on the machine
 # instead of the installed one. No npm dependency: Playwright comes from uvx.
 import argparse
@@ -30,6 +33,13 @@ OVERFLOW = """() => {
   return { scrollWidth: document.documentElement.scrollWidth, clientWidth: cw,
            past: past.slice(0, 8).map((e) => `${e.tagName.toLowerCase()}.${String(e.className).trim().replace(/\\s+/g, '.')}:${Math.round(e.getBoundingClientRect().right)}`) };
 }"""
+# Clicks the Run view node with this label (it opens the node's log and brings it into view). False when there is none.
+FOCUS = """(label) => {
+  const node = [...document.querySelectorAll('.work')].find((e) => e.querySelector('.label')?.textContent === label);
+  if (!node) return false;
+  node.click();
+  return true;
+}"""
 
 
 def runs_of(base: str) -> list[dict]:
@@ -44,15 +54,23 @@ def main() -> int:
     parser.add_argument("--wait-ms", type=int, default=1500, help="how long each page settles before the capture")
     parser.add_argument("--strict", action="store_true", help="exit 1 when a probe finds overflow or a console message")
     parser.add_argument("--browser", help="a Chrome or Chromium executable to use instead of Playwright's own")
+    parser.add_argument("--fixtures", help="the fixtures.json scripts/dev/dash-fixtures.ts wrote: name files by role, add focus captures")
     args = parser.parse_args()
     base = args.url.rstrip("/")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    pages = [("runs", "/#/runs"), ("board", "/#/board"), ("metrics", "/#/metrics")]
+    # (name, path, label of the node to focus or None)
+    pages = [("runs", "/#/runs", None), ("board", "/#/board", None), ("metrics", "/#/metrics", None)]
+    manifest = json.loads(Path(args.fixtures).read_text()) if args.fixtures else {"runs": {}, "focus": {}}
+    role_of = {run_id: role for role, run_id in manifest["runs"].items()}
     for run in runs_of(base):
-        name = re.sub(r"[^a-z0-9-]+", "-", f"run-{run['status']}-{run['runId']}".lower())
-        pages.append((name, f"/runs/{run['runId']}"))
+        run_id = run["runId"]
+        role = role_of.get(run_id)
+        name = f"run-{role}" if role else re.sub(r"[^a-z0-9-]+", "-", f"run-{run['status']}-{run_id}".lower())
+        pages.append((name, f"/runs/{run_id}", None))
+        if role in manifest["focus"]:
+            pages.append((f"{name}-focus", f"/runs/{run_id}", manifest["focus"][role]))
 
     probes: dict[str, dict] = {}
     problems = 0
@@ -65,10 +83,14 @@ def main() -> int:
                 messages: list[str] = []
                 page.on("console", lambda m: messages.append(f"{m.type}: {m.text}") if m.type in ("error", "warning") else None)
                 page.on("pageerror", lambda e: messages.append(f"pageerror: {e}"))
-                for name, path in pages:
+                for name, path, focus in pages:
                     messages.clear()
                     page.goto(base + path)
                     page.wait_for_timeout(args.wait_ms)
+                    if focus:
+                        if not page.evaluate(FOCUS, focus):
+                            messages.append(f"focus: no node labelled {focus!r}")
+                        page.wait_for_timeout(args.wait_ms)
                     key = f"{name}-{width}-{scheme}"
                     overflow = page.evaluate(OVERFLOW)
                     # The Run view is a full-height canvas; the other pages are captured whole.

@@ -99,6 +99,26 @@ const ISSUES: Record<Mode, [number, string]> = {
 };
 /** The label of the step a cancelled or interrupted run stops in. */
 const STOP_LABEL = "implement-api";
+/** The node a Run view capture focuses on, per run: the cloud step, the failing command, the step the run stopped in. */
+const FOCUS: Record<Mode, string> = { finished: "review", failed: "npm test", cancelled: STOP_LABEL, interrupted: STOP_LABEL };
+
+/**
+ * An `onEvent` that calls `ready` once the run is stopped in the hung step and nothing else is in flight: the step started,
+ * and its siblings in the group (the lint command, the UI pipeline) have ended. Every build then stops in the same place.
+ */
+function whenOnlyHangLeft(ready: (runId: string) => void): (e: any) => void {
+  const seen = new Set<string>();
+  let fired = false;
+  return (e) => {
+    if (e.type === "step-start" && e.label === STOP_LABEL) seen.add("hang");
+    if (e.type === "exec-end" && e.label === "lint") seen.add("lint");
+    if (e.type === "step-end" && e.label === "ui-tests") seen.add("ui");
+    if (!fired && seen.size === 3) {
+      fired = true;
+      ready(e.runId);
+    }
+  };
+}
 
 /** An implement-issue-like workflow: five phases, a card, a parallel group with a pipeline in it, commands, a cloud review. */
 function shipFeature(mode: Mode) {
@@ -155,7 +175,7 @@ async function runShip(mode: Mode, opts: { signal?: AbortSignal; onEvent?: (e: a
 
 // The interrupted run's process: it starts the run, says so when the step that never ends starts, and waits to be killed.
 if (values.child === "interrupted") {
-  await runShip("interrupted", { onEvent: (e) => e.type === "step-start" && e.label === STOP_LABEL && process.stdout.write(`started ${e.runId}\n`) });
+  await runShip("interrupted", { onEvent: whenOnlyHangLeft((runId) => process.stdout.write(`started ${runId}\n`)) });
   process.exit(0);
 }
 
@@ -174,7 +194,7 @@ const failed = await runShip("failed");
 const abort = new AbortController();
 const cancelled = await runShip("cancelled", {
   signal: abort.signal,
-  onEvent: (e) => e.type === "step-start" && e.label === STOP_LABEL && setTimeout(() => abort.abort(), 200),
+  onEvent: whenOnlyHangLeft(() => abort.abort()),
 });
 
 const interrupted = await new Promise<string>((done, reject) => {
@@ -234,6 +254,7 @@ const manifest = {
   repo,
   runs: { finished: finished.runId, failed: failed.runId, cancelled: cancelled.runId, interrupted, ...(live && { live: live.runId }) },
   cloudStep: { runId: finished.runId, label: "review" },
+  focus: FOCUS,
   ...(live && { liveJob: { jobId: live.jobId, pid: live.pid, cancel: `WF_HOME=${home} npm run wf -- cancel ${live.jobId} --cwd ${repo}` } }),
   dashboard: `WF_HOME=${home} WF_DASH_PORT=4399 npm run dash`,
 };

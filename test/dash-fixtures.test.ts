@@ -46,9 +46,22 @@ test("the finished run has the implement-issue shape: phases, a parallel group, 
   assert.ok(cloud.chargedCents > 0, JSON.stringify(cloud));
 });
 
-test("the interrupted run stopped mid-step: a step that started and never ended, and no run end", () => {
+test("the interrupted run stopped mid-step: only the hung step started and never ended, and no run end", () => {
   const log = events(manifest.runs.interrupted!);
   assert.ok(!log.some((e) => e.type === "run-end"));
-  const ended = new Set(log.filter((e) => e.type === "step-end").map((e) => e.stepId));
-  assert.ok(log.some((e) => e.type === "step-start" && !ended.has(e.stepId)));
+  assert.deepEqual(unended(log), ["implement-api"]);
 });
+
+test("the cancelled run stopped in the same step, with nothing else in flight", () => {
+  const log = events(manifest.runs.cancelled!);
+  assert.equal(log.findLast((e) => e.type === "run-end")?.status, "cancelled");
+  const cancelled = log.filter((e) => e.type === "step-end" && !e.ok).map((e) => e.label);
+  assert.deepEqual(cancelled, ["implement-api"]);
+  assert.ok(log.some((e) => e.type === "exec-end" && e.label === "lint"), "the lint command ended before the cancel");
+});
+
+/** The labels of the steps and commands that started and never ended. */
+function unended(log: Array<Record<string, any>>): string[] {
+  const ended = new Set(log.filter((e) => e.type === "step-end" || e.type === "exec-end").map((e) => e.attemptId ?? e.stepId));
+  return log.filter((e) => (e.type === "step-start" || e.type === "exec-start") && !ended.has(e.attemptId ?? e.stepId)).map((e) => e.label);
+}
