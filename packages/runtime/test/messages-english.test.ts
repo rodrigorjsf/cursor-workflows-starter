@@ -41,12 +41,35 @@ test("no string in the runtime's source is Portuguese: every message that can re
   assert.deepEqual(offenders, []);
 });
 
-test("the installer's messages are English too: an agent runs it (INSTALL-AGENT.md) and reads what it prints", () => {
-  const script = join(import.meta.dirname, "..", "..", "..", "scripts", "install.sh");
-  const offenders = readFileSync(script, "utf8")
+const SCRIPTS = join(import.meta.dirname, "..", "..", "..", "scripts");
+
+/** The lines of a shell script an agent reads, as what it prints or as the files it writes: every line but the comments. */
+const shellOffenders = (name: string) =>
+  readFileSync(join(SCRIPTS, name), "utf8")
     .split("\n")
     .map((text, i) => ({ line: i + 1, text }))
     .filter(({ text }) => !text.trimStart().startsWith("#") && PORTUGUESE.test(text))
-    .map(({ line, text }) => `install.sh:${line}: ${text.trim().slice(0, 100)}`);
+    .map(({ line, text }) => `${name}:${line}: ${text.trim().slice(0, 100)}`);
+
+test("the installer's messages are English too: an agent runs it (INSTALL-AGENT.md) and reads what it prints", () => {
+  assert.deepEqual(shellOffenders("install.sh"), []);
+});
+
+// The measurement fixtures are agent-facing too: their prompts, schemas and meta go to real agents, and the probe repo's
+// AGENTS.md and hook are what those agents read (issue #51). Out of this check, on purpose: the book generators and the docs
+// checker (config-reference.ts, events-reference.ts, check-docs.ts), whose strings are pt-BR book text, and
+// verify/validate-cursor-ide.sh, a wizard only a person reads.
+test("the measurement fixtures an agent reads are English: the verify workflows, the SDK probe and the probe repo", () => {
+  const verify = join(SCRIPTS, "verify");
+  const workflows = [...readdirSync(verify).filter((n) => n.endsWith(".ts")).map((n) => join(verify, n)), join(SCRIPTS, "probe-sdk.ts")];
+  const offenders = [
+    ...workflows.flatMap((file) =>
+      literals(file)
+        .filter(({ text }) => PORTUGUESE.test(text))
+        .map(({ line, text }) => `${relative(SCRIPTS, file)}:${line}: ${text.slice(0, 100)}`),
+    ),
+    ...shellOffenders("verify/setup-probe-repo.sh"),
+    ...shellOffenders("link-claude-skills.sh"),
+  ];
   assert.deepEqual(offenders, []);
 });
