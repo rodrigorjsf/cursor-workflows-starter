@@ -9,7 +9,7 @@
 | Conta Cursor | Plano pago com acesso ao SDK. Testado: Premium da The X Subscription | Medido em 2026-11-11 ([8.2 §4–5](../research/verificacoes-locais.md)): no Free o SDK não funciona. O `Agent.create` local falha com `UnknownAgentError` `plan_required` (403, `GET /v1/models` na validação local do modelo), e `wf whoami` e `wf models` também. O engine encerra o run na primeira tentativa (`AccountAccessError`). No Premium, funciona. O plano legado Start não inclui o SDK ([DOC](https://cursor.com/docs/account/pricing/legacy-cursor-plans)); o Plus não foi testado |
 | Cursor IDE | Atual | Para usar pelo chat (MCP e skills). Terminal e CI não precisam da IDE |
 | `git` | qualquer recente | O workflow de exemplo cria worktrees e commits |
-| `gh` (GitHub CLI) | autenticado (`gh auth login`) | O exemplo lê a issue e, opcionalmente, abre o PR |
+| `gh` (GitHub CLI) ou `glab` (GitLab CLI) | o do forge do repositório, autenticado (`gh auth login` ou `glab auth login`) | O exemplo lê a issue e, opcionalmente, abre o PR (no GitLab, o MR). O host do `origin` decide o forge ([6.2](../reference/config.md)) |
 
 > **Não** use `npm install --omit=optional`: isso remove o binário de plataforma do SDK e do `esbuild` (usado
 > pelo `tsx`).
