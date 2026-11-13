@@ -86,6 +86,8 @@ rodou: custo zero.
 | Modelo de terceiros no Premium | `--model gpt-5.3-codex` | ❌ sem crédito pré-pago | run com `status: "error"` (não exceção): "Codex 5.3 is not included in your weekly usage Buy credits or switch to a Grok model to continue." | Defaults viram modelos do Cursor: `composer-2.5` (CLASSIFY, LOW), `grok-4.7` (MED), `grok-4.7` com `reasoning_effort=high` (HIGH, REVIEW) |
 | Erro de uso/franquia: exceção ou `status: "error"`? (C17) | mesmo run | ◐ | a falta de franquia para o modelo veio como `status: "error"` com mensagem, não como `RateLimitError` | O engine trata como falha de run (com uma nova tentativa). O teto mensal do plano não foi atingido, então segue sem teste |
 
+> **Nota (2026-11-12, [#51](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/51)):** os prompts do `scripts/probe-sdk.ts` estão em inglês desde então. As linhas das §4 a §6 foram medidas com os prompts em pt-BR e ficam como foram medidas.
+
 ## 7. Fase 2, Blocos 4 e 5: saída estruturada, contexto do projeto e guarda contra recursão
 
 **Ambiente:** Premium da The X Subscription · `@cursor/sdk@1.3.1` · `composer-2.5` · `settingSources`
@@ -109,6 +111,8 @@ Workflows de verificação em `.agents/workflows/` de um repositório de teste l
 | `WF_INSIDE_WORKFLOW` no shell da etapa | `echo inside=$WF_INSIDE_WORKFLOW` | ✅ | `inside=1`: a guarda do CLI (`wf run/start`) vale | — |
 | Contexto fixo por camada | `RulesService` no log do SDK e `inputTokens` | ⚠ medido | com `project` ou só `["team","mdm"]`: `ruleCount 58, skillCount 58`; com `[]`: nenhuma skill. Mesmo prompt com `shell`+`mcp`: 30,4 mil tokens de input com `project` × 25,5 mil com `[]` | Doc 5.2: `["team","mdm"]` não corta as skills; só `[]` corta (e então hooks do time e MDM também saem) |
 
+> **Nota (2026-11-12, [#51](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/51)):** o `verify-context`, o `verify-structured` e o repositório de sonda (`AGENTS.md`, hook `PreToolUse`) estão em inglês desde então, e os marcadores viraram `NONE` e `forbidden-by-claude`. As linhas acima foram medidas com os textos em pt-BR (`NENHUMA`, `proibido-pelo-claude`, "bloqueado pelo hook PreToolUse do Claude Code") e ficam como foram medidas.
+
 ## 8. Fase 2, Bloco 6: cache de prompt entre agentes irmãos
 
 **Ambiente:** Premium da The X Subscription · `@cursor/sdk@1.3.1` · `composer-2.5` · `settingSources: []` · Linux
@@ -128,6 +132,8 @@ em `ctx.parallel` e duas em sequência. Cada etapa é um agente novo.
 |---|---|---|---|---|
 | Agentes irmãos compartilham prefixo? (C43) | tabela acima | ◐ parcial e sem garantia | o prefixo fixo (~4,2 mil tokens) veio do cache em todo agente novo; o trecho variável foi reaproveitado uma vez em paralelo e nenhuma vez em sequência; `cacheHitRatio` do run 0,455 | O kit continua sem prometer economia entre agentes e mede; doc 5.2 recebe os números |
 | Custo dos Blocos 4 a 6 | `SELECT SUM(cost_cents) FROM v_attempts` em `~/tmp/wf-verify.db` | estimativa | 9,01 ¢ pela tabela `pricing` (preço de lista do Composer 2.5; `cost_source = estimate` em todas, porque `getUsage()` dá `feature_unavailable`); as sondas fora do banco somam ≈ 0,82 ¢ | Uso do Composer no Premium sai da franquia semanal; o valor cobrado de fato só aparece no dashboard da conta |
+
+> **Nota (2026-11-12, [#51](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/51)):** o prompt do `verify-cache` está em inglês desde então. As linhas acima foram medidas com o prompt em pt-BR e ficam como foram medidas.
 
 ## 9. Fase 2, Bloco 7: ponta a ponta (`implement-issue` no repositório `wf-sandbox`)
 

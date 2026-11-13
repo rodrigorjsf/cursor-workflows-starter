@@ -14,15 +14,15 @@ const FILES_SCHEMA = { type: "object", required: ["files"], properties: { files:
 const WORD_SCHEMA = { type: "object", required: ["word"], properties: { word: { type: "string" } } };
 
 export default defineWorkflow({
-  meta: { name: "verify-structured", description: "Verificação: submit_result, correção de JSON inválido e re-prompt do engine." },
+  meta: { name: "verify-structured", description: "Verification: submit_result, fixing invalid JSON and the engine's re-prompt." },
   defaults: { model: { id: process.env.WF_VERIFY_MODEL ?? "composer-2.5" }, timeoutMs: 5 * 60_000, retries: 0 },
   async run(ctx) {
-    const a = await ctx.agent("Leia o package.json deste repositório e devolva o name e a version.", { label: "a-simples", tools: ["read"], schema: NAME_SCHEMA });
+    const a = await ctx.agent("Read this repository's package.json and return its name and version.", { label: "a-simple", tools: ["read"], schema: NAME_SCHEMA });
     const b = await ctx.agent(
-      'Primeiro chame submit_result exatamente com {"files": ["README.md"]}. Se a ferramenta recusar, corrija conforme a mensagem de erro dela usando arquivos que existem na raiz do repositório.',
-      { label: "b-invalido-depois-corrige", tools: ["read", "ls"], schema: FILES_SCHEMA },
+      'First call submit_result with exactly {"files": ["README.md"]}. If the tool refuses it, fix it as its error message says, using files that exist at the root of the repository.',
+      { label: "b-invalid-then-fixed", tools: ["read", "ls"], schema: FILES_SCHEMA },
     );
-    const c = await ctx.agent("Responda apenas com o texto 'pronto'. Não chame nenhuma ferramenta nesta mensagem.", { label: "c-sem-submit", tools: [], schema: WORD_SCHEMA, schemaRetries: 2 });
+    const c = await ctx.agent("Answer only with the text 'done'. Do not call any tool in this message.", { label: "c-no-submit", tools: [], schema: WORD_SCHEMA, schemaRetries: 2 });
     return { status: "done", a, b, c };
   },
 });

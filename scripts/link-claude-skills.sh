@@ -18,7 +18,7 @@ for dir in .agents/skills/*/; do
   name="$(basename "$dir")"
   target=".claude/skills/$name"
   if [ -e "$target" ] && [ ! -L "$target" ]; then
-    echo "pulando $target (já existe e não é link)"; continue
+    echo "skipping $target (it exists and is not a link)"; continue
   fi
   ln -sfn "../../.agents/skills/$name" "$target"
   echo "ok: $target -> .agents/skills/$name"

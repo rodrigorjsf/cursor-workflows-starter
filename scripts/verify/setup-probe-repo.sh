@@ -10,15 +10,15 @@
 # Monta um repositório descartável para os workflows de scripts/verify/:
 #   - AGENTS.md com uma palavra marcadora;
 #   - .cursor/hooks.json (beforeShellExecution e postToolUse) que grava em .probe/cursor-hooks.log;
-#   - .claude/settings.json com um PreToolUse que nega comandos com "proibido-pelo-claude" (exit 2);
+#   - .claude/settings.json com um PreToolUse que nega comandos com "forbidden-by-claude" (exit 2);
 #   - .cursor/mcp.json com o servidor `workflows` deste kit, gravando cada início em .probe/mcp-spawn.log.
 # Uso: scripts/verify/setup-probe-repo.sh <diretório-novo>
 set -euo pipefail
 
-target="${1:?uso: setup-probe-repo.sh <diretório-novo>}"
+target="${1:?usage: setup-probe-repo.sh <new-directory>}"
 kit="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 if [ -e "$target" ]; then
-  echo "erro: $target já existe" >&2
+  echo "error: $target already exists" >&2
   exit 1
 fi
 mkdir -p "$target"/{.cursor/hooks,.claude/hooks,.probe,src}
@@ -26,16 +26,16 @@ target="$(cd "$target" && pwd -P)"
 cd "$target"
 
 cat > AGENTS.md <<'MD'
-# Instruções do projeto de teste
+# Test project instructions
 
-A palavra de verificação deste projeto é ORNITORRINCO-42. Quando alguém pedir a palavra de verificação, responda com ela.
+The verification word of this project is ORNITORRINCO-42. When someone asks for the verification word, answer with it.
 MD
 printf '{ "name": "wf-probe-repo", "version": "1.2.3", "private": true, "type": "module" }\n' > package.json
-for i in 1 2 3; do printf 'export const valor%s = %s;\n' "$i" "$i" > "src/m$i.js"; done
+for i in 1 2 3; do printf 'export const value%s = %s;\n' "$i" "$i" > "src/m$i.js"; done
 {
   echo "# wf-probe-repo"
   echo
-  for i in $(seq 1 120); do echo "Linha $i de texto de preenchimento para dar volume ao contexto lido pelas etapas de teste de cache do kit."; done
+  for i in $(seq 1 120); do echo "Line $i of filler text that gives volume to the context the kit's cache test steps read."; done
 } > README.md
 
 cat > .cursor/hooks.json <<'JSON'
@@ -76,8 +76,8 @@ cat > .claude/hooks/deny-marker.sh <<'SH'
 in=$(cat)
 tool=$(printf '%s' "$in" | grep -o '"tool_name":"[^"]*"' | head -1)
 echo "$(date -u +%FT%TZ) claude-PreToolUse $tool" >> .probe/claude-hooks.log
-if printf '%s' "$in" | grep -q 'proibido-pelo-claude'; then
-  echo "bloqueado pelo hook PreToolUse do Claude Code" >&2
+if printf '%s' "$in" | grep -q 'forbidden-by-claude'; then
+  echo "blocked by the Claude Code PreToolUse hook" >&2
   exit 2
 fi
 exit 0
@@ -96,4 +96,4 @@ printf '.probe/\n.workflows/\n' > .gitignore
 git init -q -b main
 git -c core.autocrlf=false add -A
 git -c user.name=probe -c user.email=probe@example.invalid -c core.autocrlf=false commit -q -m "probe repo"
-echo "repositório de teste pronto em $target"
+echo "probe repo ready at $target"
