@@ -68,8 +68,12 @@ Um ADR registra uma decisão difícil de reverter, surpreendente sem contexto e 
 3. As seções são `## Context`, `## Decision`, `## Consequences` e `## Considered options`. O `npm test` confere o título, o
    status, as seções e o idioma (`test/vision-and-adrs.test.ts`).
 4. Liste o ADR na Parte 7 do índice e cole o rodapé que o docs check pedir.
-5. Para mudar uma decisão, não reescreva o ADR: escreva outro, e troque o status do antigo para
-   `superseded by ADR-NNNN`.
+5. Uma decisão que muda é um ADR novo, que substitui o antigo: não reescreva o ADR aceito. No novo, o status diz
+   `supersedes [ADR-NNNN](...)`; no antigo, troque o status para `superseded by ADR-NNNN`.
+6. Um ADR aceito só é editado no lugar para um esclarecimento que mantém a decisão (um motivo que faltava, uma
+   consequência que ficou clara depois, um nome que mudou). A edição ganha, no parágrafo logo abaixo do
+   `**Status:**`, a linha datada `**Amended:** AAAA-MM-DD: o que foi esclarecido`, em inglês como o resto do ADR. Se a
+   edição muda o que foi decidido, ela é um ADR novo (item 5).
 
 ## O que o docs check confere
 
