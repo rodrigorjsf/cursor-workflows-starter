@@ -20,7 +20,7 @@ import { dashboardCacheDir } from "@cursor-workflows/runtime/observe";
 const PACKAGE_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Change when the build options below change in a way the sources do not show. */
-const BUILD_RECIPE = "2";
+const BUILD_RECIPE = "3";
 
 /** The pages, by the name their files take: the entry each is built from, under the package folder. */
 const PAGES = { app: join("app", "main.tsx"), run: join("run-view", "run-page.tsx") } as const;

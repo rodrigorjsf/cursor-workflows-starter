@@ -12,7 +12,6 @@ test("toda etapa que escreve leva a regra de escopo: teste, código, correção 
 
 import { homedir } from "node:os";
 import { buildPrBody, redactPaths, sanitizeModelText } from "../workflows/implement-issue/pr-body.js";
-import { TEST_INSTRUCTIONS } from "../workflows/implement-issue/prompts.js";
 import { DEFAULT_PROTECTED_GLOBS, isTestFile, looksLikeNoTests, matchesAny, sliceKey } from "../workflows/implement-issue/tdd.js";
 
 const PR_TEXT = { summary: "s", door: "two-way" as const, blastRadius: "local" };

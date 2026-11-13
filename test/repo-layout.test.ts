@@ -4,7 +4,9 @@
 import assert from "node:assert/strict";
 import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { builtinModules } from "node:module";
 import { test } from "node:test";
+import ts from "typescript";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const read = (...p: string[]) => readFileSync(join(ROOT, ...p), "utf8");
@@ -243,4 +245,56 @@ test("the dashboard is its own workspace package: its dependencies never enter t
   const uiSources = readdirSync(join(ROOT, ui)).filter((f) => /\.tsx?$/.test(f));
   assert.ok(uiSources.length >= 5);
   for (const file of uiSources) assert.doesNotMatch(read(ui, file), /@cursor-workflows\/runtime|from "(\.\.\/)+runtime\/|from "node:/, `${file} runs in the browser and must not import the runtime or Node`);
+});
+
+/**
+ * Lines of a browser file under `dir` that load server code at run time: a value import (or a side-effect import) of
+ * `node:*` or a bare built-in, of the runtime package, or of a relative path that leaves the browser folders. Only
+ * `import type` is erased: with `verbatimModuleSyntax` (which esbuild reads from the tsconfig), `import { type X }` still
+ * loads the module for its side effects.
+ */
+function serverValueImports(dir: string, file: string, text: string): number[] {
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const browser = ["app", "run-view"].map((d) => join(ROOT, "packages", "dashboard", d) + "/");
+  const isServer = (spec: string) =>
+    spec.startsWith("node:") ||
+    builtinModules.includes(spec.split("/")[0]!) ||
+    spec.startsWith("@cursor-workflows/runtime") ||
+    (spec.startsWith(".") && !browser.some((b) => resolve(dir, spec).startsWith(b)));
+  const found: number[] = [];
+  for (const s of sf.statements) {
+    if (!ts.isImportDeclaration(s) && !ts.isExportDeclaration(s)) continue;
+    if (!s.moduleSpecifier || !ts.isStringLiteral(s.moduleSpecifier) || !isServer(s.moduleSpecifier.text)) continue;
+    const typeOnly = ts.isExportDeclaration(s) ? s.isTypeOnly : !!s.importClause?.isTypeOnly;
+    if (!typeOnly) found.push(sf.getLineAndCharacterOfPosition(s.getStart(sf)).line + 1);
+  }
+  return found;
+}
+
+test("the browser import check fires on a value import of server code and passes type-only imports and the browser folders", () => {
+  const app = join(ROOT, "packages", "dashboard", "app");
+  const offender = [
+    'import { RunSummary } from "@cursor-workflows/runtime/observe";',
+    'import { readFileSync } from "node:fs";',
+    'import { boardOf } from "../src/board.js";',
+    'import "../src/server.js";',
+    'import { type Board } from "../src/board.js";',
+  ].join("\n");
+  assert.deepEqual(serverValueImports(app, "Offender.tsx", offender), [1, 2, 3, 4, 5]);
+  const legit = [
+    'import type { RunSummary } from "@cursor-workflows/runtime/observe";',
+    'import type { Board } from "../src/board.js";',
+    'import { formatCount } from "./format.js";',
+    'import { runApiPath } from "../run-view/location.js";',
+    'import "./tokens.css";',
+  ].join("\n");
+  assert.deepEqual(serverValueImports(app, "Legit.tsx", legit), []);
+});
+
+test("the app page imports server code as types only: esbuild bundles it for the browser", () => {
+  const app = join(ROOT, "packages", "dashboard", "app");
+  const sources = readdirSync(app).filter((f) => /\.tsx?$/.test(f));
+  assert.ok(sources.length >= 5);
+  const offenders = sources.flatMap((f) => serverValueImports(app, f, read("packages", "dashboard", "app", f)).map((line) => `app/${f}:${line}`));
+  assert.deepEqual(offenders, [], "import runtime and server modules with `import type`; the browser bundle cannot load them");
 });

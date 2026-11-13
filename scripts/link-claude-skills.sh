@@ -12,7 +12,7 @@
 # Cria links simbólicos em .claude/skills/. Atenção: o Cursor também lê .claude/skills/ (compatibilidade),
 # então a mesma skill pode aparecer duas vezes no Cursor. Rode só se o time usa Claude Code neste repositório.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 mkdir -p .claude/skills
 for dir in .agents/skills/*/; do
   name="$(basename "$dir")"

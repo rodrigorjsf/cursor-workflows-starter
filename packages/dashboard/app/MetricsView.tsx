@@ -23,9 +23,9 @@ const CHART_HEIGHT = 200;
 
 const num = (value: unknown): number => Number(value ?? 0);
 
-/** A value as its column writes it; `–` when there is none. */
+/** A value as its column writes it; `—` when there is none (as text, for a chart's `<title>`). */
 function cell(value: unknown, kind: Kind): string {
-  if (value == null || value === "") return "–";
+  if (value == null || value === "") return "—";
   if (kind === "text" || typeof value !== "number") return String(value);
   switch (kind) {
     case "count":
@@ -39,6 +39,11 @@ function cell(value: unknown, kind: Kind): string {
     case "number":
       return formatNumber(value);
   }
+}
+
+/** A table or KPI value as `cell` writes it, with a missing one as the em dash in a `none` span, like every other page. */
+function Value({ value, kind }: { value: unknown; kind: Kind }) {
+  return value == null || value === "" ? <span className="none">—</span> : <>{cell(value, kind)}</>;
 }
 
 function Table({ rows, cols, empty = "No data in this window." }: { rows: Row[]; cols: Column[]; empty?: string }) {
@@ -60,7 +65,7 @@ function Table({ rows, cols, empty = "No data in this window." }: { rows: Row[];
             <tr key={i}>
               {cols.map(([key, title, kind]) => (
                 <td key={key} data-label={title} className={kind === "text" ? "" : "n"}>
-                  {cell(row[key], kind)}
+                  <Value value={row[key]} kind={kind} />
                 </td>
               ))}
             </tr>
@@ -308,7 +313,7 @@ export function Panels({ data, width }: { data: Summary; width?: number }) {
         {KPIS.map(([key, label, kind]) => (
           <div key={key} className="kpi">
             <dt>{label}</dt>
-            <dd>{cell(totals[key], kind)}</dd>
+            <dd><Value value={totals[key]} kind={kind} /></dd>
           </div>
         ))}
       </dl>

@@ -4,6 +4,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
+    "verbatimModuleSyntax": true,
     "noUncheckedIndexedAccess": false,
     "skipLibCheck": true,
     "esModuleInterop": true,
