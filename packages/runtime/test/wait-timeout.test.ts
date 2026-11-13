@@ -24,8 +24,15 @@ test("the seconds of a wait are 45 when absent and always between 1 and 50", () 
   assert.equal(waitSeconds(999), 50);
 });
 
+test("null is an absent wait, and a numeric string is its number, as before the check", () => {
+  assert.equal(waitSeconds(null), 45);
+  assert.equal(waitSeconds("30"), 30);
+  assert.equal(waitSeconds(" 12.5 "), 12.5);
+  assert.equal(waitSeconds("999"), 50);
+});
+
 test("seconds that are not a number are refused", () => {
-  for (const raw of ["30s", "30", Number.NaN, Number.POSITIVE_INFINITY, null, true, {}]) {
+  for (const raw of ["30s", "", "  ", Number.NaN, Number.POSITIVE_INFINITY, "Infinity", true, {}]) {
     assert.throws(() => waitSeconds(raw), /^Error: timeoutSec must be a number of seconds/, String(raw));
   }
 });

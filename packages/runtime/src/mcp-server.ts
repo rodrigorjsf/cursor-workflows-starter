@@ -10,7 +10,7 @@
 //                                                   dashboardUrl: the run's page on the local dashboard, started detached if it was not running
 //                                                   (once, for every repo); dashboardWarning: why it could not be
 //   wait_workflow  {jobId, timeoutSec?}             → state (status, phase, recent summary lines, spend, result)
-//                                                   timeoutSec: a number of seconds, clamped to 1..50, 45 when absent
+//                                                   timeoutSec: a number of seconds (a numeric string too), clamped to 1..50, 45 when absent or null
 //   get_workflow_status {jobId}                     → state, without waiting
 //   cancel_workflow {jobId}                         → cancel the job and return its state (the run stays resumable)
 //
@@ -83,7 +83,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         },
         {
           name: "wait_workflow",
-          description: "Waits up to timeoutSec seconds (a number, 1 to 50, default 45; outside that range it is clamped) for the job to end and returns its state. Repeat while status = running.",
+          description: "Waits up to timeoutSec seconds (a number, 1 to 50, default 45 when absent or null; outside that range it is clamped; a numeric string counts as its number) for the job to end and returns its state. Repeat while status = running.",
           inputSchema: {
             type: "object",
             required: ["jobId"],

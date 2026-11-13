@@ -426,7 +426,7 @@
 - **`wait_workflow` não espera mais para sempre com um `timeoutSec` que não é número.** Um `"30s"` virava `NaN`, o
   teto de 50 s deixava de valer e a chamada só voltava quando o job terminava, acima do timeout do cliente MCP. Agora um
   `timeoutSec` que não é número é um erro (`isError`, com `timeoutSec must be a number of seconds`), o número é levado
-  para 1 a 50 (45 sem ele), e `waitJob` não espera nada com um tempo que não é um número finito. O `cancel_workflow`
+  para 1 a 50 (45 sem ele ou com `null`), um texto numérico como `"30"` vale como o número, como antes, e `waitJob` não espera nada com um tempo que não é um número finito. O `cancel_workflow`
   espera um tempo fixo (20 s) e não tinha o problema.
 - **`job not found` no servidor MCP é um erro de tool.** `wait_workflow`, `get_workflow_status` e `cancel_workflow`
   devolviam `{ "error": "job not found" }` como uma resposta normal, sem o `isError` que todas as outras falhas do
