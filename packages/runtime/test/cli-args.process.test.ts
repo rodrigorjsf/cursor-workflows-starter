@@ -69,6 +69,14 @@ test("the numeric flags that were already checked are usage errors too", () => {
   assertUsageError(wf(["run", "smoke", "--max-cents", "lots"]), /^--max-cents must be a number/);
 });
 
+test("--args or --overrides that is not JSON is a usage error that names the flag, and no job or run is created", () => {
+  assertUsageError(wf(["run", "smoke", "--args", "{"]), /^--args must be JSON: /);
+  assertUsageError(wf(["start", "smoke", "--args", "{"]), /^--args must be JSON: /);
+  assertUsageError(wf(["start", "smoke", "--overrides", "{"]), /^--overrides must be JSON: /);
+  assert.equal(existsSync(join(repo, ".workflows", "jobs")), false);
+  assert.equal(existsSync(join(repo, ".workflows", "runs")), false);
+});
+
 test("wf run --job is refused inside a workflow step, like run and start", () => {
   const job = createJob(repo, "smoke");
   const r = wf(["run", "smoke", "--job", job.jobId], { WF_INSIDE_WORKFLOW: "1" });

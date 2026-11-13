@@ -120,8 +120,16 @@ const flagLimits = () => {
   };
   return { maxCents: number("max-cents"), maxTokens: number("max-tokens") };
 };
+/** The JSON value of a flag (`--args`, `--overrides`); text that is not JSON is a usage error that names the flag. */
+const jsonFlag = (flag: string, raw: string): unknown => {
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new UsageError(`--${flag} must be JSON: ${(err as Error).message}`);
+  }
+};
 /** The chat's layer of the config (`--overrides`): only what the MCP server forwards to the process it spawns. */
-const overridesFlag = () => (values.overrides === undefined ? undefined : parseLimitOverrides(JSON.parse(values.overrides)));
+const overridesFlag = () => (values.overrides === undefined ? undefined : parseLimitOverrides(jsonFlag("overrides", values.overrides)));
 const runOpts = () => ({
   cwd,
   runId: values.resume,
@@ -206,7 +214,7 @@ async function main(): Promise<number> {
     }
     case "run": {
       const def = await resolveWorkflow();
-      const args = JSON.parse(values.args!);
+      const args = jsonFlag("args", values.args!);
       const opts = { ...runOpts(), signal: cancelOnSignals() }; // SIGINT and SIGTERM cancel the run, the same as `wf cancel`
       if (values.job) {
         // Child mode of `wf start` and `start_workflow`: the parent already created the job.
@@ -224,7 +232,7 @@ async function main(): Promise<number> {
     case "start": {
       // Valida no pai, antes do spawn, para o erro aparecer aqui e não sumir num processo destacado.
       const def = await resolveWorkflow();
-      const args = JSON.parse(values.args!);
+      const args = jsonFlag("args", values.args!);
       const overrides = overridesFlag();
       const { violations } = loadEffectiveConfig(def, { cwd, flags: flagLimits(), mcpOverrides: overrides }); // an unusable config fails here, with its field path
       const { job, log } = spawnJob({ cwd, workflow: def.meta.name, args, resumeRunId: values.resume, ...flagLimits(), overrides });
