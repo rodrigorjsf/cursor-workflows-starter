@@ -723,9 +723,12 @@ test("forges takes a lower-case host with an optional port and the value github 
   assert.match(await refused(["gitlab"]), /\/forges/);
   assert.match(await refused({ "github.com": "gitlab" }), /\/forges\/github\.com: .*github\.com is GitHub/, "a host the kit knows cannot be given another forge");
   assert.match(await refused({ "gitlab.com": "github" }), /\/forges\/gitlab\.com: .*gitlab\.com is GitLab/);
+  assert.match(await refused({ "github.com:443": "gitlab" }), /\/forges\/github\.com:443: .*github\.com is GitHub/, "the kit knows its hosts on any port: a port does not make a contradiction valid");
+  assert.match(await refused({ "gitlab.com:8443": "github" }), /\/forges\/gitlab\.com:8443: .*gitlab\.com is GitLab/);
+  assert.match(await refused({ "gitlab.com": "github" }), /remove the entry/, "an error ends on what to do");
   assert.equal(calls.length, 0);
 
-  writeRepoConfig(cwd, { forges: { "github.com": "github", "gitlab.com": "gitlab", "git.example.com:8443": "gitlab", "10.0.0.5": "github" } });
+  writeRepoConfig(cwd, { forges: { "github.com": "github", "gitlab.com": "gitlab", "git.example.com:8443": "gitlab", "10.0.0.5": "github", "gitlab.com:8443": "gitlab" } });
   const start = await startOf();
-  assert.deepEqual(Object.keys(start.config.forges).sort(), ["10.0.0.5", "git.example.com:8443", "github.com", "gitlab.com"], "saying what the kit already knows is allowed");
+  assert.deepEqual(Object.keys(start.config.forges).sort(), ["10.0.0.5", "git.example.com:8443", "github.com", "gitlab.com", "gitlab.com:8443"], "saying what the kit already knows is allowed");
 });

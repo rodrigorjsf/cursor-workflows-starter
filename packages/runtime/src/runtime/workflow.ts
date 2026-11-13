@@ -225,8 +225,9 @@ export interface WorkflowContext<A = unknown> {
   readonly settings: Readonly<Record<string, unknown>>;
   /**
    * The forge of each host the kit does not know, as the config's `forges` map declares it for this run (the global
-   * file, then the repo file, host by host): empty when no file declares one. `github.com` and `gitlab.com` are not in
-   * it: the kit knows them. A copy; read fresh at each run start, a resume included.
+   * file, then the repo file, host by host): empty when no file declares one. `github.com` and `gitlab.com` need no
+   * entry, the kit knows them (an entry that repeats one is kept). A copy; read fresh at each run start, a resume
+   * included.
    */
   readonly forges: Readonly<Record<string, ForgeName>>;
   /** Executa uma etapa com um agente novo do Cursor SDK. Lança erro se falhar após as tentativas. */

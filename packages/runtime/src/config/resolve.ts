@@ -292,13 +292,14 @@ function checkLocations(input: ResolveInput, roles: WorkflowRole[], issues: Conf
   }
 }
 
-/** A `forges` entry that gives a host the kit knows (github.com, gitlab.com) the other forge would be silently ignored: it is an error instead. */
+/** A `forges` entry that gives a host the kit knows (github.com, gitlab.com, on any port) the other forge would be silently ignored: it is an error instead. */
 function checkForges(input: ResolveInput, issues: ConfigIssue[]): void {
   for (const file of [input.global, input.repo]) {
     for (const [host, forge] of Object.entries(file?.data.forges ?? {})) {
-      const known = KNOWN_FORGE_HOSTS[host];
+      const bare = host.replace(/:\d+$/, "");
+      const known = KNOWN_FORGE_HOSTS[bare];
       if (known === undefined || known === forge) continue;
-      issues.push({ ref: file!.path, path: pointerOf("forges", host), message: `${host} is ${known === "github" ? "GitHub" : "GitLab"}, a host the kit knows: it cannot be declared as ${forge}` });
+      issues.push({ ref: file!.path, path: pointerOf("forges", host), message: `${bare} is ${known === "github" ? "GitHub" : "GitLab"}, a host the kit knows, so it cannot be declared as ${forge}: remove the entry` });
     }
   }
 }

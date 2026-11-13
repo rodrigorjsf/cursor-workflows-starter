@@ -56,6 +56,8 @@ export const forgeNameOf = (record: { forge?: string }): string => record.forge 
 export interface RemoteName {
   host: string;
   port?: string;
+  /** An http(s) URL: its port, when it has one, is the web port. An ssh remote's port is the ssh port. */
+  web: boolean;
   path: string;
 }
 
@@ -68,17 +70,18 @@ export function parseRemote(text: string): RemoteName | undefined {
     try {
       const url = new URL(trimmed);
       const host = url.hostname.toLowerCase();
-      return host ? { host, ...(url.port ? { port: url.port } : {}), path: trimmedPath(url.pathname) } : undefined;
+      return host ? { host, ...(url.port ? { port: url.port } : {}), web: url.protocol === "https:" || url.protocol === "http:", path: trimmedPath(url.pathname) } : undefined;
     } catch {
       return undefined;
     }
   }
   if (/^[a-z]:[\\/]/i.test(trimmed)) return undefined; // a drive path, not `host:path`
   const scp = /^(?:[^@/:]+@)?([^@/:]+):(?!\/\/)(.*)$/.exec(trimmed);
-  return scp ? { host: scp[1]!.toLowerCase(), path: trimmedPath(scp[2]!) } : undefined;
+  return scp ? { host: scp[1]!.toLowerCase(), web: false, path: trimmedPath(scp[2]!) } : undefined;
 }
 
-const own = <T>(map: Readonly<Record<string, T>>, key: string): T | undefined => (Object.hasOwn(map, key) ? map[key] : undefined);
+/** The value `key` has in `map` itself: a host named `constructor` is no entry of Object.prototype. */
+const ownEntry = <T>(map: Readonly<Record<string, T>>, key: string): T | undefined => (Object.hasOwn(map, key) ? map[key] : undefined);
 
 /**
  * The forge of a host: github.com and gitlab.com (on any port) are known; any other is looked up in `forges` by `host:port` when the
@@ -86,10 +89,10 @@ const own = <T>(map: Readonly<Record<string, T>>, key: string): T | undefined =>
  * A host that is none of these is an error naming it and the key: the kit never guesses which CLI to use. `source` says where the host came from.
  */
 function forgeOfHost(remote: RemoteName, forges: Readonly<Record<string, ForgeName>>, source: string): ForgeName {
-  const forge = own(KNOWN_FORGE_HOSTS, remote.host) ?? (remote.port ? own(forges, `${remote.host}:${remote.port}`) : undefined) ?? own(forges, remote.host);
+  const forge = ownEntry(KNOWN_FORGE_HOSTS, remote.host) ?? (remote.port ? ownEntry(forges, `${remote.host}:${remote.port}`) : undefined) ?? ownEntry(forges, remote.host);
   if (forge !== undefined) return forge;
   throw new Error(
-    `${source} names the host ${remote.port ? `${remote.host}:${remote.port}` : remote.host}, which is not a known forge: declare it under "forges" in the config (the global file or the repo file), for example { "forges": { ${JSON.stringify(remote.host)}: "gitlab" } }; github.com is GitHub and gitlab.com is GitLab`,
+    `${source} names the host ${remote.port ? `${remote.host}:${remote.port}` : remote.host}, which is not a known forge (the kit knows github.com as GitHub and gitlab.com as GitLab): declare it under "forges" in the config (the global file or the repo file), for example { "forges": { ${JSON.stringify(remote.host)}: "gitlab" } }`,
   );
 }
 
@@ -186,7 +189,7 @@ const repoPathOf = (repo: string): string => parseRemote(repo)?.path ?? trimmedP
 function hostFlag(repo: string | undefined): string[] {
   const named = repo === undefined ? undefined : parseRemote(repo);
   if (!named) return [];
-  return ["--hostname", /^https?:\/\//i.test(repo!.trim()) && named.port ? `${named.host}:${named.port}` : named.host];
+  return ["--hostname", named.web && named.port ? `${named.host}:${named.port}` : named.host];
 }
 /** `projects/<repository>` in the REST API: `repo`'s path, or glab's placeholder for the repository of the cwd. */
 const projectOf = (repo: string | undefined): string => `projects/${repo ? encodeURIComponent(repoPathOf(repo)) : ":fullpath"}`;

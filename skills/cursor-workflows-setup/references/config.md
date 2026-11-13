@@ -47,7 +47,7 @@ Top-level keys besides `caps`:
   `{ "git.example.com": "gitlab" }`. The kit knows `github.com` and `gitlab.com`; a repository whose `origin` (or `repo`
   argument, when it is a URL) is on any other host fails before any step until the host is declared here. A key is the
   host in lower case, with the port when the URL has one (`git.example.com:8443`); without a port it matches any port.
-  The two files merge host by host, the repo file first. No env var or flag sets it.
+  The two files merge host by host, and the repo file wins on a host both name. No env var or flag sets it.
 - `dashboard.autoStart` (global file only): `false` stops `start_workflow` from starting the dashboard.
 
 Under `workflows.<name>`:
