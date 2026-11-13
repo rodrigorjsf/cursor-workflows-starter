@@ -394,8 +394,8 @@ class GitlabForge implements Forge {
   }
 
   async openPr(cwd: string, pr: NewPr): Promise<string> {
-    // `glab mr create` has no body-file flag: the text goes as one argument (never through a shell). `--source-branch` names the
-    // branch; `-H` would name the head repository.
+    // `glab mr create` has no body-file flag: the text goes as one argument (never through a shell), which `pr-body.ts` caps in
+    // bytes below Linux's 128 KiB limit on one argument. `--source-branch` names the branch; `-H` would name the head repository.
     const description = readFileSync(pr.bodyFile, "utf8");
     const out = await this.glab(cwd, "mr", "create", "--source-branch", pr.branch, "--title", pr.title, "--description", description, "--yes", ...repoFlag(pr.repo));
     const url = MR_URL.exec(out)?.[0];

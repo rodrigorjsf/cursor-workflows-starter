@@ -283,6 +283,18 @@ forgeTest(
   ["gitlab"],
 );
 
+forgeTest("a PR body of many multi-byte characters still opens the PR: the body is cut by bytes too, not only by characters", async () => {
+  issue(["complexity:low"]);
+  // 60 000 three-byte characters: under the character cap, but some 180 KB, past Linux's 128 KiB limit on one argument (glab
+  // mr create takes the description as one).
+  fx.handlers["pr-text"] = (o) => submit(o, { summary: "\u20AC".repeat(60_000), door: "two-way", blastRadius: "local" });
+  const r = await run({ openPr: true });
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)).slice(0, 2000));
+  const body = forgeState().prs[0]!.body;
+  assert.match(body, /_\(body truncated\)_$/);
+  assert.ok(Buffer.byteLength(body) <= 100_000, `the body is ${Buffer.byteLength(body)} bytes`);
+});
+
 forgeTest(
   "the MR is opened from the run's branch with --source-branch, never -H (the head repository), and its URL is the run's prUrl",
   async () => {

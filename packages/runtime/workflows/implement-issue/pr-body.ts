@@ -10,6 +10,25 @@ import type { SliceRecord } from "./tdd.js";
 export interface PrText { summary: string; door: "one-way" | "two-way"; doorNote?: string; blastRadius: string; blastNote?: string }
 
 const MAX_BODY = 60_000; // o GitHub aceita até 65.536 caracteres
+/**
+ * The cap in UTF-8 bytes. `glab mr create` takes the description as one argument (it has no body-file flag), and Linux refuses an
+ * argument over 128 KiB (E2BIG): 60 000 characters of a three-byte script are some 180 KB.
+ */
+const MAX_BODY_BYTES = 100_000;
+const TRUNCATED = "\n\n_(body truncated)_";
+/** `body` within both caps, cut at a whole character (never inside a surrogate pair), with a note that it was cut. */
+function capped(body: string): string {
+  if (body.length <= MAX_BODY && Buffer.byteLength(body) <= MAX_BODY_BYTES) return body;
+  let end = 0;
+  let bytes = 0;
+  for (const ch of body) {
+    const size = Buffer.byteLength(ch);
+    if (end + ch.length > MAX_BODY - 40 || bytes + size > MAX_BODY_BYTES - 40) break;
+    end += ch.length;
+    bytes += size;
+  }
+  return body.slice(0, end) + TRUNCATED;
+}
 /** O fim de uma saída, a partir de uma linha inteira: o pedaço de linha que o limite corta sai. */
 const tail = (s: string | undefined, n: number) => {
   const t = (s ?? "").trim();
@@ -131,5 +150,5 @@ export function buildPrBody(input: {
   // The whole body is redacted, the model's text included: a step result keeps the redact-only formats (JWT, `Bearer`, a
   // URL password) for the workflow to use, but a public PR gets none of them. Redacting the Evidence twice changes nothing.
   const body = redact(raw);
-  return body.length > MAX_BODY ? body.slice(0, MAX_BODY - 40) + "\n\n_(body truncated)_" : body;
+  return capped(body);
 }
