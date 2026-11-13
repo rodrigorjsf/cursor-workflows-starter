@@ -128,8 +128,11 @@ export class Commands {
 
   /** The URL `remote` (the origin by default) has in the repository's configuration, as written there (`url.<base>.insteadOf` is not applied); undefined when there is no such remote. */
   async remoteUrl(cwd: string, remote = ORIGIN): Promise<string | undefined> {
-    if (!(await this.gitIs(cwd, "config", "--get", `remote.${remote}.url`))) return undefined;
-    return (await this.gitRead(cwd, "config", "--get", `remote.${remote}.url`)).trim() || undefined;
+    const args = ["config", "--get", `remote.${remote}.url`];
+    const r = await this.read("git", args, cwd, this.timeouts.localMs);
+    if (r.exitCode === 1) return undefined; // git config --get: the key is not set
+    if (!r.ok) throw new CommandError("git", args, r, this.timeouts.localMs);
+    return r.stdout.trim() || undefined;
   }
 
   /**
