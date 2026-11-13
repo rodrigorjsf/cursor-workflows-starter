@@ -27,17 +27,17 @@ const { values } = parseArgs({
     "cost-waits": { type: "string", default: "0,5,15,30" },
   },
 });
-if (!values.model) throw new Error("--model é obrigatório (veja `npm run models`)");
+if (!values.model) throw new Error("--model is required (see `npm run models`)");
 
 const PROMPTS: Record<string, string> = {
-  smoke: "Responda apenas com a palavra OK. Não use ferramentas.",
-  "invalid-model": "Responda apenas com a palavra OK.",
+  smoke: "Answer only with the word OK. Do not use tools.",
+  "invalid-model": "Answer only with the word OK.",
   read:
-    "Leia os arquivos package.json, tsconfig.json, AGENTS.md e README.md deste diretório. " +
-    "Responda com uma linha por arquivo: o nome do arquivo e o número de linhas dele. Não edite nada.",
+    "Read the files package.json, tsconfig.json, AGENTS.md and README.md in this directory. " +
+    "Answer with one line per file: the file name and its number of lines. Do not edit anything.",
 };
 const mode = values.mode!;
-if (!(mode in PROMPTS)) throw new Error(`--mode inválido: ${mode}`);
+if (!(mode in PROMPTS)) throw new Error(`invalid --mode: ${mode}`);
 const model = { id: mode === "invalid-model" ? "wf-probe-modelo-inexistente" : values.model };
 const settingSources = values["setting-sources"]!.split(",").filter(Boolean) as SettingSource[];
 const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));

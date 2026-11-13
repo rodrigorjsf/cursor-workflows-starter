@@ -9,11 +9,11 @@
 // Verificação real: agentes irmãos aproveitam o prefixo em cache? (ver docs/research/verificacoes-locais.md §8)
 import { defineWorkflow } from "../../packages/runtime/src/runtime/workflow.js";
 
-const PROMPT = "Leia README.md, AGENTS.md e package.json. Responda em uma linha: quantas linhas tem cada arquivo.";
+const PROMPT = "Read README.md, AGENTS.md and package.json. Answer in one line: how many lines each file has.";
 const OPTS = { tools: ["read"], settingSources: [] as [] };
 
 export default defineWorkflow({
-  meta: { name: "verify-cache", description: "Verificação: cache de prompt entre agentes irmãos (paralelo e sequência)." },
+  meta: { name: "verify-cache", description: "Verification: prompt cache between sibling agents (parallel and in sequence)." },
   defaults: { model: { id: process.env.WF_VERIFY_MODEL ?? "composer-2.5" }, timeoutMs: 5 * 60_000, retries: 0 },
   async run(ctx) {
     ctx.phase("paralelo");
