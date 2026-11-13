@@ -417,6 +417,12 @@
   redator: uma etapa que devolvia uma chave a gravava em claro em `journal.jsonl` e em `.workflows/memo/`. Agora o
   resultado passa pela mesma redação antes de ser guardado, e o workflow recebe o valor já redigido, para que um resume
   (que repete o journal) veja o mesmo que a primeira execução e não refaça as etapas seguintes.
+- **Uma etapa na nuvem não manda para a Cursor a credencial embutida na URL do remote, e recusa remotes inseguros.**
+  `cloudRepoUrl` mantinha o `usuario:token` de um remote `https://usuario:token@host/...` na URL do repositório enviada
+  à API da Cursor, e passava `http://`, `ext::` e caminhos locais como estavam (o snapshot, com arquivos não commitados,
+  ia em texto puro por `http://`). Agora a URL vem de `remote.<nome>.url` como configurada, sai sem credencial, e um
+  remote que não é `https://` ou ssh num host falha a etapa com uma mensagem clara, antes do snapshot e sem novas
+  tentativas. O redator do log ganhou o formato da senha numa URL (`https://usuario:[REDACTED]@host`).
 
 ## 0.2.0 (pré-release, 2026-11-11)
 

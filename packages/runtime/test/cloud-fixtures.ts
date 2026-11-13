@@ -7,6 +7,16 @@ import { dirname, join } from "node:path";
 
 export const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" });
 
+/**
+ * Adds `remoteName` to `repo` the way a user's checkout has it, an https URL on a code host, while git sends it to the bare
+ * repository `bare`: a cloud step refuses a local-path remote, and the tests need no network.
+ */
+export function addRemote(repo: string, remoteName: string, bare: string): void {
+  const url = `https://example.invalid/${remoteName}/repo.git`;
+  git(repo, "remote", "add", remoteName, url);
+  git(repo, "config", `url.${bare}.insteadOf`, url);
+}
+
 /** A repository at `repo` with one commit (`a.txt`, `b.txt`) and a bare repository at `remote`, added as `remoteName`. */
 export function repoWithRemote(repo: string, remote: string, remoteName = "origin"): void {
   mkdirSync(repo, { recursive: true });
@@ -20,7 +30,7 @@ export function repoWithRemote(repo: string, remote: string, remoteName = "origi
   git(repo, "commit", "-qm", "init");
   mkdirSync(remote, { recursive: true });
   git(remote, "init", "-q", "--bare");
-  git(repo, "remote", "add", remoteName, remote);
+  addRemote(repo, remoteName, remote);
 }
 
 /** The branches the bare repository has. */

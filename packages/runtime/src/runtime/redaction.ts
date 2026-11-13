@@ -2,7 +2,7 @@
 // the workflow gets that redacted value). Two things are replaced with `[REDACTED]` before an event is written (and before
 // any listener sees it):
 //   - text that has the shape of a well-known credential (GitHub, AWS, Slack, Google, npm, Stripe and Cursor keys, JWTs,
-//     bearer tokens, private key blocks, and the `sk-` keys of the model providers);
+//     bearer tokens, private key blocks, the `sk-` keys of the model providers, and the password in a URL's userinfo);
 //   - the value of any environment variable whose name contains KEY, TOKEN, SECRET or PASSWORD, plus keys handed to the run
 //     directly (the Cursor API key arrives this way, as `CURSOR_API_KEY` or the `apiKey` option), and those of the
 //     environment each `ctx.exec` command runs with (its `env` option, and process.env as it is when the command starts).
@@ -52,6 +52,9 @@ export const CREDENTIAL_FORMATS: readonly CredentialFormat[] = [
   { rule: "Stripe key", pattern: /[sr]k_(?:live|test)_[A-Za-z0-9]{16,}/g },
   { rule: "JWT", pattern: /eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, redactOnly: true },
   { rule: "Bearer token", pattern: /\b(Bearer\s+)[A-Za-z0-9._~+/=-]{16,}/gi, redactOnly: true }, // Authorization header
+  // The password of a URL's userinfo (`https://user:secret@host`, a git remote's, say): the scheme and user stay. Redact-only:
+  // fixtures and docs are full of `postgres://user:pass@localhost`.
+  { rule: "password in a URL", pattern: /\b([a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:)[^\s/@]+(?=@)/gi, redactOnly: true },
 ];
 
 /** The rule of the first credential format in `text` that blocks a delivery (not `redactOnly`), or undefined. Never the match. */
