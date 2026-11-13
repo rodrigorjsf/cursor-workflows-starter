@@ -96,7 +96,7 @@ import { NamedLockedError, acquireNamedLock, eventLogPath, readEventLog } from "
 import { defineWorkflow, type AgentCallOptions, type WorkflowCard } from "../src/runtime/workflow.js";
 import { buildPrBody, inlineCode, sanitizeModelText, type PrText } from "./implement-issue/pr-body.js";
 import { CommandError, Commands, NETWORK_TIMEOUT_SEC, SNAPSHOT_GRACE_HOURS, WORKFLOW_BRANCH_PREFIX, worktreeOf } from "./implement-issue/commands.js";
-import { type Forge, createForge, detectForge, forgeNameOf } from "./implement-issue/forge.js";
+import { type Forge, createForge, detectForge, forgeNameOf, prLabel } from "./implement-issue/forge.js";
 import * as P from "./implement-issue/prompts.js";
 import { AXES, AXIS_SCHEMAS, blockingAxes, blockingOf, type Axis, type ReviewReports } from "./implement-issue/review.js";
 import {
@@ -260,13 +260,6 @@ const issueCard = (issue: { number: number; title: string }, tier: Tier, extra: 
   badges: [tier],
   ...extra,
 });
-/** The link text of a pull request, as its forge writes it: `PR #9` for `https://github.com/o/r/pull/9`, `MR !9` for `https://gitlab.com/g/p/-/merge_requests/9`. */
-const prLabel = (url: string) => {
-  const merge = /\/-\/merge_requests\/(\d+)/.exec(url)?.[1];
-  if (merge) return `MR !${merge}`;
-  const pull = /\/pull\/(\d+)/.exec(url)?.[1];
-  return pull ? `PR #${pull}` : "Pull request";
-};
 
 /** O tier das labels da issue: o mais alto entre os que casam, para a ordem das labels nunca rebaixar uma issue difícil. */
 function tierOfLabels(labels: Array<{ name: string }>, labelTiers: Record<string, Tier>): Tier | undefined {

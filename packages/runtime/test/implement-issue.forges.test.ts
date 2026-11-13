@@ -5,16 +5,10 @@
 import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { SUB_CODE, branchOf, failForge, forgeState, forgeTest, fx, git, issue, run, submit, write, type TestForge } from "./implement-issue.fixture.js";
+import { SUB_CODE, branchOf, changeForgeState, failForge, forgeState, forgeTest, fx, git, issue, run, submit, write, type TestForge } from "./implement-issue.fixture.js";
 
 const res = (r: { result?: unknown }) => r.result as any;
 const progressOf = (runId: string) => JSON.parse(readFileSync(join(fx.repo, ".workflows", "runs", runId, "tdd-progress.json"), "utf8")) as { forge?: string };
-/** Changes what the fake forge holds: the comments the issue already has, the system notes GitLab added, the PRs that exist. */
-function seed(change: (state: Record<string, unknown>) => void) {
-  const state = JSON.parse(readFileSync(fx.forgeStateFile, "utf8"));
-  change(state);
-  writeFileSync(fx.forgeStateFile, JSON.stringify(state));
-}
 const SEAMS_MARKER = "<!-- wf:implement-issue:seams -->";
 /** Makes `url` the URL of `origin`, reached through the bare repository the fixture made (as the fixture does for its own forge). */
 function setOrigin(url: string) {
@@ -111,7 +105,7 @@ forgeTest("the issue's title and body reach the classifier, and a label, not the
 
 forgeTest("the seams comment is posted once: a resume does not post it again when the issue has more than 20 comments", async () => {
   issue(["complexity:medium"]);
-  seed((state) => (state.comments = Array.from({ length: 24 }, (_, i) => `an earlier comment, ${i + 1}`)));
+  changeForgeState((state) => (state.comments = Array.from({ length: 24 }, (_, i) => `an earlier comment, ${i + 1}`)));
   const first = await run({});
   assert.equal(res(first).status, "seams-proposed", JSON.stringify(res(first)));
   assert.equal(forgeState().comments.length, 25, "the comment is the 25th: past the first page of 20");
@@ -127,7 +121,7 @@ forgeTest(
   "a system note is not a comment: one that quotes the seams comment does not stop the run from posting it",
   async () => {
     issue(["complexity:medium"]);
-    seed((state) => (state.systemNotes = [`mentioned ${SEAMS_MARKER} run-a`]));
+    changeForgeState((state) => (state.systemNotes = [`mentioned ${SEAMS_MARKER} run-a`]));
     const r = await run({}, "run-a");
     assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
     assert.equal(forgeState().comments.length, 1, "the comment was posted although a system note held the same text");
@@ -183,7 +177,7 @@ forgeTest(
   async () => {
     issue(["complexity:low"]);
     const branch = branchOf("run-a");
-    seed((state) => {
+    changeForgeState((state) => {
       state.prs = [
         { url: "https://gitlab.com/owner/repo/-/merge_requests/1", body: "the first, closed", head: branch, state: "CLOSED" },
         { url: "https://gitlab.com/owner/repo/-/merge_requests/2", body: "the second, the latest", head: branch, state: "OPEN" },

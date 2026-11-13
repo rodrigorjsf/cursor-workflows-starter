@@ -56,20 +56,27 @@ export const forgeState = () =>
   };
 /** From now on the fake forge fails the operation `op` with `message` on stderr and exit code 1; `message` undefined restores it. `op` is the `gh` call it replaces: "issue view", "issue comment", "pr view" or "pr create" (glab's own commands and routes map to the same names). */
 export function failForge(op: string, message: string | undefined) {
+  changeForgeState((state) => {
+    state.fail = { ...state.fail };
+    if (message === undefined) delete state.fail[op];
+    else state.fail[op] = message;
+  });
+}
+
+/** Changes what the fake forge holds (the comments the issue has, the system notes GitLab added, the PRs that exist, what fails): `change` edits the state it is given. */
+export function changeForgeState(change: (state: Record<string, any>) => void) {
   const state = JSON.parse(readFileSync(fx.forgeStateFile, "utf8"));
-  state.fail = { ...state.fail };
-  if (message === undefined) delete state.fail[op];
-  else state.fail[op] = message;
+  change(state);
   writeFileSync(fx.forgeStateFile, JSON.stringify(state));
 }
 
 /** From now on the fake forge answers the state of the PR opened on `branch` with `state` (a merge or a close that happened on the forge). */
 export function setPrState(branch: string, state: "OPEN" | "MERGED" | "CLOSED") {
-  const st = JSON.parse(readFileSync(fx.forgeStateFile, "utf8")) as { prs: Array<{ head?: string; state?: string }> };
-  const pr = st.prs.filter((p) => p.head === branch).pop();
-  if (!pr) throw new Error(`the fake forge has no PR on ${branch}`);
-  pr.state = state;
-  writeFileSync(fx.forgeStateFile, JSON.stringify(st));
+  changeForgeState((st) => {
+    const pr = (st.prs as Array<{ head?: string; state?: string }>).filter((p) => p.head === branch).pop();
+    if (!pr) throw new Error(`the fake forge has no PR on ${branch}`);
+    pr.state = state;
+  });
 }
 
 /** The branch and the worktree of a run on issue 7: each run owns its own (`wf/issue-<n>-<run>`), named after the run id without the workflow's name. */
@@ -130,7 +137,7 @@ if (st.forge !== "gitlab") { (st.wrongCli = st.wrongCli || []).push(["glab", ...
 st.calls.push(a);
 const flag = (n) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };
 const has = (...n) => n.some((x) => a.includes(x));
-const NOTES_PAGE = 20; // GitLab's default page size: without --paginate a caller sees only the first page
+const DEFAULT_PAGE_SIZE = 20; // GitLab's default page size: without --paginate a caller sees only the first page
 const STATES = { OPEN: "opened", MERGED: "merged", CLOSED: "closed" };
 const mrOf = (p, i) => ({ iid: i + 1, title: p.title, description: p.body, web_url: p.url, state: STATES[p.state || "OPEN"] || p.state, source_branch: p.head });
 const out = (value) => { save(); process.stdout.write(typeof value === "string" ? value : JSON.stringify(value) + "\\n"); };
@@ -152,7 +159,7 @@ if (route === "issue view" && a[0] === "issue") {
   // all the notes of the issue: GitLab's own system notes first, then the comments; --paginate prints one array per page
   const notes = [...(st.systemNotes || []).map((body) => ({ body, system: true })), ...st.comments.map((body) => ({ body, system: false }))].map((n, i) => ({ id: i + 1, ...n }));
   const pages = [];
-  for (let i = 0; i < notes.length || i === 0; i += NOTES_PAGE) pages.push(notes.slice(i, i + NOTES_PAGE));
+  for (let i = 0; i < notes.length || i === 0; i += DEFAULT_PAGE_SIZE) pages.push(notes.slice(i, i + DEFAULT_PAGE_SIZE));
   out((has("--paginate") ? pages : pages.slice(0, 1)).map((p) => JSON.stringify(p)).join("\\n") + "\\n");
 } else if (route === "issue comment") {
   const field = flag("-F") || flag("--field") || "";
@@ -166,7 +173,7 @@ if (route === "issue view" && a[0] === "issue") {
   // A PR seeded by a test has no head and answers for every branch; one made by mr create answers for its own branch only
   let mrs = st.prs.map(mrOf).filter((m) => !m.source_branch || m.source_branch === query.get("source_branch"));
   if (query.get("sort") !== "asc") mrs = mrs.reverse(); // created_at descending: the latest first
-  out(mrs.slice(0, Number(query.get("per_page") || NOTES_PAGE)));
+  out(mrs.slice(0, Number(query.get("per_page") || DEFAULT_PAGE_SIZE)));
 } else if (route === "pr create") {
   if (has("-H", "--head")) fail("fake glab: -H names the head repository, not the branch: use --source-branch", 2);
   if (!flag("--source-branch") || !has("--yes")) fail("fake glab: mr create needs --source-branch and --yes (no prompts)", 2);

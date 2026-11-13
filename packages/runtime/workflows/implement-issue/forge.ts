@@ -6,7 +6,8 @@
 //
 // A fresh run detects its forge from the host of the `origin` remote (`detectForge`) and records it (`Progress.forge`); `wf gc`
 // asks the forge a record names, never one detected again, and a record without the field is GitHub (`forgeNameOf`), as every run
-// before the field existed was.
+// before the field existed was. Detection knows github.com and gitlab.com only for now: ADR-0009's `forges` map, the error for an
+// unknown host and the `repo` argument's host are not built yet, and until they are every other host is GitHub, as it was.
 import { readFileSync } from "node:fs";
 import type { Commands } from "./commands.js";
 
@@ -70,8 +71,9 @@ export function hostOfRemote(url: string): string | undefined {
 
 /**
  * The forge a fresh run starts on: the one of the host of the cwd's `origin` remote, as the repository's configuration spells it
- * (a `url.<base>.insteadOf` rewrite is not applied: the name the user cloned from decides). A host the kit does not know, a local
- * path and a repository with no `origin` are GitHub, as before GitLab was supported.
+ * (a `url.<base>.insteadOf` rewrite is not applied: the name the user cloned from decides). Interim, until the `forges` map exists
+ * (ADR-0009): a host the kit does not know, a local path and a repository with no `origin` are GitHub, as before GitLab was
+ * supported; the decided behaviour for an unknown host is an error.
  */
 export async function detectForge(commands: Commands, cwd: string): Promise<ForgeName> {
   const url = await commands.remoteUrl(cwd);
@@ -140,6 +142,17 @@ class GithubForge implements Forge {
 const MR_STATES: Readonly<Record<string, PrState>> = { opened: "OPEN", locked: "OPEN", merged: "MERGED", closed: "CLOSED" };
 /** The URL of a merge request in the output of `glab mr create`, which prints a line of text around it. */
 const MR_URL = /https?:\/\/\S+\/-\/merge_requests\/\d+/;
+/** The number in the URL of a GitLab merge request, and in the URL of a GitHub pull request. */
+const MR_NUMBER = /\/-\/merge_requests\/(\d+)/;
+const PULL_NUMBER = /\/pull\/(\d+)/;
+
+/** The link text of a PR, as its forge writes it: `PR #9` for `https://github.com/o/r/pull/9`, `MR !9` for `https://gitlab.com/g/p/-/merge_requests/9`. */
+export function prLabel(url: string): string {
+  const merge = MR_NUMBER.exec(url)?.[1];
+  if (merge) return `MR !${merge}`;
+  const pull = PULL_NUMBER.exec(url)?.[1];
+  return pull ? `PR #${pull}` : "Pull request";
+}
 
 /** The path of a repository as the REST API takes it, from what the `repo` argument holds: `group/sub/project`, or a URL of it. */
 const repoPathOf = (repo: string): string => repo.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]+\//i, "").replace(/\/+$/, "").replace(/\.git$/, "");
