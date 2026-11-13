@@ -153,7 +153,7 @@ O que conferir:
    `--max-cents` não dispara. Veja [2.2 §3](02-configuracao-inicial.md#3-teto-de-custo).
 4. Em `/caminho/do/repo-de-teste/.workflows/worktrees/` existe um worktree `wf-issue-1-<run>`, na branch `wf/issue-1-<run>`, com o commit.
 5. Rodando de novo com `--resume <runId>`, as etapas de agente concluídas aparecem como "(cache)", e o commit
-   não é repetido. Exceção esperada: as etapas `corrigir-N` embutem a saída dos testes no prompt, e essa saída
+   não é repetido. Exceção esperada: as etapas `fix-N-R` embutem a saída dos testes no prompt, e essa saída
    costuma mudar (tempos de execução), então elas rodam de novo se os testes falharem outra vez.
 
 Se algo divergir, anote em um issue do seu fork. Os pontos marcados "a validar" em

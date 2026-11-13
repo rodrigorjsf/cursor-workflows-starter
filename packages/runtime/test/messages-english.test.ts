@@ -15,7 +15,7 @@ import { test } from "node:test";
 import ts from "typescript";
 
 const SRC = join(import.meta.dirname, "..", "src");
-const PORTUGUESE = /[ãõçáéíóúâêôà]|\b(não|para|uma|que|dos|das|são|também|você|com o|de um|de|da|em|ou|sem|nenhuma?|chave|desconhecid[oa]s?|encontrad[oa]s?|arquivo|pasta|rode|banco|uso|falha|nem|autenticado|servidor)\b/i;
+const PORTUGUESE = /[ãõçáéíóúâêôà]|\b(não|para|uma|que|dos|das|são|também|você|com o|de um|de|da|em|ou|sem|nenhuma?|chave|desconhecid[oa]s?|encontrad[oa]s?|arquivo|pasta|rode|banco|uso|falha|nem|autenticado|servidor|fatias?|teste|falhando|adiad[oa]s?|corpo)\b/i;
 /** Not messages: the metrics database's DDL, whose SQL comments are comments (the rule above), and the pricing rows it seeds. */
 const DATA = ["CREATE VIEW", "CREATE TABLE", "cursor.com/docs/models-and-pricing"];
 
@@ -45,7 +45,20 @@ test("no string in the runtime's source is Portuguese: every message that can re
   assert.deepEqual(offenders, []);
 });
 
-const SCRIPTS = join(import.meta.dirname, "..", "..", "..", "scripts");
+const WORKFLOWS = join(import.meta.dirname, "..", "workflows");
+
+// The built-in workflows' strings reach agents and people too: the prompts, the step labels (in the event log, the dashboard
+// and the metrics), the results and the PR body the workflow writes.
+test("no string in the built-in workflows is Portuguese: prompts, step labels, results and the PR body are English", () => {
+  const offenders = sources(WORKFLOWS).flatMap((file) =>
+    literals(file)
+      .filter(({ text }) => PORTUGUESE.test(text))
+      .map(({ line, text }) => `${relative(WORKFLOWS, file)}:${line}: ${text.slice(0, 100)}`),
+  );
+  assert.deepEqual(offenders, []);
+});
+
+const SCRIPTS =join(import.meta.dirname, "..", "..", "..", "scripts");
 
 /** The lines of a shell script an agent reads, as what it prints or as the files it writes: every line but the comments. */
 const shellOffenders = (name: string) =>

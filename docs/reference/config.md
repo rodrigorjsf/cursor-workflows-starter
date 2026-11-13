@@ -233,7 +233,7 @@ Os campos abaixo são os ajustes do `implement-issue`, validados pelo esquema. U
         }
       },
       "labels": {
-        "desenhar:*": {
+        "design:*": {
           "maxTokensPerStep": 150000
         }
       }

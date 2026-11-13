@@ -540,7 +540,7 @@ Para validar a entrega depois, por exemplo quando o PR é aceito ou recusado, us
 **Cartão no dashboard.** `ctx.card({ title, subtitle, links, badges })` define o que o cartão do run mostra no Board do
 [dashboard](#o-quadro-board) (a issue e o tier, o link da PR…). Chame de novo quando algo mudar: o quadro mostra o último.
 
-**Labels:** dê `label` explícito às etapas (`"planejar"`, `"implementar"`). Sem label, o runtime usa
+**Labels:** dê `label` explícito às etapas (`"plan"`, `"implement"`). Sem label, o runtime usa
 `step-<hash>`, para não vazar conteúdo do prompt. Mas aí as análises por etapa ficam ilegíveis.
 
 ## 7. Privacidade e uso no time

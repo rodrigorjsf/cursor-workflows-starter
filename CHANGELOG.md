@@ -274,6 +274,16 @@
 
 ### Mudado
 
+- **Os rótulos das etapas do `implement-issue` e o corpo do PR que ele abre são em inglês.** Os rótulos passam a
+  `classify`, `plan`, `design:<minimal|flexible|common>`, `judge`, `test-N`, `code-N`, `fix-N-R`, `refactor-1` e
+  `pr-text` (antes `classificar`, `planejar`, `desenhar:<minima|flexivel|comum>`, `julgar`, `teste-N`, `codigo-N`,
+  `corrigir-N-R`, `refatorar-1` e `pr-texto`), e o `step` de um `tdd-violation` no refactor passa a `refactor-1`. O
+  histórico de métricas por rótulo se divide na troca: os runs antigos ficam com os rótulos antigos, e uma análise por
+  etapa que cruza a troca precisa somar os dois nomes. Um glob de `labels` na configuração que nomeava um rótulo antigo
+  (por exemplo `desenhar:*`) deixa de casar sem aviso: troque-o pelo novo. A configuração por papel (`roles`) não muda.
+  Um resume de um run começado antes da troca reaproveita as etapas prontas (a chave do journal não leva o rótulo),
+  menos o `judge`, cujo prompt leva o nome da restrição de cada design. O corpo do PR (Evidence, achados que não bloqueiam, fatias adiadas, rodapé) também é em inglês, e um teste
+  confere que nenhuma string dos workflows embutidos é em português.
 - **Cancelar um run para os cloud agents dele, em qualquer estado do job** ([ADR-0007](docs/adr/0007-cancel-stops-cloud-agents.md),
   que substitui o ADR-0006). Um job que executa recebe SIGTERM; um job congelado (processo vivo, sem heartbeat) é morto, o
   que não desfaz a etapa em andamento, e os agentes que o log mostra sem fim são cancelados pela API da Cursor; um job cujo
