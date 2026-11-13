@@ -33,8 +33,9 @@ one implementation per forge: GitHub through `gh`, GitLab through `glab`.
 - **A run keeps its forge.** A run records the forge it resolved; `wf gc` reads it from there and never detects again, so
   a later config or remote change cannot send a deletion decision's state query to the wrong CLI. A record without the
   field is GitHub.
-- **`glab api` where the CLI falls short.** Notes (paginated), comments (`-F body=@file`), the latest MR of a branch and
-  an MR by URL go through the GitLab REST API via `glab api`; the rest uses glab's own commands. glab keeps the login.
+- **`glab api` where the CLI falls short.** Notes (paginated), comments (`-F body=@file`), the MR of a branch (the latest open
+  one, else the latest, as `gh pr view <branch>` picks) and an MR by URL go through the GitLab REST API via `glab api`;
+  the rest uses glab's own commands. glab keeps the login.
 - **"PR" stays the kit's term** on both forges: the persisted fields (`prUrl`, `PrState`) do not change, and only the
   interface shows `MR !9`. `opened` and `locked` map to `OPEN`, so `wf gc` never treats a live MR as finished.
 - **The seam is internal.** The built-in workflow, `wf gc` and `wf doctor` use it; the `observe` entry point exports only

@@ -352,8 +352,8 @@ forgeTest(
     const calls = forgeState().calls;
     assert.ok(calls.some((c) => c.join(" ") === "issue view 7 --repo other/x --output json"), "the issue is read from the named repository");
     assert.ok(calls.some((c) => c.join(" ") === "api projects/other%2Fx"), "the lock asks glab which repository it is, by its path");
-    const lookup = `projects/other%2Fx/merge_requests?source_branch=${encodeURIComponent(branchOf(other.runId))}&order_by=created_at&sort=desc&per_page=1`;
-    assert.ok(calls.some((c) => c.join(" ") === `api ${lookup}`), "its MR is looked up by the project path, the latest first");
+    const lookup = `projects/other%2Fx/merge_requests?source_branch=${encodeURIComponent(branchOf(other.runId))}&order_by=created_at&sort=desc&per_page=100`;
+    assert.ok(calls.some((c) => c.join(" ") === `api --paginate ${lookup}`), "its MR is looked up by the project path, the latest first");
     const create = calls.find((c) => c[0] === "mr" && c[1] === "create")!;
     assert.equal(create[create.indexOf("--repo") + 1], "other/x");
   },

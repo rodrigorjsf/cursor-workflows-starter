@@ -188,7 +188,11 @@ if (route === "issue view" && a[0] === "issue") {
   // A PR seeded by a test has no head and answers for every branch; one made by mr create answers for its own branch only
   let mrs = st.prs.map(mrOf).filter((m) => !m.source_branch || m.source_branch === query.get("source_branch"));
   if (query.get("sort") !== "asc") mrs = mrs.reverse(); // created_at descending: the latest first
-  out(mrs.slice(0, Number(query.get("per_page") || DEFAULT_PAGE_SIZE)));
+  // GitLab's page size is per_page; --paginate prints one array per page
+  const size = Number(query.get("per_page") || DEFAULT_PAGE_SIZE);
+  const pages = [];
+  for (let i = 0; i < mrs.length || i === 0; i += size) pages.push(mrs.slice(i, i + size));
+  out((has("--paginate") ? pages : pages.slice(0, 1)).map((p) => JSON.stringify(p)).join("\\n") + "\\n");
 } else if (route === "pr create") {
   if (has("-H", "--head")) fail("fake glab: -H names the head repository, not the branch: use --source-branch", 2);
   if (!flag("--source-branch") || !has("--yes")) fail("fake glab: mr create needs --source-branch and --yes (no prompts)", 2);

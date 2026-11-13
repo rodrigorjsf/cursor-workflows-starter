@@ -420,12 +420,17 @@ class GitlabForge implements Forge {
     return project.web_url.trim();
   }
 
-  /** The latest merge request (by creation date, in any state) whose source branch is `branch`; `glab mr view` would fail when there are several. */
+  /**
+   * The merge request of `branch` that `gh pr view <branch>` would pick on GitHub: the latest open one (`opened` or `locked`),
+   * else the latest one in any state, by creation date. Every page is read, so an older open MR is found behind newer closed
+   * ones and `wf gc` never takes a live MR's branch for a finished one. `glab mr view` would fail when there are several.
+   */
   private async latestMr(cwd: string, branch: string, repo?: string): Promise<GitlabMr | undefined> {
-    const query = `source_branch=${encodeURIComponent(branch)}&order_by=created_at&sort=desc&per_page=1`;
-    const [page] = jsonValues(await this.api(cwd, repo, `${projectOf(repo)}/merge_requests?${query}`));
-    if (!Array.isArray(page)) throw new Error(`glab api merge_requests (${branch}): expected a list`);
-    return (page as GitlabMr[])[0];
+    const query = `source_branch=${encodeURIComponent(branch)}&order_by=created_at&sort=desc&per_page=100`;
+    const pages = jsonValues(await this.api(cwd, repo, "--paginate", `${projectOf(repo)}/merge_requests?${query}`));
+    if (!pages.every(Array.isArray)) throw new Error(`glab api merge_requests (${branch}): expected a list`);
+    const mrs = pages.flat() as GitlabMr[];
+    return mrs.find((mr) => MR_STATES[mr.state] === "OPEN") ?? mrs[0];
   }
 
   private glab(cwd: string, ...args: string[]): Promise<string> {
