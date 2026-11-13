@@ -15,14 +15,13 @@ import { ConfigError, type ResolvedConfig, loadEffectiveConfig } from "./config/
 import { type CheckId, type CheckResult, type DoctorReport, fail, nodeHint, pass, reportOf } from "./doctor-report.js";
 import { kitCompatibility, kitFileUrl, readKitPackage } from "./kit-version.js";
 import { MCP_CONFIG_FILES, type McpLaunch, type McpLaunches, readMcpLaunches } from "./mcp-launch.js";
+import { errorText } from "./runtime/error-text.js";
 import { createRedactor } from "./runtime/redaction.js";
 import { loadWorkflows } from "./runtime/registry.js";
 import type { WorkflowDefinition } from "./runtime/workflow.js";
-import { forgeOfOrigin, loginOf } from "../workflows/implement-issue/forge.js";
+import { type OriginForge, forgeOfOrigin, loginOf } from "../workflows/implement-issue/forge.js";
 
 export { type CheckResult, type DoctorReport, formatReport } from "./doctor-report.js";
-
-const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /** How long a call to a remote service or the MCP server may take before its check gives up. `WF_DOCTOR_TIMEOUT_MS` (milliseconds) changes it. */
 function timeoutMs(): number {
@@ -61,7 +60,7 @@ function probeNode(path: string | undefined, nodeRange: string): { ok: boolean; 
   try {
     version = execFileSync(node, ["--version"], { encoding: "utf8", timeout: 10_000 }).trim();
   } catch (err) {
-    return { ok: false, line: `\`${node} --version\` failed: ${messageOf(err)}` };
+    return { ok: false, line: `\`${node} --version\` failed: ${errorText(err)}` };
   }
   if (semver.satisfies(version, nodeRange)) return { ok: true, line: `${version} at ${node}` };
   return { ok: false, line: `${version} at ${node}; @cursor/sdk needs Node ${nodeRange.replace(/^>=/, "")} or newer` };
@@ -127,7 +126,7 @@ async function checkLogin(): Promise<CheckResult> {
     const me = await within(Cursor.me(), timeoutMs(), "Cursor");
     return pass("login", `key "${me.apiKeyName}"`);
   } catch (err) {
-    return fail("login", messageOf(err), "Log in with `wf login` (it opens the browser) or set CURSOR_API_KEY in the environment that starts the IDE.");
+    return fail("login", errorText(err), "Log in with `wf login` (it opens the browser) or set CURSOR_API_KEY in the environment that starts the IDE.");
   }
 }
 
@@ -153,7 +152,7 @@ async function probeServer(launch: McpLaunch): Promise<ServerProbe> {
     return { launch, tools: tools.map((t) => t.name), version: client.getServerVersion()?.version };
   } catch (err) {
     const printed = stderr.trim();
-    return { launch, error: `${messageOf(err)}${printed ? `\n  the server wrote on stderr:\n    ${printed.split("\n").slice(-8).join("\n    ")}` : ""}` };
+    return { launch, error: `${errorText(err)}${printed ? `\n  the server wrote on stderr:\n    ${printed.split("\n").slice(-8).join("\n    ")}` : ""}` };
   } finally {
     await client.close().catch(() => undefined);
   }
@@ -178,21 +177,29 @@ function checkMcpServer(mcp: McpLaunches, probes: ServerProbe[]): CheckResult {
   );
 }
 
-/** The first lines of what a command printed (its stderr, else its stdout): what it said about why it failed. */
+/** The first lines of what a failed command printed (its stderr, else its stdout): what it said about why it failed. */
 function saidBy(err: unknown): string {
   const { stderr, stdout } = err as { stderr?: string; stdout?: string };
-  const lines = (stderr?.trim() || stdout?.trim() || "").split("\n").map((line) => line.trim()).filter(Boolean);
-  return lines.length ? lines.slice(0, 4).join("\n") : messageOf(err);
+  const printed = [stderr, stdout].map((text) => text?.trim() ?? "").find((text) => text !== "") ?? "";
+  const lines = printed.split("\n").map((line) => line.trim()).filter((line) => line !== "");
+  return lines.length ? lines.slice(0, 4).join("\n") : errorText(err);
 }
 
-/** `git` in `cwd`: how it ended (`exitCode` is undefined when it did not run or was killed at the timeout) and what it printed. */
-async function runGit(cwd: string, args: string[]): Promise<{ exitCode: number | undefined; stdout: string; stderr: string; said: string }> {
+/** How a `git` call ended: `exitCode` is undefined when it did not run or was killed at the timeout; `said` is what it printed when it failed. */
+interface GitResult {
+  exitCode: number | undefined;
+  stdout: string;
+  said: string;
+}
+
+/** `git` in `cwd`, in the C locale: git translates its messages, and the check reads one of them (outside a repository). */
+async function runGit(cwd: string, args: string[]): Promise<GitResult> {
   try {
-    const { stdout, stderr } = await promisify(execFile)("git", args, { cwd, timeout: timeoutMs(), encoding: "utf8" });
-    return { exitCode: 0, stdout, stderr, said: "" };
+    const { stdout } = await promisify(execFile)("git", args, { cwd, timeout: timeoutMs(), encoding: "utf8", env: { ...process.env, LC_ALL: "C" } });
+    return { exitCode: 0, stdout, said: "" };
   } catch (err) {
-    const { code, stdout, stderr } = err as { code?: unknown; stdout?: string; stderr?: string };
-    return { exitCode: typeof code === "number" ? code : undefined, stdout: stdout ?? "", stderr: stderr ?? "", said: saidBy(err) };
+    const { code, stdout } = err as { code?: unknown; stdout?: string };
+    return { exitCode: typeof code === "number" ? code : undefined, stdout: stdout ?? "", said: saidBy(err) };
   }
 }
 
@@ -206,7 +213,7 @@ async function checkForge(cwd: string, resolution: Resolution): Promise<CheckRes
     return fail("forge", "`git` is not on the PATH: the `origin` remote, which names the forge, cannot be read", "Install git (https://git-scm.com), in the environment that starts the IDE.");
   }
   const inside = await runGit(cwd, ["rev-parse", "--git-dir"]);
-  if (inside.exitCode === 128 && /not a git repository/i.test(inside.stderr)) return pass("forge", "not inside a git repository: there is no forge to check");
+  if (inside.exitCode === 128 && /not a git repository/i.test(inside.said)) return pass("forge", "not inside a git repository: there is no forge to check");
   if (inside.exitCode !== 0) return fail("forge", `\`git rev-parse --git-dir\` failed: ${inside.said}`, "Run `git status` in the repository to see the error.");
   const origin = await runGit(cwd, ["config", "--get", "remote.origin.url"]);
   if (origin.exitCode === 1) return pass("forge", "the repository has no `origin` remote: there is no forge to check");
@@ -214,13 +221,14 @@ async function checkForge(cwd: string, resolution: Resolution): Promise<CheckRes
 
   // Every workflow resolves the same `forges`: the map the config files declare. A host the kit knows needs none of it.
   const declared = resolution.ok ? (resolution.workflows[0]?.resolved.config.forges ?? {}) : {};
-  let found: ReturnType<typeof forgeOfOrigin>;
+  const url = origin.stdout.trim();
+  let found: OriginForge;
   try {
-    found = forgeOfOrigin(origin.stdout.trim() || undefined, declared);
+    found = forgeOfOrigin(url === "" ? undefined : url, declared);
   } catch (err) {
     return resolution.ok
-      ? fail("forge", messageOf(err), "Declare the host under `forges` in `.agents/workflows/config.json` (this repository) or in the global config, as the message shows.")
-      : fail("forge", `cannot tell which forge the origin is: ${messageOf(err)}\nThe config that may declare the host does not resolve (see the configuration check).`, "Fix the configuration first.");
+      ? fail("forge", errorText(err), "Declare the host under `forges` in `.agents/workflows/config.json` (this repository) or in the global config, as the message shows.")
+      : fail("forge", `cannot tell which forge the origin is: ${errorText(err)}\nThe config that may declare the host does not resolve (see the configuration check).`, "Fix the configuration first.");
   }
   const login = loginOf(found.forge, found.host);
   if (!findOnPath(login.cli, process.env.PATH)) return fail("forge", `${login.service}: \`${login.cli}\` is not on the PATH`, login.installHint);
@@ -246,7 +254,7 @@ async function resolveWorkflows(cwd: string): Promise<Resolution> {
   try {
     defs = [...(await loadWorkflows(cwd)).values()];
   } catch (err) {
-    return { ok: false, message: `could not load the repository's workflows: ${messageOf(err)}` };
+    return { ok: false, message: `could not load the repository's workflows: ${errorText(err)}` };
   }
   // Every workflow resolves the same two files, so one bad file shows up once per workflow: list each issue once.
   const issues = new Map<string, ConfigIssue>();
@@ -257,7 +265,7 @@ async function resolveWorkflows(cwd: string): Promise<Resolution> {
       workflows.push({ def, resolved: loadEffectiveConfig(def, { cwd }) });
     } catch (err) {
       if (err instanceof ConfigError) for (const issue of err.issues) issues.set(JSON.stringify(issue), issue);
-      else others.push(`workflow ${def.meta.name} does not resolve: ${messageOf(err)}`); // a malformed definition, say
+      else others.push(`workflow ${def.meta.name} does not resolve: ${errorText(err)}`); // a malformed definition, say
     }
   }
   const problems = [...(issues.size ? [new ConfigError([...issues.values()]).message] : []), ...others];
@@ -289,7 +297,7 @@ async function checkModels(resolution: Resolution): Promise<CheckResult> {
   try {
     catalog = await within(Cursor.models.list(), timeoutMs(), "Cursor");
   } catch (err) {
-    return fail("models", `could not list the account's models: ${messageOf(err)}`, "See the login check: the catalog comes only with a valid key.");
+    return fail("models", `could not list the account's models: ${errorText(err)}`, "See the login check: the catalog comes only with a valid key.");
   }
   const known = new Set(catalog.flatMap((m) => [m.id, ...(m.aliases ?? [])]));
   const used = configuredModels(resolution.workflows);
@@ -329,7 +337,7 @@ function checkKitVersion(cwd: string, probes: ServerProbe[]): CheckResult {
 function guarded(id: CheckId, run: () => CheckResult | Promise<CheckResult>): Promise<CheckResult> {
   return Promise.resolve()
     .then(run)
-    .catch((err: unknown) => fail(id, `unexpected error in the check: ${messageOf(err)}`, "Run `wf doctor` again; if the error persists, open an issue on the kit's repository with this message."));
+    .catch((err: unknown) => fail(id, `unexpected error in the check: ${errorText(err)}`, "Run `wf doctor` again; if the error persists, open an issue on the kit's repository with this message."));
 }
 
 /** Runs every check against the repo at `cwd`. Nothing in the report holds a secret: it is redacted like the run logs are. */

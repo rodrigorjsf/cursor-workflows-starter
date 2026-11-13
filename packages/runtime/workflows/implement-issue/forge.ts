@@ -101,13 +101,19 @@ function forgeOfHost(remote: RemoteName, forges: Readonly<Record<string, ForgeNa
   );
 }
 
+/** What `forgeOfOrigin` found: the forge, and the host to name to its CLI (absent when the URL names none). */
+export interface OriginForge {
+  forge: ForgeName;
+  host?: string;
+}
+
 /**
  * The forge of a remote URL as the repository's configuration spells it (a `url.<base>.insteadOf` rewrite is not applied: the name
  * the user cloned from decides), and the host to name to that forge's CLI (`glab auth status --hostname`: the web host, with its port
  * when the URL is an http one that has it). `forges` is the config's host map. A URL that names no host (a local path) or no URL at
  * all (no `origin`) is GitHub, as before GitLab was supported: `host` is then absent.
  */
-export function forgeOfOrigin(url: string | undefined, forges: Readonly<Record<string, ForgeName>>): { forge: ForgeName; host?: string } {
+export function forgeOfOrigin(url: string | undefined, forges: Readonly<Record<string, ForgeName>>): OriginForge {
   const origin = url === undefined ? undefined : parseRemote(url);
   return origin === undefined ? { forge: DEFAULT_FORGE } : { forge: forgeOfHost(origin, forges, "the origin remote"), host: webHost(origin) };
 }
@@ -124,9 +130,9 @@ export async function detectForge(commands: Commands, cwd: string, forges: Reado
 
 /** How a forge's CLI is asked whether the user is logged in, and what to tell the user when it is not (`wf doctor`). */
 export interface ForgeLogin {
-  /** The forge and where it is, for the report: `GitHub`, `GitLab at git.example.com`. */
+  /** The forge and where it is, for the report: `GitHub at github.com`, `GitLab at git.example.com`. */
   service: string;
-  /** The CLI to run, and its arguments: `gh auth status`, `glab auth status --hostname <host>`. */
+  /** The CLI to run, and its arguments: `gh auth status --hostname <host>`, `glab auth status --hostname <host>`. */
   cli: string;
   args: string[];
   /** The hint when the CLI is not installed: where to get it, then how to log in. */
@@ -135,17 +141,25 @@ export interface ForgeLogin {
   loginCommand: string;
 }
 
-/** The login check of `forge`. `host` (from `forgeOfOrigin`) names the GitLab instance, since glab keeps one login per host; `gh auth status` covers every GitHub host at once. */
+/** Per forge: its name, its CLI, and where to get that CLI. A total record: a forge added to `ForgeName` is a compile error here. */
+const FORGE_CLIS: Readonly<Record<ForgeName, { name: string; cli: string; source: string }>> = {
+  github: { name: "GitHub", cli: "gh", source: "the GitHub CLI (https://cli.github.com)" },
+  gitlab: { name: "GitLab", cli: "glab", source: "the GitLab CLI (https://gitlab.com/gitlab-org/cli)" },
+};
+
+/**
+ * The login check of `forge`, for `host` (from `forgeOfOrigin`) when the origin names one: both CLIs keep a login per host, and
+ * `auth status` with no host fails for a login of another host that has expired. No host (a local-path origin) asks every host.
+ */
 export function loginOf(forge: ForgeName, host?: string): ForgeLogin {
-  if (forge === "github") {
-    return { service: "GitHub", cli: "gh", args: ["auth", "status"], installHint: "Install the GitHub CLI (https://cli.github.com) and run `gh auth login`, in the environment that starts the IDE.", loginCommand: "gh auth login" };
-  }
-  const loginCommand = `glab auth login${host ? ` --hostname ${host}` : ""}`;
+  const { name, cli, source } = FORGE_CLIS[forge];
+  const onHost = host === undefined ? [] : ["--hostname", host];
+  const loginCommand = [cli, "auth", "login", ...onHost].join(" ");
   return {
-    service: host ? `GitLab at ${host}` : "GitLab",
-    cli: "glab",
-    args: ["auth", "status", ...(host ? ["--hostname", host] : [])],
-    installHint: `Install the GitLab CLI (https://gitlab.com/gitlab-org/cli) and run \`${loginCommand}\`, in the environment that starts the IDE.`,
+    service: host === undefined ? name : `${name} at ${host}`,
+    cli,
+    args: ["auth", "status", ...onHost],
+    installHint: `Install ${source} and run \`${loginCommand}\`, in the environment that starts the IDE.`,
     loginCommand,
   };
 }

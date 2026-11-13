@@ -1,4 +1,4 @@
-// Seam 2, the process: `wf doctor` is spawned (against the fake Cursor SDK) in a temporary repo with a temporary home, as
+// Seam: the process. `wf doctor` is spawned (against the fake Cursor SDK) in a temporary repo with a temporary home, as
 // the IDE's environment would be: the kit sits at ~/.cursor-workflows/kit, the repo has the MCP configs `wf init` writes,
 // and `gh`, `glab` and `node` are whatever the PATH of the process says (git is the real one). The tests read the report,
 // the exit code and the messages; they never import the doctor.
@@ -314,24 +314,24 @@ test("the models check does not guess when the config does not resolve", () => {
   assert.ok(models.hint);
 });
 
-test("the forge check of a GitHub repository runs `gh auth status`: it passes for a logged-in gh, and fails with what gh said and `gh auth login` when it is logged out, or with where to get it when it is missing", () => {
+test("the forge check of a GitHub repository runs `gh auth status` for the origin's host: it passes for a logged-in gh, and fails with what gh said and `gh auth login` when it is logged out, or with where to get it when it is missing", () => {
   const repo = gitRepoCopy("git@github.com:acme/widgets.git");
   const gh = fakeForgeCli("gh");
   const ok = checkOf(reportOf(doctor(repo, { bins: [gh.dir] })), "forge");
   assert.equal(ok.status, "pass", ok.message);
-  assert.deepEqual(gh.calls(), ["auth status"]);
+  assert.deepEqual(gh.calls(), ["auth status --hostname github.com"]);
 
   const loggedOutGh = fakeForgeCli("gh", "You are not logged into any GitHub hosts.");
   const loggedOut = checkOf(reportOf(doctor(repo, { bins: [loggedOutGh.dir] })), "forge");
   assert.equal(loggedOut.status, "fail");
   assert.match(loggedOut.message, /not logged into any GitHub hosts/);
-  assert.match(loggedOut.hint ?? "", /gh auth login/);
+  assert.match(loggedOut.hint ?? "", /gh auth login --hostname github\.com/);
 
   const missing = checkOf(reportOf(doctor(repo, { bins: [] })), "forge");
   assert.equal(missing.status, "fail");
   assert.match(missing.message, /`gh` is not on the PATH/);
   assert.match(missing.hint ?? "", /cli\.github\.com/);
-  assert.match(missing.hint ?? "", /gh auth login/);
+  assert.match(missing.hint ?? "", /gh auth login --hostname github\.com/);
 });
 
 test("the forge check of a gitlab.com repository runs `glab auth status --hostname gitlab.com` and needs no gh: a logged-out glab fails with `glab auth login`, a missing one with where to get it", () => {
@@ -374,13 +374,13 @@ test("a host the global config or the repo config declares as GitLab is checked 
   assert.deepEqual(glab.calls(), ["auth status --hostname git.example.com", "auth status --hostname git.example.com:8443", "auth status --hostname git.example.com"]);
 });
 
-test("a declared GitHub host is checked with gh, and a missing glab does not matter there", () => {
+test("a declared GitHub host is checked with gh for that host, and a missing glab does not matter there", () => {
   const repo = gitRepoCopy("git@ghe.example.com:acme/widgets.git");
   put(repoConfigPath(repo), { forges: { "ghe.example.com": "github" } });
   const gh = fakeForgeCli("gh");
   const forge = checkOf(reportOf(doctor(repo, { bins: [gh.dir] })), "forge");
   assert.equal(forge.status, "pass", forge.message);
-  assert.deepEqual(gh.calls(), ["auth status"]);
+  assert.deepEqual(gh.calls(), ["auth status --hostname ghe.example.com"]);
 });
 
 test("an origin on a host nobody declared fails the forge check naming the host and the `forges` key, and a hint to declare it", () => {
@@ -404,6 +404,15 @@ test("outside a git repository, or in one with no origin, the forge check passes
   const local = checkOf(reportOf(doctor(gitRepoCopy("/srv/git/widgets.git"), { bins: [gh.dir] })), "forge");
   assert.equal(local.status, "pass", local.message);
   assert.deepEqual(gh.calls(), ["auth status"]);
+});
+
+test("outside a git repository the forge check passes whatever the language git speaks: git is asked in the C locale", () => {
+  // Stands in for a git that translates its messages (as the real one does) unless the caller pins the locale.
+  const realGit = join(gitDir, "git");
+  const translating = fakeBin("git", `if [ "$LC_ALL" = C ]; then exec "${realGit}" "$@"; fi\necho "fatal: kein Git-Repository (oder irgendein Elternverzeichnis): .git" >&2\nexit 128`);
+  const outside = checkOf(reportOf(doctor(repoCopy(), { bins: [translating], env: { LANG: "de_DE.UTF-8" } })), "forge");
+  assert.equal(outside.status, "pass", outside.message);
+  assert.match(outside.message, /not inside a git repository/);
 });
 
 test("a config that does not resolve fails the forge check only when the origin's host is one it could declare", () => {
