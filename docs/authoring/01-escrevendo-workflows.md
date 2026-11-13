@@ -29,7 +29,7 @@ documento explica o *porquê* das regras e traz as receitas, que a skill aponta.
 - **Trava de segredos.** Antes do commit, o `implement-issue` desfaz os commits que um agente tenha feito
   (`git reset --soft` para a base, mantendo a árvore) e examina as linhas adicionadas desde a base atrás dos formatos
   de credencial que o redator do log conhece (`CREDENTIAL_FORMATS` em `redaction.ts`: chaves `crsr_` e `sk-`, tokens
-  do GitHub, AWS, npm, Slack, Google e Stripe, blocos de chave privada; JWTs e `Bearer`, comuns em fixtures, só são
+  do GitHub, GitLab, AWS, npm, Slack, Google e Stripe, blocos de chave privada; JWTs e `Bearer`, comuns em fixtures, só são
   redigidos), da própria chave salva do SDK (ou a de `CURSOR_API_KEY`) e do valor de variáveis de ambiente com nome de
   segredo, e os arquivos chamados `auth.json`, `.env` ou `.env.*`. As mesmas regras de texto valem para o comentário
   das seams e para o corpo do PR, cuja saída de teste já entra redigida. Cada acerto para o efeito que levaria o texto para fora:
