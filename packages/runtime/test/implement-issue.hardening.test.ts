@@ -324,6 +324,44 @@ forgeTest("model text in an inline code span of the seams comment cannot close t
   assert.doesNotMatch(comment, /`\s*@octocat/);
 });
 
+// GitLab runs a quick action (`/close`, `/merge`, `/assign`...) found at the start of a line of an MR description or a note, as
+// the account that posted it. Model text must reach the forge unable to do that; the sanitizer is the same on both forges.
+const HOSTILE_ACTIONS = "/close\n/MERGE\n/assign @octocat\n/label ~bug\n/shrug";
+const QUICK_ACTION_LINE = /^\/(close|merge|assign|label|shrug)(\s|$)/im;
+
+forgeTest("a quick action written by the model reaches the forge neutralized, in the seams comment and in the MR body", async () => {
+  issue(["complexity:medium"]);
+  const hostile = (what: string) => `${what}\n${HOSTILE_ACTIONS}\nafter`;
+  fx.handlers.plan = (o) =>
+    submit(o, {
+      ...PLAN,
+      seams: [{ ...PLAN.seams[0], name: hostile("name"), why: hostile("why") }],
+      slices: [{ behavior: hostile("behavior"), seam: hostile("seam"), testIdea: hostile("testIdea") }],
+      rationale: hostile("rationale"),
+    });
+  fx.handlers["pr-text"] = (o) =>
+    submit(o, { summary: hostile("summary"), door: "two-way", doorNote: hostile("doorNote"), blastRadius: hostile("blastRadius"), blastNote: hostile("blastNote") });
+  const first = await run({});
+  assert.equal(res(first).status, "seams-proposed", JSON.stringify(res(first)));
+  const second = await run({ approveSeams: true, openPr: true }, first.runId);
+  assert.equal(res(second).status, "done", JSON.stringify(res(second)));
+  for (const [where, text] of [["seams comment", forgeState().comments[0]!], ["MR body", forgeState().prs[0]!.body]] as const) {
+    assert.doesNotMatch(text, QUICK_ACTION_LINE, `${where}: a model-written line still starts with a quick action`);
+    assert.ok(text.includes("/close") && text.includes("/MERGE") && text.includes("/assign"), `${where}: the model's words stay readable`);
+  }
+});
+
+forgeTest("a path, code in a fence and the body's own closing line are not altered by the quick-action guard", async () => {
+  issue(["complexity:low"]);
+  const summary = ["Run it as:", "/usr/bin/env node", "/tmp", "", "```sh", "/close", "/usr/bin/env node", "```", "", "done"].join("\n");
+  fx.handlers["pr-text"] = (o) => submit(o, { summary, door: "two-way", blastRadius: "local" });
+  const r = await run({ openPr: true });
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  const body = forgeState().prs[0]!.body;
+  assert.ok(body.startsWith("Closes #7\n"), "the body's own closing line is kept");
+  assert.ok(body.includes(`## Summary\n\n${summary}\n\n## Evidence`), body);
+});
+
 // A step result keeps the redact-only shapes (a URL password, Bearer, JWT) so the workflow can run them; what goes to GitHub
 // is redacted with every format all the same.
 forgeTest("a redact-only credential in the plan runs in the test command but reaches neither the seams comment nor the PR", async () => {

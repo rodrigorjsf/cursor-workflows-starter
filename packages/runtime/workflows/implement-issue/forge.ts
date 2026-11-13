@@ -8,6 +8,7 @@
 // asks the forge a record names, never one detected again, and a record without the field is GitHub (`forgeNameOf`), as every run
 // before the field existed was. Detection knows github.com and gitlab.com only for now: ADR-0009's `forges` map, the error for an
 // unknown host and the `repo` argument's host are not built yet, and until they are every other host is GitHub, as it was.
+// What a forge makes of the text a model wrote for it (GitLab runs quick actions) is here too: `neutralizeGitlabText`.
 import { readFileSync } from "node:fs";
 import type { Commands } from "./commands.js";
 
@@ -152,6 +153,84 @@ export function prLabel(url: string): string {
   if (merge) return `MR !${merge}`;
   const pull = PULL_NUMBER.exec(url)?.[1];
   return pull ? `PR #${pull}` : "Pull request";
+}
+
+// ── Model text on GitLab ──────────────────────────────────────────────────────────────────────────────────────────────────────
+// GitLab acts on text the account that posts it did not mean as a command: a line of an MR description or a note that starts with
+// `/close`, `/merge` or another quick action runs it as that account, and `!12`, `~label` and `%milestone` turn into links and
+// cross-reference notes on other objects. `neutralizeGitlabText` defuses both in text a model wrote; `sanitizeModelText`
+// (`pr-body.ts`) is where every piece of model text goes through it.
+
+/**
+ * The quick actions GitLab runs: the "Quick actions" page of its documentation (read on 2026-11-13, GitLab 18.x), plus the names
+ * of older releases that a self-managed instance may still run (`wip`, the epic ones, `promote`). A name that is not here is a
+ * name this guard does not know. GitLab matches a name without regard to case, and so does the pattern below.
+ */
+const GITLAB_QUICK_ACTIONS = [
+  "add_child", "add_contacts", "add_email", "approve", "assign", "assign_reviewer", "award", "blocked_by", "blocks", "board_move",
+  "checkin_reminder", "child_epic", "clear_health_status", "clear_weight", "clone", "close", "confidential", "convert_to_ticket",
+  "copy_metadata", "create_merge_request", "done", "draft", "due", "duplicate", "epic", "estimate", "estimate_time", "health_status",
+  "internal_note", "invite_email", "iteration", "label", "labels", "link", "lock", "merge", "milestone", "move", "page", "parent_epic",
+  "promote", "promote_to", "promote_to_incident", "publish", "react", "ready", "reassign", "reassign_reviewer", "rebase", "relabel",
+  "relate", "remove_child", "remove_child_epic", "remove_contacts", "remove_due_date", "remove_email", "remove_epic", "remove_estimate",
+  "remove_iteration", "remove_label", "remove_milestone", "remove_parent", "remove_parent_epic", "remove_reviewer",
+  "remove_time_estimate", "remove_time_spent", "remove_zoom", "reopen", "request_review", "reviewer", "run_pipeline", "set_parent",
+  "severity", "shrug", "spend", "spend_time", "status", "submit_review", "subscribe", "tableflip", "tag", "target_branch", "timeline",
+  "title", "todo", "type", "unapprove", "unassign", "unassign_reviewer", "unlabel", "unlink", "unlock", "unsubscribe", "weight", "wip",
+  "zoom",
+];
+/** A line that is a quick action to GitLab: a slash and a known name at the start, then a space or the end of the line. */
+const QUICK_ACTION_LINE = new RegExp(`^/(${GITLAB_QUICK_ACTIONS.join("|")})(?=\\s|$)`, "i");
+/** The sigil of a reference only GitLab has: `!12` (a merge request), `~label` and `%milestone` (also `~"two words"`). */
+const REFERENCE_SIGIL = /(?<![\w~])~(?=[\w"])|(?<![\w%])%(?=[\w"])|!(?=\d)/g;
+const ZERO_WIDTH_SPACE = "\u200B";
+/** A line a Markdown parser may read as the edge of a fenced code block: up to 3 spaces, then 3 or more backticks or tildes. */
+const FENCE_LIKE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+/** A line that starts an HTML block, a quote (`>>>` too) or a `$$` math block: structures that can swallow a fence's opening line. */
+const BLOCK_START = /^ {0,3}(?:[<>]|\$\$)/;
+
+/**
+ * `text`, a model's, made unable to act on a GitLab project: a line that starts with a quick action is shown as code (`/close`
+ * becomes `` `/close` ``, no longer a command), and the sigil of `!12`, `~label` and `%milestone` is followed by a zero-width
+ * space (as `sanitizeModelText` does for a mention). A path (`/usr/bin/env`) and a line inside a fenced code block stay as they are.
+ *
+ * What a fence protects is a judgement GitLab makes over the whole description, not over this piece, so the text is made safe to
+ * put anywhere in one. A fence is trusted only when its opening line starts at column 0 and nothing in the text could hide that line
+ * from GitLab's parser (an HTML block, a quote, `$$`); every other fence-like line (indented: it may sit in a list item that
+ * ends before the fence does; or not read as one here) is made plain text with a zero-width space, so that no line of this text
+ * leaves a fence open for the next piece to close, which would put that piece's code block outside a fence. A fence left open
+ * is closed, and a fence on the first or last line gets a line break beside it, so the text around the piece cannot join it.
+ * GitLab drops carriage returns before it looks for a command, so they go here too.
+ */
+export function neutralizeGitlabText(text: string): string {
+  const lines = text.replace(/\r/g, "").split("\n");
+  if (FENCE_LIKE.test(lines[0]!)) lines.unshift("");
+  const code = new Set<number>(); // the lines inside a trusted fence
+  let trusted = true;
+  let open: { char: string; size: number; start: number } | undefined;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const fence = FENCE_LIKE.exec(line);
+    if (open) {
+      if (fence && fence[1]![0] === open.char && fence[1]!.length >= open.size && fence[2]!.trim() === "") {
+        for (let j = open.start + 1; j < i; j++) code.add(j);
+        open = undefined;
+      }
+      continue;
+    }
+    if (!fence) {
+      if (BLOCK_START.test(line)) trusted = false;
+    } else if (line.startsWith(" ") || (fence[1]![0] === "`" && fence[2]!.includes("`"))) lines[i] = ZERO_WIDTH_SPACE + line;
+    else open = { char: fence[1]![0]!, size: fence[1]!.length, start: i };
+  }
+  if (open) {
+    for (let j = open.start + 1; j < lines.length; j++) code.add(j);
+    lines.push(open.char.repeat(open.size));
+  }
+  if (FENCE_LIKE.test(lines[lines.length - 1]!)) lines.push("");
+  return lines
+    .map((line, i) => (trusted && code.has(i) ? line : line.replace(QUICK_ACTION_LINE, (_m, name: string) => `\`/${name}\``).replace(REFERENCE_SIGIL, (sigil) => sigil + ZERO_WIDTH_SPACE)))
+    .join("\n");
 }
 
 /** The path of a repository as the REST API takes it, from what the `repo` argument holds: `group/sub/project`, or a URL of it. */

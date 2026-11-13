@@ -2,7 +2,7 @@
 // the workflow gets that redacted value; the result keeps the `redactOnly` shapes, which a workflow may need to run, see
 // `RunStore.redactResult`). Two things are replaced with `[REDACTED]` before an event is written (and before
 // any listener sees it):
-//   - text that has the shape of a well-known credential (GitHub, AWS, Slack, Google, npm, Stripe and Cursor keys, JWTs,
+//   - text that has the shape of a well-known credential (GitHub, GitLab, AWS, Slack, Google, npm, Stripe and Cursor keys, JWTs,
 //     bearer tokens, private key blocks, the `sk-` keys of the model providers, and the password or token in a URL's userinfo);
 //   - the value of any environment variable whose name contains KEY, TOKEN, SECRET or PASSWORD, plus keys handed to the run
 //     directly (the Cursor API key arrives this way, as `CURSOR_API_KEY` or the `apiKey` option), and those of the
@@ -44,6 +44,11 @@ export const CREDENTIAL_FORMATS: readonly CredentialFormat[] = [
   { rule: "private key block", pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g }, // a block cut short is redacted to its end
   { rule: "GitHub fine-grained token (github_pat_)", pattern: /github_pat_[A-Za-z0-9_]{22,}/g },
   { rule: "GitHub token (ghp_, gho_, ghu_, ghs_, ghr_)", pattern: /gh[pousr]_[A-Za-z0-9]{36,}/g }, // personal, OAuth, user-to-server, server-to-server, refresh
+  // Every GitLab token type has a prefix of its own ("Token overview" in GitLab's documentation): `glpat-` (personal, project, group and
+  // impersonation tokens), `gloas-` (OAuth application secret), `gldt-` (deploy), `glrt-` and `glrtr-` (runner), `glcbt-` (CI/CD job),
+  // `glptt-` (trigger), `glft-` (feed), `glimt-` (incoming mail), `glagent-` (agent for Kubernetes), `glwt-` (workspace), `glsoat-`
+  // (SCIM) and `glffct-` (feature flags client). The newer routable format adds dot-separated parts (`glpat-<id>.01.<check>`).
+  { rule: "GitLab token (glpat-, gloas-, gldt-, glrt-, glrtr-, glcbt-, glptt-, glft-, glimt-, glagent-, glwt-, glsoat-, glffct-)", pattern: /gl(?:pat|oas|dt|rtr?|cbt|ptt|ft|imt|agent|wt|soat|ffct)-[A-Za-z0-9_-]{20,}(?:\.[A-Za-z0-9_-]+)*/g },
   { rule: "AWS access key id", pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g },
   { rule: "sk- key", pattern: /\bsk-[A-Za-z0-9_-]{20,}/g }, // OpenAI, Anthropic and compatible secret keys
   { rule: "Cursor key (crsr_)", pattern: /crsr_[A-Za-z0-9_-]{16,}/g }, // a key read from a file is in no env var
