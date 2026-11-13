@@ -432,7 +432,8 @@
 - **`job not found` no servidor MCP é um erro de tool.** `wait_workflow`, `get_workflow_status` e `cancel_workflow`
   devolviam `{ "error": "job not found" }` como uma resposta normal, sem o `isError` que todas as outras falhas do
   servidor levam; agora vem com `isError: true`. O corpo não muda: um retorno com `error` e sem `status` continua
-  encerrando a espera da skill `run-workflow`.
+  encerrando a espera da skill `run-workflow`. No `wf status|wait|cancel`, um job desconhecido imprimia o mesmo JSON no
+  stdout e saía com 0; agora é um erro como os outros, uma linha no stderr (`job not found: <jobId>`) e código 1.
 - **O `wf` trata argumentos errados como erro de uso: uma linha no stderr e código 2.** `--days abc` falhava com um
   `Invalid time value` sem nome de flag, `--format xml` gravava CSV calado, e uma flag desconhecida (ou sem valor)
   despejava o stack trace do `parseArgs`. Agora `--days` precisa ser um número de dias maior que 0

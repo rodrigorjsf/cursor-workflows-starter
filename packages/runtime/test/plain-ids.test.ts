@@ -46,7 +46,9 @@ test("wf status with a job id that walks out of the jobs folder answers job not 
     env: { ...process.env, TSX_TSCONFIG_PATH: join(PACKAGE, "tsconfig.test.json"), WF_DASH_AUTOSTART: "off" },
     encoding: "utf8",
   });
-  assert.deepEqual(JSON.parse(r.stdout), { error: "job not found" }, r.stderr);
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /^job not found: /);
 });
 
 test("a job record whose run id is not a plain name is not a record the runtime wrote: listing and reading skip it", () => {

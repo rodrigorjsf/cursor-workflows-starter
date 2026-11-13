@@ -128,6 +128,10 @@ const jsonFlag = (flag: string, raw: string): unknown => {
     throw new UsageError(`--${flag} must be JSON: ${(err as Error).message}`);
   }
 };
+/** An unknown job id is an error (exit 1), on stderr like any other; it starts with the MCP server's wording, `job not found`. */
+const jobNotFound = (): never => {
+  throw new Error(`job not found: ${name ?? ""}`);
+};
 /** The chat's layer of the config (`--overrides`): only what the MCP server forwards to the process it spawns. */
 const overridesFlag = () => (values.overrides === undefined ? undefined : parseLimitOverrides(jsonFlag("overrides", values.overrides)));
 const runOpts = () => ({
@@ -240,11 +244,11 @@ async function main(): Promise<number> {
       return 0;
     }
     case "status": {
-      out(readJob(cwd, name ?? "") ?? { error: "job not found" });
+      out(readJob(cwd, name ?? "") ?? jobNotFound());
       return 0;
     }
     case "wait": {
-      out((await waitJob(cwd, name ?? "", timeoutMs())) ?? { error: "job not found" });
+      out((await waitJob(cwd, name ?? "", timeoutMs())) ?? jobNotFound());
       return 0;
     }
     case "cancel": {
@@ -252,7 +256,7 @@ async function main(): Promise<number> {
       // end. A frozen job (no heartbeat) is killed (SIGKILL): no revert, no run end, the job stays `failed`, and once its process
       // is gone its cloud agents are cancelled through the Cursor API. A job whose process already ended gets no signal: only
       // the cloud agents it left are cancelled. See `cancelJob`.
-      out((await cancelJob(cwd, name ?? "", Math.min(timeoutMs(), 30_000))) ?? { error: "job not found" });
+      out((await cancelJob(cwd, name ?? "", Math.min(timeoutMs(), 30_000))) ?? jobNotFound());
       return 0;
     }
     case "jobs": {
