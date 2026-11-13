@@ -100,20 +100,21 @@ const ADRS: Array<{ file: string; number: string; topic: RegExp[] }> = [
   { file: "docs/adr/0006-cloud-steps-as-built.md", number: "0006", topic: [/cloud/i, /read-only/, /fast-forward/i, /supersedes/i] },
   { file: "docs/adr/0007-cancel-stops-cloud-agents.md", number: "0007", topic: [/cloud/i, /read-only/, /fast-forward/i, /supersedes/i, /cancel/i] },
   { file: "docs/adr/0008-job-record-keeps-what-the-log-cannot.md", number: "0008", topic: [/event log/i, /source of truth/i, /job record/i, /killedByCancel/, /supersedes/i] },
+  { file: "docs/adr/0009-forge-seam-github-and-gitlab.md", number: "0009", topic: [/forge/i, /GitLab/, /glab api/, /forges/] },
 ];
 
-test("part 7 lists eight ADRs, one per load-bearing decision, in order", () => {
+test("part 7 lists nine ADRs, one per load-bearing decision, in order", () => {
   assert.deepEqual(
     indexPart(7),
     ADRS.map((adr) => adr.file),
   );
 });
 
-/** Every ADR on disk, not only the eight: the format below binds the ones added later too. */
+/** Every ADR on disk, not only the nine: the format below binds the ones added later too. */
 const adrFiles = () => readdirSync(join(ROOT, "docs/adr")).filter((name) => /^\d{4}-.*\.md$/.test(name)).map((name) => `docs/adr/${name}`);
 
 test("every ADR is titled ADR-NNNN, names its status and records the context, the decision, the consequences and the options considered", () => {
-  assert.ok(adrFiles().length >= ADRS.length, "the eight ADRs are on disk");
+  assert.ok(adrFiles().length >= ADRS.length, "the nine ADRs are on disk");
   for (const file of adrFiles()) {
     const number = /\/(\d{4})-/.exec(file)![1]!;
     const doc = parseMarkdown(read(file));
@@ -128,7 +129,7 @@ test("every ADR is titled ADR-NNNN, names its status and records the context, th
   }
 });
 
-test("each of the eight ADRs is about its decision", () => {
+test("each of the nine ADRs is about its decision", () => {
   for (const adr of ADRS) for (const pattern of adr.topic) assert.match(read(adr.file), pattern, `${adr.file}: should be about ${pattern}`);
 });
 
