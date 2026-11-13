@@ -6,6 +6,9 @@ Rode `npm ci`, `npm run typecheck` e `npm test`. Os testes são offline (SDK fal
 e são os mesmos do CI (Node 22.13.0 e 22.x). O `npm test` inclui o docs check ([9.2](02-convencoes-do-livro.md#o-que-o-docs-check-confere)):
 um link quebrado, um rodapé errado ou um capítulo fora do índice reprova o PR.
 
+Mudou o dashboard? Monte runs de fixture com `scripts/dev/dash-fixtures.ts` e capture as telas com
+`scripts/dev/dash-shots.py` ([9.4](04-scripts-do-mantenedor.md)), em vez de montar runs e capturas à mão.
+
 ## Onde fica cada coisa
 
 O repositório é um produto (`packages/runtime/`, `packages/dashboard/`, `skills/`, `templates/`) mais um espaço de desenvolvimento (a raiz). O
