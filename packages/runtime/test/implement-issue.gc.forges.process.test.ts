@@ -126,6 +126,16 @@ gcTest("gc takes the latest merge request of a branch: an older closed one does 
   assert.match(r.out.kept.find((x) => x.runId === d.runId)?.why ?? "", /PR is open/);
 }, ["gitlab"]);
 
+gcTest("gc prefers an open merge request of a branch to a newer closed one, as gh does: the branch of a live MR is kept", async () => {
+  const d = await delivered(); // its MR is open
+  changeForgeState((state) => state.prs.push({ url: "https://gitlab.com/owner/repo/-/merge_requests/98", body: "", head: d.branch, state: "CLOSED" })); // a newer MR of the branch, closed
+
+  const r = gc();
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(stillThere(d), KEPT);
+  assert.match(r.out.kept.find((x) => x.runId === d.runId)?.why ?? "", /PR is open/);
+}, ["gitlab"]);
+
 gcTest("a run that pushed and never got its merge request is a failed run like any: glab answering an empty list is \"no MR\", and the origin branch goes with it", async () => {
   failForge("pr create", "HTTP 502");
   const r = await run({ openPr: true });
