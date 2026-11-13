@@ -70,8 +70,17 @@ export function changeForgeState(change: (state: Record<string, any>) => void) {
   writeFileSync(fx.forgeStateFile, JSON.stringify(state));
 }
 
-/** From now on the fake forge answers the state of the PR opened on `branch` with `state` (a merge or a close that happened on the forge). */
-export function setPrState(branch: string, state: "OPEN" | "MERGED" | "CLOSED") {
+/** Makes `url` the URL of `origin`, reached through the bare repository the fixture made (as the fixture does for its own forge): the remote moved to another host. */
+export function setOrigin(url: string) {
+  git(fx.repo, "remote", "set-url", "origin", url);
+  git(fx.repo, "config", "--add", `url.${join(fx.root, "origin.git")}.insteadOf`, url);
+}
+
+/**
+ * From now on the fake forge answers the state of the PR opened on `branch` with `state` (a merge or a close that happened on the forge).
+ * `"locked"` is GitLab's fourth state, a merge request being merged: the fake glab prints it as it is (the fake gh would too, and gh's reader would refuse it).
+ */
+export function setPrState(branch: string, state: "OPEN" | "MERGED" | "CLOSED" | "locked") {
   changeForgeState((st) => {
     const pr = (st.prs as Array<{ head?: string; state?: string }>).filter((p) => p.head === branch).pop();
     if (!pr) throw new Error(`the fake forge has no PR on ${branch}`);

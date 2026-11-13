@@ -5,16 +5,11 @@
 import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { SUB_CODE, branchOf, changeForgeState, failForge, forgeState, forgeTest, fx, git, issue, run, submit, write, type TestForge } from "./implement-issue.fixture.js";
+import { SUB_CODE, branchOf, changeForgeState, failForge, forgeState, forgeTest, fx, git, issue, run, setOrigin, submit, write, type TestForge } from "./implement-issue.fixture.js";
 
 const res = (r: { result?: unknown }) => r.result as any;
 const progressOf = (runId: string) => JSON.parse(readFileSync(join(fx.repo, ".workflows", "runs", runId, "tdd-progress.json"), "utf8")) as { forge?: string };
 const SEAMS_MARKER = "<!-- wf:implement-issue:seams -->";
-/** Makes `url` the URL of `origin`, reached through the bare repository the fixture made (as the fixture does for its own forge). */
-function setOrigin(url: string) {
-  git(fx.repo, "remote", "set-url", "origin", url);
-  git(fx.repo, "config", "--add", `url.${join(fx.root, "origin.git")}.insteadOf`, url);
-}
 
 forgeTest("a run speaks only to the CLI of its origin's forge, and records that forge in its progress", async (forge) => {
   issue(["complexity:low"]);

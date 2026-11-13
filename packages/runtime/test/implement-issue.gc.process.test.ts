@@ -5,9 +5,9 @@
 // Two tests step beside the CLI: one drives gc's plan and apply apart (a run that starts between them), one asks `Commands`
 // for the guard that keeps the origin from deleting a branch outside `wf/`. Two run implement-issue itself, to show what a resume
 // finds after gc. The cloud snapshot branches are pushed by hand to the temporary remotes, as a cloud step leaves them behind
-// (cloud.lifecycle.test.ts has the ones a real crashed cloud step leaves).
+// (cloud.lifecycle.test.ts has the ones a real crashed cloud step leaves). The CLI helper and the runs it judges are shared with
+// implement-issue.gc.forges.process.test.ts (implement-issue.gc.fixture.ts), which runs gc on a GitLab repository too.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
@@ -18,53 +18,13 @@ import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import implementIssue from "../workflows/implement-issue.js";
 import { type GcPlan, applyGc, directCommands, planGc } from "../workflows/implement-issue/gc.js";
 import { branchOf, failForge, fx, forgeState, git, issue, originBranches, run, setPrState, setup, teardown, worktreeOf } from "./implement-issue.fixture.js";
-import { ageRunLog } from "./run-fixtures.js";
+import { type GcOutput, age, delivered, editRecord, failedRun, gc, localBranches, stillThere } from "./implement-issue.gc.fixture.js";
 
 beforeEach(() => {
   setup();
   issue(["complexity:low"]); // one issue, and a run on it per scenario: a LOW issue is one slice, no planner
 });
 afterEach(teardown);
-
-const PACKAGE = join(import.meta.dirname, "..");
-
-/** What `wf gc` prints on stdout: the plan, with the result of each action. */
-type GcOutput = GcPlan & { dryRun: boolean };
-
-/** `wf gc <args>` in the temp repo. The child inherits the PATH with the fake gh and the throwaway home. */
-function gc(...args: string[]): { status: number | null; stderr: string; out: GcOutput } {
-  const env = { ...process.env, TSX_TSCONFIG_PATH: join(PACKAGE, "tsconfig.test.json"), WF_METRICS: "off" };
-  delete env.NODE_TEST_CONTEXT;
-  const r = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), join(PACKAGE, "src", "cli.ts"), "gc", "--cwd", fx.repo, ...args], { encoding: "utf8", env });
-  assert.notEqual(r.stdout, "", `wf gc printed no result (exit ${r.status}): ${r.stderr}`);
-  return { status: r.status, stderr: r.stderr, out: JSON.parse(r.stdout) as GcOutput };
-}
-
-const localBranches = () => git(fx.repo, "for-each-ref", "--format=%(refname:short)", "refs/heads/wf/").split("\n").filter(Boolean);
-
-/** A run that delivered: its PR is open on GitHub, its branch is on the origin, its worktree and local branch are here. */
-async function delivered() {
-  const r = await run({ openPr: true });
-  const result = r.result as { status: string; branch: string; worktree: string };
-  assert.equal(result.status, "done", JSON.stringify(result));
-  return { runId: r.runId, branch: result.branch, worktree: result.worktree };
-}
-
-/** A run that failed before it delivered: its suite is red from the start, so it stops with `baseline-red` and leaves its worktree and branch. */
-async function failedRun() {
-  const r = await run({ testCommand: "exit 1" });
-  assert.equal((r.result as { status: string }).status, "baseline-red", JSON.stringify(r.result));
-  return { runId: r.runId, branch: branchOf(r.runId), worktree: worktreeOf(r.runId) };
-}
-
-/** Moves everything the run did `days` days into the past, as if it had happened then. */
-const age = (runId: string, days: number) => ageRunLog(fx.repo, runId, days);
-
-const stillThere = (r: { branch: string; worktree: string }) => ({
-  worktree: existsSync(r.worktree),
-  localBranch: localBranches().includes(r.branch),
-  originBranch: originBranches().includes(r.branch),
-});
 
 test("wf gc removes the worktree, the local branch and the origin branch of a run whose PR was merged, and leaves the run whose PR is still open", async () => {
   const merged = await delivered();
@@ -299,14 +259,6 @@ test("when gh cannot say what became of a PR the run is kept and gc fails: an au
   assert.match(r.out.errors.join("\n"), new RegExp(`${merged.runId}.*authentication required`));
   assert.deepEqual(r.out.remove, []);
 });
-
-/** Rewrites the progress record of a run: `change` edits what the workflow wrote (a run from before a field, or from a newer kit). */
-function editRecord(runId: string, change: (record: Record<string, unknown>) => void) {
-  const file = join(fx.repo, ".workflows", "runs", runId, "tdd-progress.json");
-  const record = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
-  change(record);
-  writeFileSync(file, JSON.stringify(record));
-}
 
 test("gc reads a run whose record has no forge as GitHub: a run from before the field is cleaned up as before", async () => {
   const merged = await delivered();
