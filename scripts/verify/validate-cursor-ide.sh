@@ -316,7 +316,7 @@ fi
 if [[ "$(_existing SANDBOX_ISSUES || true)" != yes ]]; then
   # shellcheck disable=SC2016 # backticks are Markdown here, not command substitution
   sandbox_issue "Add multiply(a, b) to src/math.js" 'Add an exported function `multiply(a, b)` to `src/math.js` that returns `a * b`, and a test for it in `test/math.test.js`. Run the suite with `npm test`.'
-  # shellcheck disable=SC2016
+  # shellcheck disable=SC2016 # backticks are Markdown here, not command substitution
   sandbox_issue "Add negate(a) to src/math.js" 'Add an exported function `negate(a)` to `src/math.js` that returns `-a`, and a test for it in `test/math.test.js`. Run the suite with `npm test`.'
   record SANDBOX_ISSUES yes
 fi

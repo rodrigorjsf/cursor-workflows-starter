@@ -49,8 +49,8 @@ export default defineWorkflow({
     }
     const after = await snapshotBranches();
     const sawUncommittedFile = probe.marker.trim() === token;
-    ctx.metric("sawUncommittedFile", sawUncommittedFile ? 1 : 0);
-    ctx.metric("snapshotBranchesLeft", after);
+    ctx.metric("saw_uncommitted_file", sawUncommittedFile ? 1 : 0);
+    ctx.metric("snapshot_branches_left", after);
     return { status: "done", probe, sawUncommittedFile, snapshotBranches: { before, after } };
   },
 });

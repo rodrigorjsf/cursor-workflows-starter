@@ -37,15 +37,10 @@ Workflows live in `packages/runtime/workflows/*.ts` (built in) and `.agents/work
 - To convert existing skills and subagents, use `/skill-to-workflow`.
 - After any change run `mise exec -- npm run check` (typecheck plus every test, docs and generated pages included; `mise.toml`
   pins Node 22.23.4). Tests are offline and use `packages/runtime/test/fake-sdk.ts`.
-- `@cursor/sdk` is pinned. When upgrading, check the `.d.ts` files in `node_modules/@cursor/sdk/dist/esm/` and rerun
-  the tests.
-- Keep distributed skills, templates and other agent-facing text in English. The docs book and README are pt-BR.
+- Read `CODING_STANDARDS.md` (repo root) when reviewing code: it holds the judgement rules a reviewer applies.
 
 ## Skills
 
-- A skill is self-contained: every instruction lives in its own folder (`SKILL.md` plus `references/`), and nothing
-  points at a document outside that folder. Reference two skills share is copied into both; `npm test` keeps the copies
-  identical.
 - Create and update every skill with `/mattpocock-skills:writing-for-agents`.
 
 ## Rules

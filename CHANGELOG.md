@@ -4,6 +4,12 @@
 
 ### Adicionado
 
+- **`CODING_STANDARDS.md` reúne as regras de julgamento que a revisão aplica, e testes verificam as mecânicas.** O
+  arquivo na raiz é lido na revisão (inclusive pelo review do próprio `implement-issue`, que o encontra em
+  `STANDARDS_FILES`); as regras que saíram do `CLAUDE.md` e de `docs/contributing/` moram nele. O
+  `test/coding-standards.test.ts` confere as regras que um programa consegue checar (imports `node:`, exports por nome,
+  SQL só em `observability/`, scripts bash estritos, CI só de leitura, entre outras) e que todo `caminho:linha` citado
+  como exemplo existe. Na página Metrics, um valor ausente agora aparece como travessão (`—`), como nas outras páginas.
 - **`wf gc` varre as branches de snapshot das etapas na nuvem.** Uma etapa na nuvem apaga a sua branch
   `wf/cloud-snapshot/<run>/<id>` quando termina, mas um crash, um `kill -9` ou um remote que recusou apagar a deixavam
   para sempre (o gc a mantinha como uma branch de nenhum run, e ainda só olhava o `origin`). Agora `wf gc` lista essas
