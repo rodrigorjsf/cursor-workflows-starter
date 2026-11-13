@@ -51,9 +51,9 @@
           "maxCents": 300,
           "roles": {
             "review": { "model": { "id": "grok-4.7", "params": [{ "id": "reasoning_effort", "value": "medium" }] }, "timeoutMs": 900000 },
-            "implement.low": { "retries": 0 }
-          },
-          "labels": { "design:*": { "maxTokensPerStep": 150000 } }
+            "implement.low": { "retries": 0 },
+            "design": { "maxTokensPerStep": 150000 }
+          }
         }
       }
     }
@@ -168,7 +168,7 @@
         "labels": {
           "type": "object",
           "additionalProperties": { "$ref": "#/definitions/rolePrefs" },
-          "description": "Preferências por glob do `label` da etapa (`*` e `?`), só para etapas sem papel. Vale o glob com mais caracteres literais; empate vai para o primeiro."
+          "description": "Preferências por glob do `label` da etapa (`*` e `?`), só para etapas sem papel. Vale o glob com mais caracteres literais; empate vai para o primeiro. Toda etapa dos workflows do kit (`implement-issue`, `smoke`) tem papel, então nelas um glob de `labels` não casa com nada: configure-as por `roles`. `labels` serve às etapas sem papel de um workflow do repositório."
         }
       }
     },

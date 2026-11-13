@@ -279,8 +279,9 @@
   `pr-text` (antes `classificar`, `planejar`, `desenhar:<minima|flexivel|comum>`, `julgar`, `teste-N`, `codigo-N`,
   `corrigir-N-R`, `refatorar-1` e `pr-texto`), e o `step` de um `tdd-violation` no refactor passa a `refactor-1`. O
   histórico de métricas por rótulo se divide na troca: os runs antigos ficam com os rótulos antigos, e uma análise por
-  etapa que cruza a troca precisa somar os dois nomes. Um glob de `labels` na configuração que nomeava um rótulo antigo
-  (por exemplo `desenhar:*`) deixa de casar sem aviso: troque-o pelo novo. A configuração por papel (`roles`) não muda.
+  etapa que cruza a troca precisa somar os dois nomes. Os globs de `labels` na configuração não entram na troca: eles só valem
+  para etapas sem papel, e toda etapa do `implement-issue` tem papel (um `desenhar:*` nunca casou com elas; ajuste essas
+  etapas por `roles`). A configuração por papel (`roles`) não muda.
   Um resume de um run começado antes da troca reaproveita as etapas prontas (a chave do journal não leva o rótulo),
   menos o `judge`, cujo prompt leva o nome da restrição de cada design. O corpo do PR (Evidence, achados que não bloqueiam, fatias adiadas, rodapé) também é em inglês, e um teste
   confere que nenhuma string dos workflows embutidos é em português.

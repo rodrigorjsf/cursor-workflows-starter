@@ -124,7 +124,7 @@ Valida os dois arquivos de configuração do kit: o global (`~/.cursor-workflows
 | `execTimeoutMs` | `integer` | não | Tempo máximo, em milissegundos, de um comando que o workflow roda com `ctx.exec` e não passa o próprio `timeoutMs`. Passado esse tempo o comando é morto. Padrão: 600000 (10 minutos). |
 | `settings` | [Ajustes de um workflow](#ajustes-de-um-workflow) | não | Ajustes do próprio workflow, pelo nome que ele declara em `meta.settings`: o padrão está no código do workflow e só o arquivo global e o do repositório o trocam. Um nome que o workflow não declara é erro. Os ajustes que o kit distribui estão na seção de ajustes de um workflow. |
 | `roles` | objeto: nome → [Preferências de um papel ou de um glob de label](#preferências-de-um-papel-ou-de-um-glob-de-label) | não | Preferências por papel nomeado (o `meta.roles` do workflow). Um papel que o workflow não declara é erro. |
-| `labels` | objeto: nome → [Preferências de um papel ou de um glob de label](#preferências-de-um-papel-ou-de-um-glob-de-label) | não | Preferências por glob do `label` da etapa (`*` e `?`), só para etapas sem papel. Vale o glob com mais caracteres literais; empate vai para o primeiro. |
+| `labels` | objeto: nome → [Preferências de um papel ou de um glob de label](#preferências-de-um-papel-ou-de-um-glob-de-label) | não | Preferências por glob do `label` da etapa (`*` e `?`), só para etapas sem papel. Vale o glob com mais caracteres literais; empate vai para o primeiro. Toda etapa dos workflows do kit (`implement-issue`, `smoke`) tem papel, então nelas um glob de `labels` não casa com nada: configure-as por `roles`. `labels` serve às etapas sem papel de um workflow do repositório. |
 
 ## Ajustes de um workflow
 
@@ -230,10 +230,8 @@ Os campos abaixo são os ajustes do `implement-issue`, validados pelo esquema. U
         },
         "implement.low": {
           "retries": 0
-        }
-      },
-      "labels": {
-        "design:*": {
+        },
+        "design": {
           "maxTokensPerStep": 150000
         }
       }
