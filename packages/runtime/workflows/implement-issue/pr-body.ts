@@ -29,16 +29,16 @@ export const inlineCode = (s: string) => "`" + s.replace(/`/g, "ˋ").replace(/\r
  * Texto do modelo vai para um PR público: neutraliza o que teria efeito no GitHub. Palavras de fechamento citando
  * outra issue (fecharia a issue errada), menções (notificariam pessoas) e `<!--` (esconderia o resto do corpo).
  *
- * The same filters serve GitLab, which reads more as a command: its closing keywords also include `Closing`, `Fixing`,
- * `Resolving` and `Implement*`, and its issue references can be a path through subgroups or the URL of the issue; a line that
- * starts with a quick action (`/close`, `/merge`) runs it, and `!12`, `~label` and `%milestone` link other objects
- * (`neutralizeGitlabText`). One sanitizer for both forges: a PR body is not written for the forge it happens to go to.
+ * The same filters serve GitLab, which reads more as a command. Its closing keywords also include `Closing`, `Fixing`,
+ * `Resolving` and `Implement*`, and its issue reference can follow the word `issue` and be a path through subgroups or the
+ * URL of the issue. A line that starts with a quick action (`/close`, `/merge`) runs it, and `!12`, `~label` and `%milestone`
+ * link other objects (`neutralizeGitlabText`). One sanitizer for both forges: a PR body is not written for the forge it goes to.
  */
 export function sanitizeModelText(text: string): string {
   return neutralizeGitlabText(
     text
       .replace(
-        /\b(clos(?:e[sd]?|ing)|fix(?:e[sd]|ing)?|resolv(?:e[sd]?|ing)|implement(?:s|ed|ing)?)(\s*:?\s+)((?:(?:[\w.-]+\/)+[\w.-]+)?#\d+|https?:\/\/\S+?\/-\/(?:issues|work_items)\/\d+)/gi,
+        /\b(clos(?:e[sd]?|ing)|fix(?:e[sd]|ing)?|resolv(?:e[sd]?|ing)|implement(?:s|ed|ing)?)(\s*:?\s+)((?:issues?\s+)?(?:(?:[\w.-]+\/)+[\w.-]+)?#\d+|(?:issues?\s+)?https?:\/\/\S+?\/-\/(?:issues|work_items)\/\d+)/gi,
         "$1$2`$3`",
       )
       .replace(/(^|[^\w`])@([A-Za-z0-9][\w-]*)/g, "$1@​$2")

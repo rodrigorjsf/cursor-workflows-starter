@@ -186,6 +186,11 @@ const REFERENCE_SIGIL = /(?<![\w~])~(?=[\w"])|(?<![\w%])%(?=[\w"])|!(?=\d)/g;
 const ZERO_WIDTH_SPACE = "\u200B";
 /** A line a Markdown parser may read as the edge of a fenced code block: up to 3 spaces, then 3 or more backticks or tildes. */
 const FENCE_LIKE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+/** The one opening line every GitLab version reads as a fence: three backticks at column 0, then an info string with no backtick. */
+const FENCE_OPEN = /^```[^`]*$/;
+const FENCE_CLOSE = "```";
+/** A line that closes a fence for a CommonMark parser though it is no bare closer (more backticks, an indent, trailing blanks). */
+const AMBIGUOUS_FENCE_CLOSE = /^ {0,3}`{3,}[ \t]*$/;
 /** A line that starts an HTML block, a quote (`>>>` too) or a `$$` math block: structures that can swallow a fence's opening line. */
 const BLOCK_START = /^ {0,3}(?:[<>]|\$\$)/;
 
@@ -194,40 +199,38 @@ const BLOCK_START = /^ {0,3}(?:[<>]|\$\$)/;
  * becomes `` `/close` ``, no longer a command), and the sigil of `!12`, `~label` and `%milestone` is followed by a zero-width
  * space (as `sanitizeModelText` does for a mention). A path (`/usr/bin/env`) and a line inside a fenced code block stay as they are.
  *
- * What a fence protects is a judgement GitLab makes over the whole description, not over this piece, so the text is made safe to
- * put anywhere in one. A fence is trusted only when its opening line starts at column 0 and nothing in the text could hide that line
- * from GitLab's parser (an HTML block, a quote, `$$`); every other fence-like line (indented: it may sit in a list item that
- * ends before the fence does; or not read as one here) is made plain text with a zero-width space, so that no line of this text
- * leaves a fence open for the next piece to close, which would put that piece's code block outside a fence. A fence left open
- * is closed, and a fence on the first or last line gets a line break beside it, so the text around the piece cannot join it.
+ * What a fence protects is a judgement GitLab makes over the whole description, not over this piece, and GitLab versions differ:
+ * the current one reads Markdown (any CommonMark fence), an older one matched a regular expression (three backticks, a bare
+ * closer). So a fence is trusted only in the form both agree on: opened at column 0 with three backticks, closed by a bare
+ * three-backtick line, and with nothing in the text that could hide the opening line from the parser (an HTML block, a quote,
+ * `$$`). Every other fence-like line (tildes, more backticks, an indent: it may sit in a list item that ends before the fence
+ * does) is made plain text with a zero-width space, closers that only one parser would accept included, so that no line of this
+ * text leaves a fence open for the next piece to close, which would put that piece's code block outside a fence. A fence left
+ * open is closed, and a fence on the first or last line gets a line break beside it, so the text around the piece cannot join it.
  * GitLab drops carriage returns before it looks for a command, so they go here too.
  */
 export function neutralizeGitlabText(text: string): string {
   const lines = text.replace(/\r/g, "").split("\n");
-  if (FENCE_LIKE.test(lines[0]!)) lines.unshift("");
+  if (FENCE_OPEN.test(lines[0]!)) lines.unshift("");
   const code = new Set<number>(); // the lines inside a trusted fence
   let trusted = true;
-  let open: { char: string; size: number; start: number } | undefined;
+  let fenceStart: number | undefined; // the line that opened the fence being read
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
-    const fence = FENCE_LIKE.exec(line);
-    if (open) {
-      if (fence && fence[1]![0] === open.char && fence[1]!.length >= open.size && fence[2]!.trim() === "") {
-        for (let j = open.start + 1; j < i; j++) code.add(j);
-        open = undefined;
-      }
-      continue;
-    }
-    if (!fence) {
-      if (BLOCK_START.test(line)) trusted = false;
-    } else if (line.startsWith(" ") || (fence[1]![0] === "`" && fence[2]!.includes("`"))) lines[i] = ZERO_WIDTH_SPACE + line;
-    else open = { char: fence[1]![0]!, size: fence[1]!.length, start: i };
+    if (fenceStart !== undefined) {
+      if (line === FENCE_CLOSE) {
+        for (let j = fenceStart + 1; j < i; j++) code.add(j);
+        fenceStart = undefined;
+      } else if (AMBIGUOUS_FENCE_CLOSE.test(line)) lines[i] = ZERO_WIDTH_SPACE + line;
+    } else if (FENCE_OPEN.test(line)) fenceStart = i;
+    else if (FENCE_LIKE.test(line)) lines[i] = ZERO_WIDTH_SPACE + line;
+    else if (BLOCK_START.test(line)) trusted = false;
   }
-  if (open) {
-    for (let j = open.start + 1; j < lines.length; j++) code.add(j);
-    lines.push(open.char.repeat(open.size));
+  if (fenceStart !== undefined) {
+    for (let j = fenceStart + 1; j < lines.length; j++) code.add(j);
+    lines.push(FENCE_CLOSE);
   }
-  if (FENCE_LIKE.test(lines[lines.length - 1]!)) lines.push("");
+  if (lines[lines.length - 1] === FENCE_CLOSE) lines.push("");
   return lines
     .map((line, i) => (trusted && code.has(i) ? line : line.replace(QUICK_ACTION_LINE, (_m, name: string) => `\`/${name}\``).replace(REFERENCE_SIGIL, (sigil) => sigil + ZERO_WIDTH_SPACE)))
     .join("\n");

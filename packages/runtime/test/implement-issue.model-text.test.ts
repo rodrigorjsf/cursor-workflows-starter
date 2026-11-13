@@ -42,12 +42,21 @@ test("GitLab drops carriage returns before it looks for a command, so a command 
   assert.equal(sanitizeModelText("ok\n\r/close"), "ok\n`/close`");
 });
 
-test("a fenced code block is not altered, whether its fence is backticks or tildes, and what follows it is guarded again", () => {
+test("a fenced code block of three backticks is not altered, and what follows it is guarded again", () => {
   const code = "```sh\n/close\n/usr/bin/env node\n!12 ~bug %v1\n```";
   assert.equal(sanitizeModelText(`before\n${code}\n/merge`), `before\n${code}\n\`/merge\``);
-  const tildes = "~~~\n/close\n~~~";
-  assert.equal(sanitizeModelText(`x\n${tildes}\n/close`), `x\n${tildes}\n\`/close\``);
-  assert.equal(sanitizeModelText("x\n````\n```\n/close\n```\n````\n/close"), "x\n````\n```\n/close\n```\n````\n`/close`");
+});
+
+test("only a fence that every GitLab version reads as code protects its lines: other fence styles and ambiguous closers do not", () => {
+  // Tildes, four backticks and an indent are fences to a CommonMark parser, and GitLab's older quick-action regex knows none of them.
+  assert.equal(sanitizeModelText("x\n~~~\n/close\n~~~\n/close"), `x\n${ZWSP}~~~\n\`/close\`\n${ZWSP}~~~\n\`/close\``);
+  assert.equal(sanitizeModelText("x\n````\n/close\n````"), `x\n${ZWSP}\`\`\`\`\n\`/close\`\n${ZWSP}\`\`\`\``);
+  // A closer with trailing space or more than three backticks closes the fence for one parser and not for the other: it is plain text
+  // here, so the fence ends at the next bare closer, which both agree on.
+  assert.equal(
+    sanitizeModelText("x\n```\na\n``` \n````\n```\n/close\n```"),
+    `x\n\`\`\`\na\n${ZWSP}\`\`\` \n${ZWSP}\`\`\`\`\n\`\`\`\n\`/close\`\n\`\`\`\n\`\`\`\n`,
+  );
 });
 
 test("a fence on the first or last line keeps a line break beside it, so the text around the piece cannot join its fence line", () => {
@@ -57,7 +66,8 @@ test("a fence on the first or last line keeps a line break beside it, so the tex
 
 test("a fence the model leaves open is closed: it cannot reach the next piece of the body, and what is in it is code", () => {
   assert.equal(sanitizeModelText("x\n```sh\n/close"), "x\n```sh\n/close\n```\n");
-  assert.equal(sanitizeModelText("x\n~~~~\n/close"), "x\n~~~~\n/close\n~~~~\n");
+  assert.equal(sanitizeModelText("```\n```sh\n/close\n```"), "\n```\n```sh\n/close\n```\n"); // an info string does not close it
+  assert.equal(sanitizeModelText("x\n~~~~\n/close"), `x\n${ZWSP}~~~~\n\`/close\``); // no tilde fence is trusted, so there is none to close
 });
 
 test("a fence left open by one piece cannot turn the code block of the next piece into live text", () => {
@@ -105,6 +115,8 @@ test("!12, ~label and %milestone, which only GitLab links, get a zero-width spac
 test("a closing keyword of GitLab cannot close an issue of another project, whatever the keyword or the reference", () => {
   for (const [text, shown] of [
     ["Closing #5", "Closing `#5`"],
+    ["Fixes issue #5", "Fixes `issue #5`"],
+    ["closes issues group/p#5", "closes `issues group/p#5`"],
     ["Implements #5", "Implements `#5`"],
     ["fixing: #5", "fixing: `#5`"],
     ["Resolves group/sub/project#5", "Resolves `group/sub/project#5`"],
@@ -113,6 +125,14 @@ test("a closing keyword of GitLab cannot close an issue of another project, what
   ] as const) {
     assert.equal(sanitizeModelText(text), shown);
   }
+});
+
+test("a list of references after a closing keyword cannot close any of them: GitLab's pattern needs each match to start at the keyword", () => {
+  // The pattern is a keyword, then references joined by commas or "and": with a backtick right after the keyword it matches nothing.
+  const gitlabCloses = (text: string) => /\b(?:clos(?:e[sd]?|ing)|fix(?:e[sd]|ing)?|resolv(?:e[sd]?|ing)|implement(?:s|ed|ing)?):? +(?:issues? +)?(?:[\w./-]+)?#\d+/i.test(text);
+  const text = "Closes #1, #2 and #3, fixes issue #4";
+  assert.equal(gitlabCloses(text), true);
+  assert.equal(gitlabCloses(sanitizeModelText(text)), false, sanitizeModelText(text));
 });
 
 test("the body's own closing line is kept while the model's text around it is neutralized", () => {

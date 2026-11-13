@@ -37,6 +37,15 @@ export interface CredentialFormat {
 }
 
 /**
+ * The prefixes of GitLab's token types ("Token overview" in its documentation): `glpat` (personal, project, group and impersonation
+ * tokens), `gloas` (OAuth application secret), `gldt` (deploy), `glrt` and `glrtr` (runner), `glcbt` (CI/CD job), `glptt` (trigger),
+ * `glft` (feed), `glimt` (incoming mail), `glagent` (agent for Kubernetes), `glwt` (workspace), `glsoat` (SCIM) and `glffct` (feature
+ * flags client). A token is the prefix, a hyphen and 20 or more characters, then, in the newer routable format, dot-separated parts
+ * (`glpat-<id>.01.<check>`).
+ */
+const GITLAB_TOKEN_PREFIXES = ["glpat", "gloas", "gldt", "glrt", "glrtr", "glcbt", "glptt", "glft", "glimt", "glagent", "glwt", "glsoat", "glffct"];
+
+/**
  * Credential shapes: the single list both the log redactor and implement-issue's outbound guard use. A distinctive prefix
  * needs no word boundary before it (a token pasted right after other text is still a token); a short one (`sk-`, `AKIA`) does.
  */
@@ -44,11 +53,7 @@ export const CREDENTIAL_FORMATS: readonly CredentialFormat[] = [
   { rule: "private key block", pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g }, // a block cut short is redacted to its end
   { rule: "GitHub fine-grained token (github_pat_)", pattern: /github_pat_[A-Za-z0-9_]{22,}/g },
   { rule: "GitHub token (ghp_, gho_, ghu_, ghs_, ghr_)", pattern: /gh[pousr]_[A-Za-z0-9]{36,}/g }, // personal, OAuth, user-to-server, server-to-server, refresh
-  // Every GitLab token type has a prefix of its own ("Token overview" in GitLab's documentation): `glpat-` (personal, project, group and
-  // impersonation tokens), `gloas-` (OAuth application secret), `gldt-` (deploy), `glrt-` and `glrtr-` (runner), `glcbt-` (CI/CD job),
-  // `glptt-` (trigger), `glft-` (feed), `glimt-` (incoming mail), `glagent-` (agent for Kubernetes), `glwt-` (workspace), `glsoat-`
-  // (SCIM) and `glffct-` (feature flags client). The newer routable format adds dot-separated parts (`glpat-<id>.01.<check>`).
-  { rule: "GitLab token (glpat-, gloas-, gldt-, glrt-, glrtr-, glcbt-, glptt-, glft-, glimt-, glagent-, glwt-, glsoat-, glffct-)", pattern: /gl(?:pat|oas|dt|rtr?|cbt|ptt|ft|imt|agent|wt|soat|ffct)-[A-Za-z0-9_-]{20,}(?:\.[A-Za-z0-9_-]+)*/g },
+  { rule: `GitLab token (${GITLAB_TOKEN_PREFIXES.map((prefix) => `${prefix}-`).join(", ")})`, pattern: new RegExp(`(?:${GITLAB_TOKEN_PREFIXES.join("|")})-[A-Za-z0-9_-]{20,}(?:\\.[A-Za-z0-9_-]+)*`, "g") },
   { rule: "AWS access key id", pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g },
   { rule: "sk- key", pattern: /\bsk-[A-Za-z0-9_-]{20,}/g }, // OpenAI, Anthropic and compatible secret keys
   { rule: "Cursor key (crsr_)", pattern: /crsr_[A-Za-z0-9_-]{16,}/g }, // a key read from a file is in no env var
