@@ -236,7 +236,7 @@ class GithubForge implements Forge {
 /** The URL of a merge request in the output of `glab mr create`: glab 1.130.0 prints it alone on stdout and the text around it on stderr (recorded from a real GitLab), and the pattern finds it among text too. */
 const MR_URL = /https?:\/\/\S+\/-\/merge_requests\/\d+/;
 /** The number in the URL of a GitLab merge request, and in the URL of a GitHub pull request. */
-const MR_NUMBER = /\/-\/merge_requests\/(\d+)/;
+export const MR_NUMBER = /\/-\/merge_requests\/(\d+)/;
 const PULL_NUMBER = /\/pull\/(\d+)/;
 
 /** The link text of a PR, as its forge writes it: `PR #9` for `https://github.com/o/r/pull/9`, `MR !9` for `https://gitlab.com/g/p/-/merge_requests/9`. */

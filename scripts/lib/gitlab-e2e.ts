@@ -12,6 +12,7 @@ import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { errorText } from "../../packages/runtime/src/runtime/error-text.js";
 import type { ExecResult } from "../../packages/runtime/src/runtime/workflow.js";
+import { MR_NUMBER } from "../../packages/runtime/workflows/implement-issue/forge.js";
 import type { Secrets } from "./scrub-recording.js";
 
 /** The value of the environment variable `key`: the scripts are run by scripts/verify/gitlab-e2e.sh, which sets it. */
@@ -70,7 +71,7 @@ export function runMain(main: () => Promise<number>): void {
 
 /** The number in the URL of a merge request, wherever it stands in `text` (`glab mr create` prints the URL among other text), or undefined when there is none. */
 export function mergeRequestNumber(text: string): number | undefined {
-  const digits = /\/-\/merge_requests\/(\d+)/.exec(text)?.[1];
+  const digits = MR_NUMBER.exec(text)?.[1];
   return digits === undefined ? undefined : Number(digits);
 }
 
