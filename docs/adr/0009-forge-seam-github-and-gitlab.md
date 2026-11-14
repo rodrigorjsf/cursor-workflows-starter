@@ -6,6 +6,8 @@
 
 **Amended:** 2026-11-14: the dashboard's Backlog (the open issues that carry the backlog label and have no run) is read through the seam too: `Forge.listIssues`, called by `readBacklog` (`workflows/implement-issue/backlog.ts`), which `observe` exports. The seam stays internal and the decision stays: `observe` still exports no forge object, only what the dashboard shows (a PR's state by URL, the Backlog of a repository), asked of the forge of the repository's `origin` through the same detection.
 
+**Amended:** 2026-11-14: the seam also says how an issue's author stands to the repository: `Forge.authorStanding`, called by `implement-issue` before its first agent call, so that an issue by a stranger stops the run (`untrusted-author`) until the user lifts the gate with `allowExternalAuthor`. GitHub answers from `gh api repos/<owner>/<repo>/issues/<n> --jq .author_association` (`gh issue view --json` has no such field) and trusts `OWNER`, `MEMBER` and `COLLABORATOR`. GitLab answers nothing, so its runs are not gated: the author's access level is a `glab api` route that no recording of a real GitLab covers yet, and the fake `glab` plays recordings only (#100, which also covers GitHub Enterprise hosts, whose `--hostname` form no recording reaches). A lookup that fails is an error, never "trusted".
+
 ## Context
 
 The kit opened pull requests, read issues and commented on them only through the GitHub CLI (`gh`). `gh` was called

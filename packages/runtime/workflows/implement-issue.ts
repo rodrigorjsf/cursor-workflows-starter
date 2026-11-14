@@ -17,6 +17,12 @@
 //     or, in LOW, it is the kit's `npm test`. With `seams` and no `testCommand` the run stores the plan, comments the command on
 //     the issue and stops with "test-command-proposed"; its `next` line drops `seams` (the stored plan holds them) and, resumed,
 //     runs that plan;
+//   - the issue's text is a stranger's: before the first agent call the run asks the forge how the issue's author stands to the repository
+//     (GitHub: `author_association`, through `gh api`), and an author who is not the owner, a member or a collaborator stops the run
+//     with "untrusted-author" until the user passes `allowExternalAuthor` after reading the issue (GitLab says nothing, so it is not
+//     gated, and the log says so: see #100). The text that does reach an agent (the issue's title and body, the output of a test run, the
+//     diff of the run's own changes) comes behind a fixed line that says it is data, in a fence nothing in it can close
+//     (implement-issue/untrusted.ts);
 //   - a suíte tem de estar verde antes da primeira fatia ("baseline-red"; um runner sem nenhum teste conta como
 //     verde); `setupCommand` opcional antes; os testes têm teto de tempo ("tests-timeout"), e uma suíte morta por um sinal não conta como red ("tests-killed");
 //   - cada fatia é um ciclo red → green controlado pelo código. Red: o que a etapa mudar fora dos testes é
@@ -103,6 +109,7 @@ import { buildPrBody, inlineCode, sanitizeModelText, type PrText } from "./imple
 import { CommandError, Commands, NETWORK_TIMEOUT_SEC, SNAPSHOT_GRACE_HOURS, WORKFLOW_BRANCH_PREFIX, worktreeOf } from "./implement-issue/commands.js";
 import { type Forge, createForge, detectForge, forgeNameOf, prLabel } from "./implement-issue/forge.js";
 import * as P from "./implement-issue/prompts.js";
+import { untrusted } from "./implement-issue/untrusted.js";
 import { AXES, AXIS_SCHEMAS, blockingAxes, blockingOf, type Axis, type ReviewReports } from "./implement-issue/review.js";
 import {
   DEFAULT_PROTECTED_GLOBS,
@@ -208,6 +215,8 @@ interface Args {
   approveSeams?: boolean;
   /** Seams approved by you, in place of the proposed ones: the plan is made again with them (without `testCommand`, the command the planner chooses waits for your approval). */
   seams?: string[];
+  /** Lifts the author gate: the run goes on although the forge does not call the issue's author the owner, a member or a collaborator. Pass it after you read the issue. */
+  allowExternalAuthor?: boolean;
   /** O que conta como arquivo de teste (default: DEFAULT_TEST_GLOBS). */
   testGlobs?: string[];
   /** Configuração do runner que nenhuma etapa pode tocar (default: DEFAULT_PROTECTED_GLOBS). */
@@ -272,7 +281,11 @@ const AXIS_INSTRUCTIONS: Record<Axis, string> = {
   security: P.SECURITY_INSTRUCTIONS,
 };
 
-const issueBlock = (i: { number: number; title: string; body: string }) => `## Issue #${i.number}: ${i.title}\n\n${i.body}`;
+/** The issue as a prompt block. Its title and body are a stranger's text: only the number (the user's own arg) stays outside the fence. */
+const issueBlock = (i: { number: number; title: string; body: string }) =>
+  `## Issue #${i.number}\n\n${untrusted(`issue #${i.number} (title and body)`, `Title: ${i.title}\n\n${i.body}`)}`;
+/** Test output goes to write steps: tests an agent wrote (after reading the issue) print what they like, so it is fenced like the issue. */
+const testOutputBlock = (output: string) => untrusted("the test suite's output", output);
 const sliceBlock = (s: Slice) => `## Slice\n- Behaviour: ${s.behavior}\n- Seam: ${s.seam}\n- Test idea: ${s.testIdea}`;
 const listBlock = (title: string, items: string[]) => (items.length ? `## ${title}\n${items.map((f) => `- ${f}`).join("\n")}` : "");
 const tail = (s: string | undefined, n = 3000) => (s ?? "").slice(-n);
@@ -420,13 +433,18 @@ async function withBodyFile<T>(body: string, fn: (path: string) => Promise<T>): 
   }
 }
 
-/** Diff desde a base do worktree, para o review e o PR. Grande demais: estatística + início, e o agente lê o resto. */
+/**
+ * Diff desde a base do worktree, para o review e o PR. Grande demais: estatística + início, e o agente lê o resto.
+ * The diff is untrusted text: code that a write step wrote after reading the issue, so a comment in it can try to steer the reviewers
+ * and the PR text. It goes behind the notice, in a fence no line of it can close.
+ */
 async function diffSinceBase(cmd: Commands, cwd: string, base: string, maxChars: number): Promise<string> {
   await cmd.git(cwd, "add", "-A");
   const diff = await cmd.gitRead(cwd, "diff", "--cached", "--no-color", base);
-  if (diff.length <= maxChars) return "```diff\n" + diff + "\n```";
+  const block = (text: string) => untrusted("the diff of this run's changes", text, "diff");
+  if (diff.length <= maxChars) return block(diff);
   const stat = await cmd.gitRead(cwd, "diff", "--cached", "--stat", base);
-  return `(diff truncated: read the files for the rest)\n\n${stat}\n\n\`\`\`diff\n${diff.slice(0, maxChars)}\n\`\`\``;
+  return `(diff truncated: read the files for the rest)\n\n${stat}\n\n${block(diff.slice(0, maxChars))}`;
 }
 
 /**
@@ -511,6 +529,7 @@ export default defineWorkflow<Args>({
         openPr: { type: "boolean" },
         approveSeams: { type: "boolean" },
         seams: { type: "array", items: { type: "string" } },
+        allowExternalAuthor: { type: "boolean" },
         testGlobs: { type: "array", items: { type: "string" } },
         protectedGlobs: { type: "array", items: { type: "string" } },
       },
@@ -564,6 +583,27 @@ export default defineWorkflow<Args>({
       // ── Triagem: dados da issue via forge (código, sem modelo) ──────────────────────────
       ctx.phase("Triage");
       const issue = await forge.issue(ctx.cwd, number, repo);
+      // Anyone can open an issue on a public repository, and its text reaches steps that write code and run commands with the user's
+      // credentials: an issue by a stranger stops here, before the first agent call, until the user has read it and says so. The user's
+      // `allowExternalAuthor` skips the lookup too. A lookup that fails is an error (a CommandError fails the run), never a trusted author.
+      if (!ctx.args.allowExternalAuthor) {
+        const author = await forge.authorStanding(ctx.cwd, number, repo);
+        if (author === undefined) {
+          ctx.log(`could not check the author of issue #${issue.number}: ${forge.name} does not say how an author stands to the repository; the issue's text still reaches the agents as fenced data`);
+        } else if (!author.trusted) {
+          ctx.card({ title: `#${issue.number} ${issue.title}`, badges: ["untrusted author"] });
+          return {
+            issue: issue.number,
+            status: "untrusted-author",
+            runId: ctx.runId,
+            authorAssociation: author.association,
+            reason:
+              `the author of issue #${issue.number} is not the repository's owner, a member of its organization or a collaborator (the forge says: ${author.association}), ` +
+              "and the issue's text reaches steps that write code and run commands with your credentials. Read the issue; if you trust it, run again with allowExternalAuthor: true",
+            next: `npm run wf -- run implement-issue --args ${shellQuote(JSON.stringify({ ...ctx.args, allowExternalAuthor: true }))} --resume ${ctx.runId}`,
+          };
+        }
+      }
       const labelTier = tierOfLabels(issue.labels, settings.labelTiers);
       let tier = labelTier;
       if (!tier) {
@@ -949,7 +989,7 @@ export default defineWorkflow<Args>({
             progress.upsert(rec);
             const { before } = await writeStep<Impl>(
               `green:${key}:${attempt}`,
-              `${P.CODE_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Failing test\n\`${rec.testName}\` in \`${rec.testFile}\`\n\n## Suite output\n${tail(rec.red)}${problem ? `\n\n## Fix\n${problem}` : ""}`,
+              `${P.CODE_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Failing test\n\`${rec.testName}\` in \`${rec.testFile}\`\n\n## Suite output\n${testOutputBlock(tail(rec.red))}${problem ? `\n\n## Fix\n${problem}` : ""}`,
               { label: attempt === 1 ? `code-${sfx}` : `code-${sfx}:${attempt}`, role: implementRole(tier), schema: IMPL_SCHEMA },
             );
             problem = await codeViolation(before, await snapshotTree(cmd, worktree), rec);
@@ -973,7 +1013,7 @@ export default defineWorkflow<Args>({
         // na suíte depois do settle, a correção fica no worktree e a suíte do green do resume é a desta rodada.
         for (let round = (rec.fixRound ?? 0) + 1; res.kind === "failed" && round <= settings.fixRounds; round++) {
           ctx.log(`slice ${sfx}: tests failed; fix ${round}/${settings.fixRounds}`);
-          const { before } = await writeStep<Impl>(`fix:${key}:${round}`, `${P.FIX_INSTRUCTIONS}\n\n${sliceBlock(sl)}\n\n## Test output\n${res.output}`, {
+          const { before } = await writeStep<Impl>(`fix:${key}:${round}`, `${P.FIX_INSTRUCTIONS}\n\n${sliceBlock(sl)}\n\n## Test output\n${testOutputBlock(res.output)}`, {
             label: `fix-${sfx}-${round}`,
             role: "fix",
             model: tier === "LOW" ? GROK : GROK_HIGH, // escala o modelo na correção

@@ -37,6 +37,43 @@
       "exitCode": 0,
       "stdout": "[]\n",
       "stderr": ""
+    },
+    "issue-author-association": {
+      "args": [
+        "api",
+        "--hostname",
+        "github.com",
+        "repos/{owner}/{repo}/issues/98",
+        "--jq",
+        ".author_association"
+      ],
+      "exitCode": 0,
+      "stdout": "OWNER\n",
+      "stderr": ""
+    },
+    "issue-author-association-repo": {
+      "args": [
+        "api",
+        "repos/owner/repo/issues/98",
+        "--jq",
+        ".author_association"
+      ],
+      "exitCode": 0,
+      "stdout": "OWNER\n",
+      "stderr": ""
+    },
+    "issue-author-association-url": {
+      "args": [
+        "api",
+        "--hostname",
+        "github.com",
+        "repos/owner/repo/issues/98",
+        "--jq",
+        ".author_association"
+      ],
+      "exitCode": 0,
+      "stdout": "OWNER\n",
+      "stderr": ""
     }
   }
 }

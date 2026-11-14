@@ -14,6 +14,7 @@ import { calls, script } from "./fake-sdk.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import implementIssue from "../workflows/implement-issue.js";
 import { RECORDINGS_PATH, TEST_HOST } from "./glab-recordings.js";
+import { AUTHOR_RECORDING, GH_RECORDINGS_PATH } from "../../../scripts/verify/record-gh-fixtures.js"; // the recorder owns the format and the path; importing it runs nothing
 
 export type Handler = (o: any, msg: string) => unknown;
 
@@ -31,6 +32,8 @@ export const fx = {
   forge: "github" as TestForge,
   savedPath: undefined as string | undefined,
   handlers: {} as Record<string, Handler>,
+  /** What every agent step of the test was sent, in order: its label and its prompt. */
+  prompts: [] as Array<{ label: string; msg: string }>,
 };
 
 /** The URL `origin` has in each forge's tests: the host decides the forge. The bare repository behind it is reached through `url.<base>.insteadOf`. */
@@ -103,6 +106,9 @@ export const originBranches = () =>
     .filter(Boolean);
 export const onOrigin = () => originBranches().length > 0;
 
+// The fake gh: hand-written for what `gh issue ... --json`, `gh pr ...` print, and playing the recording of the real gh for `gh api` (the
+// author association: test/gh-fixtures.test.ts reads the same file). A `gh api` command line is accepted only in a form that was recorded,
+// with the number and the repository of the call; the association it prints is the one the test sets on the issue.
 const FAKE_GH = `#!/usr/bin/env node
 const fs = require("fs");
 const f = process.env.FAKE_FORGE_STATE;
@@ -119,6 +125,13 @@ if (a[0] === "issue" && a[1] === "view") {
   const out = {};
   for (const k of (flag("--json") || "").split(",")) out[k] = k === "comments" ? st.comments.map((b) => ({ body: b })) : st.issue[k];
   save(); process.stdout.write(JSON.stringify(out));
+} else if (a[0] === "api") {
+  const REC = JSON.parse(fs.readFileSync(${JSON.stringify(GH_RECORDINGS_PATH)}, "utf8")).recordings;
+  // the form of a call: the number, the repository and the host of the call are not part of it
+  const shape = (args) => args.map((x, i) => (args[i - 1] === "--hostname" ? "<host>" : x.replace(/^repos\\/\\{owner\\}\\/\\{repo\\}\\/issues\\/\\d+$/, "repos/{owner}/{repo}/issues/<n>").replace(/^repos\\/(?!\\{owner\\}\\/\\{repo\\}\\/)[^/]+\\/[^/]+\\/issues\\/\\d+$/, "repos/<repo>/issues/<n>"))).join(" ");
+  const recording = ${JSON.stringify(Object.values(AUTHOR_RECORDING))}.map((n) => REC[n]).find((r) => shape(r.args) === shape(a));
+  if (!recording) { save(); process.stderr.write("fake gh: no recording of " + a.join(" ")); process.exit(2); }
+  save(); process.stdout.write(recording.stdout.replace(/^[A-Z_]+/, st.issue.author_association));
 } else if (a[0] === "issue" && a[1] === "comment") {
   st.comments.push(body()); save(); process.stdout.write("https://example.invalid/issues/1#c" + st.comments.length + "\\n");
 } else if (a[0] === "pr" && a[1] === "view" && flag("--json") === "state") {
@@ -233,7 +246,14 @@ export function issue(labels: string[], title = "Add subtract(a, b)") {
     fx.forgeStateFile,
     JSON.stringify({
       forge: fx.forge,
-      issue: { number: 7, title, body: "Exportar `subtract(a, b)` em src/math.js, que devolve a - b.", labels: labels.map((name) => ({ name })) },
+      issue: {
+        number: 7,
+        title,
+        body: "Exportar `subtract(a, b)` em src/math.js, que devolve a - b.",
+        labels: labels.map((name) => ({ name })),
+        /** What the forge says of the author (GitHub's `author_association`): the owner's, unless a test sets another. */
+        author_association: "OWNER",
+      },
       comments: [],
       prs: [],
       calls: [],
@@ -266,6 +286,7 @@ function defaults(): Record<string, Handler> {
 }
 const dispatcher = (o: any, msg: string) => {
   const label = labelOf(o);
+  fx.prompts.push({ label, msg });
   const h = fx.handlers[label] ?? fx.handlers[label.replace(/:\d+$/, "")];
   if (!h) throw new Error(`etapa sem resposta no teste: ${label}`);
   const r = h(o, msg);
@@ -308,6 +329,7 @@ function setupFor(forge: TestForge) {
   fx.savedPath = process.env.PATH;
   process.env.PATH = `${bin}:${fx.savedPath}`;
   fx.handlers = defaults();
+  fx.prompts = [];
   for (let i = 0; i < 200; i++) script.push(dispatcher);
   calls.length = 0;
 }

@@ -1,11 +1,14 @@
-// WHAT: Runs the real `gh` for the one forge command the dashboard's Backlog sends it, `gh issue list` (the forge module,
-//   packages/runtime/workflows/implement-issue/forge.ts, `listIssues`), against a real GitHub repository, and writes what gh printed,
-//   with the repository's `owner/name` replaced by `owner/repo`, to packages/runtime/test/fixtures/gh/recordings.json. The fake `gh`
-//   of the dashboard's tests reads that file. It only reads: nothing is created on GitHub.
+// WHAT: Runs the real `gh` for the forge commands the fakes cannot take from gh's own `--json` output, against a real GitHub
+//   repository: `gh issue list` (the dashboard's Backlog, `listIssues` in the forge module,
+//   packages/runtime/workflows/implement-issue/forge.ts) and `gh api repos/.../issues/<n> --jq .author_association` (the author gate of
+//   `implement-issue`, `authorStanding`), the latter for the repository of the cwd, for a named one and for one named by its URL. It writes what gh printed, with
+//   the repository's `owner/name` replaced by `owner/repo`, to packages/runtime/test/fixtures/gh/recordings.json. The fake `gh` of the
+//   dashboard's tests and the one of the `implement-issue` tests read that file. It only reads: nothing is created on GitHub.
 // WHY: a fake of an external CLI answers from a recording of the real tool (CODING_STANDARDS, Testing): the argument list the forge
-//   sends and the JSON gh prints for it are what the fake accepts and prints, never what someone remembered of gh's documentation.
-// WHEN: after changing the `gh issue list` command line in forge.ts, or to try a newer gh. Needs `gh auth login`, and at least two
-//   open issues with the label (default `ready-for-agent`) in the repository, so that the recording shows how gh prints a list of issues.
+//   sends and what gh prints for it are what the fake accepts and prints, never what someone remembered of gh's documentation.
+// WHEN: after changing the `gh issue list` or the `gh api` command line in forge.ts, or to try a newer gh. Needs `gh auth login`, and at
+//   least two open issues with the label (default `ready-for-agent`) in the repository, so that the recording shows how gh prints a list
+//   of issues; the author of the first one is the one `gh api` reads.
 // HOW: `npx tsx scripts/verify/record-gh-fixtures.ts` in a clone of the repository to read (a GitHub origin), or with `--repo
 //   <owner/name>`; `GH_RECORD_LABEL=<label>` picks the label. Prints where it wrote; exits 1 and writes nothing when the repository
 //   has fewer than two open issues with the label, or when a recording still holds a credential.
@@ -22,6 +25,9 @@ import { isEntryPoint } from "../lib/cli.js";
 const ROOT = resolve(import.meta.dirname, "..", "..");
 /** Where the fake `gh` of the dashboard's tests reads the recordings. */
 export const GH_RECORDINGS_PATH = join(ROOT, "packages", "runtime", "test", "fixtures", "gh", "recordings.json");
+
+/** The names of the recordings of `gh api ... .author_association`: for the cwd's repository, for one named as `owner/name`, and for one named by its URL. */
+export const AUTHOR_RECORDING = { cwd: "issue-author-association", repo: "issue-author-association-repo", url: "issue-author-association-url" } as const;
 
 /** What replaces the repository the recording was made on. */
 export const REPO_PLACEHOLDER = "owner/repo";
@@ -81,7 +87,7 @@ async function recordCalls(run: () => Promise<unknown>): Promise<GhRecording[]> 
   }
 }
 
-/** The recordings of `gh issue list` for `label` and for a label no issue has, made in `cwd`, whose origin names the repository. */
+/** The recordings of `gh issue list` for `label` and for a label no issue has, and of the author of the first issue listed (of the cwd's repository, and of `repo` by name and by URL), made in `cwd`, whose origin names the repository. */
 export async function record(cwd: string, label: string, repo: string): Promise<GhRecordingsFile> {
   const forge = createForge("github", directCommands());
   const listed: Array<{ number: number }> = [];
@@ -90,13 +96,18 @@ export async function record(cwd: string, label: string, repo: string): Promise<
     ...(await recordCalls(() => forge.listIssues(cwd, NO_SUCH_LABEL))),
   ];
   if (listed.length < 2) throw new Error(`${repo} has ${listed.length} open issue(s) labelled ${label}: the recording needs at least two, to show how gh prints a list of them (GH_RECORD_LABEL names another label)`);
+  const [author, authorOfRepo, authorOfUrl] = [
+    ...(await recordCalls(() => forge.authorStanding(cwd, listed[0]!.number))),
+    ...(await recordCalls(() => forge.authorStanding(cwd, listed[0]!.number, repo))),
+    ...(await recordCalls(() => forge.authorStanding(cwd, listed[0]!.number, `https://github.com/${repo}`))),
+  ];
   const scrub = (text: string) => createRedactor({ env: {} }).text(text.split(repo).join(REPO_PLACEHOLDER));
   const version = /^gh version (\S+)/.exec(execFileSync("gh", ["--version"], { encoding: "utf8" }))?.[1] ?? "unknown";
   const file: GhRecordingsFile = {
     recordedWith: { gh: version },
     placeholders: { repo: REPO_PLACEHOLDER },
     recordings: Object.fromEntries(
-      Object.entries({ "issue-list": full!, "issue-list-empty": empty! }).map(([name, r]) => [name, { args: r.args.map(scrub), exitCode: r.exitCode, stdout: scrub(r.stdout), stderr: scrub(r.stderr) }]),
+      Object.entries({ "issue-list": full!, "issue-list-empty": empty!, [AUTHOR_RECORDING.cwd]: author!, [AUTHOR_RECORDING.repo]: authorOfRepo!, [AUTHOR_RECORDING.url]: authorOfUrl! }).map(([name, r]) => [name, { args: r.args.map(scrub), exitCode: r.exitCode, stdout: scrub(r.stdout), stderr: scrub(r.stderr) }]),
     ),
   };
   if (repo !== "" && JSON.stringify(file).includes(repo)) throw new Error("a recording still names the repository: nothing was written");
