@@ -140,3 +140,16 @@ test("the installer clones the same repository the runtime links to, so one rena
   assert.equal(kitFileUrl("INSTALL-AGENT.md", "0.3.0"), `https://github.com/${KIT_REPO}/blob/v0.3.0/INSTALL-AGENT.md`);
   assert.equal(kitFileUrl("a/b.json", "0.3.0", "raw"), `https://raw.githubusercontent.com/${KIT_REPO}/v0.3.0/a/b.json`);
 });
+
+test("no tag fetch of the installer or of wf upgrade forces over a moved tag, and both ask the releases API whether the release is immutable", () => {
+  for (const parts of [["scripts", "install.sh"], ["packages", "runtime", "src", "upgrade.ts"]]) {
+    const file = parts.join("/");
+    const lines = read(...parts).split("\n").filter((line) => !/^\s*(#|\/\/|\*|\/\*)/.test(line));
+    const tagFetches = lines.filter((line) => /\bfetch\b/.test(line) && /--tags\b/.test(line));
+    assert.ok(tagFetches.length > 0, `${file} no longer fetches the tags: this check has nothing to look at`);
+    for (const line of tagFetches) assert.doesNotMatch(line, /--force|\s-f\b|\+refs\/tags/, `${file} forces a tag fetch, which accepts a moved tag silently: ${line.trim()}`);
+    const text = lines.join("\n");
+    assert.match(text, /releases\/tags\//, `${file} never asks the releases API about the tag`);
+    assert.match(text, /\bimmutable\b/, `${file} never tests the release's immutable field`);
+  }
+});
