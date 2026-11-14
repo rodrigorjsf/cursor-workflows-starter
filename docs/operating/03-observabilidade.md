@@ -468,7 +468,9 @@ um cartão não é confiável: o dashboard só mostra links `http:` e `https:`, 
 textos (título e subtítulo em 200 caracteres, no máximo 8 links e 8 rótulos).
 
 O `implement-issue` põe o cartão no ar depois da triagem (`#<n> <título da issue>` e o tier) e o atualiza na entrega, com
-a branch e o link da PR.
+a branch e o link da PR (`PR #9` no GitHub, `MR !9` no GitLab). O forge do run vem do host do `origin`, ou da chave
+`forges` da configuração quando o host é um que o kit não conhece ([6.2](../reference/config.md)), e o run fala com ele
+pelo `gh` ou pelo `glab`.
 
 **Estado da PR.** Um link de cartão para uma pull request do GitHub (`https://github.com/<dono>/<repo>/pull/<n>`) ou para
 um merge request do GitLab (`https://<host>/<grupo>/<projeto>/-/merge_requests/<n>`), exatamente nesse formato, mostra se
@@ -572,7 +574,7 @@ Para validar a entrega depois, por exemplo quando o PR é aceito ou recusado, us
     entrega do `implement-issue` (JWT, `Bearer`, a senha ou o token numa URL): o workflow pode rodar o que a etapa
     devolve, e um comando de teste como `DATABASE_URL=postgres://u:senha@localhost/db npm test` não pode chegar a ele
     com `[REDACTED]`. Esses formatos ficam em claro no journal e no memo, e continuam redigidos no log de eventos e no que o
-    `implement-issue` publica no GitHub (o comentário das seams e o corpo do PR passam inteiros pelo redator). É um esforço, não uma garantia: um segredo de outro
+    `implement-issue` publica no forge, GitHub ou GitLab (o comentário das seams e o corpo do PR passam inteiros pelo redator). É um esforço, não uma garantia: um segredo de outro
     formato, numa variável com outro nome, passa;
   - cada texto é cortado em 32768 caracteres (`truncated` e `chars` dizem o quanto havia);
   - **retenção:** ao iniciar um run, o `text` dos runs do repositório fora dos 30 mais recentes (contando o que
