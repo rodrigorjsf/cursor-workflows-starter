@@ -2,7 +2,7 @@
 // check enforces one mechanical rule that CODING_STANDARDS.md names on an "Enforced by tooling" line, so the file keeps
 // only the judgement. A check is a predicate over one file's text: a sample test proves it fires on an offender and stays
 // silent on the legitimate case, and a second test runs it over the tree the rule governs. The last check reads
-// CODING_STANDARDS.md itself: every exemplar `path:line` it cites must still exist.
+// CODING_STANDARDS.md itself: every exemplar it cites (a file plus a symbol, heading or key) must still resolve.
 //
 // Code-keyed: the TypeScript checks read the syntax tree, so comments never trip them; the shell, YAML and manifest checks
 // read lines. A construct spelled in a way the predicate does not know (an alias of `ctx`, a computed import path) passes.
@@ -12,6 +12,7 @@ import { builtinModules } from "node:module";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { test } from "node:test";
 import ts from "typescript";
+import { parseMarkdown } from "../scripts/lib/markdown.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
@@ -37,7 +38,8 @@ const TEST_CODE = TEST_DIRS.flatMap((d) => files(d, /\.ts$/));
 const PRODUCT_CODE = ["packages/runtime/src", "packages/runtime/workflows", "packages/dashboard/src", ".agents/workflows"].flatMap((d) => files(d, CODE));
 /** Code bundled for the browser. */
 const BROWSER_CODE = ["packages/dashboard/app", "packages/dashboard/run-view"].flatMap((d) => files(d, /\.tsx?$/));
-const SHELL = files("scripts", /\.sh$/);
+/** Every shell script: the maintainer scripts and the git hooks (extensionless, under .githooks/). */
+const SHELL = [...files("scripts", /\.sh$/), ...files(".githooks", /^[\w-]+$/)];
 
 const parse = (path: string, text: string) =>
   ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
@@ -323,9 +325,21 @@ const TSCONFIG = "packages/runtime/tsconfig.json";
 test("the shared tsconfig keeps verbatimModuleSyntax on, so tsc rejects a type imported without `type`", () => {
   // tsc proves the flag: with it on, `import { WorkflowEvent } from ".../events.js"` used only as a type fails with TS1484.
   assert.equal(JSON.parse(read(TSCONFIG)).compilerOptions.verbatimModuleSyntax, true);
-  for (const config of ["tsconfig.json", "packages/dashboard/tsconfig.json", "packages/dashboard/app/tsconfig.json", "packages/dashboard/run-view/tsconfig.json"]) {
+  for (const config of ["tsconfig.json", "packages/dashboard/tsconfig.json", "packages/dashboard/app/tsconfig.json", "packages/dashboard/run-view/tsconfig.json", "test/tsconfig.json", "packages/runtime/test/tsconfig.json", "packages/dashboard/test/tsconfig.json"]) {
     const options = JSON.parse(read(config)).compilerOptions ?? {};
     assert.notEqual(options.verbatimModuleSyntax, false, `${config} turns verbatimModuleSyntax off`);
+  }
+});
+
+test("`npm run typecheck` checks every test: each directory that holds tests has a tsconfig.json for all its files, and the script runs it", () => {
+  const typecheck: string = JSON.parse(read("package.json")).scripts.typecheck;
+  const dirs = ["test", ...PACKAGES.map((p) => `${p}/test`)].filter((dir) => existsSync(join(ROOT, dir)) && readdirSync(join(ROOT, dir)).some((f) => f.endsWith(".test.ts")));
+  assert.ok(dirs.length >= 3, `test directories found: ${dirs.join(", ")}`);
+  for (const dir of dirs) {
+    const config = `${dir}/tsconfig.json`;
+    assert.ok(existsSync(join(ROOT, config)), `${dir} has no tsconfig.json: its tests are never typechecked`);
+    assert.deepEqual(JSON.parse(read(config)).include, ["./**/*.ts"], `${config} includes every file of ${dir}`);
+    assert.ok(typecheck.split("&&").some((command) => command.trim() === `tsc --noEmit -p ${dir}`), `npm run typecheck does not run tsc --noEmit -p ${dir}`);
   }
 });
 
@@ -600,7 +614,7 @@ test("the shell checks fire on a lax script, on $0 and on a bare shellcheck disa
 });
 
 test("every shell script starts strict, locates itself through BASH_SOURCE, and explains each shellcheck disable", () => {
-  assert.ok(SHELL.length >= 5, `found ${SHELL.join(", ")}`);
+  assert.ok(SHELL.length >= 5 && SHELL.includes(".githooks/pre-commit"), `found ${SHELL.join(", ")}`);
   assert.deepEqual(scan(SHELL, lax), [], "open with #!/usr/bin/env bash and set -euo pipefail");
   assert.deepEqual(scan(SHELL, dollarZero), [], 'use "$(dirname "${BASH_SOURCE[0]}")", not $0');
   assert.deepEqual(scan(SHELL, unexplainedDisables), [], "put the reason on the same line: # shellcheck disable=SCnnnn # <why>");
@@ -635,35 +649,138 @@ test("CI reads the repository only, and uses first-party actions by major tag", 
 });
 
 // --- The exemplars ----------------------------------------------------------------------------------------------------
+//
+// An exemplar is cited as a file, plus the symbol, heading or key in it that shows the rule: `path` `anchor`, two code
+// spans one space apart. An edit above the exemplar leaves the anchor valid; a line number would not. A file alone (no
+// anchor) is cited in a `_See:_` clause when the exemplar is the whole file or its header.
 
-/** Every `path:line` cited in code spans of a standards file, with the line of the file that cites it. */
-const citations = (md: string) =>
-  md.split("\n").flatMap((l, i) => [...l.matchAll(/`([\w./-]+\.[\w]+):(\d+)`/g)].map((m) => ({ at: i + 1, path: m[1]!, line: Number(m[2]) })));
+/** A file the standards can cite: a path with one of the extensions the anchor resolver reads. */
+const CITABLE = /^[\w./-]+\.(?:ts|tsx|mjs|md|sh|css|json|toml|ya?ml)$/;
 
-/** Each citation whose file is gone, or whose cited line is past the end or blank. */
-function brokenCitations(md: string, readFile: (path: string) => string | undefined): string[] {
-  return citations(md).flatMap(({ at, path, line }) => {
-    const text = readFile(path);
-    if (text === undefined) return [`:${at} cites ${path}:${line}, and ${path} does not exist`];
-    const cited = text.split("\n")[line - 1];
-    return cited === undefined || cited.trim() === "" ? [`:${at} cites ${path}:${line}, which is ${cited === undefined ? "past the end" : "blank"}`] : [];
-  });
+interface Citation {
+  /** The line of the standards file that cites it. */
+  at: number;
+  path: string;
+  /** The symbol, heading or key; undefined when the citation is the whole file. */
+  anchor?: string;
 }
 
-test("the exemplar check fires on a missing file, a line past the end and a blank line, and passes a line with content", () => {
-  const files = new Map([["a.ts", "// header\n\nexport const x = 1;\n"]]);
-  const md = "- **Rule.** _See:_ `gone.ts:3`.\n- **Rule.** _See:_ `a.ts:9`, `a.ts:2`.\n- **Rule.** _See:_ `a.ts:3`.\n";
+/** Every exemplar a standards file cites, plus each legacy `path:line` citation it still holds. */
+function citations(md: string): { cited: Citation[]; byLine: string[] } {
+  const cited: Citation[] = [];
+  const byLine: string[] = [];
+  md.split("\n").forEach((l, i) => {
+    const at = i + 1;
+    const see = l.indexOf("_See:_");
+    const spans = [...l.matchAll(/`([^`]+)`/g)].map((m) => ({ text: m[1]!, start: m.index, end: m.index + m[0].length }));
+    for (let k = 0; k < spans.length; k++) {
+      const span = spans[k]!;
+      if (/^[\w./-]+\.\w+:\d+$/.test(span.text)) byLine.push(`:${at} cites ${span.text}`);
+      if (!CITABLE.test(span.text)) continue;
+      const next = spans[k + 1];
+      if (next && next.start === span.end + 1 && !CITABLE.test(next.text)) {
+        cited.push({ at, path: span.text, anchor: next.text });
+        k++;
+      } else if (see >= 0 && span.start > see) {
+        cited.push({ at, path: span.text });
+      }
+    }
+  });
+  return { cited, byLine };
+}
+
+/** The name a TypeScript declaration, member or object key introduces, or undefined for any other node. */
+function declaredName(node: ts.Node): string | undefined {
+  const named =
+    ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node) || ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node) ||
+    ts.isEnumDeclaration(node) || ts.isVariableDeclaration(node) || ts.isMethodDeclaration(node) || ts.isMethodSignature(node) ||
+    ts.isPropertyDeclaration(node) || ts.isPropertySignature(node) || ts.isPropertyAssignment(node);
+  const name = named ? node.name : undefined;
+  return name && (ts.isIdentifier(name) || ts.isStringLiteral(name)) ? name.text : undefined;
+}
+
+/** True when `anchor` names a declaration of the file (`outer.inner` for one declared inside another) or a `test()` title. */
+function tsAnchor(sf: ts.SourceFile, anchor: string): boolean {
+  let scopes: ts.Node[] = [sf];
+  for (const segment of anchor.split(".")) {
+    const found: ts.Node[] = [];
+    for (const scope of scopes) ts.forEachChild(scope, (child) => walk(child as ts.SourceFile, (n) => void (declaredName(n) === segment && found.push(n))));
+    scopes = found;
+  }
+  if (scopes.length > 0) return true;
+  let titled = false;
+  walk(sf, (n) => {
+    if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "test") {
+      const title = n.arguments[0];
+      if (title && ts.isStringLiteralLike(title) && title.text === anchor) titled = true;
+    }
+  });
+  return titled;
+}
+
+/** Every key of a parsed JSON value, at any depth. */
+const jsonKeys = (value: unknown): string[] =>
+  value && typeof value === "object" ? Object.entries(value).flatMap(([k, v]) => [...(Array.isArray(value) ? [] : [k]), ...jsonKeys(v)]) : [];
+
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** True when `anchor` resolves in `path`: a declaration or test title (TypeScript), a heading or a bold lead-in (Markdown),
+ * a function (shell), a selector or at-rule prelude (CSS), a key (JSON, TOML, YAML). */
+function anchorResolves(path: string, text: string, anchor: string): boolean {
+  if (/\.(ts|tsx|mjs)$/.test(path)) return tsAnchor(parse(path, text), anchor);
+  if (path.endsWith(".md")) {
+    const { headings, lines } = parseMarkdown(text);
+    const leadIns = lines.flatMap((l) => /^\s*(?:\d+\.\s+|[-*]\s+)?\*\*([^*]+)\*\*/.exec(l)?.[1] ?? []);
+    return [...headings.map((h) => h.text), ...leadIns].includes(anchor);
+  }
+  if (path.endsWith(".sh")) return new RegExp(`^${escapeRegExp(anchor)}\\(\\)\\s*\\{`, "m").test(text);
+  if (path.endsWith(".css")) return text.split("\n").some((l) => l.includes("{") && l.slice(0, l.indexOf("{")).split(",").some((s) => s.trim() === anchor));
+  if (path.endsWith(".json")) return jsonKeys(JSON.parse(text)).includes(anchor);
+  if (path.endsWith(".toml")) return new RegExp(`^\\s*(${escapeRegExp(anchor)}\\s*=|\\[${escapeRegExp(anchor)}\\])`, "m").test(text);
+  return new RegExp(`^\\s*(?:-\\s*)?${escapeRegExp(anchor)}:`, "m").test(text);
+}
+
+/** Each citation whose file is gone or whose anchor no longer resolves in it, and each citation by line number. */
+function brokenCitations(md: string, readFile: (path: string) => string | undefined): string[] {
+  const { cited, byLine } = citations(md);
+  return [
+    ...byLine.map((c) => `${c}: cite the file and a symbol or heading, not a line`),
+    ...cited.flatMap(({ at, path, anchor }) => {
+      const text = readFile(path);
+      if (text === undefined) return [`:${at} cites ${path}, which does not exist`];
+      return anchor === undefined || anchorResolves(path, text, anchor) ? [] : [`:${at} cites ${path} \`${anchor}\`, which ${path} no longer declares`];
+    }),
+  ];
+}
+
+test("the exemplar check fires on a missing file, a dangling anchor and a line number, and resolves every anchor kind", () => {
+  const files = new Map([
+    ["a.ts", "// header\nexport function outer() {\n  const inner = 1;\n}\ntest(\"it works\", () => {});\n"],
+    ["b.md", "# Title\n\n## Section\n\n**Term** (*term*): text.\n"],
+    ["c.sh", "#!/usr/bin/env bash\nmain() {\n  :\n}\n"],
+    ["d.css", ".a .b, .c { color: red; }\n@media (x) { .d { color: blue; } }\n"],
+    ["e.json", '{ "dependencies": { "@x/y": "1.0.0" } }\n'],
+    ["f.toml", "[tools]\nnode = \"22\"\n"],
+    ["g.yml", "jobs:\n  test:\n    steps:\n      - run: x\n"],
+  ]);
+  const good = [
+    "`a.ts` `outer`", "`a.ts` `outer.inner`", "`a.ts` `it works`", "`b.md` `Section`", "`b.md` `Term`", "`c.sh` `main`",
+    "`d.css` `.c`", "`d.css` `@media (x)`", "`e.json` `@x/y`", "`f.toml` `node`", "`f.toml` `tools`", "`g.yml` `test`",
+  ];
+  const md = `- **Rule.** _See:_ ${good.join(", ")}, \`a.ts\`.\n- **Rule.** _See:_ \`gone.ts\` \`x\`, \`a.ts\` \`inner.outer\`, \`b.md\` \`Nope\`.\n- **Rule.** _See:_ \`a.ts:2\`.\n`;
+  assert.equal(citations(md).cited.length, good.length + 4);
   assert.deepEqual(brokenCitations(md, (p) => files.get(p)), [
-    ":1 cites gone.ts:3, and gone.ts does not exist",
-    ":2 cites a.ts:9, which is past the end",
-    ":2 cites a.ts:2, which is blank",
+    ":3 cites a.ts:2: cite the file and a symbol or heading, not a line",
+    ":2 cites gone.ts, which does not exist",
+    ":2 cites a.ts `inner.outer`, which a.ts no longer declares",
+    ":2 cites b.md `Nope`, which b.md no longer declares",
   ]);
 });
 
-test("every exemplar path:line that CODING_STANDARDS.md cites exists and is not blank", () => {
+test("every exemplar CODING_STANDARDS.md cites is a file that exists, with an anchor it still declares", () => {
   const md = read("CODING_STANDARDS.md");
-  assert.ok(citations(md).length >= 100, `found ${citations(md).length} citations`);
+  const { cited } = citations(md);
+  assert.ok(cited.length >= 141, `found ${cited.length} citations`);
   const readFile = (path: string) => (existsSync(join(ROOT, path)) ? read(path) : undefined);
-  assert.deepEqual(brokenCitations(md, readFile), [], "a refactor moved or deleted an exemplar: cite a line that still shows the rule");
+  assert.deepEqual(brokenCitations(md, readFile), [], "an exemplar was renamed, moved or deleted: cite a symbol or heading that still shows the rule");
 });
-

@@ -9,7 +9,7 @@ import "./isolate-home.js";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { calls, costConfig, resetCloud, script, stats } from "@cursor/sdk";
+import { calls, costConfig, resetCloud, script, stats } from "./fake-sdk.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { clearConfig, configWorkflow, writeGlobalConfig } from "./config-fixtures.js";

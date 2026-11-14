@@ -15,7 +15,7 @@
     "wf": "tsx packages/runtime/src/cli.ts",
     "mcp": "tsx packages/runtime/src/mcp-server.ts",
     "check": "npm run typecheck && npm test",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p packages/dashboard/app && tsc --noEmit -p packages/dashboard/run-view",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p packages/dashboard/app && tsc --noEmit -p packages/dashboard/run-view && tsc --noEmit -p test && tsc --noEmit -p packages/runtime/test && tsc --noEmit -p packages/dashboard/test",
     "models": "tsx packages/runtime/src/cli.ts models",
     "test": "npm run test --workspaces --if-present && tsx --test test/*.test.ts",
     "dash": "tsx packages/dashboard/src/main.ts",

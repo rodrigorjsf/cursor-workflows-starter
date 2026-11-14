@@ -1,7 +1,7 @@
 // Child process of job-state.test.ts: starts a job whose only step never ends, then dies of an uncaught exception.
 // Usage: crash-job.ts <cwd> <jobId> <runId>
 process.env.WF_METRICS = "off";
-import { script } from "@cursor/sdk";
+import { script } from "./fake-sdk.js";
 import { defineWorkflow } from "../src/runtime/workflow.js";
 import { createJob, installCrashHandlers, startJob } from "../src/runtime/jobs.js";
 

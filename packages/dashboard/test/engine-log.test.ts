@@ -12,7 +12,7 @@ process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, test } from "node:test";
-import { calls, resetCloud, script } from "@cursor/sdk";
+import { calls, resetCloud, script } from "../../runtime/test/fake-sdk.js";
 import { runWorkflow } from "../../runtime/src/runtime/engine.js";
 import { EVENT_SCHEMA_VERSION } from "../../runtime/src/runtime/events.js";
 import { defineWorkflow } from "../../runtime/src/runtime/workflow.js";
@@ -42,7 +42,7 @@ afterEach(async () => {
   resetCloud();
 });
 
-const NODE = [process.execPath, ["-e", "0"]] as const;
+const NODE: [string, string[]] = [process.execPath, ["-e", "0"]];
 
 /** One of each shape: steps in a row, a parallel group whose branches differ, a nested pipeline, then a step after it all. */
 const workflow = defineWorkflow<unknown, string>({

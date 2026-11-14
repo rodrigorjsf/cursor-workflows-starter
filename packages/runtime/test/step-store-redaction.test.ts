@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { calls, script } from "@cursor/sdk";
+import { calls, script } from "./fake-sdk.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import { defineWorkflow } from "../src/runtime/workflow.js";
 

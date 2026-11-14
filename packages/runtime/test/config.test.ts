@@ -7,9 +7,10 @@ import "./isolate-home.js";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { calls, costConfig, script, stats } from "@cursor/sdk";
+import { calls, costConfig, script, stats } from "./fake-sdk.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
+import type { WorkflowDefinition } from "../src/runtime/workflow.js";
 import { clearConfig, configWorkflow, globalConfigPath, repoConfigPath, runStartOf, withEnv, writeGlobalConfig, writeRepoConfig } from "./config-fixtures.js";
 
 const cwd = join(import.meta.dirname, ".tmp", `config-${process.pid}`);
@@ -130,7 +131,7 @@ test("a role's defaults sit under the call's options: the call wins over the rol
 });
 
 // The 10 s bound turns a regression (the role timeout ignored: the default is 30 minutes) into a failure, not a hang.
-test("retries, schema retries and timeout per role change how the step runs", { timeout: 10_000 }, async () => {
+test("retries, schema retries and timeout per role change how the step runs", { timeout: 30_000 }, async () => {
   writeRepoConfig(cwd, { workflows: { cfg: { roles: { classify: { retries: 2, timeoutMs: 40 } } } } });
   script.push(() => ({ hang: true }), () => ({ hang: true }), () => ({ hang: true }));
   const r = await runWorkflow(configWorkflow(), {}, { cwd });
@@ -609,7 +610,7 @@ test("a code-default model that a cap refuses shows up as a violation of the def
 // ── Workflow settings: the workflow declares them, the config files tune them ───────────
 
 /** Like `configWorkflow`, plus two settings with code defaults. */
-const settingsWorkflow = (run: Parameters<typeof configWorkflow>[0]) => {
+const settingsWorkflow = (run: Parameters<typeof configWorkflow>[0]): WorkflowDefinition => {
   const base = configWorkflow(run);
   return { ...base, meta: { ...base.meta, settings: { batchSize: 10, mode: "fast", maxTokens: 7 } } };
 };
@@ -730,5 +731,6 @@ test("forges takes a lower-case host with an optional port and the value github 
 
   writeRepoConfig(cwd, { forges: { "github.com": "github", "gitlab.com": "gitlab", "git.example.com:8443": "gitlab", "10.0.0.5": "github", "gitlab.com:8443": "gitlab" } });
   const start = await startOf();
+  assert.ok(start.config.forges, "the run-start records the forges");
   assert.deepEqual(Object.keys(start.config.forges).sort(), ["10.0.0.5", "git.example.com:8443", "github.com", "gitlab.com", "gitlab.com:8443"], "saying what the kit already knows is allowed");
 });

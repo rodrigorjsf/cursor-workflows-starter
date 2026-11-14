@@ -9,7 +9,7 @@
     "node": ">=22.13"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit && tsc --noEmit -p app && tsc --noEmit -p run-view",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p app && tsc --noEmit -p run-view && tsc --noEmit -p test",
     "test": "tsx --tsconfig ../runtime/tsconfig.test.json --test test/*.test.ts"
   },
   "dependencies": {

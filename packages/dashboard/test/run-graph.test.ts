@@ -288,7 +288,7 @@ test("the run's summary: status, executions and what it spent, from its events a
   assert.deepEqual(summary([runStart, ...spent("s-a"), ...spent("s-b")]), { workflow: "demo", status: "running", startedAt: new Date(T0).toISOString(), executions: 1, tokens: 2000, costCents: 4 });
   assert.equal(summary([runStart, ...spent("s-a")], true).status, "interrupted", "settled with no run-end: the process is gone");
 
-  const ended = (status: string, extra: Draft = {}): Draft[] => [runStart, ...spent("s-a"), { type: "run-end", status, ...extra }];
+  const ended = (status: string, extra: Record<string, unknown> = {}): Draft[] => [runStart, ...spent("s-a"), { type: "run-end", status, ...extra }];
   assert.equal(summary(ended("finished")).status, "finished");
   assert.deepEqual(
     [summary(ended("failed", { error: "budget" })).status, summary(ended("failed", { error: "budget" })).error, summary(ended("cancelled")).status],

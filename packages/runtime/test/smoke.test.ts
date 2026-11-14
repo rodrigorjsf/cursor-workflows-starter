@@ -7,7 +7,7 @@ import "./isolate-home.js";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { calls, script, stats } from "@cursor/sdk";
+import { calls, script, stats } from "./fake-sdk.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { clearConfig, runStartOf, writeRepoConfig } from "./config-fixtures.js";

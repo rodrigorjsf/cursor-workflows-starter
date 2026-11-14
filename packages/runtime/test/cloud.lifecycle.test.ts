@@ -10,7 +10,7 @@ import "./isolate-home.js";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { ConfigurationError, calls, cloudRunsOf, costConfig, finishCloudRun, forgetCloudAgent, killCloudClients, lookups, resetCloud, resumes, script, stats } from "@cursor/sdk";
+import { ConfigurationError, calls, cloudRunsOf, costConfig, finishCloudRun, forgetCloudAgent, killCloudClients, lookups, resetCloud, resumes, script, stats } from "./fake-sdk.js";
 import { createCloudBackend } from "../src/runtime/backend-cloud.js";
 import { openDb } from "../src/observability/db.js";
 import { reconcile } from "../src/observability/queries.js";
@@ -420,7 +420,9 @@ for (const retries of [0, 1]) {
     const runId = `life-cancel-resume-${retries}`;
     const crashed = await crashWhileTheAgentRuns(runId, reviewStep({ retries }));
     try {
-      assert.deepEqual((await cancelRun(runId, 100)).cancelledAgents, ["bc-1"]);
+      const cancelled = await cancelRun(runId, 100);
+      assert.ok(cancelled.kind === "not-running", `the crashed run is not running: ${cancelled.kind}`);
+      assert.deepEqual(cancelled.cancelledAgents, ["bc-1"]);
       script.push(() => ({ result: "fresh answer" }));
 
       const r = await runWorkflow(reviewStep({ retries }), {}, { cwd, runId });

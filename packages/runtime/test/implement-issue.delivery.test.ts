@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { calls } from "@cursor/sdk";
+import { calls } from "./fake-sdk.js";
 import type { ContentEvent, ExecStartEvent } from "../src/runtime/events.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";

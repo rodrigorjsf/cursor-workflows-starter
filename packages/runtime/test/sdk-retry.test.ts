@@ -6,7 +6,7 @@ import "./isolate-home.js";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { AuthenticationError, ConfigurationError, CursorAgentError, calls, costConfig } from "@cursor/sdk";
+import { AuthenticationError, ConfigurationError, CursorAgentError, calls, costConfig } from "./fake-sdk.js";
 import { classifyError } from "../src/runtime/backend.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";

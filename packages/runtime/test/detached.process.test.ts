@@ -224,12 +224,12 @@ test("a second signal while the run is still stopping ends the process at once, 
   process.kill(pid, "SIGTERM"); // the fake agent run takes 5 s to cancel
   await until("the job to take the first signal", () => readFileSync(started.log, "utf8").includes("[wf] SIGTERM: cancelling the run"));
   assert.ok(alive(pid), "still stopping");
-  const signalledAt = performance.now();
   process.kill(pid, "SIGTERM");
-  await until("the process to exit", () => !alive(pid), 3000);
-  assert.ok(performance.now() - signalledAt < 3000);
+  await until("the process to exit", () => !alive(pid));
+  // Which signal ended the run is in its end, not in a wall-clock bound: the first one's cancel would end it in 5 s anyway.
   const end = eventsOf(started.runId).findLast((e) => e.type === "run-end");
   assert.ok(end && end.type === "run-end" && end.status === "cancelled", "the log says cancelled, not a crash");
+  assert.match(end.error ?? "", /cancelled by force by a second SIGTERM/, "the second signal ended the process, not the first one's cancel");
   assert.equal(wf("status", started.jobId).status, "cancelled");
 });
 

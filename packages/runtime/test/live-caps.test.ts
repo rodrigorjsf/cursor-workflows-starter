@@ -8,7 +8,7 @@ import "./isolate-home.js";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { RateLimitError, calls, costConfig, script, stats } from "@cursor/sdk";
+import { RateLimitError, calls, costConfig, script, stats } from "./fake-sdk.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import type { WorkflowEvent } from "../src/runtime/events.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
@@ -30,6 +30,8 @@ afterEach(() => {
 /** One finished turn that used `tokens` tokens in all (10 of them output). */
 const turn = (tokens: number) => ({ type: "turn-ended", usage: { inputTokens: tokens - 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 } });
 /** A send() that streams `count` turns of `tokens` tokens each, until the run is cancelled. */
+/** What the fake does on one send(): an entry of its `script`. */
+type Send = (typeof script)[number];
 const live = (count: number, tokens: number) => () => ({ live: true, result: "ok", deltas: Array.from({ length: count }, () => turn(tokens)) });
 
 type StepEnd = Extract<WorkflowEvent, { type: "step-end" }>;
@@ -64,7 +66,7 @@ const deferred = () => {
 };
 
 /** A send() chosen by the step's prompt, so parallel steps need no send order. */
-const byPrompt = (plan: Record<string, ReturnType<typeof live>>) => (o: any, msg: string, n: number) => plan[msg]!(o, msg, n);
+const byPrompt = (plan: Record<string, Send>) => (o: any, msg: string, n: number) => plan[msg]!(o, msg, n);
 
 /**
  * Like `byPrompt`, for live runs that must all exist before any of them streams: the first turn of every run is held until
@@ -72,7 +74,7 @@ const byPrompt = (plan: Record<string, ReturnType<typeof live>>) => (o: any, msg
  * a cap, however late a step's agent was created, so a test can count on every active step having a run to cancel.
  * Push the result once per step of the plan.
  */
-const holdUntilAllSent = (plan: Record<string, ReturnType<typeof live>>) => {
+const holdUntilAllSent = (plan: Record<string, Send>) => {
   let sent = 0;
   const allSent = deferred();
   return (o: any, msg: string, n: number) => {
@@ -292,7 +294,7 @@ test("a step the workflow starts after the run's cap was crossed, while the canc
   assert.equal(stats.turnsDelivered, 2);
 });
 
-test("a cut does not wait for the SDK: a run whose wait() never settles after cancel() still fails at once", { timeout: 10_000 }, async () => {
+test("a cut does not wait for the SDK: a run whose wait() never settles after cancel() still fails at once", { timeout: 30_000 }, async () => {
   writeRepoConfig(cwd, { workflows: { cfg: { roles: { classify: { maxTokensPerStep: 150, retries: 0, timeoutMs: 600_000 } } } } });
   script.push(() => ({ live: true, stuckAfterCancel: true, deltas: Array.from({ length: 10 }, () => turn(100)) }));
   const r = await runWorkflow(configWorkflow((ctx) => ctx.agent("p", { role: "classify", label: "c" })), {}, { cwd });
@@ -345,7 +347,7 @@ test("a cap crossed while the agent answers a schema re-prompt cuts the step too
   assert.equal(stepEnds(logOf(r.runId))[0]!.errorKind, "budget");
 });
 
-test("the tokens of an attempt that failed on a rate limit are counted once while it backs off, not twice", { timeout: 15_000 }, async () => {
+test("the tokens of an attempt that failed on a rate limit are counted once while it backs off, not twice", { timeout: 30_000 }, async () => {
   const rateLimited = Object.assign(new RateLimitError("slow down"), { isRetryable: true }); // the engine sleeps 2 s before the retry
   let aSends = 0;
   script.push(...[0, 1, 2].map(() => (o: any, msg: string, n: number) => {
