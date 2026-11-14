@@ -151,6 +151,17 @@ test("the dashboard's merge request by URL and the forge's calls with a repo arg
   const created = ran("mr-create-repo");
   assert.deepEqual(created.args.slice(-2), ["--repo", named]);
   assert.match(created.stdout, /\/-\/merge_requests\/\d+\n/);
+
+  // A host with no port (gitlab.com, most self-managed hosts) goes in `glab api --hostname <host>`, the form the dashboard and the
+  // cross-repository forge calls take there: the real glab accepted it too, with no GITLAB_HOST.
+  const byHostname = ran("mr-api-hostname");
+  assert.deepEqual(byHostname.args, ["api", "--hostname", HOST_PLACEHOLDER, `projects/${encodeURIComponent(subjects.project)}/merge_requests/${subjects.mr}`]);
+  assert.equal(byHostname.env, undefined);
+  assert.equal(JSON.parse(byHostname.stdout).state, "opened");
+  const projectByHostname = ran("repo-view-hostname");
+  assert.deepEqual(projectByHostname.args, ["api", "--hostname", HOST_PLACEHOLDER, `projects/${encodeURIComponent(subjects.project)}`]);
+  assert.equal(projectByHostname.env, undefined);
+  assert.equal(JSON.parse(projectByHostname.stdout).path_with_namespace, subjects.project);
 });
 
 // ── the script stays out of the checks ───────────────────────────────────────────────────────────────────────────
