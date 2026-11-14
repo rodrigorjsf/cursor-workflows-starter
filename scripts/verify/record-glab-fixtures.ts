@@ -11,13 +11,11 @@
 //   mise.toml on the PATH. Prints where it wrote; exits 1 and writes nothing when a recording still holds a secret.
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
-import { errorText } from "../../packages/runtime/src/runtime/error-text.js";
 import { Commands } from "../../packages/runtime/workflows/implement-issue/commands.js";
 import { createForge, loginOf, type Forge } from "../../packages/runtime/workflows/implement-issue/forge.js";
 import { isEntryPoint } from "../lib/cli.js";
-import { GitLabApi, basicAuthOf, e2eEnv, execOf, git, loginGlab, mergeRequestNumber, type E2eEnv } from "../lib/gitlab-e2e.js";
+import { GitLabApi, basicAuthOf, e2eEnv, execOf, git, loginGlab, mergeRequestNumber, runMain, secretsOf, versionsOf, type E2eEnv } from "../lib/gitlab-e2e.js";
 import { HOST_PLACEHOLDER, leaksIn, scrubText, type Secrets } from "../lib/scrub-recording.js";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
@@ -203,10 +201,8 @@ class Recorder {
     }
   }
 
-  async versions(): Promise<RecordingsFile["recordedWith"]> {
-    const glab = /^glab (\S+)/.exec(execFileSync("glab", ["--version"], { encoding: "utf8" }))?.[1] ?? "";
-    const gitlab = (await this.api.call<{ version: string }>("GET", "/version")).version;
-    return { glab, gitlab, image: this.env.image };
+  versions(): Promise<RecordingsFile["recordedWith"]> {
+    return versionsOf(this.api, this.env.image);
   }
 }
 
@@ -230,7 +226,7 @@ export async function main(): Promise<number> {
   await recorder.seed();
   const subjects = await recorder.recordAll();
   const recordedWith = await recorder.versions();
-  const secrets: Secrets = { token: env.token, password: env.password, scratch: env.scratch, home: homedir() };
+  const secrets = secretsOf(env);
   const file = scrubRecordings({ recordedWith, placeholders: { host: HOST_PLACEHOLDER }, subjects, recordings: recorder.recordings }, secrets);
   mkdirSync(dirname(RECORDINGS_PATH), { recursive: true });
   const partial = `${RECORDINGS_PATH}.partial`;
@@ -240,14 +236,4 @@ export async function main(): Promise<number> {
   return 0;
 }
 
-if (isEntryPoint(import.meta.url)) {
-  main().then(
-    (code) => {
-      process.exitCode = code;
-    },
-    (err: unknown) => {
-      process.stderr.write(`error: ${errorText(err)}\n`);
-      process.exitCode = 1;
-    },
-  );
-}
+if (isEntryPoint(import.meta.url)) runMain(main);

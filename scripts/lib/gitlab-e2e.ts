@@ -6,9 +6,13 @@
 //   configuration the user owns (ADR-0009).
 // WHEN: imported by those two scripts; not run on its own.
 // HOW: `const env = e2eEnv()`; `new GitLabApi(env.url, env.token).call("GET", "/version")`; `git(cwd, basicAuthOf(token), "clone", ...)`;
-//   `loginGlab(glab, env, host, token)`; `new Commands(execOf(env), { networkMs })`; `mergeRequestNumber(url)`.
+//   `loginGlab(glab, env, host, token)`; `new Commands(execOf(env), { networkMs })`; `mergeRequestNumber(url)`; `secretsOf(env)`;
+//   `await versionsOf(api, env.image)`; `if (isEntryPoint(import.meta.url)) runMain(main)`.
 import { execFileSync } from "node:child_process";
+import { homedir } from "node:os";
+import { errorText } from "../../packages/runtime/src/runtime/error-text.js";
 import type { ExecResult } from "../../packages/runtime/src/runtime/workflow.js";
+import type { Secrets } from "./scrub-recording.js";
 
 /** The value of the environment variable `key`: the scripts are run by scripts/verify/gitlab-e2e.sh, which sets it. */
 export function requireEnv(key: string): string {
@@ -39,6 +43,29 @@ export function e2eEnv(): E2eEnv {
     image: requireEnv("GITLAB_E2E_IMAGE"),
     scratch: requireEnv("GITLAB_E2E_SCRATCH"),
   };
+}
+
+/** What the scripts' output must not carry: the token, the root password, the scratch directory and the user's home. */
+export const secretsOf = (env: E2eEnv): Secrets => ({ token: env.token, password: env.password, scratch: env.scratch, home: homedir() });
+
+/** The version of the `glab` on the PATH, of the GitLab behind `api`, and the image it runs: what a recording or a proof ran against. */
+export async function versionsOf(api: GitLabApi, image: string): Promise<{ glab: string; gitlab: string; image: string }> {
+  const glab = /^glab (\S+)/.exec(execFileSync("glab", ["--version"], { encoding: "utf8" }))?.[1] ?? "";
+  const gitlab = (await api.call<{ version: string }>("GET", "/version")).version;
+  return { glab, gitlab, image };
+}
+
+/** Runs a script's `main` as the entry point: its exit code, or 1 with `error: <why>` on stderr when it throws. */
+export function runMain(main: () => Promise<number>): void {
+  main().then(
+    (code) => {
+      process.exitCode = code;
+    },
+    (err: unknown) => {
+      process.stderr.write(`error: ${errorText(err)}\n`);
+      process.exitCode = 1;
+    },
+  );
 }
 
 /** The number in the URL of a merge request, wherever it stands in `text` (`glab mr create` prints the URL among other text), or undefined when there is none. */

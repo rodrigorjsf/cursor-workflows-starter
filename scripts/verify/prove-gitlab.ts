@@ -16,16 +16,15 @@
 //   `GITLAB_E2E_MAX_TOKENS` (default 600000) and `GITLAB_E2E_MAX_CENTS` (default 100) are the caps of that run, passed to `wf run` as
 //   `--max-tokens` and `--max-cents`; `GITLAB_E2E_WORKFLOW_TIMEOUT_SECONDS` (default 2700) is how long it may take. Prints the
 //   evidence on stdout, progress on stderr; exits 1 when a proof did not hold.
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { errorText } from "../../packages/runtime/src/runtime/error-text.js";
 import { Commands } from "../../packages/runtime/workflows/implement-issue/commands.js";
 import { createForge, type Forge } from "../../packages/runtime/workflows/implement-issue/forge.js";
 import { sanitizeModelText } from "../../packages/runtime/workflows/implement-issue/pr-body.js";
 import { isEntryPoint } from "../lib/cli.js";
-import { GitLabApi, GitLabHttpError, basicAuthOf, e2eEnv, execOf, git, loginGlab, mergeRequestNumber, type E2eEnv } from "../lib/gitlab-e2e.js";
+import { GitLabApi, GitLabHttpError, basicAuthOf, e2eEnv, execOf, git, loginGlab, mergeRequestNumber, runMain, secretsOf, versionsOf, type E2eEnv } from "../lib/gitlab-e2e.js";
 import {
   CLOSING_FORMS,
   QUICK_ACTION_CASES,
@@ -443,10 +442,8 @@ class Prover {
     return report;
   }
 
-  async versions(): Promise<ProofReport["versions"]> {
-    const glab = /^glab (\S+)/.exec(execFileSync("glab", ["--version"], { encoding: "utf8" }))?.[1] ?? "";
-    const gitlab = (await this.api.call<{ version: string }>("GET", "/version")).version;
-    return { glab, gitlab, image: this.env.image };
+  versions(): Promise<ProofReport["versions"]> {
+    return versionsOf(this.api, this.env.image);
   }
 }
 
@@ -480,21 +477,11 @@ export async function main(): Promise<number> {
   report.workflow = await stage("workflow", () => prover.workflow());
 
   const found = problems(report, env.stages);
-  const secrets: Secrets = { token: env.token, password: env.password, scratch: env.scratch, home: homedir() };
+  const secrets = secretsOf(env);
   process.stdout.write(publishable(renderEvidence(report, env.stages), secrets));
   for (const problem of found) log(`problem: ${problem}`);
   log(found.length === 0 ? `every proof held (${HOST_PLACEHOLDER} stands for the local GitLab in the evidence)` : `${found.length} problem(s)`);
   return found.length === 0 ? 0 : 1;
 }
 
-if (isEntryPoint(import.meta.url)) {
-  main().then(
-    (code) => {
-      process.exitCode = code;
-    },
-    (err: unknown) => {
-      process.stderr.write(`error: ${errorText(err)}\n`);
-      process.exitCode = 1;
-    },
-  );
-}
+if (isEntryPoint(import.meta.url)) runMain(main);
