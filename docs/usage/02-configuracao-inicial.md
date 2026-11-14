@@ -108,7 +108,8 @@ Como funciona:
   - O teto do **run** cancela todas as etapas ativas, nenhuma etapa nova começa, e o run termina com
     `Token cap reached: 500 of 450.` Isso vale mesmo que o código do workflow capture o erro da etapa e siga
     adiante: o run termina `failed`. O run espera as etapas canceladas fecharem a conta (até 30 s), então o
-    `run-end` é o último evento do log e os tokens delas entram no total.
+    `run-end` é o último evento do log e os tokens delas entram no total, desde que o `getUsage()` os leia (veja a
+    ultrapassagem, abaixo).
   - Uma etapa que já gastou todo o seu teto numa tentativa que falhou (`>=`, como no teto do run) não ganha nova
     tentativa: nenhum agente é criado.
   - A ultrapassagem é de **no máximo um envio por etapa ativa**, e um envio é o laço inteiro do agente. Medido em
@@ -116,9 +117,11 @@ Como funciona:
     **1** `turn-ended`, no fim, depois de 267.526 tokens, e o `token-delta` do SDK não soma ao uso (passa do
     `outputTokens` e cobre menos de 5% do total), então nada informa o uso no meio do envio. Dentro dele, só o
     `timeoutMs` de cada envio freia. O teto corta entre os envios (a cada re-prompt de schema, a cada etapa em
-    paralelo): quando o envio de uma etapa termina e passa do teto do run, o `Run.cancel()` para os envios das outras
-    etapas ativas no meio, em milissegundos (3 ms medidos). Etapa sem uso reportado no `turn-ended` não é cortada ao
-    vivo.
+    paralelo): quando o envio de uma etapa termina e passa do teto do run, o motor chama o `Run.cancel()` dos envios das
+    outras etapas ativas, e o SDK para um envio no meio em milissegundos (3 ms medidos com o `Run.cancel()` chamado
+    direto, sem o motor no meio). Mas um envio cortado no meio não reporta uso: o `RunResult.usage` veio ausente e
+    nenhum `turn-ended` chegou, então, numa conta em que o `getUsage()` falha (a medida), os tokens desses envios
+    ficam fora do total do run. Etapa sem uso reportado no `turn-ended` não é cortada ao vivo.
   - O teto em centavos continua checado só **antes** de cada tentativa: o custo só chega depois da etapa.
   Medido em 2026-11-11, antes do teto ao vivo: com `--max-tokens 300000`, o `implement-issue` gastou 344.376 tokens.
   A `corrigir-1` começou com 74,9 mil gastos e sozinha usou 269 mil ([8.2 §9](../research/verificacoes-locais.md)).

@@ -8,8 +8,11 @@
 // WHEN: On a new account or after an SDK upgrade, to refresh the bound the cap docs state (docs/usage/02-configuracao-inicial.md).
 // HOW: see scripts/verify/README.md ("verify-turn-granularity"): `scripts/verify/setup-probe-repo.sh <new-dir>`, then
 //   `WORKFLOWS_DIR=scripts/verify npm run wf -- run verify-turn-granularity --cwd <probe-repo> --args '{}' --max-tokens 400000 --max-cents 40`.
-//   Refuses a repository that already holds the `lib/` folder the engine step writes. The two direct sends write in
-//   temporary folders it removes at the end.
+//   Refuses a repository that already holds the `lib/` folder the engine step writes, and a run without both caps. The two
+//   direct sends write in temporary folders it removes at the end.
+// COST: measured 2026-11-14 on composer-2.5, two runs: 134 to 268 thousand tokens for the engine step and about 128 thousand
+//   for the long direct send, so about 10 cents a run at list price and 0 charged (usage included in the plan). Only the
+//   engine step is under `--max-tokens`: each direct send is bounded by `SEND_TIMEOUT_MS` alone.
 
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -29,13 +32,13 @@ const LONG_PROMPT =
   "2) For each module add `test/<name>.test.js` that uses `node:test` and `node:assert/strict`, with at least three cases. " +
   "3) Add the modules one at a time: after each module and its test, run `node --test` and fix any failure before you start the next one. " +
   "4) Finish with one line: the final `node --test` result. " +
-  "Do not touch any file outside `lib/` and `test/`, and do not use git.";
+  "Do not touch any file outside `lib/` and `test/`, and do not use git."; // the last rule is a request to the agent, not a lock: nothing stops a shell command from breaking it
 /** The cap of the cancel probe: what a tight `maxTokensPerStep` would be. */
 const LOW_CAP_TOKENS = 3000;
 /** The cancel probe's fallback trigger, for an SDK that sends no `token-delta` at all. */
 const CANCEL_AFTER_TOOL_CALLS = 3;
-/** A direct send that has not ended by then is cancelled, and its measurement says so. */
-const DIRECT_TIMEOUT_MS = 8 * 60_000;
+/** The bound of every send here: the engine step's `timeoutMs`, and the time after which a direct send is cancelled (its measurement says so). */
+const SEND_TIMEOUT_MS = 8 * 60_000;
 /** How close, as a fraction, the `token-delta` total must be to a figure of `RunResult.usage` to count as summing to it. */
 const SUM_TOLERANCE = 0.1;
 
@@ -45,11 +48,16 @@ interface Counted {
   reasoningTokens?: number;
 }
 
+/** The usage a `step-end` or a `turn` line of the event log carries. */
+interface LoggedUsage extends Counted {
+  totalTokens?: number;
+}
+
 interface EventLine {
   type: string;
   label?: string;
   attemptId?: string;
-  usage?: Counted & { totalTokens?: number };
+  usage?: LoggedUsage;
   turns?: number;
   steps?: number;
   ok?: boolean;
@@ -59,13 +67,13 @@ interface EventLine {
 
 const isEventLine = (value: unknown): value is EventLine => typeof value === "object" && value !== null && typeof (value as { type?: unknown }).type === "string";
 
-/** What the engine's own log says about the step `label`: its `turn` events against the `step-end` the engine wrote. */
+/** What the engine's own log says about the step `label`: its `turn` events against the `step-end` the engine wrote. It only reads the log, which the run's store keeps writing. */
 function engineReport(cwd: string, runId: string, label: string) {
   const events = readJsonl(join(runDirIn(cwd, runId), EVENTS_FILE), isEventLine).records;
   const end = events.findLast((e) => e.type === "step-end" && e.label === label);
   if (!end) throw new Error(`verify-turn-granularity: the event log of run ${runId} has no step-end for step "${label}".`);
   const turns = events.filter((e) => e.type === "turn" && e.attemptId === end.attemptId);
-  const sum = (pick: (u: Counted & { totalTokens?: number }) => number) => turns.reduce((total, t) => total + (t.usage ? pick(t.usage) : 0), 0);
+  const sum = (pick: (u: LoggedUsage) => number) => turns.reduce((total, t) => total + (t.usage ? pick(t.usage) : 0), 0);
   return {
     ok: end.ok,
     errorKind: end.errorKind,
@@ -113,6 +121,8 @@ const lowCapTrigger: CancelTrigger = ({ tokenDeltaTotal, toolCalls }) => {
   return undefined;
 };
 
+const tally = (counts: Record<string, number>, key: string) => void (counts[key] = (counts[key] ?? 0) + 1);
+
 /** One send of the long task straight through the SDK, in `cwd`, watching every update. With `trigger`, cancels the run when it says so. */
 async function directSend(cwd: string, trigger?: CancelTrigger): Promise<DirectSend> {
   await mkdir(cwd, { recursive: true });
@@ -126,7 +136,7 @@ async function directSend(cwd: string, trigger?: CancelTrigger): Promise<DirectS
   let toolCalls = 0;
   let tokenDeltaTotal = 0;
   let run: Run | undefined;
-  let fired: { why: string; at: number; turnEndedBefore: number } | undefined;
+  let fired: { why: string; atMs: number; turnEndedBefore: number } | undefined;
   let cancelCalledAt: number | undefined;
   let cancelReturnedMs: number | undefined;
   const updatesAfter: Record<string, number> = {};
@@ -140,11 +150,11 @@ async function directSend(cwd: string, trigger?: CancelTrigger): Promise<DirectS
   const timer = setTimeout(() => {
     timedOut = true;
     cancelNow();
-  }, DIRECT_TIMEOUT_MS);
+  }, SEND_TIMEOUT_MS);
   timer.unref();
   const onUpdate = (update: InteractionUpdate) => {
-    updates[update.type] = (updates[update.type] ?? 0) + 1;
-    if (cancelCalledAt !== undefined) updatesAfter[update.type] = (updatesAfter[update.type] ?? 0) + 1;
+    tally(updates, update.type);
+    if (cancelCalledAt !== undefined) tally(updatesAfter, update.type);
     if (update.type === "turn-ended") turnEnded++;
     if (update.type === "tool-call-started") toolCalls++;
     if (update.type === "token-delta") {
@@ -153,7 +163,7 @@ async function directSend(cwd: string, trigger?: CancelTrigger): Promise<DirectS
     }
     if (trigger && !fired) {
       const why = trigger({ tokenDeltaTotal, toolCalls });
-      if (why) fired = { why, at: performance.now() - startedAt, turnEndedBefore: turnEnded };
+      if (why) fired = { why, atMs: performance.now() - startedAt, turnEndedBefore: turnEnded };
     }
     if (fired) cancelNow();
   };
@@ -171,7 +181,7 @@ async function directSend(cwd: string, trigger?: CancelTrigger): Promise<DirectS
       timedOut,
       cancel:
         fired && cancelCalledAt !== undefined
-          ? { why: fired.why, triggeredAtMs: Math.round(fired.at), turnEndedBefore: fired.turnEndedBefore, cancelReturnedMs: Math.round(cancelReturnedMs ?? -1), waitSettledMs: Math.round(settledAt - cancelCalledAt), updatesAfter }
+          ? { why: fired.why, triggeredAtMs: Math.round(fired.atMs), turnEndedBefore: fired.turnEndedBefore, cancelReturnedMs: Math.round(cancelReturnedMs ?? -1), waitSettledMs: Math.round(settledAt - cancelCalledAt), updatesAfter }
           : undefined,
     };
   } finally {
@@ -209,11 +219,12 @@ export default defineWorkflow({
     description: "Verification: turn-ended and token-delta updates of a long local write step, and how Run.cancel() settles mid-turn (the live token caps).",
     roles: [{ name: "probe", cloud: "never", description: "Writes a small library and its tests in the repository.", defaults: { model: MODEL } }],
   },
-  defaults: { timeoutMs: DIRECT_TIMEOUT_MS, retries: 0 },
+  defaults: { timeoutMs: SEND_TIMEOUT_MS, retries: 0 },
   async run(ctx) {
+    if (ctx.budget.maxTokens === null || ctx.budget.maxCents === null) throw new Error("verify-turn-granularity: pass --max-tokens and --max-cents (the run spends tokens on the real API).");
     if (existsSync(join(ctx.cwd, "lib"))) throw new Error(`verify-turn-granularity: ${ctx.cwd} already has a lib/ folder, so the step would not write the whole library. Use a new repository from scripts/verify/setup-probe-repo.sh.`);
     ctx.phase("engine-step");
-    await ctx.agent(LONG_PROMPT, { role: "probe", label: "long-write", tools: TOOLS, settingSources: [] });
+    await ctx.agent(LONG_PROMPT, { role: "probe", label: "long-write", tools: TOOLS, settingSources: [], revertOnRetry: true });
     const engine = engineReport(ctx.cwd, ctx.runId, "long-write");
 
     const scratch = await mkdtemp(join(tmpdir(), "wf-turn-granularity-"));

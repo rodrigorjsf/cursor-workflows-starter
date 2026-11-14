@@ -37,12 +37,13 @@ workflow faz **três envios** do mesmo pedido (uma biblioteca de seis módulos c
 2. um envio direto pelo SDK, vendo cada update: quantos `turn-ended` chegam e se a soma dos `token-delta` bate com `RunResult.usage`
    (o motor não repassa `token-delta`, por isso a via direta);
 3. um segundo envio direto, cancelado com `Run.cancel()` no meio do turno (quando a soma dos `token-delta` chega a 3 mil ou na
-   terceira tool call, o que vier primeiro): quanto `cancel()` e `wait()` levam para assentar.
+   terceira tool call, o que vier primeiro): quanto `cancel()` e `wait()` levam para assentar. É um cancelamento direto no SDK,
+   não um corte do motor: uma etapa com `maxTokensPerStep` baixo só seria cortada no fim do envio.
 
 **Custa:** na medição de 2026-11-14, com `composer-2.5`, o run inteiro gastou de 134 mil a 268 mil tokens na etapa do motor e
 cerca de 128 mil no envio direto longo, o que dá **cerca de 10 centavos por run no preço de lista** (a tabela `pricing`), com 0
-cobrado (uso incluído no plano). Só o `--max-tokens` limita a etapa `long-write`: os dois envios diretos não passam pelo motor, e
-cada um tem como freio um limite de 8 minutos. Numa conta em que o `getUsage()` de agente local não vem (`feature_unavailable`), o
+cobrado (uso incluído no plano). Só o `--max-tokens` limita a etapa `long-write` (o workflow recusa rodar sem os dois tetos): os dois envios diretos não passam
+pelo motor, e cada um tem como freio um limite de 8 minutos. Numa conta em que o `getUsage()` de agente local não vem (`feature_unavailable`), o
 `--max-cents` também não dispara.
 
 ```bash

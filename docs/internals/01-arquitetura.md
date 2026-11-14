@@ -62,7 +62,9 @@ são o que o backend local faz numa tentativa.
      tentativas dela somadas), só ela é cancelada e falha com `StepBudgetError`, que não é fatal. A tentativa cortada
      fecha com `errorKind: "budget"` e não é repetida. A ultrapassagem é de no máximo um envio por etapa ativa: medido em
      2026-11-14, o turno do SDK é o `send` inteiro (uma etapa longa que escreve deu 1 `turn-ended`, no fim, depois de 267.526
-     tokens) e o `token-delta` não soma ao uso, então só o `timeoutMs` freia dentro do envio ([8.2 §15](../research/verificacoes-locais.md)).
+     tokens) e o `token-delta` não soma ao uso, então só o `timeoutMs` freia dentro do envio. Um envio cortado no meio, por outro
+     teto, também não reporta uso (`RunResult.usage` ausente, nenhum `turn-ended`): numa conta em que o `getUsage()` falha, os
+     tokens dele ficam fora do total ([8.2 §15](../research/verificacoes-locais.md)).
      Antes disso, medido em 2026-11-11: uma etapa começou abaixo de `--max-tokens 300000` e o run fechou em 344 mil
      ([8.2 §9](../research/verificacoes-locais.md)).
 4. **Agente novo:** `Agent.create` com o modelo da etapa, a allowlist de tools, os subagents e MCP servers

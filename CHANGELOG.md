@@ -15,8 +15,9 @@
   tool calls, deu **1** `turn-ended`, no fim, depois de 267.526 tokens, e o `token-delta` do SDK não soma ao uso (passa do
   `outputTokens` e cobre menos de 5% do total), então nenhum sinal de uso chega no meio do envio. O motor não ganhou
   estimativa no meio do turno: dentro de um envio só o `timeoutMs` da tentativa freia, e a ultrapassagem do teto é de no
-  máximo um envio por etapa ativa. O `Run.cancel()` para um envio no meio em 3 ms, então o teto do run corta os envios das
-  outras etapas assim que o de uma termina. Os textos do livro (2.2, 3.1, 4.1, 5.1, 5.3 e 6.2), o comentário do evento
+  máximo um envio por etapa ativa. O `Run.cancel()` chamado direto no SDK parou um envio no meio em 3 ms, e o teto do run o chama
+  nos envios das outras etapas quando o de uma termina; um envio cortado no meio não reporta uso, então numa conta sem
+  `getUsage()` os tokens dele ficam fora do total. Os textos do livro (2.2, 3.1, 4.1, 5.1, 5.3 e 6.2), o comentário do evento
   `turn` e as skills `cursor-workflow-authoring` e `skill-to-workflow` dizem isso agora.
 
 ## 0.4.0 (pré-release, 2026-11-13)
