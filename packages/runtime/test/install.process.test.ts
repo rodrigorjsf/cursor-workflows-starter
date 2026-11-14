@@ -372,6 +372,19 @@ for (const { what, file, listed, plant } of KIT_TAMPERING) {
   });
 }
 
+test("the installer says it cannot read the state of a clone whose git data is broken, and moves nothing", () => {
+  const home = newHome();
+  assert.equal(install(home, ["--tag", "v0.3.0", "--repo", origin]).status, 0);
+  const kit = kitOf(home);
+  writeFileSync(join(kit, ".git", "HEAD"), "not a ref\n");
+  const before = npmCalls().length;
+
+  const r = install(home, ["--tag", "v0.3.0", "--repo", origin]);
+  assert.equal(r.status, 1);
+  assert.ok(r.stderr.includes(`error: could not read the state of the kit at ${kit}`) && r.stderr.includes("reinstall it"), r.stderr);
+  assert.deepEqual(npmCalls().slice(before), []);
+});
+
 test("the installer lists every change of the clone, also when it is asked for the tag the clone is on", () => {
   const home = newHome();
   assert.equal(install(home, ["--tag", "v0.3.0", "--repo", origin]).status, 0);
@@ -522,6 +535,20 @@ for (const { what, file, listed, plant } of KIT_TAMPERING) {
     assert.ok(existsSync(join(kit, file)), "the change is left for the user to look at");
   });
 }
+
+test("wf upgrade says it cannot read the state of a kit whose git data is broken, as the installer does, and moves nothing", () => {
+  const dir = originWithReleases();
+  const home = newHome();
+  assert.equal(install(home, ["--tag", "v0.3.0", "--repo", dir], { from: dir }).status, 0);
+  const kit = kitOf(home);
+  writeFileSync(join(kit, ".git", "HEAD"), "not a ref\n");
+  const before = npmCalls().length;
+
+  const r = upgrade(home);
+  assert.equal(r.status, 1);
+  assert.ok(r.stderr.includes(`could not read the state of the kit at ${kit}`) && r.stderr.includes("reinstall it"), r.stderr);
+  assert.deepEqual(npmCalls().slice(before), []);
+});
 
 test("wf upgrade lists every change of the kit, and refuses even when the kit is already at the newest tag", () => {
   const dir = originWithReleases();
