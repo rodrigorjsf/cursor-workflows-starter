@@ -5,7 +5,9 @@
 // WHY: the sanitizer for model text bound for GitLab (`sanitizeModelText`, packages/runtime/workflows/implement-issue/pr-body.ts)
 //   was written from GitLab's documentation and source, never against a live instance. A verdict that reads a run's results is
 //   a function, so the offline tests can pin it (test/gitlab-proofs.test.ts) while only the run itself needs the real GitLab. A
-//   "no effect" result counts only when the same text, unsanitized, did take effect: otherwise the check proves nothing.
+//   "no effect" result counts only when a control did take effect (`Closes #N` closing, a bare `/close` running, the references
+//   linking), or the check proves nothing. The other phrases and payloads show beside their sanitized result what GitLab did with
+//   them as written: one that does nothing even then is text to this GitLab, which the guard neutralizes for older versions.
 // WHEN: imported by scripts/verify/prove-gitlab.ts and test/gitlab-proofs.test.ts; not run on its own.
 // HOW: `problems(report)` is empty when every proof held; `renderEvidence(report)` is the Markdown for the pull request description.
 
@@ -195,7 +197,7 @@ export function problems(report: ProofReport, stages: readonly Stage[] = STAGES)
 }
 
 const yes = (flag: boolean) => (flag ? "yes" : "no");
-const closing = (o: ClosingOutcome) => (o.closed ? `yes (${o.seconds ?? "?"} s)` : "no");
+const closedCell = (o: ClosingOutcome) => (o.closed ? `yes (${o.seconds ?? "?"} s)` : "no");
 const code = (text: string) => `\`${text}\``;
 const cell = (text: string) => text.replace(/\|/g, "\\|");
 
@@ -207,6 +209,7 @@ export function renderEvidence(report: ProofReport, stages: readonly Stage[] = S
   if (report.closing) {
     const implement = report.closing.filter((r) => /^Implement/.test(r.form));
     const closes = implement.filter((r) => r.raw.closed);
+    const notClosing = report.closing.filter((r) => !r.raw.closed);
     out.push(
       "### Which phrases close an issue when the merge request merges",
       "",
@@ -216,12 +219,15 @@ export function renderEvidence(report: ProofReport, stages: readonly Stage[] = S
       "",
       "| Phrase | Raw: issue closed | Sanitized: issue closed |",
       "|---|---|---|",
-      ...report.closing.map((r) => `| ${cell(code(r.form))} | ${closing(r.raw)} | ${closing(r.sanitized)} |`),
+      ...report.closing.map((r) => `| ${cell(code(r.form))} | ${closedCell(r.raw)} | ${closedCell(r.sanitized)} |`),
       "",
+      ...(notClosing.length === 0 ? [] : [`Not closing even as written: ${notClosing.map((r) => code(r.form)).join(", ")}. GitLab's pattern does not match them; the sanitizer neutralizes them anyway.`, ""]),
     );
   }
 
   if (report.quickActions) {
+    const ranAsWritten = new Set(report.quickActions.filter((r) => r.raw).map((r) => r.case));
+    const total = new Set(report.quickActions.map((r) => r.case)).size;
     out.push(
       "### Quick actions in model text",
       "",
@@ -230,6 +236,8 @@ export function renderEvidence(report: ProofReport, stages: readonly Stage[] = S
       "| Payload | Surface | Raw: command ran | Sanitized: command ran |",
       "|---|---|---|---|",
       ...report.quickActions.map((r) => `| ${cell(r.case)} | ${r.surface} | ${yes(r.raw)} | ${yes(r.sanitized)} |`),
+      "",
+      `Ran as written: ${ranAsWritten.size} of ${total} payloads.${ranAsWritten.size === total ? "" : " The others are text to this GitLab; the guard neutralizes them anyway, for the versions that read them as commands."}`,
       "",
     );
   }

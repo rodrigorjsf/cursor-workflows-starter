@@ -41,8 +41,10 @@
   `Resolves grupo/projeto#N`, a URL da issue, em frase…); só `CLOSES #N`, tudo em maiúsculas, nunca fechou, porque o padrão do
   GitLab só aceita a primeira letra em maiúscula. Um `/close` solto fecha a issue (numa nota) ou o MR (na descrição), também
   depois de `\r`, com CRLF, depois de `$$` e numa cerca que um trecho anterior deixou aberta; depois do filtro nenhuma das 12
-  formas roda, e `!1`, `~bug` e `%v1` não viram link atrás do espaço de largura zero. Cada "não aconteceu nada" vem ao lado do
-  mesmo texto sem o filtro, que acontece, senão a checagem não prova nada. A última prova gasta tokens da API da Cursor
+  formas roda, e `!1`, `~bug` e `%v1` não viram link atrás do espaço de largura zero. Cada prova tem um controle que tem de
+  acontecer (o `Closes #N` fecha, um `/close` solto roda, as referências viram link), senão um "não aconteceu nada" não prova
+  nada; as formas que o GitLab 19.5.5 não roda nem como estão (`/close` com tab, depois de `<div>` ou `>>>`, em cerca de til)
+  o filtro neutraliza do mesmo jeito, para as versões que as leem como comando. A última prova gasta tokens da API da Cursor
   (`GITLAB_E2E_MAX_TOKENS` e `GITLAB_E2E_MAX_CENTS` são os tetos; `GITLAB_E2E_STAGES` escolhe as provas).
 
 ### Mudado

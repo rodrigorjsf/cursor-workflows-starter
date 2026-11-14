@@ -4,11 +4,12 @@
 // logs what the script handed each. The tests read the exit code, what the script printed, the calls the stand-ins logged and the files left behind;
 // none of them looks inside the script. What a real GitLab and a real glab do is the script's own run, which is opt-in.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { after, before, test } from "node:test";
+import { waitFor } from "../packages/runtime/test/wait-for.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const SCRIPT = join(ROOT, "scripts", "verify", "gitlab-e2e.sh");
@@ -50,6 +51,7 @@ case "$*" in
   *prove-gitlab*) who=prover; fails="$FAKE_PROVER_FAILS" ;;
   *) exit 4 ;;
 esac
+echo "$who stdout line"
 printf '%s\\n' "$who url=$GITLAB_E2E_URL token=$GITLAB_E2E_TOKEN password=$GITLAB_E2E_PASSWORD image=$GITLAB_E2E_IMAGE scratch=$GITLAB_E2E_SCRATCH maxTokens=$GITLAB_E2E_MAX_TOKENS maxCents=$GITLAB_E2E_MAX_CENTS stages=$GITLAB_E2E_STAGES" >> "$FAKE_LOG"
 [ -d "$GITLAB_E2E_SCRATCH" ] || exit 3
 [ -z "$fails" ] || exit 1
@@ -61,8 +63,8 @@ function bin(dir: string, name: string, script: string) {
   chmodSync(join(dir, name), 0o755);
 }
 
-/** One run of the script: its own PATH of stand-ins and its own log. */
-function runScript(extraEnv: Record<string, string> = {}, args: string[] = []) {
+/** The sandbox of one run of the script: its own directory, PATH of stand-ins and log, and the environment that makes the script use them. */
+function prepare(extraEnv: Record<string, string>) {
   const dir = join(sandbox, `run-${++counter}`);
   const fakes = join(dir, "fakes");
   const log = join(dir, "calls.log");
@@ -72,22 +74,26 @@ function runScript(extraEnv: Record<string, string> = {}, args: string[] = []) {
   bin(fakes, "curl", "exit 0");
   bin(fakes, "glab", GLAB);
   bin(fakes, "npx", NPX);
-  const r = spawnSync("bash", [SCRIPT, ...args], {
-    env: {
-      PATH: [fakes, dirname(process.execPath), "/usr/bin", "/bin"].join(":"),
-      HOME: dir,
-      TMPDIR: dir,
-      FAKE_LOG: log,
-      // No waiting between polls, and none for GitLab: the stand-in's health says "starting" until a test says otherwise.
-      GITLAB_E2E_TIMEOUT_SECONDS: "0",
-      GITLAB_E2E_POLL_SECONDS: "1",
-      ...extraEnv,
-    },
-    encoding: "utf8",
-    timeout: 60_000,
-  });
-  const calls = readFileSync(log, "utf8").split("\n").filter(Boolean);
-  return { status: r.status, out: r.stdout + r.stderr, stderr: r.stderr, calls, docker: calls.filter((c) => c.startsWith("docker ")), dir };
+  const env = {
+    PATH: [fakes, dirname(process.execPath), "/usr/bin", "/bin"].join(":"),
+    HOME: dir,
+    TMPDIR: dir,
+    FAKE_LOG: log,
+    // No waiting between polls, and none for GitLab: the stand-in's health says "starting" until a test says otherwise.
+    GITLAB_E2E_TIMEOUT_SECONDS: "0",
+    GITLAB_E2E_POLL_SECONDS: "1",
+    ...extraEnv,
+  };
+  const calls = () => readFileSync(log, "utf8").split("\n").filter(Boolean);
+  return { dir, env, calls };
+}
+
+/** One run of the script: its own PATH of stand-ins and its own log. */
+function runScript(extraEnv: Record<string, string> = {}, args: string[] = []) {
+  const { dir, env, calls: readCalls } = prepare(extraEnv);
+  const r = spawnSync("bash", [SCRIPT, ...args], { env, encoding: "utf8", timeout: 60_000 });
+  const calls = readCalls();
+  return { status: r.status, out: r.stdout + r.stderr, stdout: r.stdout, stderr: r.stderr, calls, docker: calls.filter((c) => c.startsWith("docker ")), dir };
 }
 
 const READY = { FAKE_HEALTH: "healthy", GITLAB_E2E_TIMEOUT_SECONDS: "60" };
@@ -169,6 +175,24 @@ test("a recorder that fails stops the script before the proofs, which would spen
   const r = runScript({ ...READY, FAKE_RECORDER_FAILS: "1" });
   assert.notEqual(r.status, 0, r.out);
   assert.deepEqual(r.calls.filter((c) => c.startsWith("prover ") || c.includes("prove-gitlab")), []);
+});
+
+test("what the script prints on stdout is the evidence of the proofs alone: the recorder's own line goes to stderr", () => {
+  const r = runScript(READY);
+  assert.equal(r.status, 0, r.out);
+  assert.equal(r.stdout, "prover stdout line\n", "a maintainer can paste stdout into the pull request as it is");
+  assert.match(r.stderr, /^recorder stdout line$/m);
+});
+
+test("an interrupted run exits with the signal's status and still removes its container and volumes", async () => {
+  const { env, calls } = prepare({ GITLAB_E2E_TIMEOUT_SECONDS: "600" }); // the stand-in's health stays "starting": the script is waiting for GitLab
+  const child = spawn("bash", [SCRIPT], { env, stdio: "ignore" });
+  const ended = new Promise<number | null>((done) => child.on("close", (code) => done(code)));
+  await waitFor("the script to wait for GitLab", () => calls().some((c) => c.startsWith("docker inspect")), { timeoutMs: 30_000 });
+  child.kill("SIGTERM");
+  assert.equal(await ended, 143, "128 plus the signal, not the 0 of the last command that ran");
+  assert.ok(calls().includes("docker rm -f -v wf-gitlab-e2e"), calls().join("\n"));
+  assert.ok(calls().includes("docker volume rm -f wf-gitlab-e2e-config wf-gitlab-e2e-logs wf-gitlab-e2e-data"));
 });
 
 test("a container the script did not start is never removed: a name already in use stops it before anything is started", () => {

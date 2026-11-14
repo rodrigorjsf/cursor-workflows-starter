@@ -204,6 +204,19 @@ test("the evidence answers the Implement question, naming how many forms closed 
   assert.match(renderEvidence(none), /\*\*No\*\*: 0 of 4 forms closed the issue/);
 });
 
+test("the evidence says which phrases do not close an issue even as written, and which payloads GitLab does not run even as written", () => {
+  const report = passingReport();
+  report.closing!.find((r) => r.form === "CLOSES #N")!.raw = { closed: false };
+  for (const r of report.quickActions!) r.raw = r.case === CONTROL_CASE || r.case === "/CLOSE in capitals";
+  const text = renderEvidence(report);
+  assert.match(text, /Not closing even as written: `CLOSES #N`\./);
+  assert.match(text, new RegExp(`Ran as written: 2 of ${QUICK_ACTION_CASES.length} payloads\\.`));
+  assert.match(text, /The others are text to this GitLab; the guard neutralizes them anyway, for the versions that read them as commands\./);
+
+  const all = passingReport();
+  assert.ok(!renderEvidence(all).includes("Not closing even as written"), "nothing to say when every phrase closed");
+});
+
 test("the evidence has a row for every payload on every surface, the references, and the run of implement-issue with its caps", () => {
   const text = renderEvidence(passingReport());
   for (const c of QUICK_ACTION_CASES) for (const surface of SURFACES) assert.ok(text.includes(`| ${c.name} | ${surface} |`), `${c.name} on a ${surface}`);

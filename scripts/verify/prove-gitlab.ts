@@ -4,8 +4,9 @@
 //   link behind the zero-width space, and a real `implement-issue` run with local steps that opens a merge request whose merge
 //   closes its issue through `Closes #N`. It makes its own project `owner/proof` in the GitLab and prints the evidence as Markdown.
 // WHY: the sanitizer and the quick-action guard were written from GitLab's documentation and source, never against a live instance
-//   (ADR-0009). Each "no effect" is shown beside the same text unsanitized, which does take effect: a check without that control
-//   proves nothing (scripts/lib/gitlab-proofs.ts holds the verdicts, and test/gitlab-proofs.test.ts pins them offline).
+//   (ADR-0009). A "no effect" counts only beside a control that did take effect (`Closes #N` closing, a bare `/close` running, the
+//   references linking), and every text is posted both as written and sanitized, so what GitLab did with each is on record
+//   (scripts/lib/gitlab-proofs.ts holds the verdicts, and test/gitlab-proofs.test.ts pins them offline).
 // WHEN: through scripts/verify/gitlab-e2e.sh, after the recorder, which starts the GitLab, makes the token and removes the container
 //   after. Alone only against a throwaway GitLab with the environment of that script: it creates a project `owner/proof` and refuses
 //   to run when it exists. The last stage runs the real `implement-issue` against the Cursor API: it spends tokens.
@@ -24,7 +25,7 @@ import { Commands } from "../../packages/runtime/workflows/implement-issue/comma
 import { createForge, type Forge } from "../../packages/runtime/workflows/implement-issue/forge.js";
 import { sanitizeModelText } from "../../packages/runtime/workflows/implement-issue/pr-body.js";
 import { isEntryPoint } from "../lib/cli.js";
-import { GitLabApi, basicAuthOf, execOf, git, loginGlab, requireEnv } from "../lib/gitlab-e2e.js";
+import { GitLabApi, GitLabHttpError, basicAuthOf, e2eEnv, execOf, git, loginGlab, mergeRequestNumber, type E2eEnv } from "../lib/gitlab-e2e.js";
 import {
   CLOSING_FORMS,
   QUICK_ACTION_CASES,
@@ -71,12 +72,7 @@ const TEST_FILES: Record<string, string> = {
 const ISSUE_TITLE = "Add subtract(a, b) to src/math.js";
 const ISSUE_BODY = "Add an exported function `subtract(a, b)` to `src/math.js` that returns `a - b`, and a test for it in `test/math.test.js`. Run the suite with `npm test`.";
 
-interface Env {
-  url: string;
-  token: string;
-  password: string;
-  image: string;
-  scratch: string;
+interface Env extends E2eEnv {
   stages: Stage[];
   maxTokens: number;
   maxCents: number;
@@ -109,11 +105,7 @@ export function stagesOf(text: string | undefined): Stage[] {
 
 function envOf(): Env {
   return {
-    url: requireEnv("GITLAB_E2E_URL"),
-    token: requireEnv("GITLAB_E2E_TOKEN"),
-    password: requireEnv("GITLAB_E2E_PASSWORD"),
-    image: requireEnv("GITLAB_E2E_IMAGE"),
-    scratch: requireEnv("GITLAB_E2E_SCRATCH"),
+    ...e2eEnv(),
     stages: stagesOf(process.env.GITLAB_E2E_STAGES),
     maxTokens: numberEnv("GITLAB_E2E_MAX_TOKENS", DEFAULT_MAX_TOKENS),
     maxCents: numberEnv("GITLAB_E2E_MAX_CENTS", DEFAULT_MAX_CENTS),
@@ -121,13 +113,16 @@ function envOf(): Env {
   };
 }
 
-/** Polls `read` every `intervalMs` until it answers something other than `undefined`, or fails after `timeoutMs`. */
+/** What `until` throws when the thing it waited for did not happen in time: GitLab being slow, which the caller may report, and not a bug of this script. */
+class TimedOut extends Error {}
+
+/** Polls `read` every `intervalMs` until it answers something other than `undefined`, or throws `TimedOut` after `timeoutMs`. */
 async function until<T>(what: string, read: () => Promise<T | undefined>, timeoutMs: number, intervalMs = 1_000): Promise<T> {
   const deadline = performance.now() + timeoutMs;
   for (;;) {
     const value = await read();
     if (value !== undefined) return value;
-    if (performance.now() > deadline) throw new Error(`${what}: not within ${Math.round(timeoutMs / 1000)} s`);
+    if (performance.now() > deadline) throw new TimedOut(`${what}: not within ${Math.round(timeoutMs / 1000)} s`);
     await sleep(intervalMs);
   }
 }
@@ -166,7 +161,7 @@ class Prover {
   private counter = 0;
 
   constructor(private readonly env: Env) {
-    this.api = new GitLabApi(env.url.replace("localhost", "127.0.0.1"), env.token);
+    this.api = new GitLabApi(env.url, env.token);
     this.host = new URL(env.url).host;
     this.repo = join(env.scratch, "proof");
     this.gitConfig = join(env.scratch, "proof.gitconfig");
@@ -252,7 +247,7 @@ class Prover {
           await this.api.call("PUT", `${this.project}/merge_requests/${iid}/merge`, {});
           return true;
         } catch (err) {
-          if (/HTTP (405|406)\b/.test(errorText(err))) return undefined;
+          if (err instanceof GitLabHttpError && (err.status === 405 || err.status === 406)) return undefined;
           throw err;
         }
       },
@@ -333,7 +328,8 @@ class Prover {
 
         const branch = await this.branch();
         const url = await this.withBodyFile(text, (bodyFile) => this.forge.openPr(this.repo, { branch, title: `Quick action in a description ${this.counter}`, bodyFile }));
-        const iid = Number(/\/-\/merge_requests\/(\d+)/.exec(url)?.[1]);
+        const iid = mergeRequestNumber(url);
+        if (iid === undefined) throw new Error(`glab mr create: no merge request number in ${url}`);
         posted.push({ c, surface: "merge request description", sanitize, fired: async () => (await this.mergeRequest(iid)).state === "closed" });
       }
     }
@@ -370,7 +366,11 @@ class Prover {
     const sanitized = await this.postReferences(sanitizeModelText(SIGIL_TEXT, "gitlab"));
     // GitLab writes the cross-reference note some seconds after the note. The sanitized one is given three times as long as the raw one took.
     const start = performance.now();
-    const rawNoted = await until(`the cross-reference note for #${raw.issue}`, async () => ((await this.crossReferenced(raw.issue)) ? true : undefined), CLOSE_TIMEOUT_SECONDS * 1000, 2_000).catch(() => false);
+    // A raw note that GitLab never cross-references in time is a result (`false`), and the verdict then calls the control void; any other failure is not.
+    const rawNoted = await until(`the cross-reference note for #${raw.issue}`, async () => ((await this.crossReferenced(raw.issue)) ? true : undefined), CLOSE_TIMEOUT_SECONDS * 1000, 2_000).catch((err: unknown) => {
+      if (err instanceof TimedOut) return false;
+      throw err;
+    });
     const settleMs = Math.max(MIN_SETTLE_SECONDS * 1000, 3 * (performance.now() - start));
     await sleep(Math.max(0, settleMs - (performance.now() - start)));
     return { raw: { links: raw.links, crossReferenced: rawNoted }, sanitized: { links: sanitized.links, crossReferenced: await this.crossReferenced(sanitized.issue) } };
@@ -418,19 +418,27 @@ class Prover {
       caps,
     };
     const mrUrl = typeof result.prUrl === "string" ? result.prUrl : undefined;
-    const iid = Number(/\/-\/merge_requests\/(\d+)/.exec(mrUrl ?? "")?.[1]);
-    if (base.status !== "done" || !Number.isInteger(iid)) return { ...base, mrUrl };
+    const iid = mergeRequestNumber(mrUrl ?? "");
+    if (base.status !== "done" || iid === undefined) return { ...base, mrUrl };
     const mr = await this.mergeRequest(iid);
     const report: WorkflowResult = { ...base, mrUrl, mrState: mr.state, closesIssueLine: new RegExp(`^Closes #${WORKFLOW_ISSUE}$`, "m").test(mr.description) };
+    // GitLab refusing the merge, or taking too long to close the issue, is the result to report; any other failure is a bug and ends the stage.
+    const gitlabSaid = (err: unknown) => err instanceof GitLabHttpError || err instanceof TimedOut;
     try {
       await this.merge(iid);
-      report.merged = true;
+    } catch (err) {
+      if (!gitlabSaid(err)) throw err;
+      log(`implement-issue: ${errorText(err)}`);
+      return { ...report, merged: false };
+    }
+    report.merged = true;
+    try {
       report.secondsToClose = await until(`issue #${WORKFLOW_ISSUE} closed`, () => this.closedAfterMerge(WORKFLOW_ISSUE, iid), CLOSE_TIMEOUT_SECONDS * 1000);
       report.issueClosed = true;
     } catch (err) {
+      if (!gitlabSaid(err)) throw err;
       log(`implement-issue: ${errorText(err)}`);
-      if (report.merged === undefined) report.merged = false;
-      else report.issueClosed = false;
+      report.issueClosed = false;
     }
     return report;
   }

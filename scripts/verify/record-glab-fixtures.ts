@@ -17,7 +17,7 @@ import { errorText } from "../../packages/runtime/src/runtime/error-text.js";
 import { Commands } from "../../packages/runtime/workflows/implement-issue/commands.js";
 import { createForge, loginOf, type Forge } from "../../packages/runtime/workflows/implement-issue/forge.js";
 import { isEntryPoint } from "../lib/cli.js";
-import { GitLabApi, basicAuthOf, execOf, git, loginGlab, requireEnv } from "../lib/gitlab-e2e.js";
+import { GitLabApi, basicAuthOf, e2eEnv, execOf, git, loginGlab, mergeRequestNumber, type E2eEnv } from "../lib/gitlab-e2e.js";
 import { HOST_PLACEHOLDER, leaksIn, scrubText, type Secrets } from "../lib/scrub-recording.js";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
@@ -63,24 +63,6 @@ const MR_BRANCH = "wf/issue-1-recorded";
 /** A second issue with more comments than one page of GitLab's notes API holds (20), to record how glab joins the pages. */
 const MANY_COMMENTS = 25;
 
-interface Env {
-  url: string;
-  token: string;
-  password: string;
-  image: string;
-  scratch: string;
-}
-
-function envOf(): Env {
-  return {
-    url: requireEnv("GITLAB_E2E_URL"),
-    token: requireEnv("GITLAB_E2E_TOKEN"),
-    password: requireEnv("GITLAB_E2E_PASSWORD"),
-    image: requireEnv("GITLAB_E2E_IMAGE"),
-    scratch: requireEnv("GITLAB_E2E_SCRATCH"),
-  };
-}
-
 /** The glab that wraps the real one: it runs it, keeps what it printed beside the call, and prints the same. The runtime's own code calls it by name. */
 const WRAPPER = `#!/usr/bin/env node
 const { spawnSync } = require("node:child_process");
@@ -104,11 +86,11 @@ class Recorder {
   private readonly realGlab: string;
   readonly recordings: Record<string, Recording> = {};
 
-  constructor(private readonly env: Env) {
+  constructor(private readonly env: E2eEnv) {
     this.recordDir = join(env.scratch, "calls");
     this.bin = join(env.scratch, "bin");
     this.repo = join(env.scratch, "repo");
-    this.api = new GitLabApi(env.url.replace("localhost", "127.0.0.1"), env.token);
+    this.api = new GitLabApi(env.url, env.token);
     this.realGlab = execFileSync("which", ["glab"], { encoding: "utf8" }).trim();
   }
 
@@ -205,8 +187,8 @@ class Recorder {
     await this.record("auth-status-logged-in", () => execOf(this.glabEnv)("glab", login.args, { cwd }));
     await this.record("auth-status-logged-out", () => execOf({ ...this.glabEnv, GLAB_CONFIG_DIR: join(this.env.scratch, "no-login") })("glab", login.args, { cwd }));
 
-    const mr = Number(/\/-\/merge_requests\/(\d+)$/.exec(url)?.[1]);
-    if (!Number.isInteger(mr)) throw new Error(`mr-create: no merge request number in ${url}`);
+    const mr = mergeRequestNumber(url);
+    if (mr === undefined) throw new Error(`mr-create: no merge request number in ${url}`);
     return { project: `${GROUP}/${PROJECT}`, issue: 1, branch: MR_BRANCH, title: MR_TITLE, mr };
   }
 
@@ -242,7 +224,7 @@ export function scrubRecordings(file: RecordingsFile, secrets: Secrets): Recordi
 
 /** The whole recording; returns the exit code. */
 export async function main(): Promise<number> {
-  const env = envOf();
+  const env = e2eEnv();
   const recorder = new Recorder(env);
   await recorder.prepare();
   await recorder.seed();

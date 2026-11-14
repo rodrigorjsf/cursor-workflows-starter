@@ -5,8 +5,8 @@
 //   throwaway GitLab the same way; one copy keeps them alike, and keeps the token off every command line and out of every
 //   configuration the user owns (ADR-0009).
 // WHEN: imported by those two scripts; not run on its own.
-// HOW: `requireEnv("GITLAB_E2E_URL")`; `new GitLabApi(url, token).call("GET", "/version")`; `git(cwd, basicAuthOf(token), "clone", ...)`;
-//   `loginGlab(glab, env, host, token)`; `new Commands(execOf(env), { networkMs })`.
+// HOW: `const env = e2eEnv()`; `new GitLabApi(env.url, env.token).call("GET", "/version")`; `git(cwd, basicAuthOf(token), "clone", ...)`;
+//   `loginGlab(glab, env, host, token)`; `new Commands(execOf(env), { networkMs })`; `mergeRequestNumber(url)`.
 import { execFileSync } from "node:child_process";
 import type { ExecResult } from "../../packages/runtime/src/runtime/workflow.js";
 
@@ -17,12 +17,60 @@ export function requireEnv(key: string): string {
   return value;
 }
 
-/** GitLab's REST API as the root user, from this process (the token never goes on a command line). */
-export class GitLabApi {
+/** What scripts/verify/gitlab-e2e.sh hands every script it runs against the GitLab it started. */
+export interface E2eEnv {
+  /** The GitLab's external URL, `http://localhost:8929`. */
+  url: string;
+  /** A personal access token of the root user. */
+  token: string;
+  /** The root user's password. */
+  password: string;
+  /** The image the GitLab runs. */
+  image: string;
+  /** An empty directory of the script's own, removed when it ends. */
+  scratch: string;
+}
+
+export function e2eEnv(): E2eEnv {
+  return {
+    url: requireEnv("GITLAB_E2E_URL"),
+    token: requireEnv("GITLAB_E2E_TOKEN"),
+    password: requireEnv("GITLAB_E2E_PASSWORD"),
+    image: requireEnv("GITLAB_E2E_IMAGE"),
+    scratch: requireEnv("GITLAB_E2E_SCRATCH"),
+  };
+}
+
+/** The number in the URL of a merge request, wherever it stands in `text` (`glab mr create` prints the URL among other text), or undefined when there is none. */
+export function mergeRequestNumber(text: string): number | undefined {
+  const digits = /\/-\/merge_requests\/(\d+)/.exec(text)?.[1];
+  return digits === undefined ? undefined : Number(digits);
+}
+
+/** GitLab refused a call: its status says why (404 not there, 405 or 406 not mergeable yet), which a failure of this code never does. */
+export class GitLabHttpError extends Error {
   constructor(
-    private readonly base: string,
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "GitLabHttpError";
+  }
+}
+
+/**
+ * GitLab's REST API as the root user, from this process (the token never goes on a command line). `url` is the GitLab's external URL:
+ * its `localhost` is reached as `127.0.0.1`, which is where Docker publishes the port, because `localhost` may resolve to `::1` first.
+ */
+export class GitLabApi {
+  private readonly base: string;
+
+  constructor(
+    url: string,
     private readonly token: string,
-  ) {}
+  ) {
+    this.base = url.replace("localhost", "127.0.0.1");
+  }
 
   async call<T = Record<string, unknown>>(method: string, path: string, body?: unknown): Promise<T> {
     const response = await fetch(`${this.base}/api/v4${path}`, {
@@ -30,16 +78,18 @@ export class GitLabApi {
       headers: { "PRIVATE-TOKEN": this.token, "content-type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-    if (!response.ok) throw new Error(`${method} ${path}: HTTP ${response.status} ${(await response.text()).slice(0, 300)}`);
+    if (!response.ok) throw new GitLabHttpError(response.status, `${method} ${path}: HTTP ${response.status} ${(await response.text()).slice(0, 300)}`);
     return (await response.json()) as T;
   }
 
-  /** Like `call`, but a 404 is `undefined`: the answer to "does it exist". */
+  /** Like `call` for a GET, but a 404 is `undefined`: the answer to "does it exist". */
   async find<T = Record<string, unknown>>(path: string): Promise<T | undefined> {
-    const response = await fetch(`${this.base}/api/v4${path}`, { headers: { "PRIVATE-TOKEN": this.token } });
-    if (response.status === 404) return undefined;
-    if (!response.ok) throw new Error(`GET ${path}: HTTP ${response.status} ${(await response.text()).slice(0, 300)}`);
-    return (await response.json()) as T;
+    try {
+      return await this.call<T>("GET", path);
+    } catch (err) {
+      if (err instanceof GitLabHttpError && err.status === 404) return undefined;
+      throw err;
+    }
   }
 }
 

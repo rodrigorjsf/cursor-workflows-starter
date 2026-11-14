@@ -130,3 +130,24 @@ test("the opt-in script, its recorder and its prover are not run by npm run chec
     assert.ok(!/gitlab-e2e|record-glab-fixtures|prove-gitlab/.test(read(rel)), `${rel} must not run the real-GitLab script: it needs Docker and minutes, and the prover spends tokens`);
   }
 });
+
+test("every environment variable a maintainer can set for the real-GitLab scripts is named in the usage line, the header of the script, the README and the book", () => {
+  const scripts = ["scripts/verify/gitlab-e2e.sh", "scripts/verify/prove-gitlab.ts", "scripts/verify/record-glab-fixtures.ts"];
+  // The script sets these for the scripts it runs: a maintainer never does.
+  const setByTheScript = new Set(["GITLAB_E2E_URL", "GITLAB_E2E_TOKEN", "GITLAB_E2E_PASSWORD", "GITLAB_E2E_SCRATCH"]);
+  const named = new Set(scripts.flatMap((rel) => read(rel).match(/GITLAB_E2E_[A-Z_]+/g) ?? []));
+  const settable = [...named].filter((name) => !setByTheScript.has(name));
+  assert.ok(settable.length >= 9, `the variables found: ${settable.join(", ")}`);
+
+  const script = read("scripts/verify/gitlab-e2e.sh");
+  const usage = script.split("\n").find((line) => line.includes('echo "usage:')) ?? "";
+  const header = script.split("\n").filter((line, i) => i === 0 || line.startsWith("#")).join("\n");
+  const readme = read("scripts/verify/README.md");
+  const book = read("docs/contributing/04-scripts-do-mantenedor.md");
+  for (const name of settable) {
+    assert.ok(usage.includes(name), `${name} is missing from the usage line of scripts/verify/gitlab-e2e.sh`);
+    assert.ok(header.includes(name), `${name} is missing from the HOW header of scripts/verify/gitlab-e2e.sh`);
+    assert.ok(readme.includes(name), `${name} is missing from scripts/verify/README.md`);
+    assert.ok(book.includes(name), `${name} is missing from docs/contributing/04-scripts-do-mantenedor.md`);
+  }
+});

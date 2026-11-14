@@ -113,13 +113,15 @@ configuração descartável, então o `~/.config/glab-cli` de quem roda não é 
 ### O que as provas mostram
 
 O [`prove-gitlab.ts`](prove-gitlab.ts) imprime no stdout a evidência em Markdown (sem token, senha, host local nem caminho desta
-máquina), pronta para a descrição do PR, e sai com 1 se uma prova não valeu. Cada "não aconteceu nada" vem ao lado do mesmo
-texto sem o filtro, que acontece: sem esse controle a checagem não prova nada.
+máquina), pronta para a descrição do PR, e sai com 1 se uma prova não valeu. Cada prova tem um controle que tem de acontecer
+(o `Closes #N` fecha a issue, um `/close` solto roda, `!1`, `~bug` e `%v1` viram link), senão um "não aconteceu nada" não prova
+nada. Todo texto é postado como está e depois do filtro, e a tabela mostra os dois lado a lado: o que não roda nem como está é
+texto para esse GitLab, e o filtro o neutraliza do mesmo jeito, para as versões que o leem como comando.
 
-| Etapa | O que faz | Vale quando |
+| Prova | O que faz | Vale quando |
 |---|---|---|
 | `closing` | Mergeia um MR por frase de fechamento (`Closes #N`, `Implements #N`, `Fixing #N`, `Resolves grupo/projeto#N`, a URL da issue, em frase…), com a frase como está e passada pelo `sanitizeModelText` | A frase como está fecha a issue (o `Closes #N` do controle sempre), e a mesma frase depois do filtro não fecha. Responde se o padrão de fechamento do GitLab casa `Implement(s\|ed\|ing) #N` |
-| `quick-actions` | Posta 11 formas de `/close` (`/CLOSE`, com tab, depois de `\r`, em cerca de crase, til ou quatro crases, depois de `<div>`, `>>>` ou `$$`, numa cerca que fica aberta…) como nota numa issue e como descrição de MR | Um `/close` solto fecha a issue (ou o MR), e nenhuma forma passada pelo filtro roda |
+| `quick-actions` | Posta 12 formas de `/close` (`/CLOSE`, com tab, depois de `\r`, com CRLF, em cerca de crase, til ou quatro crases, depois de `<div>`, `>>>` ou `$$`, numa cerca que um trecho anterior deixou aberta…) como nota numa issue e como descrição de MR | Um `/close` solto fecha a issue (ou o MR) como controle, e nenhuma forma passada pelo filtro roda |
 | `references` | Renderiza e posta `!1`, `~bug` e `%v1` antes e depois do espaço de largura zero | O texto como está vira link e deixa uma nota de referência no `!1`, e o filtrado não |
 | `workflow` | Roda `implement-issue` (etapas locais, `testCommand: npm test`) na issue 1 de um projeto Node mínimo, mergeia o MR que ele abriu e espera a issue fechar | O run termina `done`, o MR abre com `Closes #1` na descrição, e o merge fecha a issue |
 

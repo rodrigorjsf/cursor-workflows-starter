@@ -4,8 +4,9 @@
 #   `glab` runs the commands and API routes the runtime uses, and their scrubbed outputs become the fixtures of the
 #   fake `glab` (packages/runtime/test/fixtures/glab/recordings.json). scripts/verify/prove-gitlab.ts: which phrases close an issue
 #   on merge (`Implement(s|ed|ing) #N` among them), whether a `/close` in model text runs after the sanitizer, and a real
-#   `implement-issue` run with local steps whose merge request closes its issue; it prints the evidence as Markdown. Removes its
-#   container and volumes at the end, also when a step fails or the script is interrupted.
+#   `implement-issue` run with local steps whose merge request closes its issue; its evidence, as Markdown, is all the script prints
+#   on stdout (everything else goes to stderr). Removes its container and volumes at the end, also when a step fails or the script is
+#   interrupted, and then exits with the status of the failure or the signal.
 # WHY: The GitLab code paths are tested offline against a fake `glab`; recording that fake's outputs from a real GitLab
 #   keeps the offline tests resting on what glab really prints (ADR-0009), and the proofs show on a real GitLab what the
 #   sanitizer for model text was written to prevent. It is outside `npm run check` and CI: GitLab CE needs about 2.5 GB of memory
@@ -18,8 +19,9 @@
 #   `GITLAB_E2E_NAME` (default wf-gitlab-e2e) names the container and its volumes; `GITLAB_E2E_TIMEOUT_SECONDS` (default
 #   1800) is how long it waits for GitLab, polling every `GITLAB_E2E_POLL_SECONDS` (default 10); `GITLAB_E2E_MIN_MEMORY_MB`
 #   (default 4096) is the least memory it accepts from Docker. The `implement-issue` run is capped by `GITLAB_E2E_MAX_TOKENS`
-#   (default 600000) and `GITLAB_E2E_MAX_CENTS` (default 100), passed to `wf run` as `--max-tokens` and `--max-cents`;
-#   `GITLAB_E2E_STAGES=closing,quick-actions,references` runs only the proofs that cost no tokens (the fourth stage is `workflow`).
+#   (default 600000) and `GITLAB_E2E_MAX_CENTS` (default 100), passed to `wf run` as `--max-tokens` and `--max-cents`, and cancelled
+#   after `GITLAB_E2E_WORKFLOW_TIMEOUT_SECONDS` (default 2700); `GITLAB_E2E_STAGES=closing,quick-actions,references` runs only the
+#   proofs that cost no tokens (the fourth stage is `workflow`).
 #   It refuses to run while a container or a volume of those names exists, never restarts Docker or changes its settings, and
 #   removes only what it started.
 
@@ -50,12 +52,14 @@ die() {
 }
 
 usage() {
-  echo "usage: gitlab-e2e.sh   (environment: GITLAB_E2E_IMAGE, GITLAB_E2E_PORT, GITLAB_E2E_NAME, GITLAB_E2E_TIMEOUT_SECONDS, GITLAB_E2E_POLL_SECONDS, GITLAB_E2E_MIN_MEMORY_MB, GITLAB_E2E_MAX_TOKENS, GITLAB_E2E_MAX_CENTS, GITLAB_E2E_STAGES)"
+  echo "usage: gitlab-e2e.sh   (environment: GITLAB_E2E_IMAGE, GITLAB_E2E_PORT, GITLAB_E2E_NAME, GITLAB_E2E_TIMEOUT_SECONDS, GITLAB_E2E_POLL_SECONDS, GITLAB_E2E_MIN_MEMORY_MB, GITLAB_E2E_MAX_TOKENS, GITLAB_E2E_MAX_CENTS, GITLAB_E2E_WORKFLOW_TIMEOUT_SECONDS, GITLAB_E2E_STAGES)"
 }
 
-# The container and its volumes go, on success, on failure and on a signal. A container this run did not start stays.
+# The container and its volumes go, on success, on failure and on a signal. A container this run did not start stays. The script
+# ends with the status it had (a failure's), or with 128 plus the number of the signal that interrupted it (`cleanup 143`): the
+# status of the last command that ran would be 0, and an interrupted run must not read as a pass.
 cleanup() {
-  local status=$?
+  local status=${1:-$?}
   trap - EXIT INT TERM HUP
   if [ -n "$container_started" ]; then
     echo "removing container $name and its volumes" >&2
@@ -176,7 +180,10 @@ main() {
       return 2
       ;;
   esac
-  trap cleanup EXIT INT TERM HUP
+  trap cleanup EXIT
+  trap 'cleanup 130' INT
+  trap 'cleanup 143' TERM
+  trap 'cleanup 129' HUP
   preflight
   scratch="$(mktemp -d "${TMPDIR:-/tmp}/wf-gitlab-e2e-XXXXXX")"
   start_gitlab
@@ -186,7 +193,7 @@ main() {
   token="$(create_token)"
   [ -n "$token" ] || die "could not create a personal access token inside the container"
   echo "GitLab is ready: recording the fixtures" >&2
-  run_script scripts/verify/record-glab-fixtures.ts
+  run_script scripts/verify/record-glab-fixtures.ts >&2
   echo "fixtures recorded: proving the GitLab behaviours (the last stage runs implement-issue and spends tokens)" >&2
   run_script scripts/verify/prove-gitlab.ts
 }
