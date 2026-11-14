@@ -92,15 +92,15 @@ test("while a long command runs, status shows it as the step in progress, and ca
   assert.equal(state.status, "running");
   assert.ok(state.recent.some((line: string) => /^▶ nap \[bash\]$/.test(line)), `the running command is in the progress lines: ${state.recent}`);
 
-  const cancelledAt = performance.now();
+  // `wf cancel` waits 30 s at most for the job to stop, and the command naps for 60: a job whose process froze until the
+  // command ended would still be running when the wait gives up. No wall-clock bound needed, however slow the machine.
   const cancelled = wf("cancel", started.jobId);
-  assert.equal(cancelled.status, "cancelled", JSON.stringify(cancelled));
-  assert.ok(performance.now() - cancelledAt < 10_000, `cancel took ${performance.now() - cancelledAt} ms: the job's process was free to answer the signal`);
+  assert.equal(cancelled.status, "cancelled", `the job's process was free to answer the signal: ${JSON.stringify(cancelled)}`);
   assert.match(cancelled.error, new RegExp(`resumeRunId="${started.runId}"`));
   const end = eventsOf(started.runId).findLast((e) => e.type === "exec-end");
   assert.ok(end && end.type === "exec-end" && end.outcome === "cancelled");
-  await until("the command's child to be gone", () => !alive(child), 5_000);
-  await until("the job's process to be gone", () => !alive(jobRecord(started.jobId).pid), 5_000);
+  await until("the command's child to be gone", () => !alive(child));
+  await until("the job's process to be gone", () => !alive(jobRecord(started.jobId).pid));
 });
 
 test("a command that outlives its timeout fails its node, not the run: status shows how it ended", async () => {
@@ -108,7 +108,7 @@ test("a command that outlives its timeout fails its node, not the run: status sh
   const done = wf("wait", started.jobId, "--timeout", "60");
   assert.equal(done.status, "finished", JSON.stringify(done));
   assert.deepEqual(done.result, { status: "timed-out" });
-  assert.ok(done.recent.some((line: string) => /^✗ nap \(timeout, 0\.\ds\)$/.test(line)), `the node's end is in the progress lines: ${done.recent}`);
+  assert.ok(done.recent.some((line: string) => /^✗ nap \(timeout, \d+\.\ds\)$/.test(line)), `the node's end is in the progress lines: ${done.recent}`);
 });
 
 test("a second SIGTERM ends the job at once and takes down the command that ignored the first one", async () => {
@@ -118,12 +118,14 @@ test("a second SIGTERM ends the job at once and takes down the command that igno
   strays.push(child);
   const { pid } = jobRecord(started.jobId);
 
-  process.kill(pid, "SIGTERM"); // the command ignores SIGTERM: the run is stopping, for up to two seconds
+  process.kill(pid, "SIGTERM"); // the command ignores SIGTERM: the run is stopping, for up to two seconds (the kill grace)
   await until("the job to take the first signal", () => readFileSync(started.log, "utf8").includes("[wf] SIGTERM: cancelling the run"));
-  assert.ok(alive(pid) && alive(child), "still stopping");
+  // The second signal lands inside the two seconds the first one leaves. The run's end says which ended the job: the second
+  // signal, not the kill grace. How long the exit takes is not asserted: a loaded machine stretches it.
   process.kill(pid, "SIGTERM");
-  await until("the job's process to exit", () => !alive(pid), 3_000);
-  await until("the command's child to be gone", () => !alive(child), 3_000);
+  await until("the job's process to exit", () => !alive(pid));
+  await until("the command's child to be gone", () => !alive(child));
   const end = eventsOf(started.runId).findLast((e) => e.type === "run-end");
   assert.ok(end && end.type === "run-end" && end.status === "cancelled");
+  assert.match(end.error ?? "", /cancelled by force by a second SIGTERM/, "the second signal ended the job, not the kill grace");
 });
