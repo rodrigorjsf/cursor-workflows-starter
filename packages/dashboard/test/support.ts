@@ -275,8 +275,8 @@ export function glabConfigOf(tokens: Record<string, string>): string {
 
 /**
  * What the real glab 1.130.0 printed for that command line on a real GitLab, recorded by scripts/verify/gitlab-e2e.sh: the fake
- * answers with the recorded merge request (`mr-api`), its number, state and URL set to the one asked for. A path, not a module:
- * the fake runs as a process of its own.
+ * answers with the recorded merge request of the same form (`mr-api-hostname` for `--hostname`, `mr-api` for `GITLAB_HOST`), its
+ * number, state and URL set to the one asked for. A path, not a module: the fake runs as a process of its own.
  */
 const GLAB_RECORDINGS = join(import.meta.dirname, "..", "..", "runtime", "test", "fixtures", "glab", "recordings.json");
 
@@ -314,7 +314,8 @@ const url = "https://" + host + "/" + decodeURIComponent(project) + "/-/merge_re
 const line = fs.readFileSync(${JSON.stringify(states)}, "utf8").split("\\n").find((l) => l.startsWith(url + " "));
 if (!line) { process.stderr.write("glab: 404 Not Found"); process.exit(1); }
 const REC = JSON.parse(fs.readFileSync(${JSON.stringify(GLAB_RECORDINGS)}, "utf8"));
-const recorded = REC.recordings["mr-api"];
+// the recording of the same form: \`--hostname <host>\` for a host with no port, \`GITLAB_HOST\` for one with a port
+const recorded = REC.recordings[byFlag ? "mr-api-hostname" : "mr-api"];
 const onThisHost = (text) => text.split(REC.placeholders.host).join(host);
 process.stderr.write(onThisHost(recorded.stderr));
 process.stdout.write(JSON.stringify({ ...JSON.parse(onThisHost(recorded.stdout)), id: 1000 + Number(number), iid: Number(number), state: line.split(" ")[1], web_url: url }) + "\\n");

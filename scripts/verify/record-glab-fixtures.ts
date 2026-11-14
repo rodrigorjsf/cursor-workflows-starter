@@ -1,6 +1,7 @@
 // WHAT: Runs the real `glab` against a running GitLab for every command and API route the runtime uses (the forge module,
 //   packages/runtime/workflows/implement-issue/forge.ts, with and without a `repo` argument; the `wf doctor` login check; and the
-//   dashboard's merge request by URL, packages/runtime/src/runtime/pr-by-url.ts), and writes what glab printed,
+//   dashboard's merge request by URL, packages/runtime/src/runtime/pr-by-url.ts; `glab api` both with `GITLAB_HOST=<host:port>` and
+//   with `--hostname <host>`, the form a host with no port gets), and writes what glab printed,
 //   scrubbed of the token, the root password and the local host, to packages/runtime/test/fixtures/glab/recordings.json.
 //   The fake `glab` of the offline tests reads that file. It makes its own group, project, issues and merge request.
 // WHY: the GitLab code paths are tested offline against a fake `glab`; the outputs of that fake must be what a real glab
@@ -80,6 +81,8 @@ const MR_TITLE = "Recorded merge request (#1)";
 const MR_BRANCH = "wf/issue-1-recorded";
 /** The branch of the merge request opened with a `repo` argument: one branch has one open merge request. */
 const MR_REPO_BRANCH = "wf/issue-1-recorded-repo";
+/** The host with no port that glab's configuration maps to the GitLab's `host:port` (`Recorder.aliasGlab`). */
+const PORTLESS_HOST = HOST_PLACEHOLDER;
 /** A second issue with more comments than one page of GitLab's notes API holds (20), to record how glab joins the pages. */
 const MANY_COMMENTS = 25;
 
@@ -175,9 +178,22 @@ class Recorder {
     // The branch checked out on main again: the run of the workflow starts from there.
     git(this.repo, auth, "checkout", "--quiet", "main");
     loginGlab(this.realGlab, this.glabEnv, this.host, this.env.token);
+    this.aliasGlab();
     // The login and the configuration above are glab calls of the setup, not recordings.
     rmSync(this.recordDir, { recursive: true, force: true });
     mkdirSync(this.recordDir);
+  }
+
+  /**
+   * A host with no port for the same GitLab, as gitlab.com and most self-managed hosts are: glab's own `api_host` setting sends the
+   * API calls of `PORTLESS_HOST` to the GitLab's `host:port`, so `glab api --hostname <host>` runs on the real glab. The name is the
+   * placeholder the scrubbing writes for the local host, so the recorded arguments read the same as the other recordings'.
+   */
+  private aliasGlab(): void {
+    const env = { ...process.env, ...this.glabEnv };
+    for (const [key, value] of [["api_protocol", "http"], ["api_host", this.host], ["token", this.env.token]] as const) {
+      execFileSync(this.realGlab, ["config", "set", key, value, "--host", PORTLESS_HOST, "--global"], { env, stdio: "ignore" });
+    }
   }
 
   /** Every glab call the forge module, the doctor and the dashboard's PR-state source make, once. */
@@ -211,11 +227,16 @@ class Recorder {
     const mrUrl = `https://${this.host}/${GROUP}/${PROJECT}/-/merge_requests/${mr}`;
     const state = await this.record("mr-api", () => this.inGlabEnv(() => prStateOfUrl(mrUrl)));
     if (state !== "OPEN") throw new Error(`mr-api: the dashboard read ${state ?? "no state"} for ${mrUrl}, not OPEN`);
+    // The same question for a host with no port, which glab is told through `--hostname` (glab-host.ts).
+    const portlessUrl = `https://${PORTLESS_HOST}/${GROUP}/${PROJECT}/-/merge_requests/${mr}`;
+    const portlessState = await this.record("mr-api-hostname", () => this.inGlabEnv(() => prStateOfUrl(portlessUrl)));
+    if (portlessState !== "OPEN") throw new Error(`mr-api-hostname: the dashboard read ${portlessState ?? "no state"} for ${portlessUrl}, not OPEN`);
 
     // The forge module with a `repo` argument, as a cross-repository run calls it: the project's URL.
     const named = `${this.env.url}/${GROUP}/${PROJECT}`;
     await this.record("issue-view-repo", () => forge.issue(cwd, 1, named));
     await this.record("repo-view-repo", () => forge.repoUrl(cwd, named));
+    await this.record("repo-view-hostname", () => forge.repoUrl(cwd, `http://${PORTLESS_HOST}/${GROUP}/${PROJECT}`));
     // Last, so that the notes recorded above hold one merge request: this one mentions no issue.
     writeFileSync(bodyFile, "Opened with a repo argument while recording the fixtures of the fake glab.\n");
     await this.record("mr-create-repo", () => forge.openPr(cwd, { branch: MR_REPO_BRANCH, title: MR_TITLE, bodyFile, repo: named }));

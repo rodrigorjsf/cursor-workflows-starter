@@ -223,7 +223,7 @@ if (route === "issue view" && a[0] === "issue") {
   // the project of the cwd is the one its origin names; a named one comes back in GitLab's case (lower case here), on the host asked for
   const cwdRemote = hostAndPath(originUrl());
   const named = endpoint === "projects/:fullpath" ? cwdRemote.path : decodeURIComponent(endpoint.slice("projects/".length)).toLowerCase();
-  const name = endpoint === "projects/:fullpath" ? "repo-view" : "repo-view-repo";
+  const name = endpoint === "projects/:fullpath" ? "repo-view" : flag("--hostname") ? "repo-view-hostname" : "repo-view-repo";
   out({ ...recordedJson(name), path_with_namespace: named, web_url: "https://" + (flag("--hostname") || process.env.GITLAB_HOST || cwdRemote.host) + "/" + named }, name);
 } else fail("fake glab: unsupported " + a.join(" "), 2);
 `;
