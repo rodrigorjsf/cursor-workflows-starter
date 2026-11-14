@@ -26,15 +26,18 @@
 // before the handler runs. Failures come back flagged `isError: true`, in two shapes:
 //   - a failure of a handler (unknown workflow, job not found, a refused config, a bad `timeoutSec`) is a JSON text
 //     `{ "error": "..." }`, as before the move to `McpServer`;
-//   - a call that breaks the input schema (a missing or non-string `name` or `jobId`) is the SDK's own plain text,
-//     `MCP error -32602: Input validation error: Invalid arguments for tool <name>: ...`, which names the property. It is
-//     not JSON: a client that parses every reply must look at `isError` first.
-// The move adds no refusal: `args`, `resumeRunId`, `overrides` and `timeoutSec` are listed with the schema they have
-// always advertised but accepted as before, and the handlers check them (`advertised` below). A throw in a handler is
-// an `isError` reply too, where the low-level `Server` answered with a JSON-RPC error.
+//   - a failure the SDK finds first is its own plain text, which is not JSON: a client that parses every reply must look
+//     at `isError` first. It is a call that breaks the input schema (a missing or non-string `name` or `jobId`):
+//     `MCP error -32602: Input validation error: Invalid arguments for tool <name>: ...`, which names the property; and a
+//     call to a tool that is not registered: `MCP error -32602: Tool <name> not found` (the low-level `Server` answered
+//     `{ "error": "unknown tool: <name>" }`).
+// The one new refusal is the missing or non-string `name` and `jobId` above (before, `String(...)` turned them into
+// `unknown workflow` or `job not found`). `args`, `resumeRunId`, `overrides` and `timeoutSec` are listed with the schema
+// they have always advertised but accepted as before, and the handlers check them (`advertised` below). A throw in a
+// handler is an `isError` reply too, where the low-level `Server` answered with a JSON-RPC error.
 //
-// STATUS: exercised over stdio (initialize, tools/list, list_workflows) by the kit's smoke tests; test/mcp-tools.test.ts
-// pins the tools, their schemas, the two error shapes and the guard of a workflow step.
+// STATUS: exercised over stdio (initialize, tools/list, list_workflows) by the kit's smoke tests; test/mcp-tools.process.test.ts
+// pins the tools, their schemas, the error shapes and the guard of a workflow step.
 
 import "./console-to-stderr.js"; // stdout is the JSON-RPC channel: the SDK and workflow console goes to stderr
 import "./node-check.js"; // before anything else: @cursor/sdk requires Node 22.13+
@@ -82,7 +85,7 @@ const found = (state: unknown) => (state === undefined ? fail({ error: "job not 
  * always advertised, which tells the model what to send. Moving to `McpServer` must not refuse what the server took
  * before (a numeric `timeoutSec`, `null` for an optional argument); the schemas become the check when they turn strict.
  */
-const advertised = (listed: Record<string, unknown>) => z.any().meta(listed).optional();
+const advertised = (listed: Record<string, unknown>) => z.unknown().meta(listed).optional();
 
 if (nested) {
   // The SDK would answer a call to a tool it does not have with its own "not found"; inside a step the reason is the point.

@@ -1,8 +1,8 @@
 // Seam: the MCP server over stdio, as a real child process driven by an MCP client (`test/mcp-support.ts`). It is built on
 // `McpServer.registerTool`: the SDK checks each call against the tool's input schema before the handler runs and reports a
 // failure as a tool error. These tests pin what the chat sees: the five tools and their required properties, a call that
-// breaks the schema, the arguments the handlers still check themselves (the move adds no new refusal), and the guard
-// that keeps a workflow step from starting workflows. Offline: the fake Cursor SDK replaces `@cursor/sdk`.
+// breaks the schema or names no tool, the arguments the handlers still check themselves (the move refuses nothing there),
+// and the guard that keeps a workflow step from starting workflows. Offline: the fake Cursor SDK replaces `@cursor/sdk`.
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import semver from "semver";
-import { FAKE_SDK_TSCONFIG, ROOT, withMcpServer } from "./mcp-support.js";
+import { FAKE_SDK_TSCONFIG, MCP_TOOLS, ROOT, withMcpServer } from "./mcp-support.js";
 
 const RUNTIME_SRC = join(ROOT, "packages", "runtime", "src");
 
@@ -39,7 +39,10 @@ const serverParams = (script: string, repo: string, extraEnv: Record<string, str
 });
 const mcpServer = (repo: string, extraEnv?: Record<string, string>) => serverParams(join(RUNTIME_SRC, "mcp-server.ts"), repo, extraEnv);
 
-type Reply = { isError?: boolean; content: Array<{ text: string }> };
+interface Reply {
+  isError?: boolean;
+  content: Array<{ text: string }>;
+}
 
 /** The properties each tool lists and requires. A literal, not read back from the server's own schemas. */
 const TOOLS: Record<string, { properties: string[]; required: string[] }> = {
@@ -52,7 +55,7 @@ const TOOLS: Record<string, { properties: string[]; required: string[] }> = {
 
 test("tools/list names the five tools, each with the properties it lists and requires, and a description", async () => {
   const listed = await withMcpServer(mcpServer(freshRepo()), async (client) => (await client.listTools()).tools);
-  assert.deepEqual(listed.map((t) => t.name).sort(), Object.keys(TOOLS));
+  assert.deepEqual(listed.map((t) => t.name).sort(), MCP_TOOLS);
   for (const tool of listed) {
     const schema = tool.inputSchema as { type: string; properties?: Record<string, unknown>; required?: string[] };
     assert.equal(schema.type, "object", tool.name);
@@ -97,6 +100,14 @@ test("a call that breaks an input schema is a tool error that names the property
     }
   });
   assert.equal(existsSync(join(repo, ".workflows", "jobs")), false, "a refused call creates no job");
+});
+
+test("a call to a tool that is not registered is a tool error that names the tool", async () => {
+  await withMcpServer(mcpServer(freshRepo()), async (client) => {
+    const reply = (await client.callTool({ name: "no_such_tool", arguments: {} })) as Reply;
+    assert.equal(reply.isError, true, reply.content[0]!.text);
+    assert.match(reply.content[0]!.text, /Tool no_such_tool not found/);
+  });
 });
 
 test("a value the handler checks itself reaches the handler: the schema adds no refusal (a numeric string, null and a wait outside 1..50 still count)", async () => {
