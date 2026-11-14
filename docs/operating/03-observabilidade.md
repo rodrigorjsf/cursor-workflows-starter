@@ -498,7 +498,7 @@ workflow que não declara nem percorre fase alguma tem uma coluna só, `Running`
 | Estado do run | Coluna |
 |---|---|
 | rodando | a fase em que está (a primeira, antes de entrar em alguma) |
-| terminou e o workflow devolveu `seams-proposed`, `test-command-proposed` ou `pending` | **Awaiting approval** |
+| terminou e o workflow devolveu `seams-proposed`, `test-command-proposed`, `untrusted-author` ou `pending` | **Awaiting approval** |
 | terminou entregue (`done`, `ok`…) ou com um resultado que não diz um status | **Done** |
 | terminou com outro status (`tests-failed`, `baseline-red`…) | **Failed** |
 | terminou com erro, estourou o teto, ou o processo morreu ou travou sem terminá-lo | **Failed** |
@@ -629,8 +629,9 @@ return { status: "tests-failed", ... };      // qualquer outro status = o workfl
 - run cancelado (`wf cancel`, `cancel_workflow`, Ctrl-C) → `cancelled`;
 - run que lançou erro ou estourou o teto → `error`;
 - `status` em `done/delivered/ok/success/succeeded` → `delivered`;
-- `status` em `seams-proposed/test-command-proposed/pending` → `pending`: o run parou esperando a decisão de alguém (como a
-  aprovação das seams ou do comando de teste do `implement-issue`), o que não é entrega nem falha;
+- `status` em `seams-proposed/test-command-proposed/untrusted-author/pending` → `pending`: o run parou esperando a decisão de
+  alguém (como a aprovação das seams ou do comando de teste do `implement-issue`, ou a leitura de uma issue de autor de
+  fora), o que não é entrega nem falha;
 - outro `status` → `failed`;
 - sem `status` → `unknown`.
 
