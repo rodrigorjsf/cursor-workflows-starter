@@ -210,16 +210,17 @@ test("reference files two skills share stay identical", () => {
   for (const file of shared) assert.equal(read(conversion, file), read(authoring, file), `${file} drifted: copy it from ${authoring} to ${conversion}`);
 });
 
+/** The version of the package at `...p` (the repo root when empty). */
+const version = (...p: string[]): string => JSON.parse(read(...p, "package.json")).version;
+
 test("the runtime package and the repo carry the same version", () => {
-  const version = (...p: string[]) => JSON.parse(read(...p, "package.json")).version;
   assert.equal(version("packages", "runtime"), version(), "the MCP server reports the runtime package's version: bump both together");
   assert.equal(version("packages", "dashboard"), version(), "the workspace packages are released together: bump them together");
 });
 
 test("the changelog has a dated section for the package version, so a bump never ships without its release notes", () => {
-  const version = (JSON.parse(read("package.json")) as { version: string }).version;
-  const heading = new RegExp(`^## ${version.replaceAll(".", "\\.")} \\([^)]+, \\d{4}-\\d{2}-\\d{2}\\)$`, "m");
-  assert.match(read("CHANGELOG.md"), heading, `CHANGELOG.md has no "## ${version} (pré-release, YYYY-MM-DD)" section: move "Não lançado" under it when the version is bumped`);
+  const heading = new RegExp(`^## ${version().replaceAll(".", "\\.")} \\([^)]+, \\d{4}-\\d{2}-\\d{2}\\)$`, "m");
+  assert.match(read("CHANGELOG.md"), heading, `CHANGELOG.md has no "## ${version()} (pré-release, YYYY-MM-DD)" section: rename "Não lançado" to it when the version is bumped`);
 });
 
 test("the dashboard is its own workspace package: its dependencies never enter the runtime, and it reaches the runtime through one entry point", () => {

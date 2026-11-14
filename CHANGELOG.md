@@ -5,14 +5,13 @@
 ### Adicionado
 
 - **O kit tem suporte nativo ao GitLab, pelo `glab`, ao lado do GitHub, pelo `gh`.** O `implement-issue`, o `wf gc`, o
-  `wf doctor` e o Board do dashboard servem os dois forges (as entradas abaixo dão o detalhe de cada um). O host do
-  `origin` escolhe o forge, e um GitLab self-managed entra na chave `forges` da configuração. As skills distribuídas, o
-  livro, o README e o `INSTALL-AGENT.md` agora descrevem os dois CLIs: os requisitos pedem o CLI do forge do repositório
-  (`gh` ou `glab`) com login, a tabela de comandos do forge mostra `gh` e `glab` lado a lado (ler issue, comentar, abrir PR, achar a PR de uma
-  branch), e o `glab` falso dos testes aparece nas referências de teste. No GitLab, o login é
-  `glab auth login --hostname <host>`. **O check `gh` do `wf doctor --json` agora se chama `forge`**: quem lê esse JSON
-  precisa procurar `forge` (veja "Mudado"). As etapas na nuvem de um repositório do GitLab dependem do suporte do
-  próprio Cursor ao GitLab: o kit não as valida. Decisões no ADR-0009.
+  `wf doctor` e o Board do dashboard servem os dois forges (as entradas abaixo dão o detalhe de cada um). As skills
+  distribuídas, o livro, o README e o `INSTALL-AGENT.md` agora descrevem os dois CLIs: os requisitos pedem o CLI do
+  forge do repositório (`gh` ou `glab`) com login, a tabela de comandos do forge mostra `gh` e `glab` lado a lado (ler
+  issue, comentar, abrir PR, achar a PR de uma branch), e o `glab` falso dos testes aparece nas referências de teste. No
+  GitLab, o login é `glab auth login --hostname <host>`. O check `gh` do `wf doctor --json` passou a se chamar `forge`
+  (veja "Mudado"). As etapas na nuvem de um repositório do GitLab dependem do suporte do próprio Cursor ao GitLab: o kit
+  não as valida. Decisões no ADR-0009.
 - **O `implement-issue` e o `wf gc` falam com o GitLab, pelo `glab`.** O forge vem do host: `github.com` é GitHub
   (`gh`), `gitlab.com` é GitLab (`glab`), e qualquer outro host precisa de uma entrada na chave nova `forges` da
   configuração (`{ "git.example.com": "gitlab" }`, no arquivo global ou no do repositório; o do repositório vale mais,
