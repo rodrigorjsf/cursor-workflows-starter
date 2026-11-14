@@ -106,9 +106,9 @@ export interface AgentCallOptions {
   schemaRetries?: number;
   /**
    * Runs this step in the SDK's local sandbox (`local.sandboxOptions.enabled`). Measured on Linux x64 (2026-11-14, SDK 1.3.1,
-   * docs/research/verificacoes-locais.md §16): outbound network is denied except the hosts of `.cursor/sandbox.json`, a write
-   * outside `cwd` is refused for the shell and for the `edit` tool alike, and a read of `~/.cursor/sdk/auth.json` is refused only
-   * when a `sandbox.json` sets `readBoundary: "workspace"`. Linux needs bubblewrap or a kernel with Landlock. A step that
+   * docs/research/verificacoes-locais.md §16): outbound network is denied except the hosts of `.cursor/sandbox.json`, the shell
+   * cannot write outside `cwd` (the `edit` tool did not create a file there either), and a read of `~/.cursor/sdk/auth.json` is refused only
+   * when the repository's `.cursor/sandbox.json` sets `readBoundary: "workspace"` (the user's `~/.cursor/sandbox.json` was not measured). Linux needs bubblewrap or a kernel with Landlock. A step that
    * downloads packages fails with it on, unless the hosts are listed. The installer's global config sets `caps.requireSandbox`,
    * which turns it on for every step whatever this says.
    */

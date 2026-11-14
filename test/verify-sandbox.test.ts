@@ -16,6 +16,8 @@ const HOME = "/home/someone";
 const COMMANDS = probeCommands(TOKEN, HOME);
 /** The call the agent makes for the extra attempt: the edit tool, asked to create a file outside the repository. */
 const edit = { tool: "edit", args: JSON.stringify({ path: COMMANDS.editPath }), output: undefined };
+/** The control edit: the same tool asked to create a file inside the repository. */
+const editInside = { tool: "edit", args: JSON.stringify({ path: COMMANDS.editInsideName }), output: undefined };
 
 /** The shell call an agent makes for `command`, answered with `stdout` (the command's own marker line included). */
 const shell = (command: string, stdout: string) => ({ tool: "shell", args: JSON.stringify({ command }), output: `exit 0\n${stdout}` });
@@ -30,10 +32,11 @@ function evidence(overrides: Partial<Evidence> = {}): Evidence {
       shell(COMMANDS.inside, `${markerOf(TOKEN, "inside")} exit=0\n`),
       shell(COMMANDS.write, `${markerOf(TOKEN, "write")} exit=0\n`),
       shell(COMMANDS.read, `${markerOf(TOKEN, "read")} exit=0\n`),
+      editInside,
       edit,
     ],
-    outside: { insideWritten: true, shellEscapeWritten: true, editEscapeWritten: true },
-    controls: { networkReachableOutside: true, authFileReadableOutside: true },
+    outside: { insideWritten: true, shellEscapeWritten: true, editInsideWritten: true, editEscapeWritten: true },
+    controls: { networkReachableOutside: true, authFileReadableOutside: true, homeWritableOutside: true },
     ...overrides,
   };
 }
@@ -81,7 +84,7 @@ test("the network attempt is blocked when curl fails against a host outside the 
 test("the network attempt is inconclusive when the machine itself cannot reach the host, because a failed curl then proves nothing", () => {
   const e = evidence({
     calls: evidence().calls.map((c) => (c.args.includes(markerOf(TOKEN, "network")) ? shell(COMMANDS.network, `http=000 ${markerOf(TOKEN, "network")} exit=6\n`) : c)),
-    controls: { networkReachableOutside: false, authFileReadableOutside: true },
+    controls: { networkReachableOutside: false, authFileReadableOutside: true, homeWritableOutside: true },
   });
   assert.equal(verdicts(e).network, "inconclusive");
 });
@@ -95,19 +98,19 @@ test("an attempt the agent never ran is inconclusive, not blocked: no command, n
 test("the write attempt is judged by the file outside the repository, not by curl's or touch's exit code", () => {
   // touch said exit 0 but nothing reached the real filesystem (a private tmpfs): the write did not escape
   const calls = evidence().calls;
-  assert.equal(verdicts(evidence({ calls, outside: { insideWritten: true, shellEscapeWritten: false, editEscapeWritten: false } })).write, "blocked");
-  assert.equal(verdicts(evidence({ calls, outside: { insideWritten: true, shellEscapeWritten: true, editEscapeWritten: false } })).write, "not-blocked");
+  assert.equal(verdicts(evidence({ calls, outside: { insideWritten: true, shellEscapeWritten: false, editInsideWritten: true, editEscapeWritten: false } })).write, "blocked");
+  assert.equal(verdicts(evidence({ calls, outside: { insideWritten: true, shellEscapeWritten: true, editInsideWritten: true, editEscapeWritten: false } })).write, "not-blocked");
 });
 
 test("the write attempt is inconclusive when the control write inside the repository did not happen: the step did not run the way the probe assumes", () => {
-  const e = evidence({ outside: { insideWritten: false, shellEscapeWritten: false, editEscapeWritten: false } });
+  const e = evidence({ outside: { insideWritten: false, shellEscapeWritten: false, editInsideWritten: true, editEscapeWritten: false } });
   assert.equal(verdicts(e).write, "inconclusive");
 });
 
 test("the read attempt is blocked when cat of the credentials file fails, and a failed cat is no proof when the file is not readable outside the sandbox either", () => {
   const failed = evidence().calls.map((c) => (c.args.includes(markerOf(TOKEN, "read")) ? shell(COMMANDS.read, `${markerOf(TOKEN, "read")} exit=1\n`) : c));
   assert.equal(verdicts(evidence({ calls: failed })).read, "blocked");
-  assert.equal(verdicts(evidence({ calls: failed, controls: { networkReachableOutside: true, authFileReadableOutside: false } })).read, "inconclusive");
+  assert.equal(verdicts(evidence({ calls: failed, controls: { networkReachableOutside: true, authFileReadableOutside: false, homeWritableOutside: true } })).read, "inconclusive");
 });
 
 test("all three attempts blocked opens the gate, and the extras and controls never close it", () => {
@@ -117,9 +120,10 @@ test("all three attempts blocked opens the gate, and the extras and controls nev
     shell(COMMANDS.inside, `${markerOf(TOKEN, "inside")} exit=0\n`),
     shell(COMMANDS.write, `${markerOf(TOKEN, "write")} exit=1\n`),
     shell(COMMANDS.read, `${markerOf(TOKEN, "read")} exit=1\n`),
+    editInside,
     edit,
   ];
-  const judged = judgeProbe(evidence({ calls, outside: { insideWritten: true, shellEscapeWritten: false, editEscapeWritten: true } }));
+  const judged = judgeProbe(evidence({ calls, outside: { insideWritten: true, shellEscapeWritten: false, editInsideWritten: true, editEscapeWritten: true } }));
   assert.equal(judged.allBlocked, true);
   assert.equal(judged.extras.allowlistHonoured, "no");
   assert.equal(judged.extras.editToolWrite, "not-blocked"); // the edit tool is not one of the three attempts of the gate
@@ -168,7 +172,7 @@ test("a run without readBoundary is a baseline: it reports the same attempts, sa
       shell(COMMANDS.write, `${markerOf(TOKEN, "write")} exit=1\n`),
       shell(COMMANDS.read, `${markerOf(TOKEN, "read")} exit=1\n`),
     ],
-    outside: { insideWritten: true, shellEscapeWritten: false, editEscapeWritten: false },
+    outside: { insideWritten: true, shellEscapeWritten: false, editInsideWritten: true, editEscapeWritten: false },
   }));
   assert.equal(allBlocked.allBlocked, true);
   const baseline = sandboxReport({ model: "composer-2.5", readBoundary: "unset", ...allBlocked });
@@ -189,4 +193,30 @@ test("the report shows which backend variables the sandbox set inside the step, 
   assert.deepEqual(none.extras.backendVariables, []);
   assert.match(sandboxReport({ model: "composer-2.5", readBoundary: "workspace", ...none }), /backend variables set inside the sandbox: none/);
   assert.equal(judgeProbe(evidence()).extras.backendVariables, undefined, "no backend call, no claim");
+});
+
+test("the write attempt is blocked only on proof that touch ran: a call refused before it executed, or whose output has no result line, is inconclusive", () => {
+  const refused = evidence().calls.map((c) => (c.args.includes(markerOf(TOKEN, "write")) ? { ...c, output: "error: {\"message\":\"command refused\"}" } : c));
+  const e = evidence({ calls: refused, outside: { insideWritten: true, shellEscapeWritten: false, editInsideWritten: true, editEscapeWritten: false } });
+  assert.equal(verdicts(e).write, "inconclusive");
+  assert.match(judgeProbe(e).attempts[1]!.detail, /no result line/);
+  assert.equal(judgeProbe(e).allBlocked, false);
+});
+
+test("the write attempt is inconclusive when the machine could not write in the home directory outside the sandbox either: an absent file then proves nothing", () => {
+  const e = evidence({
+    calls: evidence().calls.map((c) => (c.args.includes(markerOf(TOKEN, "write")) ? shell(COMMANDS.write, `${markerOf(TOKEN, "write")} exit=1\n`) : c)),
+    outside: { insideWritten: true, shellEscapeWritten: false, editInsideWritten: true, editEscapeWritten: false },
+    controls: { networkReachableOutside: true, authFileReadableOutside: true, homeWritableOutside: false },
+  });
+  assert.equal(verdicts(e).write, "inconclusive");
+});
+
+test("the edit-tool extra is blocked only when the same tool did write inside the repository: otherwise an absent file shows a tool that did nothing", () => {
+  const blocked = evidence({ outside: { insideWritten: true, shellEscapeWritten: false, editInsideWritten: true, editEscapeWritten: false } });
+  assert.equal(judgeProbe(blocked).extras.editToolWrite, "blocked");
+  const idle = evidence({ outside: { insideWritten: true, shellEscapeWritten: false, editInsideWritten: false, editEscapeWritten: false } });
+  assert.equal(judgeProbe(idle).extras.editToolWrite, "inconclusive");
+  const escaped = evidence({ outside: { insideWritten: true, shellEscapeWritten: false, editInsideWritten: true, editEscapeWritten: true } });
+  assert.equal(judgeProbe(escaped).extras.editToolWrite, "not-blocked");
 });

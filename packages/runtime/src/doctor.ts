@@ -3,9 +3,9 @@
 // fixed order. The checks follow what the IDE does: they read the MCP config it reads and start the server it starts.
 
 import { execFile, execFileSync } from "node:child_process";
-import { accessSync, constants, existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Cursor } from "@cursor/sdk";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -14,6 +14,7 @@ import semver from "semver";
 import type { ConfigIssue } from "./config/file.js";
 import { ConfigError, type ResolvedConfig, loadEffectiveConfig } from "./config/index.js";
 import { type CheckId, type CheckResult, type DoctorReport, fail, nodeHint, pass, reportOf } from "./doctor-report.js";
+import { findOnPath } from "./find-on-path.js";
 import { kitCompatibility, kitFileUrl, readKitPackage } from "./kit-version.js";
 import { MCP_CONFIG_FILES, type McpLaunch, type McpLaunches, readMcpLaunches } from "./mcp-launch.js";
 import { errorText } from "./runtime/error-text.js";
@@ -37,20 +38,6 @@ function within<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
     timer = setTimeout(() => reject(new Error(`${what} did not answer within ${ms / 1000}s`)), ms);
   });
   return Promise.race([promise, late]).finally(() => clearTimeout(timer));
-}
-
-/** The first executable called `name` on `path`, the way `/usr/bin/env node` (the shebang of the MCP command) finds it. */
-function findOnPath(name: string, path: string | undefined): string | undefined {
-  for (const dir of (path ?? "").split(delimiter).filter(Boolean)) {
-    const file = join(dir, name);
-    try {
-      accessSync(file, constants.X_OK);
-      return file;
-    } catch {
-      // not in this directory
-    }
-  }
-  return undefined;
 }
 
 /** The `node` that `path` resolves to and its version, against the range the kit supports. */
@@ -345,10 +332,11 @@ function readBoundaryOf(file: string): unknown {
 
 /**
  * The SDK sandbox, when the global caps require it (`caps.requireSandbox`): on Linux it needs `bwrap` on the PATH, and a step can
- * still read `~/.cursor/sdk/auth.json` until a `sandbox.json` (the repository's, which wins, or the user's) sets `readBoundary`
- * to `workspace`. The kit measured the sandbox on Linux (issue #62): it blocked the network and a write outside the repository
- * in every run, and a read of the key only with that setting. It also ran, on a kernel with Landlock, with no usable `bwrap`;
- * the doctor cannot test Landlock, so it asks for bubblewrap, which is the dependency the SDK documents.
+ * still read `~/.cursor/sdk/auth.json` until a `sandbox.json` sets `readBoundary` to `workspace`. The kit measured the sandbox on Linux
+ * (issue #62): it blocked the network and a write outside the repository in every run, and a read of the key only with that setting
+ * in the repository's `.cursor/sandbox.json`. The user's `~/.cursor/sandbox.json` was not measured (Cursor documents it as applying to
+ * every workspace, with the repository's file taking priority), so the report says so. The sandbox also ran, on a kernel with Landlock,
+ * with no usable `bwrap`; the doctor cannot test Landlock, so it asks for bubblewrap, which is the dependency the SDK documents.
  */
 function checkSandbox(cwd: string, resolution: Resolution): CheckResult {
   if (!resolution.ok) return fail("sandbox", "cannot tell whether the sandbox is required: the config does not resolve (see the configuration check)", "Fix the configuration first.");
@@ -363,11 +351,14 @@ function checkSandbox(cwd: string, resolution: Resolution): CheckResult {
       "Install bubblewrap (`sudo apt install bubblewrap`, `sudo dnf install bubblewrap`) in the environment that starts the IDE, and run `wf doctor` again from a terminal the IDE opened. To run steps without the sandbox, set `caps.requireSandbox` to false in ~/.cursor-workflows/config.json.",
     );
   }
-  const boundary = readBoundaryOf(join(cwd, ".cursor", "sandbox.json")) ?? readBoundaryOf(join(homedir(), ".cursor", "sandbox.json"));
+  const inRepo = readBoundaryOf(join(cwd, ".cursor", "sandbox.json"));
+  const inHome = readBoundaryOf(join(homedir(), ".cursor", "sandbox.json"));
   const reads =
-    boundary === "workspace"
-      ? "reads are limited to the workspace (`readBoundary` is \"workspace\")"
-      : "`readBoundary` is not \"workspace\" in .cursor/sandbox.json or ~/.cursor/sandbox.json, so a step can still read ~/.cursor/sdk/auth.json: set it to \"workspace\" to block that read";
+    inRepo === "workspace"
+      ? 'reads are limited to the workspace (`readBoundary` is "workspace" in .cursor/sandbox.json)'
+      : inRepo === undefined && inHome === "workspace"
+        ? '`readBoundary` is "workspace" in ~/.cursor/sandbox.json, which Cursor documents for every workspace but the kit has not measured (it measured the repository\'s .cursor/sandbox.json): confirm that a step cannot read ~/.cursor/sdk/auth.json'
+        : '`readBoundary` is not "workspace" in .cursor/sandbox.json or ~/.cursor/sandbox.json, so a step can still read ~/.cursor/sdk/auth.json: set it to "workspace" in the repository\'s .cursor/sandbox.json to block that read';
   return pass("sandbox", `\`caps.requireSandbox\` is true${bwrap ? `, bubblewrap at ${bwrap}` : `, and ${process.platform} needs no bubblewrap`}; ${reads}`);
 }
 

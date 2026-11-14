@@ -44,8 +44,8 @@ documento explica o *porquê* das regras e traz as receitas, que a skill aponta.
   ([8.2 §9](../research/verificacoes-locais.md)). A `SCOPE_RULE` reduz a chance, mas nada impede a
   escrita. Ver [5.1 · Segurança](../operating/01-governanca-e-custos.md#segurança).
 - **Sandbox.** No Linux exige `bubblewrap` (ou um kernel com Landlock). Medido em 2026-11-14 ([8.2 §16](../research/verificacoes-locais.md)):
-  nega a rede salvo os hosts do `sandbox.json`, recusa a escrita fora do cwd (shell e `edit`) e só recusa a leitura do
-  `~/.cursor/sdk/auth.json` com `readBoundary: "workspace"`. A configuração global do instalador o liga em toda etapa
+  nega a rede salvo os hosts do `sandbox.json`, não deixa o shell escrever fora do cwd (a tool `edit` também não criou o arquivo
+  fora dele) e só recusa a leitura do `~/.cursor/sdk/auth.json` com `readBoundary: "workspace"` no `.cursor/sandbox.json` do repositório. A configuração global do instalador o liga em toda etapa
   (`caps.requireSandbox`), então uma etapa que baixa pacotes precisa dos hosts no `.cursor/sandbox.json`
   ([2.2 §5](../usage/02-configuracao-inicial.md#5-contexto-do-projeto-nos-agentes)).
 - **`timeoutMs` curto nas etapas que escrevem, e um `maxTokensPerStep` no papel delas.** O teto de tokens da etapa e o do

@@ -214,9 +214,10 @@ MDM.
 
 > **Sandbox (`sandbox: true`):** liga o `local.sandboxOptions.enabled` do SDK. Medido em 2026-11-14, no Linux x64 (WSL2), com
 > `@cursor/sdk@1.3.1` e `composer-2.5` ([8.2 §16](../research/verificacoes-locais.md)): a rede de saída é negada, salvo os hosts
-> do `.cursor/sandbox.json` (ou do `~/.cursor/sandbox.json`, [DOC](https://cursor.com/docs/sdk/typescript#sandbox-options)); a escrita fora do repositório é recusada, pelo shell e pela tool
-> `edit`; e a leitura do `~/.cursor/sdk/auth.json` só é recusada quando um `sandbox.json` tem `readBoundary: "workspace"`: sem
-> essa chave, a etapa lê a chave do Cursor. A configuração global que o instalador grava liga o sandbox em toda etapa
+> do `.cursor/sandbox.json` (ou do `~/.cursor/sandbox.json`, [DOC](https://cursor.com/docs/sdk/typescript#sandbox-options)); o shell não escreve fora do repositório, e a tool
+> `edit` não criou o arquivo fora dele; e a leitura do `~/.cursor/sdk/auth.json` só é recusada quando o `.cursor/sandbox.json` do
+> repositório tem `readBoundary: "workspace"` (o `~/.cursor/sandbox.json` não foi medido): sem essa chave, a etapa lê a chave do
+> Cursor. A configuração global que o instalador grava liga o sandbox em toda etapa
 > (`caps.requireSandbox: true`), então uma etapa que baixa pacotes falha até você listar os hosts. No Linux o SDK exige
 > `bubblewrap` ou um kernel com Landlock (nesta máquina o sandbox impôs as regras pelo Landlock, sem `bwrap` utilizável); o
 > `wf doctor` pede o `bubblewrap` e diz se o `readBoundary` está posto. macOS e Windows não foram medidos

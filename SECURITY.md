@@ -21,22 +21,22 @@ falhas de segurança.
     do SDK (próximo item), que recusou a escrita fora do repositório na medição de 2026-11-14.
 - **O sandbox do SDK foi medido, e o instalador o liga.** Em 2026-11-14, no Linux x64 (WSL2, kernel 6.18), com
   `@cursor/sdk@1.3.1` e `composer-2.5`, uma sonda real (`scripts/verify/verify-sandbox.ts`) rodou uma etapa que escreve, com
-  o sandbox ligado, e tentou o que uma etapa que leu texto não confiável poderia fazer. Em três runs, **os três foram
+  o sandbox ligado, e tentou o que uma etapa que leu texto não confiável poderia fazer. Em quatro runs, **os três foram
   bloqueados**: o `curl` para um host fora da allowlist (`CONNECT tunnel failed, response 403`), um `touch` fora do
   repositório (`Permission denied`) e o `cat ~/.cursor/sdk/auth.json` com `.cursor/sandbox.json` em
-  `readBoundary: "workspace"` (`Permission denied`). A escrita fora do repositório pela tool `edit` também foi recusada, e o
-  host da allowlist respondeu 200. Detalhes em [`docs/research/verificacoes-locais.md`](docs/research/verificacoes-locais.md) §16.
+  `readBoundary: "workspace"` (`Permission denied`). A tool `edit`, pedida para criar um arquivo fora do repositório, não o criou, e criou um arquivo dentro dele
+  (controle), e o host da allowlist respondeu 200. Detalhes em [`docs/research/verificacoes-locais.md`](docs/research/verificacoes-locais.md) §16.
   - **A leitura da chave só é bloqueada com `readBoundary: "workspace"`.** Num run sem essa chave, a mesma etapa leu o
     `~/.cursor/sdk/auth.json` (`cat` saiu com 0). Ligar o sandbox sozinho nega a rede e a escrita fora do repositório, o
-    que corta o caminho "ler a chave e mandá-la embora", mas não impede a leitura. O kit não grava esse arquivo por você
-    (o `~/.cursor/sandbox.json` vale para todos os seus workspaces, não só para o kit): ponha `{ "readBoundary": "workspace" }` nele, ou
-    no `.cursor/sandbox.json` do repositório, e confira com `wf doctor`, que diz se o `readBoundary` está posto.
+    que corta o caminho "ler a chave e mandá-la embora", mas não impede a leitura. O kit não grava esse arquivo por você: ponha `{ "readBoundary": "workspace" }` no
+    `.cursor/sandbox.json` do repositório, que foi o arquivo medido, e confira com `wf doctor`, que diz se o `readBoundary` está posto.
+    O `~/.cursor/sandbox.json`, que a doc do Cursor diz valer para todos os workspaces, o kit não mediu.
   - **O padrão mudou:** o `~/.cursor-workflows/config.json` que o instalador grava traz `caps.requireSandbox: true`, que liga o
     sandbox em toda etapa, e a instalação que já tinha esse arquivo não muda. No Linux o SDK exige `bubblewrap` ou um
     kernel com Landlock: nesta máquina o sandbox impôs as regras pelo Landlock (`CURSOR_SANDBOX_LANDLOCK_STATUS=fully_enforced`),
     mesmo com o `bwrap` fora do PATH, mas o `wf doctor` falha, nomeando o `bubblewrap`, quando o `bwrap` não está no PATH, porque
     não testa o Landlock. Uma etapa que baixa pacotes falha até você listar os hosts em `.cursor/sandbox.json`.
-  - **Não medido:** macOS e Windows, e o `implement-issue` inteiro com o sandbox ligado (a sonda é uma etapa que escreve).
+  - **Não medido:** macOS e Windows, e o `implement-issue` inteiro com o sandbox ligado (a sonda é uma etapa que escreve; veja [#99](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/99)).
 - **Com `settingSources` contendo `"project"` (o default), o repositório alvo roda código na sua máquina:** hooks de
   `.cursor/hooks.json` e de `.claude/settings.json` e servidores MCP de `.cursor/mcp.json`. Não use o default em
   repositórios em que você não confia.

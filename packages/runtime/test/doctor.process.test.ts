@@ -732,7 +732,13 @@ test("with the sandbox required, the check says whether reads are limited to the
   const userHome = sandboxedHome();
   put(join(userHome, ".cursor", "sandbox.json"), { readBoundary: "workspace" });
   const inHome = checkOf(reportOf(doctor(repoCopy(), { home: userHome, bins })), "sandbox");
-  assert.match(inHome.message, /reads are limited to the workspace/);
+  assert.match(inHome.message, /"workspace" in ~\/\.cursor\/sandbox\.json/);
+  assert.match(inHome.message, /has not measured/, "the kit measured the repository's file, not the user's");
+  assert.doesNotMatch(inHome.message, /reads are limited to the workspace/);
+
+  const overridden = repoCopy();
+  put(join(overridden, ".cursor", "sandbox.json"), { readBoundary: "system" });
+  assert.match(checkOf(reportOf(doctor(overridden, { home: userHome, bins })), "sandbox").message, /readBoundary.*not "workspace"/, "the repository's own setting wins over the user's");
 
   const broken = repoCopy();
   put(join(broken, ".cursor", "sandbox.json"), "{ not json");

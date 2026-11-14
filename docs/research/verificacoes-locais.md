@@ -444,18 +444,20 @@ mínimo, sem remoto), com este `.cursor/sandbox.json`: `readBoundary: "workspace
 `touch` dentro do repositório (controle) e um `touch` na home, um `cat` do `~/.cursor/sdk/auth.json` (a saída vai para o
 `/dev/null`: a chave não entra no contexto nem no log), o `env` filtrado pelas variáveis `CURSOR_SANDBOX_*` e um pedido de escrita pela
 tool `edit`. O veredito não vem do que o agente diz: vem do log de eventos (a chamada e a saída de cada tool) e dos arquivos que o
-código do workflow confere, de fora do sandbox, depois da etapa. Cinco runs, com `--max-tokens 150000 --max-cents 25`.
+código do workflow confere, de fora do sandbox, depois da etapa. Seis runs, com `--max-tokens 150000 --max-cents 25`; os runs 2 a 5
+rodaram revisões anteriores do verificador, que ainda não conferiam o `exit` do `touch`, a escrita na home fora do sandbox nem o
+controle da tool `edit` dentro do repositório, e o run 6 rodou o verificador final.
 
 | Item | Método | Resultado | Evidência | Ação tomada |
 |---|---|---|---|---|
-| `curl` para um host fora da allowlist | `curl -m 20 https://example.com/` na etapa; o mesmo `curl` fora do sandbox é o controle | ✅ bloqueado | runs 2, 4 e 5: `exit 7`, `http=000` e `curl: (7) CONNECT tunnel failed, response 403`; fora do sandbox, o mesmo `curl` deu 200 | Rede negada confirmada |
-| `curl` para um host da allowlist | `curl https://registry.npmjs.org/` na etapa | ✅ passa | `http=200` nos runs 2 a 5 | O `.cursor/sandbox.json` do projeto vale para runs locais do SDK com o `settingSources` default |
-| Escrita fora do repositório, pelo shell | `touch "$HOME/.wf-sandbox-…"`; o arquivo é procurado de fora do sandbox | ✅ bloqueada | runs 2, 4 e 5: `touch: cannot touch …: Permission denied`, `exit 1`, o arquivo não existe depois; o `touch` dentro do repositório (controle) criou o arquivo | Escrita fora do cwd negada confirmada |
-| Escrita fora do repositório, pela tool `edit` | a tool `edit` pedida para criar um arquivo na home; o arquivo é procurado de fora | ✅ recusada | runs 2 a 5: a tool recusou ("escrita recusada pela política do sandbox", nas palavras do agente) e o arquivo não existe depois | A doc não dizia se o sandbox cobria `edit`: cobre. É o caminho do incidente da §9 |
-| Leitura do `~/.cursor/sdk/auth.json` com `readBoundary: "workspace"` | `cat ~/.cursor/sdk/auth.json > /dev/null` | ✅ bloqueada | runs 2, 4 e 5: `cat: …/auth.json: Permission denied`, `exit 1`; a chave é legível fora do sandbox (controle) | O portão do #62 abre |
+| `curl` para um host fora da allowlist | `curl -m 20 https://example.com/` na etapa; o mesmo `curl` fora do sandbox é o controle | ✅ bloqueado | runs 2, 4, 5 e 6: `exit 7`, `http=000` e `curl: (7) CONNECT tunnel failed, response 403`; fora do sandbox, o mesmo `curl` deu 200 | Rede negada confirmada |
+| `curl` para um host da allowlist | `curl https://registry.npmjs.org/` na etapa | ✅ passa | `http=200` nos runs 2 a 6 | O `.cursor/sandbox.json` do projeto vale para runs locais do SDK com o `settingSources` default |
+| Escrita fora do repositório, pelo shell | `touch "$HOME/.wf-sandbox-…"`; o arquivo é procurado de fora do sandbox | ✅ bloqueada | runs 2, 4, 5 e 6: `touch: cannot touch …: Permission denied`, `exit 1`, o arquivo não existe depois; o `touch` dentro do repositório (controle) criou o arquivo, e, no run 6, a máquina escreve na home fora do sandbox (controle) | Escrita fora do cwd negada confirmada |
+| Escrita fora do repositório, pela tool `edit` | a tool `edit` pedida para criar um arquivo na home; o arquivo é procurado de fora | ✅ não criou o arquivo | runs 2 a 6: o arquivo não existe depois, e o agente disse que a política do sandbox recusou a escrita (as palavras são dele: o log não guarda a saída da tool `edit`); no run 6, a mesma tool criou um arquivo dentro do repositório (controle) | A doc não dizia se o sandbox cobria `edit`: nesta medição cobriu. É o caminho do incidente da §9 |
+| Leitura do `~/.cursor/sdk/auth.json` com `readBoundary: "workspace"` | `cat ~/.cursor/sdk/auth.json > /dev/null` | ✅ bloqueada | runs 2, 4, 5 e 6: `cat: …/auth.json: Permission denied`, `exit 1`; a chave é legível fora do sandbox (controle) | O portão do #62 abre |
 | Leitura **sem** `readBoundary` (base de comparação) | o mesmo `cat`, com um `.cursor/sandbox.json` que só tem a `networkPolicy` | ❌ passou | run 3: `exit 0`: a etapa leu a chave | Só o `readBoundary` bloqueia a leitura: ligar o sandbox sozinho não a bloqueia |
-| Qual mecanismo impôs as regras | `env` filtrado pelas variáveis `CURSOR_SANDBOX_*`; run 5 com só um `bwrap` que sai com 1 no PATH | ◐ Landlock, não bubblewrap | runs 4 e 5: `CURSOR_SANDBOX_LANDLOCK_STATUS=fully_enforced`; no run 5 o `bwrap` de verdade estava fora do PATH e os três bloqueios se repetiram. O helper do SDK (`cursorsandbox`) tem dois backends, `landlock` e `bubblewrap`, e a mensagem "Linux auto backend selection failed. Landlock error" | Nesta máquina o `bubblewrap` não foi necessário. A doc do SDK o exige no Linux; num kernel sem Landlock (a ABI 3 pede o 6.2 ou mais novo) ele deve ser o único caminho, o que não foi medido |
-| Custo | `wf stats` do banco de métricas dos runs | ◐ | 291.197 tokens nos cinco runs, cerca de 9,7 centavos no preço de lista, `spentCents: 0` e `chargedCents: 0` (uso incluído no plano); o `getUsage()` segue `feature_unavailable` | Dentro dos 100 centavos que a medição dividia com a sonda do #37 (cerca de 20 centavos) |
+| Qual mecanismo impôs as regras | `env` filtrado pelas variáveis `CURSOR_SANDBOX_*`; run 5 com só um `bwrap` que sai com 1 no PATH | ◐ Landlock, não bubblewrap | runs 4 a 6: `CURSOR_SANDBOX_LANDLOCK_STATUS=fully_enforced`; no run 5 o `bwrap` de verdade estava fora do PATH e os três bloqueios se repetiram. O helper do SDK (`cursorsandbox`) tem dois backends, `landlock` e `bubblewrap`, e a mensagem "Linux auto backend selection failed. Landlock error" | Nesta máquina o `bubblewrap` não foi necessário. A doc do SDK o exige no Linux; num kernel sem Landlock (a ABI 3 pede o 6.2 ou mais novo) ele deve ser o único caminho, o que não foi medido |
+| Custo | `wf stats` do banco de métricas dos runs | ◐ | 315.548 tokens nos seis runs (de 24 mil a 83 mil cada), cerca de 11 centavos no preço de lista, `spentCents: 0` e `chargedCents: 0` (uso incluído no plano); o `getUsage()` segue `feature_unavailable` | Dentro dos 100 centavos que a medição dividia com a sonda do #37 (cerca de 20 centavos) |
 
 O run 1 foi descartado: o verificador procurava o conteúdo das chamadas pelo rótulo da etapa, que as linhas de conteúdo não trazem
 (trazem o `attemptId`), então ele não achou nenhuma chamada e não deu veredito. O log cru do run 1 mostra os mesmos quatro bloqueios.
@@ -464,12 +466,13 @@ O verificador passou a achar o conteúdo pela tentativa aberta pelo `step-start`
 **Decisão (portão do #62):** com `readBoundary: "workspace"`, as três tentativas ficaram bloqueadas em todos os runs, então
 `templates/global-config.json` passa a gravar `caps.requireSandbox: true`, o `wf doctor` ganha a verificação `sandbox` (falha, nomeando o
 `bubblewrap`, quando o `bwrap` não está no PATH, porque o kit não testa o Landlock), e o SECURITY.md diz o resultado. O `readBoundary`
-**não** vem do `requireSandbox`: o kit não grava o `sandbox.json` (o `~/.cursor/sandbox.json` vale para todos os workspaces do
-usuário), e o `wf doctor` diz se ele está posto.
+**não** vem do `requireSandbox`: o kit não grava o `sandbox.json`, e o `wf doctor` diz se ele está posto. A medição usou o
+`.cursor/sandbox.json` do repositório; o `~/.cursor/sandbox.json`, que a doc do Cursor diz valer para todos os workspaces, com o
+arquivo do repositório prevalecendo, **não foi medido**, e o `wf doctor` diz isso quando só ele tem o `readBoundary`.
 
 **Não medido:** macOS (seatbelt) e Windows; o `implement-issue` inteiro com o sandbox ligado (uma etapa que baixa pacotes
 precisa dos hosts no `sandbox.json`; se o `git` dentro de um worktree, que escreve no `.git` do repositório principal, funciona
-no sandbox, é suspeita); um kernel sem Landlock.
+no sandbox, é suspeita, no [#99](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/99)); um kernel sem Landlock.
 
 
 ---
