@@ -376,6 +376,23 @@ test("glab's config is read for host names only, however it spells them: plain, 
   assert.deepEqual(answered, ["a.example.com", "b.example.com:8443", "c.example.com", "e.example.com:8444"]);
 });
 
+test("a merge request on a host with a port is asked through GITLAB_HOST, which takes the port that glab's --hostname refuses, and no token of the environment goes along", async () => {
+  dash = await startDashboard({ port: 0 });
+  glab.config(glabConfigOf({ "git.example.com:8443": "glpat-PORT" }));
+  const url = MR(3, "git.example.com:8443", "platform/widgets");
+  glab.set(url, "opened");
+  const previous = process.env.GITLAB_TOKEN;
+  process.env.GITLAB_TOKEN = "glpat-ENV-FOR-ANOTHER-HOST";
+  try {
+    runWithLinks("implement-issue-aaaa0001", 0, [url]);
+    assert.equal(await until("the state arrives", () => stateOf("implement-issue-aaaa0001", url), Boolean), "open");
+  } finally {
+    if (previous === undefined) delete process.env.GITLAB_TOKEN;
+    else process.env.GITLAB_TOKEN = previous;
+  }
+  assert.deepEqual(glab.calls(), [["GITLAB_HOST=git.example.com:8443", "api", "projects/platform%2Fwidgets/merge_requests/3"]]);
+});
+
 test("glab's config is read again on every ask: a host the user logs in to while the dashboard runs gets its states", async () => {
   dash = await startDashboard({ port: 0, prStateCacheMs: 20 }); // a failed ask is retried after 10 times that
   const url = MR(1, "git.example.com");

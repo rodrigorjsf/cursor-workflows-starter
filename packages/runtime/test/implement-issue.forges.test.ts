@@ -425,7 +425,7 @@ forgeTest(
 );
 
 forgeTest(
-  "a repo URL on another host of a declared forge goes to glab with --hostname, and is another repository than the cwd's even when the path is the same",
+  "a repo URL on another host of a declared forge goes to glab with --hostname (GITLAB_HOST when it has a port), and is another repository than the cwd's even when the path is the same",
   async () => {
     setOrigin("https://git.example.com/group/sub/project.git");
     writeGlobalConfig({ forges: { "git.example.com": "gitlab" } });
@@ -438,7 +438,10 @@ forgeTest(
     const otherPort = await run({ repo: "https://git.example.com:8443/group/sub/project" });
     assert.equal(res(otherPort).status, "seams-proposed", JSON.stringify(res(otherPort)));
     const calls = forgeState().calls;
-    assert.ok(calls.some((c) => c.join(" ") === "api --hostname git.example.com:8443 projects/group%2Fsub%2Fproject"), "an http(s) URL's port is part of the host glab is told");
+    assert.ok(
+      calls.some((c) => c.join(" ") === "GITLAB_HOST=git.example.com:8443 api projects/group%2Fsub%2Fproject"),
+      "an http(s) URL's port is part of the host glab is told, through GITLAB_HOST: its --hostname refuses a port",
+    );
     assert.ok(calls.some((c) => c.join(" ") === "issue view 7 --repo https://git.example.com:8443/group/sub/project --output json"));
 
     assert.deepEqual(await issueLocksDuring({ repo: "https://git.example.com/group/sub/project" }), OWN_LOCK, "the cwd's own repository, by URL");

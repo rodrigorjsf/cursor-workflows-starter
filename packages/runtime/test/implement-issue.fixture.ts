@@ -149,8 +149,11 @@ const a = process.argv.slice(2);
 const save = () => fs.writeFileSync(f, JSON.stringify(st));
 const fail = (text, code) => { save(); process.stderr.write(text); process.exit(code); };
 if (st.forge !== "gitlab") { (st.wrongCli = st.wrongCli || []).push(["glab", ...a]); fail("fake glab: this test's forge is " + st.forge, 99); }
-st.calls.push(a);
+// A host named through the environment comes first in the log, as \`GITLAB_HOST=<host>\`.
+st.calls.push(process.env.GITLAB_HOST === undefined ? a : ["GITLAB_HOST=" + process.env.GITLAB_HOST, ...a]);
 const flag = (n) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };
+// glab 1.130.0 takes a bare host in --hostname: with a port it fails before asking anyone, as it did when tried
+if (a[0] === "api" && (flag("--hostname") || "").includes(":")) fail("ERROR error parsing --hostname: invalid hostname.", 1);
 const has = (...n) => n.some((x) => a.includes(x));
 const REC = JSON.parse(fs.readFileSync(${JSON.stringify(RECORDINGS_PATH)}, "utf8"));
 const FAKE_HOST = ${JSON.stringify(TEST_HOST)};
@@ -183,7 +186,9 @@ const failure = route && (st.fail || {})[route];
 if (failure !== undefined) fail(failure, 1);
 if (route === "issue view" && a[0] === "issue") {
   if (flag("--output") !== "json") fail("fake glab: issue view without --output json", 2);
-  out({ ...recordedJson("issue-view"), iid: st.issue.number, title: st.issue.title, description: st.issue.body, labels: st.issue.labels.map((l) => l.name) }, "issue-view");
+  // the recording of the same form: \`--repo <url>\` names the project, without it the cwd's origin does
+  const name = has("--repo", "-R") ? "issue-view-repo" : "issue-view";
+  out({ ...recordedJson(name), iid: st.issue.number, title: st.issue.title, description: st.issue.body, labels: st.issue.labels.map((l) => l.name) }, name);
 } else if (route === "issue view") {
   // all the notes of the issue, newest first as GitLab lists them: the comments, then GitLab's own system notes made before them
   const notes = [...(st.systemNotes || []).map((body) => ({ body, system: true })), ...st.comments.map((body) => ({ body, system: false }))]
@@ -218,7 +223,8 @@ if (route === "issue view" && a[0] === "issue") {
   // the project of the cwd is the one its origin names; a named one comes back in GitLab's case (lower case here), on the host asked for
   const cwdRemote = hostAndPath(originUrl());
   const named = endpoint === "projects/:fullpath" ? cwdRemote.path : decodeURIComponent(endpoint.slice("projects/".length)).toLowerCase();
-  out({ ...recordedJson("repo-view"), path_with_namespace: named, web_url: "https://" + (flag("--hostname") || cwdRemote.host) + "/" + named }, "repo-view");
+  const name = endpoint === "projects/:fullpath" ? "repo-view" : "repo-view-repo";
+  out({ ...recordedJson(name), path_with_namespace: named, web_url: "https://" + (flag("--hostname") || process.env.GITLAB_HOST || cwdRemote.host) + "/" + named }, name);
 } else fail("fake glab: unsupported " + a.join(" "), 2);
 `;
 
