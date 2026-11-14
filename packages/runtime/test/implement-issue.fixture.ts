@@ -13,6 +13,7 @@ import { test } from "node:test";
 import { calls, script } from "@cursor/sdk";
 import { runWorkflow } from "../src/runtime/engine.js";
 import implementIssue from "../workflows/implement-issue.js";
+import { RECORDINGS_PATH, TEST_HOST } from "./glab-recordings.js";
 
 export type Handler = (o: any, msg: string) => unknown;
 
@@ -136,9 +137,11 @@ if (a[0] === "issue" && a[1] === "view") {
 `;
 
 
-// glab v1.130.0, by hand from its docs and source (spec B replaces these outputs with ones recorded from a real GitLab): the commands
-// and the `glab api` routes the forge module uses, on the state the fake gh keeps. A route it does not know exits 2.
-const FAKE_GLAB = `#!/usr/bin/env node
+// The fake glab: the commands and the `glab api` routes the forge module uses, on the state the fake gh keeps. What it prints is what the
+// real glab 1.130.0 printed for a real GitLab, recorded by scripts/verify/gitlab-e2e.sh (test/fixtures/glab/recordings.json, read here
+// through glab-recordings.ts): every object is the recorded one with the fields the test controls (numbers, titles, bodies, states)
+// set on it, and every list is in the order and the paging the real GitLab and glab gave. A route it does not know exits 2.
+const fakeGlab = () => `#!/usr/bin/env node
 const fs = require("fs");
 const f = process.env.FAKE_FORGE_STATE;
 const st = JSON.parse(fs.readFileSync(f, "utf8"));
@@ -149,10 +152,20 @@ if (st.forge !== "gitlab") { (st.wrongCli = st.wrongCli || []).push(["glab", ...
 st.calls.push(a);
 const flag = (n) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };
 const has = (...n) => n.some((x) => a.includes(x));
-const DEFAULT_PAGE_SIZE = 20; // GitLab's default page size: without --paginate a caller sees only the first page
+const REC = JSON.parse(fs.readFileSync(${JSON.stringify(RECORDINGS_PATH)}, "utf8"));
+const FAKE_HOST = ${JSON.stringify(TEST_HOST)};
+const fill = (text) => text.split(REC.placeholders.host).join(FAKE_HOST); // the recorded GitLab's placeholder host is the test's
+const printed = (name) => REC.recordings[name];
+const recordedJson = (name) => JSON.parse(fill(printed(name).stdout));
+const DEFAULT_PAGE_SIZE = 20; // GitLab's default page size: without --paginate glab prints only the first page; with it, every page as one array
 const STATES = { OPEN: "opened", MERGED: "merged", CLOSED: "closed" };
-const mrOf = (p, i) => ({ iid: i + 1, title: p.title, description: p.body, web_url: p.url, state: STATES[p.state || "OPEN"] || p.state, source_branch: p.head });
-const out = (value) => { save(); process.stdout.write(typeof value === "string" ? value : JSON.stringify(value) + "\\n"); };
+const MR = recordedJson("mr-list")[0];
+const NOTES = recordedJson("issue-notes");
+const NOTE_OF = { user: NOTES.find((n) => !n.system), system: NOTES.find((n) => n.system) };
+const mrOf = (p, i) => ({ ...MR, id: i + 1, iid: i + 1, title: p.title, description: p.body, web_url: p.url, state: STATES[p.state || "OPEN"] || p.state, source_branch: p.head });
+// What glab printed on stderr for the recording goes to stderr too (a warning, the text around a URL), then the value goes to stdout.
+const out = (value, name) => { save(); process.stderr.write(fill(printed(name).stderr)); process.stdout.write(JSON.stringify(value) + "\\n"); };
+const pageOf = (items, size) => (has("--paginate") ? items : items.slice(0, size));
 // which gh call each glab call stands for, so a test can fail it with failForge
 const endpoint = a[0] === "api" ? a.slice(1).find((x, i, all) => !x.startsWith("-") && !["--method", "-X", "-F", "--field", "-f", "--raw-field", "--hostname"].includes(all[i - 1])) : undefined;
 // Where glab is: the host and the project of the cwd come from its raw \`origin\` URL (a \`url.<base>.insteadOf\` rewrite is not applied), and \`--hostname\` of \`glab api\` names another host.
@@ -169,41 +182,42 @@ const failure = route && (st.fail || {})[route];
 if (failure !== undefined) fail(failure, 1);
 if (route === "issue view" && a[0] === "issue") {
   if (flag("--output") !== "json") fail("fake glab: issue view without --output json", 2);
-  out({ iid: st.issue.number, title: st.issue.title, description: st.issue.body, labels: st.issue.labels.map((l) => l.name), state: "opened" });
+  out({ ...recordedJson("issue-view"), iid: st.issue.number, title: st.issue.title, description: st.issue.body, labels: st.issue.labels.map((l) => l.name) }, "issue-view");
 } else if (route === "issue view") {
-  // all the notes of the issue: GitLab's own system notes first, then the comments; --paginate prints one array per page
-  const notes = [...(st.systemNotes || []).map((body) => ({ body, system: true })), ...st.comments.map((body) => ({ body, system: false }))].map((n, i) => ({ id: i + 1, ...n }));
-  const pages = [];
-  for (let i = 0; i < notes.length || i === 0; i += DEFAULT_PAGE_SIZE) pages.push(notes.slice(i, i + DEFAULT_PAGE_SIZE));
-  out((has("--paginate") ? pages : pages.slice(0, 1)).map((p) => JSON.stringify(p)).join("\\n") + "\\n");
+  // all the notes of the issue, newest first as GitLab lists them: the comments, then GitLab's own system notes made before them
+  const notes = [...(st.systemNotes || []).map((body) => ({ body, system: true })), ...st.comments.map((body) => ({ body, system: false }))]
+    .map((n, i) => ({ ...(n.system ? NOTE_OF.system : NOTE_OF.user), id: i + 1, body: n.body, system: n.system }))
+    .reverse();
+  out(pageOf(notes, DEFAULT_PAGE_SIZE), "issue-notes");
 } else if (route === "issue comment") {
   const field = flag("-F") || flag("--field") || "";
   const [key, ...rest] = field.split("=");
   const value = rest.join("=");
   if (key !== "body") fail("fake glab: a note needs -F body=@<file>", 2);
   st.comments.push(value.startsWith("@") ? fs.readFileSync(value.slice(1), "utf8") : value);
-  out({ id: st.comments.length, body: st.comments[st.comments.length - 1], system: false });
+  out({ ...recordedJson("note-create"), id: st.comments.length, body: st.comments[st.comments.length - 1], system: false }, "note-create");
 } else if (route === "pr view") {
   const query = new URLSearchParams(endpoint.split("?")[1]);
   // A PR seeded by a test has no head and answers for every branch; one made by mr create answers for its own branch only
   let mrs = st.prs.map(mrOf).filter((m) => !m.source_branch || m.source_branch === query.get("source_branch"));
   if (query.get("sort") !== "asc") mrs = mrs.reverse(); // created_at descending: the latest first
-  // GitLab's page size is per_page; --paginate prints one array per page
-  const size = Number(query.get("per_page") || DEFAULT_PAGE_SIZE);
-  const pages = [];
-  for (let i = 0; i < mrs.length || i === 0; i += size) pages.push(mrs.slice(i, i + size));
-  out((has("--paginate") ? pages : pages.slice(0, 1)).map((p) => JSON.stringify(p)).join("\\n") + "\\n");
+  out(pageOf(mrs, Number(query.get("per_page") || DEFAULT_PAGE_SIZE)), mrs.length ? "mr-list" : "mr-list-empty");
 } else if (route === "pr create") {
   if (has("-H", "--head")) fail("fake glab: -H names the head repository, not the branch: use --source-branch", 2);
   if (!flag("--source-branch") || !has("--yes")) fail("fake glab: mr create needs --source-branch and --yes (no prompts)", 2);
-  st.prs.push({ url: "https://gitlab.com/owner/repo/-/merge_requests/" + (st.prs.length + 1), body: flag("--description"), title: flag("--title"), head: flag("--source-branch"), state: "OPEN" });
-  const mr = st.prs[st.prs.length - 1];
-  out("\\nCreating merge request for " + mr.head + " into main in owner/repo\\n\\n!" + st.prs.length + " " + mr.title + "\\n" + mr.url + "\\n");
+  // what glab printed for the recorded merge request, with the branch, the title and the number of this one
+  const number = st.prs.length + 1;
+  const now = (text) => fill(text).split(REC.subjects.branch).join(flag("--source-branch")).split(REC.subjects.title).join(flag("--title")).split("/merge_requests/" + REC.subjects.mr).join("/merge_requests/" + number);
+  const stdout = now(printed("mr-create").stdout);
+  st.prs.push({ url: /https?:\\/\\/\\S+\\/-\\/merge_requests\\/\\d+/.exec(stdout)[0], body: flag("--description"), title: flag("--title"), head: flag("--source-branch"), state: "OPEN" });
+  save();
+  process.stderr.write(now(printed("mr-create").stderr));
+  process.stdout.write(stdout);
 } else if (route === "repo view") {
   // the project of the cwd is the one its origin names; a named one comes back in GitLab's case (lower case here), on the host asked for
   const cwdRemote = hostAndPath(originUrl());
   const named = endpoint === "projects/:fullpath" ? cwdRemote.path : decodeURIComponent(endpoint.slice("projects/".length)).toLowerCase();
-  out({ path_with_namespace: named, web_url: "https://" + (flag("--hostname") || cwdRemote.host) + "/" + named });
+  out({ ...recordedJson("repo-view"), path_with_namespace: named, web_url: "https://" + (flag("--hostname") || cwdRemote.host) + "/" + named }, "repo-view");
 } else fail("fake glab: unsupported " + a.join(" "), 2);
 `;
 
@@ -280,7 +294,7 @@ function setupFor(forge: TestForge) {
   git(repo, "config", `url.${join(root, "origin.git")}.insteadOf`, ORIGIN_URLS[forge]); // the host is the forge's; the repository is the bare one
   writeFileSync(join(bin, "gh"), FAKE_GH);
   chmodSync(join(bin, "gh"), 0o755);
-  writeFileSync(join(bin, "glab"), FAKE_GLAB);
+  writeFileSync(join(bin, "glab"), fakeGlab());
   chmodSync(join(bin, "glab"), 0o755);
   fx.forgeStateFile = join(root, "forge.json");
   process.env.FAKE_FORGE_STATE = fx.forgeStateFile;

@@ -70,6 +70,36 @@ O ciclo de vida se confere à mão, com o mesmo comando:
 
 O resultado dessas conferências vai em [8.2 §14](../../docs/research/verificacoes-locais.md).
 
+## GitLab de verdade no Docker: `gitlab-e2e.sh`
+
+O código de GitLab do runtime é testado offline contra um `glab` falso. As saídas desse falso não são escritas à mão: o
+[`gitlab-e2e.sh`](gitlab-e2e.sh) sobe um GitLab CE de verdade no Docker, roda o `glab` de verdade contra cada comando e
+rota de API que o runtime usa e grava o que ele imprimiu em
+[`packages/runtime/test/fixtures/glab/recordings.json`](../../packages/runtime/test/fixtures/glab/recordings.json). O token, a
+senha do root e o host local saem trocados por placeholders fixos, e o gravador (`record-glab-fixtures.ts`) não escreve nada se
+sobrar um segredo. É decisão do [ADR-0009](../../docs/adr/0009-forge-seam-github-and-gitlab.md).
+
+**Custa memória e tempo, não tokens.** O GitLab CE em modo de pouca memória (um processo Puma, Sidekiq enxuto, sem
+Prometheus, 256 MB de memória compartilhada) usa cerca de 2,5 GB e leva alguns minutos para subir; o script recusa rodar com
+menos de 4 GiB no Docker (`GITLAB_E2E_MIN_MEMORY_MB`). Fica fora do `npm run check` e do CI.
+
+```bash
+mise exec -- scripts/verify/gitlab-e2e.sh                                  # o glab fixado no mise.toml fica no PATH
+GITLAB_E2E_IMAGE=gitlab/gitlab-ce:latest mise exec -- scripts/verify/gitlab-e2e.sh   # a imagem mais nova, só para ver
+```
+
+| Variável | Padrão | O que muda |
+|---|---|---|
+| `GITLAB_E2E_IMAGE` | `gitlab/gitlab-ce:19.5.5-ce.0` | A imagem do GitLab. Um resultado só se reproduz com a tag fixada |
+| `GITLAB_E2E_PORT` | `8929` | A porta em `127.0.0.1`: o GitLab nunca fica exposto na rede |
+| `GITLAB_E2E_NAME` | `wf-gitlab-e2e` | O nome do container e o prefixo dos três volumes. O script recusa rodar se já existe um container com esse nome |
+| `GITLAB_E2E_TIMEOUT_SECONDS` | `1800` | Quanto esperar o GitLab responder |
+
+O script nunca reinicia nem reconfigura o Docker (use o Docker que já está de pé), e só remove o que ele mesmo criou: no fim,
+também quando uma etapa falha ou ele é interrompido, apaga o container e os volumes. O `glab` roda com uma pasta de
+configuração descartável, então o `~/.config/glab-cli` de quem roda não é tocado. Depois de uma gravação, confira com
+`git diff packages/runtime/test/fixtures/glab` e rode `mise exec -- npm run check`.
+
 ## Validação no Cursor IDE
 
 Os workflows acima conferem o SDK. Quem confere o kit dentro do Cursor IDE é o assistente guiado

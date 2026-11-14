@@ -4,7 +4,7 @@
 // WHY: the scripts took their root, ran `main` and wrote or checked their generated page the same way; one copy keeps
 //   them alike.
 // WHEN: imported by scripts/check-docs.ts, scripts/check-mermaid.ts, scripts/config-reference.ts,
-//   scripts/events-reference.ts and scripts/verify/validation-report.ts; not run on its own.
+//   scripts/events-reference.ts, scripts/verify/validation-report.ts and scripts/verify/record-glab-fixtures.ts; not run on its own.
 // HOW: `const root = rootFromArgs(process.argv.slice(2))`; `if (isEntryPoint(import.meta.url)) process.exitCode = main(...)`;
 //   `process.exitCode = writeGeneratedPage({ root, path, page, script, check })`.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
