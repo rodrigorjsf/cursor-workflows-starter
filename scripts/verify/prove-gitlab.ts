@@ -20,11 +20,29 @@ import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { errorText } from "../../packages/runtime/src/runtime/error-text.js";
-import { Commands } from "../../packages/runtime/workflows/implement-issue/commands.js";
-import { createForge, type Forge } from "../../packages/runtime/workflows/implement-issue/forge.js";
+import type { Forge } from "../../packages/runtime/workflows/implement-issue/forge.js";
 import { sanitizeModelText } from "../../packages/runtime/workflows/implement-issue/pr-body.js";
 import { isEntryPoint } from "../lib/cli.js";
-import { GitLabApi, GitLabHttpError, basicAuthOf, e2eEnv, execOf, git, loginGlab, mergeRequestNumber, runMain, secretsOf, versionsOf, type E2eEnv } from "../lib/gitlab-e2e.js";
+import {
+  GLAB_QUIET,
+  GitLabApi,
+  GitLabHttpError,
+  TimedOut,
+  basicAuthOf,
+  createProject,
+  e2eEnv,
+  git,
+  gitlabForge,
+  groupOf,
+  loginGlab,
+  mergeRequestNumber,
+  runMain,
+  secretsOf,
+  sleep,
+  until,
+  versionsOf,
+  type E2eEnv,
+} from "../lib/gitlab-e2e.js";
 import {
   CLOSING_FORMS,
   QUICK_ACTION_CASES,
@@ -83,8 +101,6 @@ function log(message: string): void {
   process.stderr.write(`${message}\n`);
 }
 
-const sleep = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
-
 /** The whole number the environment variable `key` holds, or `fallback`. */
 function numberEnv(key: string, fallback: number): number {
   const text = process.env[key];
@@ -111,20 +127,6 @@ function envOf(): Env {
     maxCents: numberEnv("GITLAB_E2E_MAX_CENTS", DEFAULT_MAX_CENTS),
     workflowTimeoutSeconds: numberEnv("GITLAB_E2E_WORKFLOW_TIMEOUT_SECONDS", DEFAULT_WORKFLOW_TIMEOUT_SECONDS),
   };
-}
-
-/** What `until` throws when the thing it waited for did not happen in time: GitLab being slow, which the caller may report, and not a bug of this script. */
-class TimedOut extends Error {}
-
-/** Polls `read` every `intervalMs` until it answers something other than `undefined`, or throws `TimedOut` after `timeoutMs`. */
-async function until<T>(what: string, read: () => Promise<T | undefined>, timeoutMs: number, intervalMs = 1_000): Promise<T> {
-  const deadline = performance.now() + timeoutMs;
-  for (;;) {
-    const value = await read();
-    if (value !== undefined) return value;
-    if (performance.now() > deadline) throw new TimedOut(`${what}: not within ${Math.round(timeoutMs / 1000)} s`);
-    await sleep(intervalMs);
-  }
 }
 
 interface Issue {
@@ -166,8 +168,8 @@ class Prover {
     this.repo = join(env.scratch, "proof");
     this.gitConfig = join(env.scratch, "proof.gitconfig");
     this.wfHome = join(env.scratch, "wf-home");
-    this.glabEnv = { GLAB_CONFIG_DIR: join(env.scratch, "glab-config-proof"), NO_COLOR: "1", GLAB_CHECK_UPDATE: "false" };
-    this.forge = createForge("gitlab", new Commands(execOf(this.glabEnv), { networkMs: 120_000 }));
+    this.glabEnv = { GLAB_CONFIG_DIR: join(env.scratch, "glab-config-proof"), ...GLAB_QUIET };
+    this.forge = gitlabForge(this.glabEnv);
   }
 
   private get project(): string {
@@ -179,11 +181,11 @@ class Prover {
   /** The group (the recorder may have made it), the project with a small Node project in it, a clone of it, and `glab` and `git` logged in. */
   async seed(): Promise<void> {
     const { api } = this;
-    const group = (await api.find<{ id: number }>(`/groups/${GROUP}`)) ?? (await api.call<{ id: number }>("POST", "/groups", { name: GROUP, path: GROUP, visibility: "private" }));
+    const group = await groupOf(api, GROUP);
     if ((await api.find(`/projects/${encodeURIComponent(PROJECT_PATH)}`)) !== undefined) {
       throw new Error(`the project ${PROJECT_PATH} exists: this script makes it, and only against a throwaway GitLab (scripts/verify/gitlab-e2e.sh starts one)`);
     }
-    const project = await api.call<{ id: number }>("POST", "/projects", { name: PROJECT, path: PROJECT, namespace_id: group.id, visibility: "private", initialize_with_readme: true });
+    const project = await createProject(api, group.id, PROJECT);
     this.projectId = project.id;
     await api.call("POST", `${this.project}/repository/commits`, {
       branch: "main",

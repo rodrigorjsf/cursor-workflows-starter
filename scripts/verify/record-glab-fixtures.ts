@@ -12,10 +12,26 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
-import { Commands } from "../../packages/runtime/workflows/implement-issue/commands.js";
-import { createForge, loginOf, type Forge } from "../../packages/runtime/workflows/implement-issue/forge.js";
+import { loginOf } from "../../packages/runtime/workflows/implement-issue/forge.js";
 import { isEntryPoint } from "../lib/cli.js";
-import { GitLabApi, basicAuthOf, e2eEnv, execOf, git, loginGlab, mergeRequestNumber, runMain, secretsOf, versionsOf, type E2eEnv } from "../lib/gitlab-e2e.js";
+import {
+  GLAB_QUIET,
+  GitLabApi,
+  basicAuthOf,
+  createProject,
+  e2eEnv,
+  execOf,
+  git,
+  gitlabForge,
+  groupOf,
+  loginGlab,
+  mergeRequestNumber,
+  runMain,
+  secretsOf,
+  until,
+  versionsOf,
+  type E2eEnv,
+} from "../lib/gitlab-e2e.js";
 import type { Versions } from "../lib/gitlab-proofs.js";
 import { HOST_PLACEHOLDER, refuseLeaks, scrubText, type Secrets } from "../lib/scrub-recording.js";
 
@@ -105,14 +121,8 @@ class Recorder {
       GLAB_CONFIG_DIR: join(this.env.scratch, "glab-config"),
       WF_RECORD_DIR: this.recordDir,
       WF_REAL_GLAB: this.realGlab,
-      NO_COLOR: "1",
-      GLAB_CHECK_UPDATE: "false",
+      ...GLAB_QUIET,
     };
-  }
-
-  private forge(): Forge {
-    const commands = new Commands(execOf(this.glabEnv), { networkMs: 120_000 });
-    return createForge("gitlab", commands);
   }
 
   /** Runs `step`, which has to make exactly one glab call, and keeps that call as the recording `name`. */
@@ -135,8 +145,8 @@ class Recorder {
   /** The group, the project, the issues and the clone that glab runs in. */
   async seed(): Promise<void> {
     const { api } = this;
-    const group = await api.call<{ id: number }>("POST", "/groups", { name: GROUP, path: GROUP, visibility: "private" });
-    const project = await api.call<{ id: number }>("POST", "/projects", { name: PROJECT, path: PROJECT, namespace_id: group.id, visibility: "private", initialize_with_readme: true });
+    const group = await groupOf(api, GROUP);
+    const project = await createProject(api, group.id, PROJECT);
     const base = `/projects/${project.id}`;
     const issue = await api.call<{ iid: number }>("POST", `${base}/issues`, { title: ISSUE_TITLE, description: ISSUE_BODY });
     // Labels set after the issue exists make GitLab add a system note, as they do on a real issue that is triaged.
@@ -165,7 +175,7 @@ class Recorder {
 
   /** Every glab call the forge module and the doctor make, once. */
   async recordAll(): Promise<Subjects> {
-    const forge = this.forge();
+    const forge = gitlabForge(this.glabEnv);
     const cwd = this.repo;
     const bodyFile = join(this.env.scratch, "body.md");
 
@@ -193,13 +203,9 @@ class Recorder {
 
   /** Waits until the issue has a note GitLab wrote itself, or fails: the recording of the notes has to hold one. */
   private async waitForSystemNote(): Promise<void> {
-    const deadline = performance.now() + 60_000;
-    for (;;) {
-      const notes = await this.api.call<Array<{ system: boolean }>>("GET", `/projects/${encodeURIComponent(`${GROUP}/${PROJECT}`)}/issues/1/notes`);
-      if (notes.some((note) => note.system)) return;
-      if (performance.now() > deadline) throw new Error("GitLab wrote no system note on the issue within 60 seconds of the merge request");
-      await new Promise((done) => setTimeout(done, 2000));
-    }
+    const notes = `/projects/${encodeURIComponent(`${GROUP}/${PROJECT}`)}/issues/1/notes`;
+    const hasSystemNote = async () => ((await this.api.call<Array<{ system: boolean }>>("GET", notes)).some((note) => note.system) ? true : undefined);
+    await until("GitLab's system note on issue #1 about the merge request", hasSystemNote, 60_000, 2_000);
   }
 
   versions(): Promise<Versions> {

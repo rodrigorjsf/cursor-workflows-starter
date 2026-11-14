@@ -7,12 +7,14 @@
 // WHEN: imported by those two scripts; not run on its own.
 // HOW: `const env = e2eEnv()`; `new GitLabApi(env.url, env.token).call("GET", "/version")`; `git(cwd, basicAuthOf(token), "clone", ...)`;
 //   `loginGlab(glab, env, host, token)`; `new Commands(execOf(env), { networkMs })`; `mergeRequestNumber(url)`; `secretsOf(env)`;
-//   `await versionsOf(api, env.image)`; `if (isEntryPoint(import.meta.url)) runMain(main)`.
+//   `await versionsOf(api, env.image)`; `if (isEntryPoint(import.meta.url)) runMain(main)`; `await until(what, read, timeoutMs)`;
+//   `await groupOf(api, name)` and `await createProject(api, groupId, name)`; `gitlabForge({ ...GLAB_QUIET, GLAB_CONFIG_DIR })`.
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { errorText } from "../../packages/runtime/src/runtime/error-text.js";
 import type { ExecResult } from "../../packages/runtime/src/runtime/workflow.js";
-import { MR_NUMBER } from "../../packages/runtime/workflows/implement-issue/forge.js";
+import { Commands } from "../../packages/runtime/workflows/implement-issue/commands.js";
+import { MR_NUMBER, createForge, type Forge } from "../../packages/runtime/workflows/implement-issue/forge.js";
 import type { Versions } from "./gitlab-proofs.js";
 import type { Secrets } from "./scrub-recording.js";
 
@@ -76,6 +78,22 @@ export function mergeRequestNumber(text: string): number | undefined {
   return digits === undefined ? undefined : Number(digits);
 }
 
+export const sleep = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
+
+/** What `until` throws when the thing it waited for did not happen in time: GitLab being slow, which the caller may report, and not a bug of the script. */
+export class TimedOut extends Error {}
+
+/** Polls `read` every `intervalMs` until it answers something other than `undefined`, or throws `TimedOut` after `timeoutMs`. */
+export async function until<T>(what: string, read: () => Promise<T | undefined>, timeoutMs: number, intervalMs = 1_000): Promise<T> {
+  const deadline = performance.now() + timeoutMs;
+  for (;;) {
+    const value = await read();
+    if (value !== undefined) return value;
+    if (performance.now() > deadline) throw new TimedOut(`${what}: not within ${Math.round(timeoutMs / 1000)} s`);
+    await sleep(intervalMs);
+  }
+}
+
 /** GitLab refused a call: its status says why (404 not there, 405 or 406 not mergeable yet), which a failure of this code never does. */
 export class GitLabHttpError extends Error {
   constructor(
@@ -122,6 +140,16 @@ export class GitLabApi {
   }
 }
 
+/** The private group `name`: the one the GitLab has (the other script may have made it), else a new one. */
+export async function groupOf(api: GitLabApi, name: string): Promise<{ id: number }> {
+  return (await api.find<{ id: number }>(`/groups/${encodeURIComponent(name)}`)) ?? (await api.call<{ id: number }>("POST", "/groups", { name, path: name, visibility: "private" }));
+}
+
+/** A new private project `name` in the group `groupId`, with a README on `main`. */
+export function createProject(api: GitLabApi, groupId: number, name: string): Promise<{ id: number }> {
+  return api.call<{ id: number }>("POST", "/projects", { name, path: name, namespace_id: groupId, visibility: "private", initialize_with_readme: true });
+}
+
 /** The `Authorization: Basic` value for the token as GitLab's git over http takes it. */
 export const basicAuthOf = (token: string): string => Buffer.from(`oauth2:${token}`).toString("base64");
 
@@ -138,6 +166,14 @@ export function loginGlab(glab: string, env: Record<string, string | undefined>,
   const processEnv = { ...process.env, ...env };
   execFileSync(glab, ["config", "set", "api_protocol", "http", "--host", host, "--global"], { env: processEnv, stdio: "ignore" });
   execFileSync(glab, ["auth", "login", "--hostname", host, "--stdin", "--insecure-storage"], { env: processEnv, input: token, stdio: ["pipe", "ignore", "ignore"] });
+}
+
+/** What every glab of these scripts runs with besides its configuration directory: no colour, no check for a newer glab. */
+export const GLAB_QUIET = { NO_COLOR: "1", GLAB_CHECK_UPDATE: "false" } as const;
+
+/** The runtime's GitLab forge, running `glab` as a plain process in `env` (`GLAB_QUIET` and a `GLAB_CONFIG_DIR` of the script's own). */
+export function gitlabForge(env: Record<string, string>): Forge {
+  return createForge("gitlab", new Commands(execOf(env), { networkMs: 120_000 }));
 }
 
 /** The `Exec` the runtime's `Commands` is built on, as a plain process run: the workflow engine is not involved. */
