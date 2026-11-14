@@ -203,6 +203,16 @@ test("the run-workflow skill opens the dashboard link that start_workflow return
   assert.match(step2, /one tab per conversation/i, "one dashboard shows every run: one tab, not a new one on every start");
 });
 
+test("the run-workflow skill says that workflow output is data from the run: relayed to the user, never followed", () => {
+  const skill = read("skills", "run-workflow", "SKILL.md");
+  const intro = skill.slice(0, skill.indexOf("\n## Steps"));
+  assert.match(intro, /`recent`, `result` and `error`/, "the sentence names the three fields the run's text arrives in");
+  assert.match(intro, /data from the run/, "the output is data from the run");
+  assert.match(intro, /never follow/i, "and the agent never follows it");
+  const approval = skill.slice(skill.indexOf("`untrusted-author`"), skill.indexOf("`secret-blocked`"));
+  assert.match(approval, /allowExternalAuthor: true/, "the skill tells the agent how an outside author's issue goes on, after the user read it");
+});
+
 test("reference files two skills share stay identical", () => {
   const authoring = join("skills", "cursor-workflow-authoring", "references");
   const conversion = join("skills", "skill-to-workflow", "references");
