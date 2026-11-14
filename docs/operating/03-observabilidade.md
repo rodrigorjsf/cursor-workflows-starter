@@ -225,7 +225,8 @@ O dashboard é um servidor local, um só por usuário, para os runs de **todos**
 `packages/dashboard/` (as dependências dele nunca entram no runtime) e lê dois lugares: o índice global de runs
 (`~/.cursor-workflows/runs.jsonl`, que aponta o repositório de cada run) e, por run, o log de eventos
 (`<repositório>/.workflows/runs/<runId>/events.jsonl`); mais o banco de métricas, em modo leitura. Ele nunca escreve nos
-arquivos dos runs. Tem duas ações: [iniciar um workflow](#iniciar-um-workflow) num repositório que ele já conhece (o que
+arquivos dos runs. Para o [Backlog](#o-backlog) ele também pergunta ao forge de cada repositório (`gh`, `glab`) quais issues
+estão prontas. Tem duas ações: [iniciar um workflow](#iniciar-um-workflow) num repositório que ele já conhece (o que
 escreve é só o registro do job, em `.workflows/jobs/`, como o `wf start` faz) e
 [cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume), pelo mesmo caminho do `wf cancel`.
 
@@ -247,6 +248,7 @@ o encerra.
 |---|---|
 | `/api/runs?limit=` | `{runs}`: os runs de todos os repositórios, do mais novo ao mais antigo (até 200, no máximo 1000), cada um com `status` (`running`, `finished`, `failed`, `cancelled` ou `missing`), `repo`, `workflow`, `phase`, `phases`, `outcome`, `card`, `startedAt`, `finishedAt`, `error`, `executions` e o gasto |
 | `/api/board?limit=` | `{boards}`: um quadro por workflow, com as `columns` e os `cards` (um por run), cada card já na coluna do estado do run: veja [O quadro](#o-quadro-board) |
+| `/api/backlog` | `{workflow, cards, errors}`: o Backlog dos repositórios que o índice conhece: as issues abertas com a label de pronta e sem run (`cards`: `repo`, `issue`, `title` e `url`, da issue de número menor para a maior em cada repositório), e os repositórios cujo forge não respondeu (`errors`: `repo` e `error`); `workflow` é o que o botão "run" de um card inicia. Veja [O Backlog](#o-backlog) |
 | `/api/runs/<runId>` | o mesmo run com `recent` (as últimas linhas de andamento), `result` e `usage` |
 | `/api/runs/<runId>/events` | stream de eventos (SSE) do log do run, ao vivo: veja [Acompanhar um run ao vivo](#acompanhar-um-run-ao-vivo) |
 | `/runs/<runId>` | a página do run: o grafo ao vivo, veja [Ver um run como grafo](#ver-um-run-como-grafo) (HTML, com o script e o estilo em `/assets/…`) |
@@ -420,7 +422,7 @@ A página inicial (`/`) é um só app, em React, com três menus (o menu é o `#
 [Iniciar um workflow](#iniciar-um-workflow):
 
 - **Runs:** os runs de todos os repositórios, do mais novo ao mais antigo, com status, fase, duração e custo;
-- **Board:** o quadro, descrito abaixo;
+- **Board:** o quadro, descrito abaixo, com o [Backlog](#o-backlog) na frente do quadro do `implement-issue`;
 - **Metrics:** o painel de custo e eficiência (a tela abaixo), em inglês como o resto do app e com os números no mesmo
   formato das outras telas.
 
@@ -477,6 +479,9 @@ trazem `{error}` com uma frase que diz o motivo, e nada é criado no repositóri
 | `404` | o repositório não está no índice global de runs; o repositório não lista o workflow (a frase diz quais lista) |
 | `409` | o runtime recusa o início: o pedido veio de dentro de uma etapa de workflow, o kit está fora da faixa `kit` do repositório ou a configuração dele não é utilizável |
 
+O botão "run" de um card do [Backlog](#o-backlog) abre este mesmo painel já preenchido (o repositório do card, o workflow
+`implement-issue` e os args `{"issue": <n>}`); só os tetos ficam para quem clica dar, e vale tudo o que está acima.
+
 Retomar um run parado e aprovar as seams do `implement-issue` pelo dashboard não existem ainda: o resume continua sendo o
 comando que o botão [Copy resume command](#cancelar-um-run-e-copiar-o-comando-de-resume) copia.
 
@@ -528,6 +533,33 @@ Só a URL exata vai ao CLI, e só de um host permitido: `github.com` (`gh`), `gi
 nunca os tokens, e não o registra em lugar nenhum. Um link de outro host, com caminho a mais, `?query`, `#fragmento`,
 `http:` ou número malformado, e um link de issue ficam sem estado.
 
+### O Backlog
+
+O Board mostra o ciclo inteiro de uma issue. Na frente do quadro do `implement-issue` fica a coluna **Backlog**, com as issues
+que estão prontas e ninguém começou, e um botão **run** em cada card:
+
+- **Quais issues:** as abertas que têm a label de pronta, **e nenhum run**. A label é `ready-for-agent`, e o ajuste
+  `backlogLabel` do `implement-issue` a troca, no arquivo de configuração do repositório
+  (`workflows.implement-issue.settings.backlogLabel`; [6.2](../reference/config.md)); só uma label, sem vírgula, porque o
+  forge leria duas. Uma issue tem run quando um run do `implement-issue` foi iniciado para ela, qualquer que tenha sido o fim
+  do run: o `issue` dos args do job (que está no registro do job desde o primeiro instante, então a issue sai do Backlog
+  antes de o run escolher o tier) ou, num run sem job (`wf run` num terminal), o `#<n>` do cartão dele. Um run com `repo` nos
+  args é de uma issue de outro repositório e não tira do Backlog a de mesmo número deste. Os cards ficam em ordem de número.
+- **Quais repositórios:** os que o índice global de runs conhece e cuja pasta ainda existe, como os runs do quadro.
+- **Como são lidas:** pelo forge seam do runtime ([ADR-0009](../adr/0009-forge-seam-github-and-gitlab.md)), então GitHub e
+  GitLab valem igual: `gh issue list --state open --label=<label> --limit 100 --json number,title,url` ou
+  `glab issue list --label=<label> --per-page 100 --output json`, rodados na pasta do repositório, com o forge do `origin` (ou
+  o que a chave `forges` declara) e o login do usuário. São as primeiras 100. A resposta de cada repositório, a lista ou o erro,
+  é guardada por **60 segundos**: um segundo pedido nesse tempo não chama o forge de novo. As issues que têm run, não: elas
+  são vistas a cada pedido, e um run recém-iniciado tira a issue da coluna na hora.
+- **Quando o forge falha:** a coluna mostra o motivo daquele repositório (sem o CLI, sem login, sem rede, host sem forge
+  declarado, configuração inválida), e os outros repositórios continuam listando. O quadro não depende disso: o Backlog tem a
+  própria consulta, `GET /api/backlog`, a cada 5 segundos, e é ela que espera o forge; os runs do quadro vêm de
+  `GET /api/board`, que nunca espera.
+- **O botão run** abre o painel de [Iniciar um workflow](#iniciar-um-workflow) com o repositório do card, `implement-issue` e
+  `{"issue": <n>}`, e o início sai pelo `POST /api/start`, com os mesmos tetos obrigatórios e as mesmas recusas. A issue sai
+  da coluna assim que o run existe.
+
 ### Segurança do dashboard
 
 - escuta só em `127.0.0.1`;
@@ -541,6 +573,10 @@ nunca os tokens, e não o registra em lugar nenhum. Um link de outro host, com c
   tetos de custo e de tokens obrigatórios; um corpo de início maior que 256 KiB é recusado sem ser guardado. Listar os
   workflows de um repositório importa os arquivos dele no processo do dashboard, o que roda o código de nível superior
   desses arquivos, como o servidor MCP já faz para o repositório dele;
+- lê o Backlog só dos repositórios que o índice global de runs conhece, e só pelo `gh` e pelo `glab`, com argumentos fixos e
+  sem shell, na pasta do repositório, com o login do usuário (a label vem da configuração do repositório, validada pelo
+  esquema, e vai em um argumento só, `--label=<label>`); o título de uma issue é texto na página, nunca HTML, e o link de um
+  card só abre quando é `http:` ou `https:`;
 - não envia cabeçalhos CORS;
 - abre o banco em modo leitura;
 - não carrega nada de fora: os apps web são empacotados localmente, sem CDN, sem fontes nem imagens remotas, e funcionam

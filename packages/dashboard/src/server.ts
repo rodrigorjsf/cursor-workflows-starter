@@ -13,10 +13,14 @@
 // - A run's event log is also served live: `/api/runs/<runId>/events` is a Server-Sent Events stream that replays the log and
 //   then follows it as the run appends, and `/api/runs/<runId>/steps/<stepId>/content` is one step's content.
 // - The Board is `/api/board`: the runs placed in the columns of their workflow, with the state of the pull requests and merge requests their cards link to.
+// - The Backlog is `/api/backlog`: the open issues, of every repository the runs index names, that carry the backlog label and have no
+//   run, as the runtime reads them through the forge seam (backlog.ts keeps each repository's answer for a minute). It is a read of its
+//   own and waits for the forge, which `/api/board` never does, so a forge that is slow or down holds back no run.
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
-import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, dashboardUrl, type RunTail, cancelRun, defaultDbPath, knownRepos, leftAgentsNote, listRepoWorkflows, listRuns, openDb, readRun, readStepContent, startRun, summary, tailRun } from "@cursor-workflows/runtime/observe";
+import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, dashboardUrl, type RunTail, cancelRun, defaultDbPath, issuesWithRuns, knownRepos, leftAgentsNote, listRepoWorkflows, listRuns, openDb, readRun, readStepContent, startRun, summary, tailRun } from "@cursor-workflows/runtime/observe";
+import { Backlogs, backlogReply } from "./backlog.js";
 import { buildBoards } from "./board.js";
 import { PAGE_POLICY, assetPath, pageHtml } from "./pages.js";
 import { PrStates } from "./pr-state.js";
@@ -43,11 +47,14 @@ export interface DashboardOptions {
   port: number;
   /** How long the state of an open pull request or merge request is kept before its forge (`gh`, `glab`) is asked again, in milliseconds (a merged or closed one is kept 120 times as long). Default 30 seconds. */
   prStateCacheMs?: number;
+  /** How long the forge's answer for a repository's Backlog (its open issues with the backlog label, or the error) is kept before `gh` or `glab` is asked again, in milliseconds. Default 60 seconds. */
+  backlogCacheMs?: number;
   /** How long a cancel waits for the job to stop before it answers that the job is still stopping, in milliseconds. Default 20 seconds, what `cancel_workflow` waits. */
   cancelTimeoutMs?: number;
 }
 
 const DEFAULT_PR_STATE_CACHE_MS = 30_000;
+const DEFAULT_BACKLOG_CACHE_MS = 60_000;
 const DEFAULT_CANCEL_TIMEOUT_MS = 20_000;
 
 /** The assets are named after their content: they never change under their name, so a browser may keep them for good. */
@@ -197,6 +204,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
   );
   const metrics = new MetricsSource();
   const prStates = new PrStates(options.prStateCacheMs ?? DEFAULT_PR_STATE_CACHE_MS);
+  const backlogs = new Backlogs(options.backlogCacheMs ?? DEFAULT_BACKLOG_CACHE_MS);
   const csrfToken = randomBytes(32).toString("hex");
   const cancelTimeoutMs = options.cancelTimeoutMs ?? DEFAULT_CANCEL_TIMEOUT_MS;
 
@@ -240,6 +248,17 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
     send(res, reply.status, reply.body);
   }
 
+  /** The Backlog: what each known repository's forge says (kept a while), without the issues a run has taken on (looked at on every request). Waits for the forge, which the Board does not. */
+  async function backlog(res: ServerResponse): Promise<void> {
+    const readings = await Promise.all(
+      knownRepos().map(async (repo) => {
+        const read = await backlogs.read(repo);
+        return { repo, read, taken: read.kind === "listed" ? issuesWithRuns(repo) : new Set<number>() };
+      }),
+    );
+    send(res, 200, backlogReply(readings));
+  }
+
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!hostAllowed(req.headers.host)) {
       res.writeHead(403, { "content-type": "text/plain; charset=utf-8" }).end("host not allowed");
@@ -277,6 +296,8 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
       case "/api/repos":
         send(res, 200, { repos: knownRepos() });
         return;
+      case "/api/backlog":
+        return backlog(res);
       case "/api/workflows": {
         const repo = url.searchParams.get("repo");
         if (!repo) return send(res, 400, { error: "repo is required: the path of a repository the dashboard knows" });
@@ -353,6 +374,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
         server.close(() => {
           metrics.close();
           prStates.close();
+          backlogs.close();
           resolve();
         });
         server.closeAllConnections();

@@ -121,6 +121,20 @@ test("every recording the fake glab plays is there, with the shape the offline t
   assert.match(json("repo-view").path_with_namespace, /^[^/]+\/[^/]+$/);
 });
 
+test("the Backlog's issue list was recorded from the real glab: the open issues that carry the label, newest first, and what glab prints for none", () => {
+  const { recordings } = JSON.parse(read(RECORDINGS)) as RecordingsFile;
+  const listed = recordings["issue-list"]!;
+  assert.deepEqual(listed.args, ["issue", "list", "--label=ready-for-agent", "--per-page", "100", "--output", "json"], "the command line the forge module sends (forge.ts, listIssues)");
+  assert.equal(listed.exitCode, 0, listed.stderr);
+  const issues = JSON.parse(listed.stdout) as Array<{ iid: number; title: string; web_url: string; state: string; labels: string[] }>;
+  assert.ok(issues.length >= 2, "two issues, so the recording shows the order glab gives");
+  assert.ok(issues.every((issue) => issue.state === "opened" && issue.labels.includes("ready-for-agent")), "open issues that carry the label");
+  assert.ok(issues[0]!.iid > issues[1]!.iid, "newest first");
+  assert.match(issues[0]!.web_url, new RegExp(`^http://${HOST_PLACEHOLDER}/[^/]+/[^/]+/-/[a-z_]+/${issues[0]!.iid}$`));
+  assert.equal(recordings["issue-list-empty"]!.exitCode, 0);
+  assert.deepEqual(JSON.parse(recordings["issue-list-empty"]!.stdout), []);
+});
+
 test("the dashboard's merge request by URL and the forge's calls with a repo argument were recorded from the real glab too", () => {
   const { recordings, subjects } = JSON.parse(read(RECORDINGS)) as RecordingsFile;
   const ran = (name: string): Recording => {

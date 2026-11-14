@@ -180,6 +180,30 @@ export function listRuns(limit = 200): RunSummary[] {
     });
 }
 
+/** What a run of a workflow says about what it was started for: how its job was started, and the card its workflow set. */
+export interface RunOrigin {
+  runId: string;
+  /** How the run's job was started (its args); absent for a run with no job (`wf run` in a terminal), and for a record an older kit wrote. */
+  start?: JobStart;
+  /** The latest card of the run; absent while the workflow has set none. */
+  card?: RunCard;
+}
+
+/**
+ * Every run of `workflow` in `repo` that the runs index names (not only the newest ones `listRuns` reads), each with what says what
+ * it was started for. Only reads. A run whose log cannot be read has neither.
+ */
+export function runOriginsOf(repo: string, workflow: string): RunOrigin[] {
+  return indexedRuns()
+    .filter((entry) => entry.repo === repo && entry.workflow === workflow)
+    .map((entry) => {
+      const projected = projectLog(logOf(entry));
+      if ("error" in projected) return { runId: entry.runId };
+      const start = projected.jobId === undefined ? undefined : readJobStart(entry.repo, projected.jobId);
+      return { runId: entry.runId, ...(start === undefined ? {} : { start }), ...(projected.card === undefined ? {} : { card: projected.card }) };
+    });
+}
+
 /** The run's entry in the runs index. Undefined when the index has no such run. The run id is only compared with the index, never used as a path. */
 function indexedRun(runId: string): RunsIndexEntry | undefined {
   return indexedRuns().find((e) => e.runId === runId);

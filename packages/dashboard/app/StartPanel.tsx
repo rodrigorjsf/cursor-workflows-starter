@@ -1,13 +1,14 @@
 // The Start panel: pick a repository the dashboard knows, one of the workflows it lists, the args as JSON (pre-filled with a
 // skeleton of what the workflow requires) and both caps, then start it as a job. The server decides what may start and says why
 // not; the panel shows its sentence next to the form. A start that worked opens the run's page, where the run appears a moment
-// later. `StartPanelView` is what is drawn from the data it is handed; `StartPanel` fetches that data and holds the form.
+// later. `StartPanelView` is what is drawn from the data it is handed; `StartPanel` fetches that data and holds the form. A `preset` (a
+// Backlog card's run button) opens the form on its repository, with its workflow and args filled in: the caps stay for the user to give.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WorkflowsReply } from "../src/start.js";
 import { repoName, runHref } from "./format.js";
 import { Empty } from "./Loaded.js";
 import { loadRepos, loadWorkflows, postStart } from "./start-api.js";
-import { EMPTY_FORM, type StartFormState, argsTextOf, brokenFilesNote, startBody, workflowNamed } from "./start-form.js";
+import { EMPTY_FORM, type StartFormState, type StartPreset, argsTextOf, brokenFilesNote, choiceAfterListing, startBody, workflowNamed } from "./start-form.js";
 
 /** Something fetched: on its way, failed with a sentence, or here. */
 export type Fetched<T> = { state: "loading" } | { state: "failed"; error: string } | { state: "ready"; value: T };
@@ -153,7 +154,7 @@ export function StartPanelView({ repos, workflows, form, sending, error, onRepo,
   );
 }
 
-export function StartPanel({ onClose }: { onClose(): void }) {
+export function StartPanel({ preset, onClose }: { preset?: StartPreset; onClose(): void }) {
   const [repos, setRepos] = useState<Fetched<string[]>>({ state: "loading" });
   const [workflows, setWorkflows] = useState<Fetched<WorkflowsReply>>();
   const [form, setForm] = useState<StartFormState>(EMPTY_FORM);
@@ -171,9 +172,9 @@ export function StartPanel({ onClose }: { onClose(): void }) {
     if (latestRepo.current !== repo) return;
     if (!reply.ok) return setWorkflows({ state: "failed", error: reply.error });
     setWorkflows({ state: "ready", value: reply.body });
-    const first = reply.body.workflows[0];
-    setForm((before) => ({ ...before, workflow: first?.name ?? "", argsText: argsTextOf(first) }));
-  }, []);
+    const choice = choiceAfterListing(repo, reply.body.workflows, preset);
+    setForm((before) => ({ ...before, ...choice }));
+  }, [preset]);
 
   useEffect(() => {
     document.getElementById("start-panel")?.focus(); // opening the panel moves the keyboard into it
@@ -182,14 +183,14 @@ export function StartPanel({ onClose }: { onClose(): void }) {
       if (stopped) return;
       if (!reply.ok) return setRepos({ state: "failed", error: reply.error });
       setRepos({ state: "ready", value: reply.body.repos });
-      const first = reply.body.repos[0];
+      const first = preset !== undefined && reply.body.repos.includes(preset.repo) ? preset.repo : reply.body.repos[0];
       if (first !== undefined) void chooseRepo(first);
     });
     return () => {
       stopped = true;
       latestRepo.current = ""; // a workflows answer that arrives after the panel closed finds no chosen repository and is dropped
     };
-  }, [chooseRepo]);
+  }, [chooseRepo, preset]);
 
   const chooseWorkflow = (name: string) => {
     const entry = workflowNamed(workflows?.state === "ready" ? workflows.value.workflows : undefined, name);

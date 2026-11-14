@@ -9,15 +9,12 @@ import { afterEach, beforeEach, test } from "node:test";
 import { postStart } from "../app/start-api.js";
 import { type DashboardServer, startDashboard } from "../src/server.js";
 import { waitFor } from "../../runtime/test/wait-for.js";
-import { ECHO_WORKFLOW, type Sandbox, http, repoWithWorkflows, sandbox, startRequest } from "./support.js";
+import { ECHO_WORKFLOW, JOB_ENV, JOB_WAIT, type Sandbox, http, jobPidOf, repoWithWorkflows, sandbox, startRequest } from "./support.js";
 
 let box: Sandbox;
 let dash: DashboardServer;
 let jobPids: number[];
 let previousEnv: Record<string, string | undefined>;
-
-/** The variables the job process inherits from this one: no metrics database, no dashboard auto-start, and the tests' tsconfig, which swaps in the fake SDK. */
-const JOB_ENV = { WF_METRICS: "off", WF_DASH_AUTOSTART: "off", TSX_TSCONFIG_PATH: join(import.meta.dirname, "..", "..", "runtime", "tsconfig.test.json") };
 
 beforeEach(async () => {
   box = sandbox();
@@ -49,13 +46,8 @@ const knownRepo = (): string => repoWithWorkflows(box, "repo", { "echo.mjs": ECH
 
 const start = (body: unknown) => startRequest(dash.url, body);
 
-/** How long to wait for a job's process, which has to load TypeScript and the runtime: seconds on a loaded machine. */
-const WAIT = { timeoutMs: 60_000, intervalMs: 100 };
-
-/** The job's process, found through its record, so a test that fails halfway does not leave it running. */
 function trackJob(repo: string, jobId: string): void {
-  const { pid } = JSON.parse(readFileSync(join(repo, ".workflows", "jobs", `${jobId}.json`), "utf8")) as { pid: number };
-  jobPids.push(pid);
+  jobPids.push(jobPidOf(repo, jobId));
 }
 
 /** The `run-start` event of a run, read from its log: what the job's own process resolved. */
@@ -69,11 +61,11 @@ async function runOnTheBoard(runId: string) {
   const card = await waitFor(`run ${runId} on the board`, async () => {
     const boards = (await http(dash.url, "/api/board")).json.boards as Array<{ cards: Array<{ runId: string; status: string }> }>;
     return boards.flatMap((board) => board.cards).find((c) => c.runId === runId);
-  }, WAIT);
+  }, JOB_WAIT);
   const detail = await waitFor(`run ${runId} to finish`, async () => {
     const reply = await http(dash.url, `/api/runs/${runId}`);
     return reply.json?.status === "finished" ? reply.json : undefined;
-  }, WAIT);
+  }, JOB_WAIT);
   return { card, detail };
 }
 

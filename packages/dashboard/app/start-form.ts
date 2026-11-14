@@ -22,10 +22,27 @@ export interface StartRequestBody {
   maxCents?: number;
 }
 
+/** What a form is opened with, instead of the first workflow of the first repository: a Backlog card's run button asks for this. `argsText` is the args box's text. */
+export interface StartPreset {
+  repo: string;
+  workflow: string;
+  argsText: string;
+}
+
 export const EMPTY_FORM: StartFormState = { repo: "", workflow: "", argsText: "{}", maxTokens: "", maxCents: "" };
 
 /** The args box's text for a workflow: its skeleton, written out as JSON so each field is on a line of its own. */
 export const argsTextOf = (workflow: WorkflowEntry | undefined): string => JSON.stringify(workflow?.argsSkeleton ?? {}, null, 2);
+
+/**
+ * The workflow and the args box's text the form takes once the workflows of `repo` are listed: the preset's when it is for this
+ * repository and the repository lists its workflow, else the first workflow and its skeleton (nothing, when none is listed).
+ */
+export function choiceAfterListing(repo: string, workflows: readonly WorkflowEntry[], preset?: StartPreset): { workflow: string; argsText: string } {
+  if (preset !== undefined && preset.repo === repo && workflowNamed(workflows, preset.workflow) !== undefined) return { workflow: preset.workflow, argsText: preset.argsText };
+  const first = workflows[0];
+  return { workflow: first?.name ?? "", argsText: argsTextOf(first) };
+}
 
 /** A cap box's number: undefined for an empty box (not given), NaN for text that is not a number. */
 function capNumber(text: string): number | undefined {
