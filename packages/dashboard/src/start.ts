@@ -44,7 +44,7 @@ export interface WorkflowsReply {
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** `maxTokens` or `maxCents` of the body: a number above 0, or the sentence that says what is wrong with it. */
-function capOf(body: Record<string, unknown>, field: "maxTokens" | "maxCents"): number | string {
+function readCap(body: Record<string, unknown>, field: "maxTokens" | "maxCents"): number | string {
   const value = body[field];
   if (value === undefined || value === null) return `${field} is required: a start from the dashboard always carries both caps, maxTokens and maxCents`;
   if (typeof value !== "number" || !Number.isFinite(value)) return `${field} must be a number`;
@@ -69,9 +69,9 @@ export function parseStartBody(raw: string): ParsedStart {
   if (workflow === undefined || workflow === "") return { ok: false, error: "workflow is required: the name of a workflow the repository lists" };
   if (typeof workflow !== "string") return { ok: false, error: "workflow must be text: the name of a workflow the repository lists" };
   if (!isObject(args)) return { ok: false, error: "args must be a JSON object" };
-  const maxTokens = capOf(body, "maxTokens");
+  const maxTokens = readCap(body, "maxTokens");
   if (typeof maxTokens === "string") return { ok: false, error: maxTokens };
-  const maxCents = capOf(body, "maxCents");
+  const maxCents = readCap(body, "maxCents");
   if (typeof maxCents === "string") return { ok: false, error: maxCents };
   return { ok: true, request: { repo, workflow, args, maxTokens, maxCents } };
 }

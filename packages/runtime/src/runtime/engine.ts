@@ -93,12 +93,6 @@ class StepTimeoutError extends StepFailedError {}
  */
 export class RunCancelledError extends FatalRunError {}
 
-/**
- * `INSIDE_WORKFLOW_ENV` (inside-workflow.ts) marca o ambiente do processo: o shell das etapas herda (o CLI recusa `wf run/start`).
- * Os servidores MCP do .cursor/mcp.json NÃO herdam (medido); para eles o engine registra o guarda inline de `nestedGuard`.
- */
-export { INSIDE_WORKFLOW_ENV, newRunId };
-
 /** Nome do servidor MCP do kit no mcp.json do projeto (o default é o do kit). */
 const WORKFLOWS_MCP_NAME = process.env.WF_MCP_SERVER_NAME ?? "workflows";
 

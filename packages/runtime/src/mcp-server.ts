@@ -32,7 +32,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { type LimitOverrides, limitOverridesSchema, loadEffectiveConfig, parseLimitOverrides } from "./config/index.js";
 import { assertKitCompatible, readKitPackage } from "./kit-version.js";
 import { type DashboardStatus, ensureDashboard, runPageUrl } from "./runtime/dashboard-instance.js";
-import { INSIDE_WORKFLOW_ENV } from "./runtime/engine.js";
+import { INSIDE_WORKFLOW_ENV } from "./runtime/inside-workflow.js";
 import { installCrashHandlers, spawnJob } from "./runtime/jobs.js";
 import { cancelJob, readJob, waitJob, waitSeconds } from "./runtime/job-state.js";
 import { type BrokenWorkflow, discoverWorkflows } from "./runtime/registry.js";

@@ -11,11 +11,10 @@ import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { newRunId } from "../src/runtime/engine.js";
 import { createJob } from "../src/runtime/jobs.js";
 import { cancelJob, listJobs, readJob, readJobRecord, waitJob } from "../src/runtime/job-state.js";
 import { RunStore } from "../src/runtime/run-store.js";
-import { isPlainName } from "../src/runtime/state.js";
+import { isPlainName, newRunId } from "../src/runtime/state.js";
 
 const PACKAGE = join(import.meta.dirname, "..");
 const sandbox = join(import.meta.dirname, ".tmp", `plain-ids-${process.pid}`);

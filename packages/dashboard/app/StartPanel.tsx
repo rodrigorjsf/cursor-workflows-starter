@@ -7,7 +7,7 @@ import type { WorkflowsReply } from "../src/start.js";
 import { repoName, runHref } from "./format.js";
 import { Empty } from "./Loaded.js";
 import { loadRepos, loadWorkflows, postStart } from "./start-api.js";
-import { EMPTY_FORM, type StartFormState, argsTextOf, startBody } from "./start-form.js";
+import { EMPTY_FORM, type StartFormState, argsTextOf, brokenFilesNote, startBody, workflowNamed } from "./start-form.js";
 
 /** Something fetched: on its way, failed with a sentence, or here. */
 export type Fetched<T> = { state: "loading" } | { state: "failed"; error: string } | { state: "ready"; value: T };
@@ -30,7 +30,8 @@ export interface StartPanelViewProps {
 
 export function StartPanelView({ repos, workflows, form, sending, error, onRepo, onWorkflow, onField, onSubmit, onClose }: StartPanelViewProps) {
   const listed = workflows?.state === "ready" ? workflows.value : undefined;
-  const chosen = listed?.workflows.find((workflow) => workflow.name === form.workflow);
+  const chosen = workflowNamed(listed?.workflows, form.workflow);
+  const brokenNote = listed && brokenFilesNote(listed.broken);
   return (
     <section className="start-panel" id="start-panel" aria-label="Start a workflow" tabIndex={-1}>
       <form
@@ -96,9 +97,9 @@ export function StartPanelView({ repos, workflows, form, sending, error, onRepo,
                 Could not load the workflows: {workflows.error}
               </p>
             )}
-            {listed && listed.broken.length > 0 && (
-              <p className="note" role="status">
-                {listed.broken.length === 1 ? "1 workflow file" : `${listed.broken.length} workflow files`} of this repository did not load and {listed.broken.length === 1 ? "is" : "are"} not listed: {listed.broken.map((file) => file.file).join(", ")}.
+            {brokenNote && (
+              <p className="note" role="alert">
+                {brokenNote}
               </p>
             )}
             <label className="start-field">
@@ -186,11 +187,12 @@ export function StartPanel({ onClose }: { onClose(): void }) {
     });
     return () => {
       stopped = true;
+      latestRepo.current = ""; // a workflows answer that arrives after the panel closed finds no chosen repository and is dropped
     };
   }, [chooseRepo]);
 
   const chooseWorkflow = (name: string) => {
-    const entry = workflows?.state === "ready" ? workflows.value.workflows.find((workflow) => workflow.name === name) : undefined;
+    const entry = workflowNamed(workflows?.state === "ready" ? workflows.value.workflows : undefined, name);
     setForm((before) => ({ ...before, workflow: name, argsText: argsTextOf(entry) }));
     setError(undefined);
   };

@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { StartPanelView, type StartPanelViewProps } from "../app/StartPanel.js";
-import { EMPTY_FORM, argsTextOf, startBody } from "../app/start-form.js";
+import { EMPTY_FORM, argsTextOf, brokenFilesNote, startBody, workflowNamed } from "../app/start-form.js";
 import { render, textOf } from "./render.js";
 
 const FORM = { repo: "/work/web-app", workflow: "echo", argsText: '{\n  "issue": 0\n}', maxTokens: "50000", maxCents: "20" };
@@ -30,6 +30,16 @@ test("the args box starts with the workflow's skeleton, written one field to a l
   assert.equal(argsTextOf({ name: "echo", description: "", argsSkeleton: { issue: 0, note: "" }, optionalArgs: [] }), '{\n  "issue": 0,\n  "note": ""\n}');
   assert.equal(argsTextOf(undefined), "{}");
   assert.equal(EMPTY_FORM.argsText, "{}");
+});
+
+test("a listing is searched by workflow name, and the files that did not load are named in one sentence, singular or plural", () => {
+  const echo = { name: "echo", description: "", argsSkeleton: {}, optionalArgs: [] };
+  assert.equal(workflowNamed([echo], "echo"), echo);
+  assert.equal(workflowNamed([echo], "plain"), undefined);
+  assert.equal(workflowNamed(undefined, "echo"), undefined);
+  assert.equal(brokenFilesNote([]), undefined);
+  assert.equal(brokenFilesNote([{ file: "/r/a.ts" }]), "1 workflow file of this repository did not load and is not listed: /r/a.ts.");
+  assert.equal(brokenFilesNote([{ file: "/r/a.ts" }, { file: "/r/b.ts" }]), "2 workflow files of this repository did not load and are not listed: /r/a.ts, /r/b.ts.");
 });
 
 const noop = () => undefined;

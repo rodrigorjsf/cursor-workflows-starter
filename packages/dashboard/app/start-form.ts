@@ -28,8 +28,18 @@ export const EMPTY_FORM: StartFormState = { repo: "", workflow: "", argsText: "{
 export const argsTextOf = (workflow: WorkflowEntry | undefined): string => JSON.stringify(workflow?.argsSkeleton ?? {}, null, 2);
 
 /** A cap box's number: undefined for an empty box (not given), NaN for text that is not a number. */
-function capOf(text: string): number | undefined {
+function capNumber(text: string): number | undefined {
   return text.trim() === "" ? undefined : Number(text);
+}
+
+/** The workflow of a listing called `name`. */
+export const workflowNamed = (workflows: readonly WorkflowEntry[] | undefined, name: string): WorkflowEntry | undefined => workflows?.find((workflow) => workflow.name === name);
+
+/** Which workflow files of a repository did not load, as the sentence the panel writes under the form; undefined when all of them did. */
+export function brokenFilesNote(broken: ReadonlyArray<{ file: string }>): string | undefined {
+  if (broken.length === 0) return undefined;
+  const one = broken.length === 1;
+  return `${one ? "1 workflow file" : `${broken.length} workflow files`} of this repository did not load and ${one ? "is" : "are"} not listed: ${broken.map((entry) => entry.file).join(", ")}.`;
 }
 
 /** The request the form stands for, or the sentence that says what is wrong with the box that cannot become one. */
@@ -41,8 +51,8 @@ export function startBody(form: StartFormState): { ok: true; body: StartRequestB
     return { ok: false, error: `the args are not valid JSON: ${err instanceof Error ? err.message : String(err)}` };
   }
   if (typeof args !== "object" || args === null || Array.isArray(args)) return { ok: false, error: "the args must be a JSON object" };
-  const maxTokens = capOf(form.maxTokens);
-  const maxCents = capOf(form.maxCents);
+  const maxTokens = capNumber(form.maxTokens);
+  const maxCents = capNumber(form.maxCents);
   if (Number.isNaN(maxTokens)) return { ok: false, error: "maxTokens must be a number" };
   if (Number.isNaN(maxCents)) return { ok: false, error: "maxCents must be a number" };
   return {

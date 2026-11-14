@@ -3,13 +3,11 @@
 // answer that is a refusal. The page's `fetch` is the same function with an empty origin. No job is started here (the start that
 // works is in start.process.test.ts).
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { postAction } from "../app/dashboard-api.js";
 import { loadRepos, loadWorkflows, postStart } from "../app/start-api.js";
 import { type DashboardServer, startDashboard } from "../src/server.js";
-import { type Sandbox, sandbox, writeRun } from "./support.js";
+import { ECHO_WORKFLOW, type Sandbox, repoWithWorkflows, sandbox } from "./support.js";
 
 let box: Sandbox;
 let dash: DashboardServer;
@@ -23,14 +21,8 @@ afterEach(async () => {
   box.dispose();
 });
 
-/** A repo the runs index knows, with one workflow that takes an `issue`. */
-function knownRepo(): string {
-  const repo = box.repo("repo");
-  mkdirSync(join(repo, ".agents", "workflows"), { recursive: true });
-  writeFileSync(join(repo, ".agents", "workflows", "echo.mjs"), `export default { meta: { name: "echo", description: "Echoes.", argsSchema: { type: "object", required: ["issue"], properties: { issue: { type: "integer" } } } }, async run() { return { status: "done" }; } };\n`);
-  writeRun(box.home, repo, { runId: "echo-earlier01", workflow: "echo", startedAt: "2026-11-12T10:00:00.000Z", events: [{ type: "run-end", status: "finished" }] });
-  return repo;
-}
+/** A repo the runs index knows, with the `echo` workflow, which takes an `issue`. */
+const knownRepo = (): string => repoWithWorkflows(box, "repo", { "echo.mjs": ECHO_WORKFLOW });
 
 test("the form's reads come back typed: the known repositories, then the repository's workflows with their skeletons", async () => {
   const repo = knownRepo();
@@ -40,7 +32,7 @@ test("the form's reads come back typed: the known repositories, then the reposit
   const listed = await loadWorkflows(repo, dash.url);
   assert.ok(listed.ok);
   assert.equal(listed.body.repo, repo);
-  assert.deepEqual(listed.body.workflows.find((workflow) => workflow.name === "echo"), { name: "echo", description: "Echoes.", argsSkeleton: { issue: 0 }, optionalArgs: [] });
+  assert.deepEqual(listed.body.workflows.find((workflow) => workflow.name === "echo"), { name: "echo", description: "Echoes its args.", whenToUse: "Only in tests.", argsSkeleton: { issue: 0 }, optionalArgs: ["note"] });
 });
 
 test("an answer that is a refusal comes back as data with the server's own sentence and its status, never as a throw", async () => {

@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { type DashboardServer, startDashboard } from "../src/server.js";
-import { type Reply, type Sandbox, http, sandbox, writeRun } from "./support.js";
+import { ECHO_WORKFLOW, PLAIN_WORKFLOW, type Reply, type Sandbox, http, repoWithWorkflows, sandbox, startRequest } from "./support.js";
 
 let box: Sandbox;
 let dash: DashboardServer;
@@ -21,43 +21,17 @@ afterEach(async () => {
   box.dispose();
 });
 
-const START = "2026-11-12T10:00:00.000Z";
 const CAPS = { maxTokens: 50_000, maxCents: 20 };
 
-/** A workflow with args: `issue` is required, `note` is not, and nothing else is accepted. */
-const ECHO = `export default {
-  meta: {
-    name: "echo",
-    description: "Echoes its args.",
-    whenToUse: "Only in tests.",
-    argsSchema: { type: "object", required: ["issue"], additionalProperties: false, properties: { issue: { type: "integer", minimum: 1 }, note: { type: "string" } } },
-  },
-  async run(ctx) { return { status: "done", args: ctx.args }; },
-};
-`;
-/** A workflow that declares no args. */
-const PLAIN = `export default { meta: { name: "plain", description: "Takes no args." }, async run() { return { status: "done" }; } };\n`;
+const WORKFLOWS = { "echo.mjs": ECHO_WORKFLOW, "plain.mjs": PLAIN_WORKFLOW };
 
-/** A repo the runs index knows (it holds a run that ended), with the two workflows above in its `.agents/workflows/`. */
-function knownRepo(name = "repo"): string {
-  const repo = box.repo(name);
-  mkdirSync(join(repo, ".agents", "workflows"), { recursive: true });
-  writeFileSync(join(repo, ".agents", "workflows", "echo.mjs"), ECHO);
-  writeFileSync(join(repo, ".agents", "workflows", "plain.mjs"), PLAIN);
-  writeRun(box.home, repo, { runId: `echo-${name}0001`, workflow: "echo", startedAt: START, events: [{ type: "run-end", status: "finished" }] });
-  return repo;
-}
+/** A repo the runs index knows, with the two workflows above in its `.agents/workflows/`. */
+const knownRepo = (name = "repo"): string => repoWithWorkflows(box, name, WORKFLOWS);
 
-async function token(): Promise<string> {
-  const reply = await http(dash.url, "/api/csrf");
-  assert.equal(reply.status, 200);
-  return reply.json.csrfToken as string;
-}
+const token = async (): Promise<string> => (await http(dash.url, "/api/csrf")).json.csrfToken as string;
 
 /** `POST /api/start` with the token (unless `headers` says otherwise) and `body`. */
-async function start(body: unknown, headers?: Record<string, string>): Promise<Reply> {
-  return http(dash.url, "/api/start", { method: "POST", headers: headers ?? { "x-csrf-token": await token() }, body });
-}
+const start = (body: unknown, headers?: Record<string, string>): Promise<Reply> => startRequest(dash.url, body, headers);
 
 /** Nothing a start would create is there: no job record, no run directory beyond the fixture's own. */
 const startedNothing = (repo: string): boolean => !existsSync(join(repo, ".workflows", "jobs"));
@@ -126,17 +100,18 @@ test("start refuses a body that is not a JSON object with a repository and a wor
 });
 
 test("start refuses a repository the runs index does not know, even one that exists on disk", async () => {
-  knownRepo();
+  const repo = knownRepo();
   const stranger = box.repo("stranger"); // a real folder with a workflow, but no run of it was ever registered
   mkdirSync(join(stranger, ".agents", "workflows"), { recursive: true });
-  writeFileSync(join(stranger, ".agents", "workflows", "plain.mjs"), PLAIN);
-  const known = join(box.repo("repo"), "..", "stranger"); // a path that reaches the stranger through a known one
-  for (const repo of [stranger, known, "/nonexistent/place", "relative/path", "/"]) {
-    const reply = await start({ repo, workflow: "plain", ...CAPS });
-    assert.equal(reply.status, 404, repo);
-    assert.match(reply.json.error, /^unknown repository: /, repo);
+  writeFileSync(join(stranger, ".agents", "workflows", "plain.mjs"), PLAIN_WORKFLOW);
+  const through = `${repo}/../stranger`; // not normalized: it names the stranger by walking out of a known repository
+  for (const unknown of [stranger, through, "/nonexistent/place", "relative/path", "/"]) {
+    const reply = await start({ repo: unknown, workflow: "plain", ...CAPS });
+    assert.equal(reply.status, 404, unknown);
+    assert.match(reply.json.error, /^unknown repository: /, unknown);
   }
-  assert.ok(startedNothing(stranger), "nothing was started, and nothing was written, in the folder");
+  assert.ok(startedNothing(stranger), "nothing was started");
+  assert.equal(existsSync(join(stranger, ".workflows")), false, "and nothing was written in the folder");
 });
 
 test("start refuses a workflow the repository does not list, and says which ones it lists", async () => {
@@ -194,7 +169,7 @@ test("a workflow file edited after the dashboard first listed it is listed, and 
   const listed = async () => ((await http(dash.url, `/api/workflows?repo=${encodeURIComponent(repo)}`)).json.workflows as Array<{ name: string; argsSkeleton: unknown }>).find((w) => w.name === "echo");
   assert.deepEqual((await listed())?.argsSkeleton, { issue: 0 });
 
-  writeFileSync(join(repo, ".agents", "workflows", "echo.mjs"), ECHO.replace('required: ["issue"]', 'required: ["ticket"]').replace("issue: { type", "ticket: { type: \"string\" }, issue: { type"));
+  writeFileSync(join(repo, ".agents", "workflows", "echo.mjs"), ECHO_WORKFLOW.replace('required: ["issue"]', 'required: ["ticket"]').replace("issue: { type", "ticket: { type: \"string\" }, issue: { type"));
   assert.deepEqual((await listed())?.argsSkeleton, { ticket: "" }, "the form's skeleton follows the edit");
   const stale = await start({ repo, workflow: "echo", args: { issue: 4 }, ...CAPS });
   assert.equal(stale.status, 400);

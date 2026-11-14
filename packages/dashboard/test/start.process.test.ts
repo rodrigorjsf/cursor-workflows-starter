@@ -3,12 +3,13 @@
 // `WF_HOME`: the tests wait for that run to show on the board and read its event log. Nothing reaches the Cursor API (the
 // workflow takes no steps, and the job gets the fake SDK like every TypeScript child process of the tests).
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { postStart } from "../app/start-api.js";
 import { type DashboardServer, startDashboard } from "../src/server.js";
-import { type Reply, type Sandbox, http, sandbox, writeRun } from "./support.js";
+import { waitFor } from "../../runtime/test/wait-for.js";
+import { ECHO_WORKFLOW, type Sandbox, http, repoWithWorkflows, sandbox, startRequest } from "./support.js";
 
 let box: Sandbox;
 let dash: DashboardServer;
@@ -41,43 +42,15 @@ afterEach(async () => {
   box.dispose();
 });
 
-const START = "2026-11-12T10:00:00.000Z";
 const CAPS = { maxTokens: 50_000, maxCents: 20 };
 
-const ECHO = `export default {
-  meta: {
-    name: "echo",
-    description: "Echoes its args.",
-    argsSchema: { type: "object", required: ["issue"], properties: { issue: { type: "integer" } } },
-  },
-  async run(ctx) { return { status: "done", args: ctx.args }; },
-};
-`;
-
 /** A repo the runs index knows, with the `echo` workflow. */
-function knownRepo(): string {
-  const repo = box.repo("repo");
-  mkdirSync(join(repo, ".agents", "workflows"), { recursive: true });
-  writeFileSync(join(repo, ".agents", "workflows", "echo.mjs"), ECHO);
-  writeRun(box.home, repo, { runId: "echo-earlier01", workflow: "echo", startedAt: START, events: [{ type: "run-end", status: "finished" }] });
-  return repo;
-}
+const knownRepo = (): string => repoWithWorkflows(box, "repo", { "echo.mjs": ECHO_WORKFLOW });
 
-async function start(body: unknown): Promise<Reply> {
-  const token = (await http(dash.url, "/api/csrf")).json.csrfToken as string;
-  return http(dash.url, "/api/start", { method: "POST", headers: { "x-csrf-token": token }, body });
-}
+const start = (body: unknown) => startRequest(dash.url, body);
 
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-/** Polls `read` until it returns something, or fails after `timeoutMs` (a process that has to load TypeScript and the runtime takes seconds on a loaded machine). */
-async function until<T>(what: string, read: () => Promise<T | undefined>, timeoutMs = 60_000): Promise<T> {
-  for (const stop = performance.now() + timeoutMs; ; await sleep(100)) {
-    const value = await read();
-    if (value !== undefined) return value;
-    if (performance.now() > stop) throw new Error(`timed out waiting for ${what}`);
-  }
-}
+/** How long to wait for a job's process, which has to load TypeScript and the runtime: seconds on a loaded machine. */
+const WAIT = { timeoutMs: 60_000, intervalMs: 100 };
 
 /** The job's process, found through its record, so a test that fails halfway does not leave it running. */
 function trackJob(repo: string, jobId: string): void {
@@ -93,14 +66,14 @@ function runStartOf(repo: string, runId: string): { config: { limits: Record<str
 
 /** Waits for the run to appear on the board and to finish, and returns its card and its detail. */
 async function runOnTheBoard(runId: string) {
-  const card = await until(`run ${runId} on the board`, async () => {
+  const card = await waitFor(`run ${runId} on the board`, async () => {
     const boards = (await http(dash.url, "/api/board")).json.boards as Array<{ cards: Array<{ runId: string; status: string }> }>;
     return boards.flatMap((board) => board.cards).find((c) => c.runId === runId);
-  });
-  const detail = await until(`run ${runId} to finish`, async () => {
+  }, WAIT);
+  const detail = await waitFor(`run ${runId} to finish`, async () => {
     const reply = await http(dash.url, `/api/runs/${runId}`);
     return reply.json?.status === "finished" ? reply.json : undefined;
-  });
+  }, WAIT);
   return { card, detail };
 }
 
