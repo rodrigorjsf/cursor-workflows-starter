@@ -10,6 +10,7 @@
 //   them as written: one that does nothing even then is text to this GitLab, which the guard neutralizes for older versions.
 // WHEN: imported by scripts/verify/prove-gitlab.ts and test/gitlab-proofs.test.ts; not run on its own.
 // HOW: `problems(report)` is empty when every proof held; `renderEvidence(report)` is the Markdown for the pull request description.
+import type { MrState } from "../../packages/runtime/src/runtime/forge-pr-state.js";
 
 /** The words GitLab's default issue-closing pattern lists (its documentation, "Default closing pattern"), each in the forms it accepts. */
 const CLOSING_WORDS = ["Close", "Closes", "Closed", "Closing", "Fix", "Fixes", "Fixed", "Fixing", "Resolve", "Resolves", "Resolved", "Resolving", "Implement", "Implements", "Implemented", "Implementing"];
@@ -119,7 +120,7 @@ export interface WorkflowResult {
   reason?: string;
   mrUrl?: string;
   /** The merge request's state before it was merged: `opened`. */
-  mrState?: string;
+  mrState?: MrState;
   /** The description holds the line that closes the issue on merge (`Closes #N`). */
   closesIssueLine?: boolean;
   merged?: boolean;

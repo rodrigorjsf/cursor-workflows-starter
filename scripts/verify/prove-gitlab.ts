@@ -20,6 +20,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { errorText } from "../../packages/runtime/src/runtime/error-text.js";
+import type { MrState } from "../../packages/runtime/src/runtime/forge-pr-state.js";
 import type { Forge } from "../../packages/runtime/workflows/implement-issue/forge.js";
 import { sanitizeModelText } from "../../packages/runtime/workflows/implement-issue/pr-body.js";
 import { isEntryPoint } from "../lib/cli.js";
@@ -132,14 +133,14 @@ function envOf(): Env {
 interface Issue {
   iid: number;
   web_url: string;
-  state: string;
+  state: Extract<MrState, "opened" | "closed">;
   closed_at: string | null;
 }
 
 interface MergeRequest {
   iid: number;
   web_url: string;
-  state: string;
+  state: MrState;
   description: string;
   detailed_merge_status: string;
   merged_at: string | null;
@@ -212,7 +213,7 @@ class Prover {
     return this.api.call<Issue>("POST", `${this.project}/issues`, { title, description });
   }
 
-  private issueState = async (iid: number): Promise<string> => (await this.api.call<Issue>("GET", `${this.project}/issues/${iid}`)).state;
+  private issueState = async (iid: number): Promise<Issue["state"]> => (await this.api.call<Issue>("GET", `${this.project}/issues/${iid}`)).state;
 
   /** A new branch off `main` with one file of its own, made through the API: no merge request of these touches another's file. */
   private async branch(): Promise<string> {

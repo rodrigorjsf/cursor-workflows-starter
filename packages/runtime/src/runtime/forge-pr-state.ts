@@ -5,8 +5,11 @@
 /** The state of a PR, as the forge reports it. */
 export type PrState = "OPEN" | "MERGED" | "CLOSED";
 
+/** The states GitLab's REST API reports for a merge request. An issue has two of them: `opened` and `closed`. */
+export type MrState = "opened" | "locked" | "merged" | "closed";
+
 /** What GitLab's REST API calls a merge request that is still being worked on or is being merged: both are a live PR. */
-const MR_STATES: Readonly<Record<string, PrState>> = { opened: "OPEN", locked: "OPEN", merged: "MERGED", closed: "CLOSED" };
+const MR_STATES: Readonly<Record<MrState, PrState>> = { opened: "OPEN", locked: "OPEN", merged: "MERGED", closed: "CLOSED" };
 
 /** The `PrState` of the `state` GitLab's REST API reports for a merge request, or undefined for one this version does not know. */
-export const prStateOfMr = (state: string): PrState | undefined => (Object.hasOwn(MR_STATES, state) ? MR_STATES[state] : undefined);
+export const prStateOfMr = (state: string): PrState | undefined => (Object.hasOwn(MR_STATES, state) ? MR_STATES[state as MrState] : undefined);
