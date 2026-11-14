@@ -35,6 +35,17 @@
   `getUsage()` os tokens dele ficam fora do total. Os textos do livro (2.2, 3.1, 4.1, 5.1, 5.3 e 6.2), o comentário do evento
   `turn` e as skills `cursor-workflow-authoring` e `skill-to-workflow` dizem isso agora.
 
+### Corrigido
+
+- **Cancelar um job travado mata também os comandos que ele iniciou, não só o processo.** O cancelamento de um job com
+  heartbeat parado (`wf cancel`, `cancel_workflow` e o botão Cancel do dashboard) mandava `SIGKILL` só ao pid do job. Cada
+  comando de `ctx.exec` roda num grupo de processo próprio e seu encerramento está no gancho de saída do job, que o `SIGKILL`
+  pula: um `sleep 600` ou um teste longo continuava rodando depois do cancelamento. Agora o job grava o grupo de processo de
+  cada comando vivo num arquivo ao lado do seu registro (`<jobId>.exec-group.<pgid>`, removido quando o comando termina), e o
+  cancelamento mata esses grupos junto com o processo. Também mata os filhos destacados do próprio processo, que é como o SDK
+  roda os comandos de shell do agente local (o agente em si roda dentro do processo do job e morre com ele); isso só vale
+  onde há `/proc`. O cancelamento de um job em execução (`SIGTERM`, desfaz a etapa, `cancelled`) não mudou.
+
 ## 0.4.0 (pré-release, 2026-11-13)
 
 ### Adicionado

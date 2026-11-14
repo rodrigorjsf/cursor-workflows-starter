@@ -255,7 +255,7 @@ o encerra.
 | `/api/repos` | `{repos}`: os repositórios em que o dashboard inicia um workflow: os que o índice global de runs conhece e cuja pasta ainda existe, o de run mais recente primeiro |
 | `/api/workflows?repo=<caminho>` | `{repo, workflows, broken}`: os workflows que o runtime lista para o repositório (cada um com `name`, `description`, `whenToUse`, `argsSkeleton` e `optionalArgs`) e os arquivos de workflow que não carregaram, com o erro; `404` para um repositório que o índice não conhece |
 | `POST /api/start` | inicia um workflow como job (cabeçalho `X-CSRF-Token`; corpo `{repo, workflow, args, maxTokens, maxCents}`) e responde `202` com `{jobId, runId, repo, workflow}`, mais `violations` quando um teto global cortou o pedido; as recusas estão em [Iniciar um workflow](#iniciar-um-workflow) |
-| `POST /api/runs/<runId>/cancel` | cancela o job que executa o run (cabeçalho `X-CSRF-Token`); num run travado, encerra o processo com `SIGKILL` e cancela pela API da Cursor os cloud agents que o run deixou rodando; num run que não está executando, cancela por essa API os cloud agents que o processo morto deixou rodando e responde `200` com um `note`, ou `409` se não havia nada a cancelar: veja [Cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume) |
+| `POST /api/runs/<runId>/cancel` | cancela o job que executa o run (cabeçalho `X-CSRF-Token`); num run travado, encerra o processo com `SIGKILL`, mata os comandos de `ctx.exec` que ele tinha em andamento e cancela pela API da Cursor os cloud agents que o run deixou rodando; num run que não está executando, cancela por essa API os cloud agents que o processo morto deixou rodando e responde `200` com um `note`, ou `409` se não havia nada a cancelar: veja [Cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume) |
 | `/api/summary?days=` | o resumo de métricas dos painéis abaixo |
 | `/api/health` | `{app, pid}`: como quem chama sabe que é o dashboard que responde na porta |
 
@@ -374,7 +374,7 @@ No cabeçalho da página do run:
   mesmo caminho do `wf cancel` e do `cancel_workflow` (`cancelJob`). Num run em andamento, é um `SIGTERM` ao processo do
   job, que cancela os agentes, desfaz a etapa de escrita em curso e escreve o fim do run como `cancelled`; o cartão vai para
   a coluna Cancelled quando o log o registra. Num run travado, é um `SIGKILL`: nada é desfeito, o run segue `failed` (o
-  cartão fica em Failed) e os cloud agents que ele deixou rodando são cancelados, como diz o item do run travado. Se o job
+  cartão fica em Failed), os comandos que o processo tinha em andamento morrem com ele e os cloud agents que ele deixou rodando são cancelados, como diz o item do run travado. Se o job
   demora mais do que a espera (20 s) para parar, a resposta diz que ele ainda está parando. Um run que não foi iniciado como job (`wf run`
   num terminal) não tem processo registrado para sinalizar: o dashboard responde `409` e diz para dar Ctrl-C naquele terminal.
 - **Cancel cloud agent** (**Cancel N cloud agents** quando são vários; num run `failed` cujo processo não existe mais, com
@@ -389,7 +389,8 @@ No cabeçalho da página do run:
 - **Um run travado** (o processo do job vivo, mas sem heartbeat há mais de 30 s) aparece como `failed`, com o erro
   `no heartbeat for <N>s`, embora o processo ainda segure o lock. A rota acha esse job (`cancelRun` procura o processo que
   ainda segura um run `failed`) e o entrega ao `cancelJob`, que encerra o processo com `SIGKILL`, sem desfazer a etapa em
-  curso, e depois cancela pela API da Cursor os cloud agents que o run deixou rodando, como o `wf cancel` faz. O run segue
+  curso, mata os comandos de `ctx.exec` que ele tinha em andamento (um `sleep` ou um teste longo não sobrevive ao
+  cancelamento) e depois cancela pela API da Cursor os cloud agents que o run deixou rodando, como o `wf cancel` faz. O run segue
   `failed` e retomável, e a nota começa com `process <pid> had no heartbeat and was killed (SIGKILL)` e nomeia os agentes
   cancelados; um resume depois disso cria agentes novos, que custam de novo
   ([ADR-0007](../adr/0007-cancel-stops-cloud-agents.md)). O botão desse run é o **Cancel run**, com ou sem etapa na nuvem:

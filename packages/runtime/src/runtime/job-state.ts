@@ -279,7 +279,8 @@ export interface CancelResult extends JobState {
  * writes the run's end and exits) and waits up to `timeoutMs` for the job to leave `running`. A process that has stopped
  * answering (its heartbeat is stale, so the job already shows as failed) cannot handle a signal: it is killed, which frees
  * the run for a resume but cannot revert the step, and its record is marked (`killedByCancel`) so the resume does not take
- * that end for a crash; once it is gone, the cloud agents its run left running are cancelled
+ * that end for a crash. The commands it started outlive a killed process, so their process groups are killed with it
+ * (`groupsLeftBy`, `job-children.ts`). Once the process is gone, the cloud agents its run left running are cancelled
  * through the Cursor API, and a resume afterwards starts a new agent in place of each, at new cost. A job whose process
  * already ended gets no signal: those agents are cancelled the same way. So does a job whose pid another process got: the
  * job's process ended, and the other process is left alone. Either way the job stays `failed`, its run's end never written.

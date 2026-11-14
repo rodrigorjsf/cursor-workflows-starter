@@ -67,7 +67,7 @@ _Evite_: tarefa, processo.
 
 **Travado** (*frozen*):
 O job cujo processo está vivo, é o do job, segura o lock do run (`run.lock`) e parou de mandar heartbeat. Aparece como
-`failed`, mas ainda executa o run: um cancelamento o mata com SIGKILL. Só esse caso é travado (`isFrozen`, em
+`failed`, mas ainda executa o run: um cancelamento o mata com SIGKILL, junto com os comandos de `ctx.exec` que ele tinha em andamento. Só esse caso é travado (`isFrozen`, em
 `packages/runtime/src/runtime/job-state.ts`).
 _Evite_: terminado (o processo de um job travado ainda está lá), morto.
 
