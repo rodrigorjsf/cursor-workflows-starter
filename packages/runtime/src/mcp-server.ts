@@ -127,13 +127,12 @@ if (nested) {
       // Checked here, as the job's process would, so the model hears it now and not on a later wait_workflow: before the dashboard starts and a job exists.
       const badArgs = argsError(def.meta.argsSchema, a.args ?? {});
       if (badArgs) return fail({ error: badArgs });
-      const runId = a.resumeRunId;
       // The config is read afresh here, so an unusable one is refused before a job exists, and a looser override is reported now.
-      // So is a kit outside the version range the repo declares: first, because an older kit may not understand a newer config.
+      // So is a kit outside the version range the repo declares, checked before the config because an older kit may not understand a newer config.
       let mcpOverrides: LimitOverrides;
       let violations;
       try {
-        if (runId !== undefined) plainName(runId, "runId"); // it becomes a path: refused before a job or the dashboard starts
+        if (a.resumeRunId !== undefined) plainName(a.resumeRunId, "runId"); // it becomes a path: refused before a job or the dashboard starts
         assertKitCompatible(cwd);
         mcpOverrides = parseLimitOverrides(a.overrides);
         violations = loadEffectiveConfig(def, { cwd, mcpOverrides }).violations;

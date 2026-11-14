@@ -6,6 +6,8 @@
 // Offline: the fake Cursor SDK replaces `@cursor/sdk`.
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -157,6 +159,34 @@ test("start_workflow refuses args that break the workflow's argsSchema, names th
     }
   });
   assert.equal(existsSync(join(repo, ".workflows", "jobs")), false, "refused args create no job and start no process");
+});
+
+test("a refused start_workflow never reaches the dashboard, a started one does (the dashboard's port is probed only after the args pass)", { timeout: 60_000 }, async () => {
+  const probes: string[] = [];
+  const listener = createServer((req, res) => {
+    probes.push(req.url ?? "");
+    res.statusCode = 404; // not the dashboard: the server then finds it disabled (WF_DASH_AUTOSTART=off) and starts nothing
+    res.end();
+  });
+  await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
+  try {
+    const port = String((listener.address() as AddressInfo).port);
+    await withMcpServer(mcpServer(freshRepo(), { WF_DASH_PORT: port, FAKE_SDK_AUTO_SUBMIT: "1" }), async (client) => {
+      const refused = await call(client, "start_workflow", { name: "smoke", args: { x: 1 } });
+      assert.equal(refused.isError, true, refused.content[0]!.text);
+      // The probe of a call that is refused late would still be in flight here, so the count is read after the next call's reply,
+      // which waits for its own probe: exactly one probe, the call that passed.
+      const started = await call(client, "start_workflow", { name: "smoke", args: {} });
+      const { jobId } = JSON.parse(started.content[0]!.text) as { jobId: string };
+      assert.equal(probes.length, 1, "only the call whose args fit asks for the dashboard; one whose args break the schema is refused before");
+      // Leave no job process behind: wait for the smoke job (the fake SDK answers at once) to end.
+      for (let state = JSON.parse((await call(client, "wait_workflow", { jobId, timeoutSec: 5 })).content[0]!.text); state.status === "running"; ) {
+        state = JSON.parse((await call(client, "wait_workflow", { jobId, timeoutSec: 5 })).content[0]!.text);
+      }
+    });
+  } finally {
+    await new Promise((resolve) => listener.close(resolve));
+  }
 });
 
 test("a call to a tool that is not registered is a tool error that names the tool", async () => {

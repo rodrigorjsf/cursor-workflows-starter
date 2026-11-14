@@ -71,8 +71,8 @@
   que não existe, com `MCP error -32602: Tool <nome> not found` (antes, `{ "error": "unknown tool: <nome>" }`). As falhas dos
   handlers seguem `{ "error": "..." }`. Um `name` ou `jobId` ausente ou que não é texto é recusado pelo SDK (antes virava
   `unknown workflow: 7` ou `job not found`); os schemas ficam estritos na entrada seguinte. Um erro lançado dentro de um
-  handler volta como `isError` (antes era um erro JSON-RPC). O servidor sem tools que substitui o `workflows` dentro das etapas também usa o `McpServer`. A faixa do
-  `@modelcontextprotocol/sdk` subiu para `^1.32.2`, a versão cujo `McpServer` sem tool registrada já lista zero tools; o
+  handler volta como `isError` (antes era um erro JSON-RPC). O servidor sem tools que substitui o `workflows` dentro das
+  etapas também usa o `McpServer`. A faixa do `@modelcontextprotocol/sdk` subiu para `^1.32.2`, a versão cujo `McpServer` sem tool registrada já lista zero tools; o
   `zod`, que o servidor importa agora, já era dependência do runtime. Veja [2.3 §1](docs/usage/03-invocacao-no-cursor-ide.md#1-mcp-server-principal).
 
 - **Todo argumento de uma tool MCP é conferido contra o schema que a tool anuncia.** O schema de cada tool é um objeto
