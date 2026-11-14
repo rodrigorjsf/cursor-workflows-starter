@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { calls } from "@cursor/sdk";
+import { calls } from "./fake-sdk.js";
 import { CONFIG_SCHEMA_PATH, validateConfigData } from "../src/config/file.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import implementIssue from "../workflows/implement-issue.js";

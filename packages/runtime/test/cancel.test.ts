@@ -9,7 +9,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, test } from "node:test";
-import { calls, costConfig, script, stats } from "@cursor/sdk";
+import { calls, costConfig, script, stats } from "./fake-sdk.js";
 import { type WorkflowEvent, runWorkflow } from "../src/runtime/engine.js";
 import { startJob } from "../src/runtime/jobs.js";
 import { readJob } from "../src/runtime/job-state.js";

@@ -8,7 +8,7 @@ import "./isolate-home.js";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { calls as sdkCalls } from "@cursor/sdk";
+import { calls as sdkCalls } from "./fake-sdk.js";
 import type { AgentBackend, AttemptEvent, AttemptResult, StepOptions } from "../src/runtime/backend.js";
 import { BudgetExceededError, RunCancelledError, runWorkflow } from "../src/runtime/engine.js";
 import type { WorkflowEvent } from "../src/runtime/events.js";

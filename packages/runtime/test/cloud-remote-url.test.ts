@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { calls, resetCloud, script } from "@cursor/sdk";
+import { calls, resetCloud, script } from "./fake-sdk.js";
 import type { StepOptions } from "../src/runtime/backend.js";
 import { createCloudBackend } from "../src/runtime/backend-cloud.js";
 import { cloudRepoUrl } from "../src/runtime/cloud-snapshot.js";

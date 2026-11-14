@@ -7,7 +7,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { calls, costConfig, script, stats } from "@cursor/sdk";
+import { calls, costConfig, script, stats } from "./fake-sdk.js";
 import { openDb } from "../src/observability/db.js";
 import { exportRows } from "../src/observability/queries.js";
 import { runWorkflow } from "../src/runtime/engine.js";

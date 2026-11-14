@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { calls } from "@cursor/sdk";
+import { calls } from "./fake-sdk.js";
 import { globToRegExp } from "../workflows/implement-issue/tdd.js";
 import { PLAN, SUB_CODE, SUB_TEST, branchOf, fx, forgeState, git, issue, names, run, setup, submit, teardown, write } from "./implement-issue.fixture.js";
 
