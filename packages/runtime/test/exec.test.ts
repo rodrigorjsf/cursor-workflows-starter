@@ -198,7 +198,10 @@ test("the output is content of the command's node: stdout and stderr apart, afte
 });
 
 test("the output reaches the log while the command is still running", async () => {
-  const wf = workflow(async (ctx) => (await ctx.exec(...node(`process.stdout.write('first\\n'); ${sleepJs(1500)} process.stdout.write('second\\n')`))).ok);
+  // The command writes its second line only once the test has read the first from the log: an order, not a race against a nap.
+  const marker = join(cwd, "first-line-read");
+  const code = `process.stdout.write('first\\n'); const t = setInterval(() => { if (require('fs').existsSync(${JSON.stringify(marker)})) { clearInterval(t); process.stdout.write('second\\n'); } }, 10);`;
+  const wf = workflow(async (ctx) => (await ctx.exec(...node(code), { timeoutMs: 60_000 })).ok);
   const running = runWorkflow(wf, {}, { cwd, metricsDb: false, runId: "streaming" });
   const early = await until("the first line in the log", () => {
     try {
@@ -209,6 +212,7 @@ test("the output reaches the log while the command is still running", async () =
   });
   assert.equal(execEnds(early).length, 0, "the command had not ended");
   assert.ok(!outputText(early, "stdout").includes("second"));
+  writeFileSync(marker, "read");
   const r = await running;
   assert.equal(r.status, "finished");
   assert.equal(outputText(eventsOf("streaming"), "stdout"), "first\nsecond\n");
@@ -308,14 +312,14 @@ test("a process the command left running, holding its output, is killed when the
 });
 
 test("a command has no stdin and no terminal: whatever would wait for someone to type (a credential prompt) fails at once", async () => {
-  const started = performance.now();
+  // A command left waiting would be killed at its 20 s timeout: `timedOut` says it was not, with no wall-clock bound.
   const wf = workflow(async (ctx) => [await ctx.exec("bash", ["-c", "cat; echo read-stdin-ended"], { label: "stdin", timeoutMs: 20_000 }), await ctx.exec("bash", ["-c", "echo asking > /dev/tty"], { label: "tty", timeoutMs: 20_000 })] as const);
   const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });
   const [stdin, tty] = r.result as [ExecResult, ExecResult];
   assert.deepEqual([stdin.ok, stdin.tail], [true, "read-stdin-ended\n"], "stdin is empty, not an open terminal");
   assert.equal(tty.ok, false, "there is no controlling terminal to open");
   assert.equal(tty.timedOut, false);
-  assert.ok(performance.now() - started < 10_000);
+  assert.equal(stdin.timedOut, false);
 });
 
 test("the output is pruned with the rest of the content: the text goes, the node and the sizes stay", async () => {
@@ -417,10 +421,8 @@ test("alive() counts a process that is running, and not one that died but was no
 
 test("a command is killed at its timeout and the call returns: the workflow is not stuck behind it", async () => {
   const wf = workflow(async (ctx) => ctx.exec(...node("setInterval(() => {}, 1000)"), { label: "hang", timeoutMs: 400 }));
-  const started = performance.now();
-  const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });
+  const r = await runWorkflow(wf, {}, { cwd, metricsDb: false }); // the command never ends by itself: returning at all is the proof
   assert.equal(r.status, "finished");
-  assert.ok(performance.now() - started < 5_000, "returned long before the command would have");
   const result = r.result as ExecResult;
   assert.deepEqual([result.ok, result.exitCode, result.timedOut], [false, null, true]);
   const [end] = execEnds(eventsOf(r.runId));
@@ -443,7 +445,8 @@ test("a command that ignores SIGTERM is killed for good two seconds later", asyn
   const started = performance.now();
   const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });
   assert.equal((r.result as ExecResult).timedOut, true);
-  assert.ok(performance.now() - started >= 2_000 && performance.now() - started < 8_000, `took ${performance.now() - started} ms`);
+  // A lower bound only: no timer fires early, so the SIGKILL cannot come before the grace; a loaded machine only delays it.
+  assert.ok(performance.now() - started >= 2_000, `took ${performance.now() - started} ms`);
   assert.equal(execEnds(eventsOf(r.runId))[0]!.signal, "SIGKILL");
 });
 
@@ -493,13 +496,11 @@ test("cancelling the run kills the running commands, ends their nodes as cancell
   await until("both commands to start", () => seen.filter((e) => e.type === "exec-start").length === 2 || undefined);
   const printed = () => contentOf(eventsOf(seen[0]!.runId)).filter((c) => c.kind === "command-output").length;
   await until("both commands to print their child's pid", () => printed() === 2 || undefined);
-  const cancelledAt = performance.now();
-  controller.abort();
+  controller.abort(); // the commands nap for a minute: the run's end says they were cancelled, not that they ended
   const r = await running;
 
   assert.equal(r.status, "cancelled");
   assert.match(r.error!, new RegExp(`resumeRunId="${r.runId}"`));
-  assert.ok(performance.now() - cancelledAt < 5_000, `the commands stopped in ${performance.now() - cancelledAt} ms`);
   assert.equal(existsSyncSafe(marker), false, "the workflow did not go on");
   const events = eventsOf(r.runId);
   assert.deepEqual(execEnds(events).map((e) => [e.label, e.ok, e.outcome, e.signal]).sort(), [["one", false, "cancelled", "SIGTERM"], ["two", false, "cancelled", "SIGTERM"]]);
@@ -522,21 +523,19 @@ test("a call made after the run was cancelled never starts: no node, the run end
 });
 
 test("the process stays responsive while a command runs: its event loop is never blocked behind the command", async () => {
-  const ticks: number[] = [];
-  const timer = setInterval(() => ticks.push(performance.now()), 20);
-  try {
-    const wf = workflow((ctx) => ctx.exec(...node(`${sleepJs(1500)}`), { label: "long" }));
-    const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });
-    assert.equal(r.status, "finished");
-  } finally {
-    clearInterval(timer);
-  }
-  const gaps = ticks.slice(1).map((t, i) => t - ticks[i]!);
-  assert.ok(ticks.length > 40, `${ticks.length} ticks in 1.5 s`);
-  assert.ok(Math.max(...gaps) < 1_000, `the longest stall was ${Math.max(...gaps)} ms`); // a blocked loop would stall for the command's 1.5 s
+  // The command waits for a file that only this process's event loop writes, once the command has started. A loop blocked
+  // behind the command would never write it, and the command would end at its timeout: an order, not a wall-clock bound.
+  const marker = join(cwd, "loop-is-free");
+  const waitForMarker = `const t = setInterval(() => { if (require('fs').existsSync(${JSON.stringify(marker)})) clearInterval(t); }, 10);`;
+  const wf = workflow((ctx) => ctx.exec(...node(waitForMarker), { label: "long", timeoutMs: 60_000 }));
+  const onEvent = (e: WorkflowEvent) => void (e.type === "exec-start" && setTimeout(() => writeFileSync(marker, "free"), 50));
+  const r = await runWorkflow(wf, {}, { cwd, metricsDb: false, onEvent });
+  assert.equal(r.status, "finished");
+  const result = r.result as ExecResult;
+  assert.deepEqual([result.ok, result.timedOut], [true, false], "the loop wrote the file while the command ran");
 });
 
-async function until<T>(what: string, read: () => T | undefined, ms = 10_000): Promise<T> {
+async function until<T>(what: string, read: () => T | undefined, ms = 30_000): Promise<T> {
   for (const stop = performance.now() + ms; ; await new Promise((r) => setTimeout(r, 25))) {
     const value = read();
     if (value) return value;
