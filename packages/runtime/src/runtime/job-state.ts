@@ -15,6 +15,7 @@ import type { LimitOverrides } from "../config/index.js";
 import { cancelLeftCloudAgents, leftAgentsNote } from "./cloud-cancel.js";
 import type { RunStatus } from "./events.js";
 import { type ExecutionState, type Ledger, projectExecution, replayLedger, resumeHint, withRatio } from "./projection.js";
+import { killGroups, recordedExecGroups } from "./job-children.js";
 import { commandLineHas, isAlive } from "./pid.js";
 import { eventLogPath, readEventLog, runLockHolder } from "./run-store.js";
 import { isPlainName, stateDir } from "./state.js";
@@ -300,11 +301,14 @@ export async function cancelJob(cwd: string, jobId: string, timeoutMs: number): 
     return { ...before, note: `process ${record.pid} is not the job's process (was the pid reused?): the job ended, no signal sent${left || "; nothing to cancel"}` };
   }
   const signal = liveness === "silent" ? "SIGKILL" : "SIGTERM";
+  // A killed process cannot stop the commands it started: its exit hook does not run. They are found before the kill.
+  const stray = signal === "SIGKILL" ? recordedExecGroups(jobsDirIn(cwd), record.jobId) : [];
   try {
     process.kill(record.pid, signal);
   } catch (err) {
     return { ...before, note: `could not signal process ${record.pid}: ${err instanceof Error ? err.message : String(err)}` };
   }
+  killGroups(stray);
   // The killed process writes no run end and runs no code again (not even its heartbeat): the record says the cancel killed
   // it, so a resume tells this end from a crash (`wasKilledByCancel`). Written now, not once the process is gone: a process
   // that outlives the wait is still killed, and a second cancel finds it gone and marks nothing.

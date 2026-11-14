@@ -24,6 +24,8 @@ import { createCloudBackend } from "./backend-cloud.js";
 import { type CommandOutcome, EXEC_FLUSH_MS, EXEC_LOG_MAX_CHARS, outputLog, runCommand, toExecResult } from "./command-runner.js";
 import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedConfig, type StepOverrides, allowedSources, isModelAllowed, loadEffectiveConfig } from "../config/index.js";
 import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type OutputStream, type NewEvent, type RunStatus, type StepRef, type TurnUsage, type WorkflowEvent } from "./events.js";
+import { recordExecGroup } from "./job-children.js";
+import { jobsDirIn } from "./job-state.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
 import { type InterruptedCloudStep, addUsage, emptyUsage, resumeHint, subtractUsage, turnTokens, withRatio } from "./projection.js";
 import { CONTENT_MAX_CHARS, RunLockedError, RunStore } from "./run-store.js";
@@ -1150,6 +1152,13 @@ async function executeRun<A, R>(
   /** How many times each call has been made in this execution, by its shape and the branch that made it: the same call twice is two nodes, and a resume numbers them alike. */
   const execOccurrences = new Map<string, number>();
 
+  /**
+   * What a job does so that a cancel which kills its frozen process can still reach its live commands: it records the process
+   * group of each (`job-children.ts`). A run with no job has no such cancel, and records nothing.
+   */
+  const jobId = opts.jobId;
+  const recordGroup = jobId === undefined ? undefined : (pgid: number) => recordExecGroup(jobsDirIn(opts.cwd), jobId, pgid);
+
   /** One `ctx.exec` call: a step node of the run. The command runs in its own process, and the call returns what the command did. */
   async function execCall(command: string, args: string[] = [], callOpts: ExecOptions = {}): Promise<ExecResult> {
     const flow = currentFlow();
@@ -1185,7 +1194,7 @@ async function executeRun<A, R>(
     const flushing = setInterval(() => log.flush(), EXEC_FLUSH_MS);
     let done: CommandOutcome;
     try {
-      done = await runCommand({ command, args, cwd, env: callOpts.env, timeoutMs, signal }, log.push);
+      done = await runCommand({ command, args, cwd, env: callOpts.env, timeoutMs, signal, onGroup: recordGroup }, log.push);
     } finally {
       clearInterval(flushing);
       log.end();
