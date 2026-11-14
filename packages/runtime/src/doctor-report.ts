@@ -47,9 +47,12 @@ export const nodeHint = (minimum: string): string =>
 /** The marker that starts a check's block in the text report, padded to one width. */
 const MARKERS: Record<CheckResult["status"], string> = { pass: "[ok]   ", warn: "[warn] ", fail: "[FAIL] " };
 
+/** How many checks warned, as the reports say it: `1 with a warning`, `2 with warnings`. */
+export const withWarnings = (warned: number): string => `${warned} with ${warned === 1 ? "a warning" : "warnings"}`;
+
 /** The last line of the text report: how many checks failed or, when none did, how many passed; warnings are counted in either case. */
 function summaryLine(total: number, failed: number, warned: number): string {
-  const warnings = warned === 0 ? "" : `${warned} with ${warned === 1 ? "a warning" : "warnings"}`;
+  const warnings = warned === 0 ? "" : withWarnings(warned);
   if (failed > 0) return `${failed} of ${total} checks failed${warnings && `, ${warnings}`}.`;
   return warned > 0 ? `All ${total} checks passed, ${warnings}.` : `All good: ${total} checks passed.`;
 }

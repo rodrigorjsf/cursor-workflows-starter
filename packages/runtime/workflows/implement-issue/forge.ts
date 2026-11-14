@@ -193,18 +193,22 @@ export interface ForgeLogin {
   token?: ForgeToken;
 }
 
+/** The hosts `gh` reads `GH_TOKEN` and `GITHUB_TOKEN` for: github.com, a subdomain of ghe.com and github.localhost. Any other host is an Enterprise Server one, read through the `*_ENTERPRISE_TOKEN` variables (`gh help environment`). */
+const takesGhToken = (host?: string): boolean => host === undefined || host === "github.com" || host === "github.localhost" || host.endsWith(".ghe.com");
+
 /** GitHub's token: `gh api -i --silent user` prints the headers, among them the `X-OAuth-Scopes` of a classic token and none for a fine-grained one. */
-function githubToken(cli: string, onHost: string[], host?: string): ForgeToken {
+function githubToken(cli: string, host?: string): ForgeToken {
+  const onHost = host === undefined ? [] : ["--hostname", host];
   return {
     scopesArgs: ["api", ...onHost, "-i", "--silent", "user"],
-    envNames: host === undefined || host === "github.com" ? ["GH_TOKEN", "GITHUB_TOKEN"] : ["GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"], // `gh help environment`
+    envNames: takesGhToken(host) ? ["GH_TOKEN", "GITHUB_TOKEN"] : ["GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"],
     printCommand: `${cli} auth token`,
     removeScopesCommand: (scopes) => [cli, "auth", "refresh", "--remove-scopes", scopes.join(","), ...onHost].join(" "),
   };
 }
 
 /** Per forge: its CLI, where to get that CLI, and, where the CLI can say what its token may do, how to ask. A total record: a forge added to `ForgeName` is a compile error here. */
-const FORGE_CLIS: Readonly<Record<ForgeName, { cli: string; source: string; token?: (cli: string, onHost: string[], host?: string) => ForgeToken }>> = {
+const FORGE_CLIS: Readonly<Record<ForgeName, { cli: string; source: string; token?: (cli: string, host?: string) => ForgeToken }>> = {
   github: { cli: "gh", source: "the GitHub CLI (https://cli.github.com)", token: githubToken },
   gitlab: { cli: "glab", source: "the GitLab CLI (https://gitlab.com/gitlab-org/cli)" },
 };
@@ -224,7 +228,7 @@ export function loginOf(forge: ForgeName, host?: string): ForgeLogin {
     args: ["auth", "status", ...onHost],
     installHint: `Install ${source} and run \`${loginCommand}\`, in the environment that starts the IDE.`,
     loginCommand,
-    ...(token ? { token: token(cli, onHost, host) } : {}),
+    ...(token ? { token: token(cli, host) } : {}),
   };
 }
 

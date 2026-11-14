@@ -87,7 +87,7 @@ falhas de segurança.
     webhooks dos repositórios.
   Fontes: [escopos de OAuth](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps) e [gerenciar
   tokens de acesso pessoal](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens).
-- **O `wf doctor` avisa, e não falha.** Num repositório com `origin` no GitHub, depois de `gh auth status`, o check `forge`
+- **O `wf doctor` avisa, e não falha.** Quando o forge do repositório é o GitHub (um `origin` no GitHub, ou um `origin` sem host, que o kit trata como GitHub), depois de `gh auth status`, o check `forge`
   roda `gh api -i --silent user` e lê só o cabeçalho `X-OAuth-Scopes`, que um token clássico devolve. Se ele lista algum dos
   escopos acima, o check sai com `status: "warn"` (o `ok` do relatório continua `true` e o código de saída, 0), nomeia os
   escopos e diz como tirá-los: `gh auth refresh --remove-scopes <escopos>`. O doctor não lê, não imprime nem registra o
@@ -95,7 +95,7 @@ falhas de segurança.
   `GH_TOKEN` no ambiente e sem o cabeçalho, o check passa e diz que há um token com escopo em uso. O doctor também não lê o token do `glab`.
 - **O token recomendado é um fine-grained, de um repositório só.** Crie-o em *Settings → Developer settings → Personal access
   tokens → Fine-grained tokens*, com acesso só ao repositório alvo, as permissões **Contents**, **Pull requests** e
-  **Issues** em leitura e escrita, **Metadata** em leitura e **uma data de expiração**. Ponha-o em `GH_TOKEN` no ambiente que
+  **Issues** em leitura e escrita, **Metadata** em leitura e **uma data de expiração**. Ponha-o em `GH_TOKEN` (num host do GitHub Enterprise Server, em `GH_ENTERPRISE_TOKEN`) no ambiente que
   abre o IDE e o terminal: o `gh` o usa no lugar do login guardado
   ([`gh help environment`](https://cli.github.com/manual/gh_help_environment)). Sem a permissão **Workflows**, o push de um
   commit que altera um arquivo de `.github/workflows/` é recusado, o que é o desejado.

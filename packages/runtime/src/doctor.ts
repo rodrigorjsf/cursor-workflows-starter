@@ -192,6 +192,9 @@ async function runGit(cwd: string, args: string[]): Promise<GitResult> {
   }
 }
 
+/** What the forge check says when the CLI has a login. */
+const authenticatedLine = (login: ForgeLogin): string => `${login.service}: \`${login.cli}\` is authenticated`;
+
 /**
  * What the token the forge CLI would use against `host` can do, once the CLI has said there is a login (`token` is the forge's way to
  * ask, GitHub's today): a warning when it holds a scope the kit does not need (`BROAD_SCOPES`), because any step that can print the
@@ -199,7 +202,7 @@ async function runGit(cwd: string, args: string[]): Promise<GitResult> {
  * warning too, not a failure: the login itself is fine. Nothing of the token or of the response but the scopes header is read or printed.
  */
 async function checkForgeToken(login: ForgeLogin, token: ForgeToken): Promise<CheckResult> {
-  const authenticated = `${login.service}: \`${login.cli}\` is authenticated`;
+  const authenticated = authenticatedLine(login);
   const fromEnv = token.envNames.find((name) => (process.env[name] ?? "") !== "");
   const scopes = await readTokenScopes(login.cli, token.scopesArgs, timeoutMs());
   const securityDoc = `See "${SECURITY_TOKEN_SECTION}" in ${kitFileUrl("SECURITY.md", readKitPackage().version)}.`;
@@ -207,7 +210,7 @@ async function checkForgeToken(login: ForgeLogin, token: ForgeToken): Promise<Ch
     case "unreadable":
       return warn(
         "forge",
-        `${authenticated}, but could not read the token's scopes: ${saidBy(scopes.error)}`,
+        `${authenticated}, but could not read the token's scopes: ${scopes.said}`,
         `Run \`${[login.cli, ...token.scopesArgs].join(" ")}\` to see the error, then \`wf doctor\` again. The check compares the scopes with the ones the kit does not need. ${securityDoc}`,
       );
     case "none":
@@ -267,7 +270,7 @@ async function checkForge(cwd: string, resolution: Resolution): Promise<CheckRes
   } catch (err) {
     return fail("forge", `${login.service}: \`${[login.cli, ...login.args].join(" ")}\` failed: ${saidBy(err)}`, `Run \`${login.loginCommand}\`.`);
   }
-  return login.token ? checkForgeToken(login, login.token) : pass("forge", `${login.service}: \`${login.cli}\` is authenticated`);
+  return login.token ? checkForgeToken(login, login.token) : pass("forge", authenticatedLine(login));
 }
 
 /** A workflow of the repo with the config it resolves to. */

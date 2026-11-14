@@ -106,6 +106,8 @@ interface FakeGhOptions {
   scopes?: string | null;
   /** Makes `gh api` fail with this on stderr and nothing on stdout, as a gh that cannot reach GitHub does. */
   apiFails?: string;
+  /** Makes `gh api` print the recorded headers without the scopes header and exit 1 with nothing on stderr: an answer that is an error and says nothing about why. */
+  apiFailsWithHeaders?: true;
   /** A token this gh holds: `auth status` prints it, and `auth token` answers with it, as `gh auth status --show-token` and `gh auth token` would. */
   token?: string;
 }
@@ -116,18 +118,18 @@ const shellQuoted = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`;
  * The shell that makes a fake `gh` answer `gh api -i --silent user` as the real one did when it was recorded: the recorded
  * headers with only the scopes header set, for the host of any `--hostname` (or none), and a refusal of any other command line.
  */
-function fakeGhApi({ scopes = "repo", apiFails }: FakeGhOptions): string[] {
+function fakeGhApi({ scopes = "repo", apiFails, apiFailsWithHeaders }: FakeGhOptions): string[] {
   if (apiFails !== undefined) return [`printf '%s\\n' ${shellQuoted(apiFails)} >&2`, "exit 1"];
   const recording = (JSON.parse(readFileSync(GH_RECORDINGS_PATH, "utf8")) as GhRecordingsFile).recordings[TOKEN_SCOPES_RECORDING];
   assert.ok(recording, `${GH_RECORDINGS_PATH} has no "${TOKEN_SCOPES_RECORDING}" recording: run scripts/verify/record-gh-fixtures.ts`);
-  const stdout = scopes === null ? recording.stdout.replace(/^X-Oauth-Scopes:.*\r?\n/m, "") : recording.stdout.replace(/^X-Oauth-Scopes:.*$/m, `X-Oauth-Scopes: ${scopes}`);
+  const stdout = scopes === null || apiFailsWithHeaders ? recording.stdout.replace(/^X-Oauth-Scopes:.*\r?\n/m, "") : recording.stdout.replace(/^X-Oauth-Scopes:.*$/m, `X-Oauth-Scopes: ${scopes}`);
   assert.notEqual(stdout, recording.stdout, "the recording has an X-Oauth-Scopes header to set");
   const host = recording.args.indexOf("--hostname");
   const withHost = `"${recording.args.slice(0, host + 1).join(" ")} "*" ${recording.args.slice(host + 2).join(" ")}"`;
   const withoutHost = `"${recording.args.filter((_, at) => at !== host && at !== host + 1).join(" ")}"`;
   return [
     'case "$*" in',
-    `  ${withHost} | ${withoutHost}) printf '%s' ${shellQuoted(stdout)}; exit 0 ;;`,
+    `  ${withHost} | ${withoutHost}) printf '%s' ${shellQuoted(stdout)}; exit ${apiFailsWithHeaders ? 1 : 0} ;;`,
     "esac",
     'echo "gh: not the command line that was recorded: $*" >&2',
     "exit 1",
@@ -502,6 +504,37 @@ test("when GitHub cannot be asked for the scopes the forge check warns with what
   assert.match(forge.message, /could not read the token's scopes/);
   assert.match(forge.message, /error connecting to api\.github\.com/);
   assert.match(forge.hint ?? "", /gh api --hostname github\.com -i --silent user/);
+});
+
+test("a failed `gh api` that says nothing on stderr does not put the response headers in the warning", () => {
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  const r = doctor(repo, { bins: [fakeForgeCli("gh", undefined, { scopes: null, apiFailsWithHeaders: true }).dir] });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const forge = checkOf(reportOf(r), "forge");
+  assert.equal(forge.status, "warn");
+  assert.match(forge.message, /could not read the token's scopes/);
+  assert.doesNotMatch(forge.message, /HTTP\/2|Access-Control|X-Github|Content-Type/i, "the answer's headers are not what the report says about a failure");
+});
+
+test("a token for a *.ghe.com host comes from GH_TOKEN, as for github.com, and not from the enterprise variables", () => {
+  const repo = gitRepoCopy("git@acme.ghe.com:acme/widgets.git");
+  put(repoConfigPath(repo), { forges: { "acme.ghe.com": "github" } });
+  const gh = fakeForgeCli("gh", undefined, { scopes: null });
+  const fromGhToken = checkOf(reportOf(doctor(repo, { bins: [gh.dir], env: { GH_TOKEN: "fine-grained-token-for-the-ghe-com-tenant" } })), "forge");
+  assert.equal(fromGhToken.status, "pass", fromGhToken.message);
+  assert.match(fromGhToken.message, /a scoped token is in use \(GH_TOKEN\)/);
+
+  const classic = checkOf(reportOf(doctor(repo, { bins: [fakeForgeCli("gh", undefined, { scopes: "repo, workflow" }).dir], env: { GH_TOKEN: "classic-token-for-the-ghe-com-tenant" } })), "forge");
+  assert.equal(classic.status, "warn");
+  assert.match(classic.hint ?? "", /in GH_TOKEN/, "the replacement goes where gh reads it for this host");
+
+  // A self-managed Enterprise Server host reads the enterprise variables, and GH_TOKEN there is for github.com.
+  const server = gitRepoCopy("git@ghe.example.com:acme/widgets.git");
+  put(repoConfigPath(server), { forges: { "ghe.example.com": "github" } });
+  const own = checkOf(reportOf(doctor(server, { bins: [gh.dir], env: { GH_ENTERPRISE_TOKEN: "fine-grained-token-for-the-server" } })), "forge");
+  assert.match(own.message, /a scoped token is in use \(GH_ENTERPRISE_TOKEN\)/);
+  const other = checkOf(reportOf(doctor(server, { bins: [gh.dir], env: { GH_TOKEN: "token-for-github-com-only" } })), "forge");
+  assert.doesNotMatch(other.message, /GH_TOKEN/, "a token for github.com is not the one used against this host");
 });
 
 test("the scopes are not asked for outside GitHub: a GitLab repository, and a repository with no forge, make no `gh api` call", () => {

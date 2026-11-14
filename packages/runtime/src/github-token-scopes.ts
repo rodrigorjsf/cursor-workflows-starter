@@ -8,6 +8,7 @@
 // no body. It knows nothing of GitLab: the scopes of a `glab` token are not read.
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { errorText } from "./runtime/error-text.js";
 
 /** The heading of the SECURITY.md section on the GitHub token: the doctor's warning names it, and a test checks the section is there. */
 export const SECURITY_TOKEN_SECTION = "O token do GitHub";
@@ -40,9 +41,16 @@ export const broadScopesOf = (scopes: readonly string[]): string[] => scopes.fil
 
 /**
  * What asking GitHub for the token's scopes found: the scopes the header lists (an empty list is a classic token with none), no
- * header (what a fine-grained token's response has), or an answer that could not be had (`error` is what `execFile` rejected with).
+ * header (what a fine-grained token's response has), or an answer that could not be had (`said` is what the call printed on
+ * stderr, else why it failed: never the response headers).
  */
-export type TokenScopes = { kind: "listed"; scopes: string[] } | { kind: "none" } | { kind: "unreadable"; error: unknown };
+export type TokenScopes = { kind: "listed"; scopes: string[] } | { kind: "none" } | { kind: "unreadable"; said: string };
+
+/** The first lines `err`, a failed `execFile`, printed on stderr; else its own message (which names the command line, never a header of the answer). */
+function saidOnStderr(err: unknown): string {
+  const lines = ((err as { stderr?: string }).stderr ?? "").split("\n").map((line) => line.trim()).filter((line) => line !== "");
+  return lines.length ? lines.slice(0, 4).join("\n") : errorText(err);
+}
 
 /** The scopes the `X-OAuth-Scopes` header of `output` (the headers `gh api -i` printed, then a blank line, then the body) lists; undefined when there is no such header. */
 export function scopesFromHeaders(output: string): string[] | undefined {
@@ -75,5 +83,5 @@ export async function readTokenScopes(cli: string, args: string[], timeoutMs: nu
   }
   const scopes = scopesFromHeaders(output);
   if (scopes !== undefined) return { kind: "listed", scopes };
-  return failure === undefined ? { kind: "none" } : { kind: "unreadable", error: failure };
+  return failure === undefined ? { kind: "none" } : { kind: "unreadable", said: saidOnStderr(failure) };
 }

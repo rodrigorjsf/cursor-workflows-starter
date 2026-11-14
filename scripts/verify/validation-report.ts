@@ -13,6 +13,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, hostname, release, userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { withWarnings } from "../../packages/runtime/src/doctor-report.js";
 import { createRedactor } from "../../packages/runtime/src/runtime/redaction.js";
 import { isEntryPoint } from "../lib/cli.js";
 
@@ -218,7 +219,7 @@ function issueBody(report: Report): string {
   ];
   if (doctor) {
     const warned = doctor.checks.filter((c) => c.status === "warn").length;
-    lines.push(`${doctor.ok ? `All checks passed${warned ? `, ${warned} with ${warned === 1 ? "a warning" : "warnings"}` : ""}.` : "At least one check failed."}`, "", "| Check | Status | Message |", "|---|---|---|", ...doctor.checks.map((c) => `| ${cell(c.id)} | ${cell(c.status)} | ${cell(c.message)} |`));
+    lines.push(`${doctor.ok ? `All checks passed${warned ? `, ${withWarnings(warned)}` : ""}.` : "At least one check failed."}`, "", "| Check | Status | Message |", "|---|---|---|", ...doctor.checks.map((c) => `| ${cell(c.id)} | ${cell(c.status)} | ${cell(c.message)} |`));
   } else {
     lines.push("No doctor report was recorded.");
   }
