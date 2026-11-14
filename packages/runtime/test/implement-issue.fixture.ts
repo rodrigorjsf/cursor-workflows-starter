@@ -14,7 +14,7 @@ import { calls, script } from "./fake-sdk.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import implementIssue from "../workflows/implement-issue.js";
 import { RECORDINGS_PATH, TEST_HOST } from "./glab-recordings.js";
-import { GH_RECORDINGS_PATH } from "../../../scripts/verify/record-gh-fixtures.js"; // the recorder owns the format and the path; importing it runs nothing
+import { AUTHOR_RECORDING, GH_RECORDINGS_PATH } from "../../../scripts/verify/record-gh-fixtures.js"; // the recorder owns the format and the path; importing it runs nothing
 
 export type Handler = (o: any, msg: string) => unknown;
 
@@ -129,7 +129,7 @@ if (a[0] === "issue" && a[1] === "view") {
   const REC = JSON.parse(fs.readFileSync(${JSON.stringify(GH_RECORDINGS_PATH)}, "utf8")).recordings;
   // the form of a call: the number, the repository and the host of the call are not part of it
   const shape = (args) => args.map((x, i) => (args[i - 1] === "--hostname" ? "<host>" : x.replace(/^repos\\/\\{owner\\}\\/\\{repo\\}\\/issues\\/\\d+$/, "repos/{owner}/{repo}/issues/<n>").replace(/^repos\\/(?!\\{owner\\}\\/\\{repo\\}\\/)[^/]+\\/[^/]+\\/issues\\/\\d+$/, "repos/<repo>/issues/<n>"))).join(" ");
-  const recording = ["issue-author-association", "issue-author-association-repo", "issue-author-association-url"].map((n) => REC[n]).find((r) => shape(r.args) === shape(a));
+  const recording = ${JSON.stringify(Object.values(AUTHOR_RECORDING))}.map((n) => REC[n]).find((r) => shape(r.args) === shape(a));
   if (!recording) { save(); process.stderr.write("fake gh: no recording of " + a.join(" ")); process.exit(2); }
   save(); process.stdout.write(recording.stdout.replace(/^[A-Z_]+/, st.issue.author_association));
 } else if (a[0] === "issue" && a[1] === "comment") {

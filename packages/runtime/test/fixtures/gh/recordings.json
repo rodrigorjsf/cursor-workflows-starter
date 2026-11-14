@@ -41,6 +41,8 @@
     "issue-author-association": {
       "args": [
         "api",
+        "--hostname",
+        "github.com",
         "repos/{owner}/{repo}/issues/98",
         "--jq",
         ".author_association"

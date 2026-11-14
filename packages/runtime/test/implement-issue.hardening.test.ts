@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
+import { writeRepoConfig } from "./config-fixtures.js";
 import {
   ALL_CODE,
   ALL_TEST,
@@ -23,6 +24,7 @@ import {
   names,
   onOrigin,
   run,
+  setOrigin,
   submit,
   suitePasses,
   worktreeOf,
@@ -470,7 +472,7 @@ forgeTest("an issue whose author is a stranger to the repository stops the run b
     assert.equal(res(r).authorAssociation, association);
     assert.equal(forgeState().comments.length, 0, "nothing is posted on a stranger's issue");
     assert.ok(!onOrigin(), "nothing reaches the origin");
-    assert.deepEqual(apiCalls(), [["api", "repos/{owner}/{repo}/issues/7", "--jq", ".author_association"]]);
+    assert.deepEqual(apiCalls(), [["api", "--hostname", "github.com", "repos/{owner}/{repo}/issues/7", "--jq", ".author_association"]], "the host of the origin is named to gh api");
   }
 }, ["github"]);
 
@@ -523,7 +525,7 @@ forgeTest("the relaunch of a stopped run, as the result gives it, goes on", asyn
 
 forgeTest("a failed lookup of the author is an error, never a trusted author: no agent runs, and the user's own allowExternalAuthor still goes", async () => {
   issue(["complexity:medium"]);
-  failForge("api repos/{owner}/{repo}/issues/7", "gh: Not Found (HTTP 404)");
+  failForge("api --hostname", "gh: Not Found (HTTP 404)"); // the fake keys a failure by the first two words of the call
   const failed = await run({});
   assert.equal(failed.status, "failed");
   assert.match(failed.error!, /Not Found/);
@@ -543,11 +545,29 @@ forgeTest("the author of an issue of another repository is looked up in that rep
   assert.deepEqual(apiCalls().at(-1), ["api", "--hostname", "github.com", "repos/acme/c/issues/7", "--jq", ".author_association"]);
 }, ["github"]);
 
+forgeTest("a repository spelled HOST/OWNER/REPO, as gh takes it, is looked up on that host", async () => {
+  issue(["complexity:medium"]);
+  setAuthor("NONE");
+  const r = await run({ repo: "ghe.corp.example/acme/b" });
+  assert.equal(res(r).status, "untrusted-author", JSON.stringify(res(r)));
+  assert.deepEqual(apiCalls(), [["api", "--hostname", "ghe.corp.example", "repos/acme/b/issues/7", "--jq", ".author_association"]]);
+}, ["github"]);
+
+forgeTest("on a GitHub Enterprise origin declared in forges, the author is looked up on the origin's host, not on github.com", async () => {
+  issue(["complexity:medium"]);
+  setAuthor("NONE");
+  setOrigin("https://ghe.corp.example/owner/repo.git");
+  writeRepoConfig(fx.repo, { forges: { "ghe.corp.example": "github" } });
+  const r = await run({});
+  assert.equal(res(r).status, "untrusted-author", JSON.stringify(res(r)));
+  assert.deepEqual(apiCalls(), [["api", "--hostname", "ghe.corp.example", "repos/{owner}/{repo}/issues/7", "--jq", ".author_association"]]);
+}, ["github"]);
+
 forgeTest("a --repo that is not owner/name is refused before the issue's author is looked up under another path", async () => {
   issue(["complexity:medium"]);
   const r = await run({ repo: "acme/b?x=1" });
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /not a GitHub repository/);
+  assert.match(r.error!, /repo argument .* is not a GitHub repository/);
   assert.deepEqual(apiCalls(), []);
   assert.deepEqual(names(), []);
 }, ["github"]);

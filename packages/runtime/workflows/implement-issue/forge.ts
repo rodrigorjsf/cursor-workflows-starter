@@ -229,15 +229,15 @@ class GithubForge implements Forge {
   }
 
   async authorStanding(cwd: string, number: number, repo?: string): Promise<AuthorStanding> {
-    // `gh issue view --json` has no author association (gh 2.102 rejects the field): the REST issue has it. Without `repo`, gh fills
-    // `{owner}/{repo}` from the cwd's repository; with one, its path names the repository, and the host of a URL goes in `--hostname`,
-    // since `gh api` asks github.com unless told otherwise.
-    const named = repo === undefined ? undefined : parseRemote(repo);
-    const path = repo === undefined ? "{owner}/{repo}" : repoPathOf(repo);
-    if (!/^(?:\{owner\}\/\{repo\}|[\w.-]+\/[\w.-]+)$/.test(path)) throw new Error(`--repo ${JSON.stringify(repo)} is not a GitHub repository, so the issue's author cannot be looked up: pass owner/name or the repository's URL, or allowExternalAuthor: true after reading the issue`);
-    const host = named ? ["--hostname", webHost(named)] : [];
-    const association = (await this.gh(cwd, "api", ...host, `repos/${path}/issues/${number}`, "--jq", ".author_association")).trim();
-    if (!/^[A-Z_]+$/.test(association)) throw new Error(`gh api repos/${path}/issues/${number}: unexpected author_association ${JSON.stringify(association.slice(0, 40))}`);
+    // `gh issue view --json` has no author association (gh 2.102 rejects the field): the REST issue has it. `gh api` asks github.com
+    // unless `--hostname` says otherwise, so the host of the repository goes there: the one `repo` names (a URL, or `HOST/OWNER/REPO`),
+    // else the one of the cwd's `origin`, whose repository gh fills into `{owner}/{repo}`. A plain `OWNER/REPO` names no host, and gh
+    // takes its default one for it, as `gh issue view --repo` does.
+    const where = repo === undefined ? { host: originHost(await this.commands.remoteUrl(cwd)), path: "{owner}/{repo}" } : githubRepoOf(repo);
+    if (!/^(?:\{owner\}\/\{repo\}|[\w.-]+\/[\w.-]+)$/.test(where.path)) throw new Error(`repo argument ${JSON.stringify(repo)} is not a GitHub repository, so the issue's author cannot be looked up: pass owner/name or the repository's URL, or allowExternalAuthor: true after reading the issue`);
+    const route = `repos/${where.path}/issues/${number}`;
+    const association = (await this.gh(cwd, "api", ...(where.host === undefined ? [] : ["--hostname", where.host]), route, "--jq", ".author_association")).trim();
+    if (!/^[A-Z_]+$/.test(association)) throw new Error(`gh api ${route}: unexpected author_association ${JSON.stringify(association.slice(0, 40))}: pass allowExternalAuthor: true after reading the issue`);
     return { association, trusted: TRUSTED_ASSOCIATIONS.has(association) };
   }
 
@@ -378,6 +378,19 @@ export function neutralizeGitlabText(text: string): string {
 
 /** The path of a repository as the REST API takes it, from what the `repo` argument holds: `group/sub/project`, or a URL of it. */
 const repoPathOf = (repo: string): string => parseRemote(repo)?.path ?? trimmedPath(repo.trim());
+/** The host to name to `gh api` for the repository of a git remote URL: github.com when the remote names none (no `origin`, a local path), as for every other use of such an origin (`forgeOfOrigin`). */
+const originHost = (url: string | undefined): string => {
+  const remote = url === undefined ? undefined : parseRemote(url);
+  return remote === undefined ? "github.com" : webHost(remote);
+};
+/** Where a `repo` argument is, as `gh` takes it: `OWNER/REPO` (no host), `HOST/OWNER/REPO` (the first segment is a host: an owner has no dot) or the repository's URL. */
+function githubRepoOf(repo: string): { host?: string; path: string } {
+  const named = parseRemote(repo);
+  if (named) return { host: webHost(named), path: repoPathOf(repo) };
+  const prefixed = /^([^/]+\.[^/]+)\/(.+)$/.exec(repo.trim());
+  return prefixed ? { host: prefixed[1]!, path: trimmedPath(prefixed[2]!) } : { path: repoPathOf(repo) };
+}
+
 /** `glab api` takes the host of a request apart from its path: the one a URL `repo` names (with its port, when the URL is a web one; `glabApiHost`), else the cwd's own. */
 function apiHost(repo: string | undefined): GlabHost {
   const named = repo === undefined ? undefined : parseRemote(repo);

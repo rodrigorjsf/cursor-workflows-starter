@@ -26,6 +26,9 @@ const ROOT = resolve(import.meta.dirname, "..", "..");
 /** Where the fake `gh` of the dashboard's tests reads the recordings. */
 export const GH_RECORDINGS_PATH = join(ROOT, "packages", "runtime", "test", "fixtures", "gh", "recordings.json");
 
+/** The names of the recordings of `gh api ... .author_association`: for the cwd's repository, for one named as `owner/name`, and for one named by its URL. */
+export const AUTHOR_RECORDING = { cwd: "issue-author-association", repo: "issue-author-association-repo", url: "issue-author-association-url" } as const;
+
 /** What replaces the repository the recording was made on. */
 export const REPO_PLACEHOLDER = "owner/repo";
 /** A label no issue carries: the recording of an empty list. */
@@ -104,7 +107,7 @@ export async function record(cwd: string, label: string, repo: string): Promise<
     recordedWith: { gh: version },
     placeholders: { repo: REPO_PLACEHOLDER },
     recordings: Object.fromEntries(
-      Object.entries({ "issue-list": full!, "issue-list-empty": empty!, "issue-author-association": author!, "issue-author-association-repo": authorOfRepo!, "issue-author-association-url": authorOfUrl! }).map(([name, r]) => [name, { args: r.args.map(scrub), exitCode: r.exitCode, stdout: scrub(r.stdout), stderr: scrub(r.stderr) }]),
+      Object.entries({ "issue-list": full!, "issue-list-empty": empty!, [AUTHOR_RECORDING.cwd]: author!, [AUTHOR_RECORDING.repo]: authorOfRepo!, [AUTHOR_RECORDING.url]: authorOfUrl! }).map(([name, r]) => [name, { args: r.args.map(scrub), exitCode: r.exitCode, stdout: scrub(r.stdout), stderr: scrub(r.stderr) }]),
     ),
   };
   if (repo !== "" && JSON.stringify(file).includes(repo)) throw new Error("a recording still names the repository: nothing was written");
