@@ -69,12 +69,24 @@
   `isError: true` e o texto do próprio SDK, que não é JSON: uma chamada que quebra o schema (falta `name` ou `jobId`, ou um
   deles não é texto), com `MCP error -32602: Input validation error: ...` e o nome da propriedade, e uma chamada a uma tool
   que não existe, com `MCP error -32602: Tool <nome> not found` (antes, `{ "error": "unknown tool: <nome>" }`). As falhas dos
-  handlers seguem `{ "error": "..." }`. A única recusa nova é essa: um `name` ou `jobId` ausente ou que não é texto (antes
-  virava `unknown workflow: 7` ou `job not found`). `args`, `resumeRunId`, `overrides` e `timeoutSec` aceitam o que
-  aceitavam, e os handlers os conferem. Um erro lançado dentro de um handler volta como `isError` (antes era um erro
-  JSON-RPC). O servidor sem tools que substitui o `workflows` dentro das etapas também usa o `McpServer`. A faixa do
-  `@modelcontextprotocol/sdk` subiu para `^1.32.2`, a versão cujo `McpServer` sem tool registrada já lista zero tools; o
+  handlers seguem `{ "error": "..." }`. Um `name` ou `jobId` ausente ou que não é texto é recusado pelo SDK (antes virava
+  `unknown workflow: 7` ou `job not found`); os schemas ficam estritos na entrada seguinte. Um erro lançado dentro de um
+  handler volta como `isError` (antes era um erro JSON-RPC). O servidor sem tools que substitui o `workflows` dentro das
+  etapas também usa o `McpServer`. A faixa do `@modelcontextprotocol/sdk` subiu para `^1.32.2`, a versão cujo `McpServer` sem tool registrada já lista zero tools; o
   `zod`, que o servidor importa agora, já era dependência do runtime. Veja [2.3 §1](docs/usage/03-invocacao-no-cursor-ide.md#1-mcp-server-principal).
+
+- **Todo argumento de uma tool MCP é conferido contra o schema que a tool anuncia.** O schema de cada tool é um objeto
+  estrito (`z.strictObject`), porque o `z.object` do zod 4 descarta uma chave desconhecida em vez de recusá-la: antes,
+  `get_workflow_status {"jobId": "x", "extra": 1}` passava e o `extra` sumia sem aviso. Agora uma propriedade que a tool não
+  lista, ou de tipo errado, volta como `isError` com o texto do SDK e o nome da propriedade, sem criar job. O `tools/list`
+  anuncia `additionalProperties: false`. Os `args` de um `start_workflow` são conferidos, com o mesmo Ajv do motor, contra o
+  `argsSchema` do workflow antes de criar o job e de subir o dashboard: um `args` errado volta na hora como
+  `invalid args: ...` com o nome do campo, não num `wait_workflow` depois de o `jobId` já ter sido entregue. Mudam, por serem
+  contra o schema anunciado: `args` e `resumeRunId` com `null` (antes valiam como ausentes), e um `resumeRunId` que não é texto
+  (antes era ignorado e começava um run novo). `timeoutSec` continua aceitando um texto numérico (`"30"`), `null` e um número
+  fora de 1 a 50, como a descrição da tool já dizia, e `overrides` continua conferido por `unknown override: ...`. A regra
+  tem um teste (`test/coding-standards.test.ts`): uma chamada `registerTool` sem schema estrito falha. Veja
+  [2.3 §1](docs/usage/03-invocacao-no-cursor-ide.md#1-mcp-server-principal).
 
 - **Os tetos de tokens ao vivo agem entre envios, não dentro de um: é o limite medido.** Uma etapa local que escreve, com 31
   tool calls, deu **1** `turn-ended`, no fim, depois de 267.526 tokens, e o `token-delta` do SDK não soma ao uso (passa do

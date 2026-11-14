@@ -23,9 +23,10 @@ matches, in code spans; match them verbatim.
      resume: `implement-issue` (`additionalProperties: false`) fails with `invalid args`, and a workflow without
      that guard starts from scratch, without the journal.
 2. Call `start_workflow` with `{ name, args }` (and `resumeRunId`, if any). The step ends with the `jobId` in hand; a
-   return with `error` (one that starts with `unknown workflow: `, an invalid config with its file and field path, or a
-   kit outside the version range the repo declares) goes back to step 1, or to the user for the config and the kit
-   version: tell them to run `wf doctor`.
+   return with `error` (one that starts with `unknown workflow: ` or `invalid args: `, which names the field, an invalid
+   config with its file and field path, or a kit outside the version range the repo declares) goes back to step 1, or
+   to the user for the config and the kit version: tell them to run `wf doctor`. A reply flagged `isError` whose text
+   starts with `MCP error` is a malformed call: the tool takes only the arguments it lists, so correct the call.
    - A return with `dashboardUrl` is this run's live page on the dashboard, which also shows every other run of every
      repo (Board and Runs, one link away). Open it in Cursor's built-in browser, in one tab per conversation (a later
      start points that tab at its own link), and tell the user the link. A page that fails to load just
