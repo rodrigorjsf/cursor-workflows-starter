@@ -2,12 +2,15 @@
 // fake `gh` plays (packages/runtime/test/fixtures/gh/recordings.json) are read from disk: they hold no repository of the machine that
 // recorded them, no local host and no credential, and they hold what the Backlog's `gh issue list` printed. The GitHub and the gh that
 // made them are not here: running them is the recorder's job (scripts/verify/record-gh-fixtures.ts), which stays out of `npm run check` and CI.
-// They also hold what `gh api repos/.../issues/<n> --jq .author_association` printed, which the `implement-issue` tests' fake `gh` plays.
+// They also hold what `gh api repos/.../issues/<n> --jq .author_association` printed, which the `implement-issue` tests' fake `gh` plays,
+// and what `gh api -i --silent user` printed (the response headers, whose scopes header `wf doctor` reads), which the doctor tests' fake `gh` plays.
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
-import { AUTHOR_RECORDING, type GhRecordingsFile, REPO_PLACEHOLDER } from "../scripts/verify/record-gh-fixtures.js";
+import { AUTHOR_RECORDING, type GhRecordingsFile, REPO_PLACEHOLDER, TOKEN_SCOPES_RECORDING } from "../scripts/verify/record-gh-fixtures.js";
+import { scopesFromHeaders } from "../packages/runtime/src/github-token-scopes.js";
+import { loginOf } from "../packages/runtime/workflows/implement-issue/forge.js";
 import { leaksWithoutSecrets } from "../scripts/lib/scrub-recording.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
@@ -41,6 +44,19 @@ test("the recordings of gh api hold the command line the author gate sends, for 
   for (const recording of [cwd, named, byUrl]) {
     assert.equal(recording.exitCode, 0, recording.stderr);
     assert.match(recording.stdout, /^[A-Z_]+\n$/, "the bare association and a newline: --jq prints a string without quotes");
+  }
+});
+
+test("the recording of gh api -i --silent user holds the command line the doctor sends, and the headers gh printed: a scopes header, no body, and nothing of the request or the account", () => {
+  const file = JSON.parse(read(RECORDINGS)) as GhRecordingsFile;
+  const recording = file.recordings[TOKEN_SCOPES_RECORDING]!;
+  assert.deepEqual(recording.args, loginOf("github", "github.com").token?.scopesArgs, "forge.ts, loginOf: the arguments the doctor sends");
+  assert.equal(recording.exitCode, 0, recording.stderr);
+  assert.match(recording.stdout, /^HTTP\/2\.0 200 OK\r?\n/);
+  assert.ok(recording.stdout.endsWith("\r\n\r\n"), "the headers and the blank line that ends them: --silent asks for no body, so none of the account's profile is in the file");
+  assert.ok((scopesFromHeaders(recording.stdout) ?? []).length > 0, "the doctor's parser finds the scopes in what the real gh printed");
+  for (const neutral of [/^Date: Thu, 01 Jan 1970 00:00:00 GMT\r?$/m, /^Last-Modified: Thu, 01 Jan 1970 00:00:00 GMT\r?$/m, /^X-Github-Request-Id: 0000:/m, /^X-Github-Edge-Region: region\r?$/m]) {
+    assert.match(recording.stdout, neutral, "the headers that name the moment, the request or the edge are neutralised");
   }
 });
 

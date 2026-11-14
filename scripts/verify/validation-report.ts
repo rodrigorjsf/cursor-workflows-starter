@@ -217,7 +217,8 @@ function issueBody(report: Report): string {
     "",
   ];
   if (doctor) {
-    lines.push(`${doctor.ok ? "All checks passed." : "At least one check failed."}`, "", "| Check | Status | Message |", "|---|---|---|", ...doctor.checks.map((c) => `| ${cell(c.id)} | ${cell(c.status)} | ${cell(c.message)} |`));
+    const warned = doctor.checks.filter((c) => c.status === "warn").length;
+    lines.push(`${doctor.ok ? `All checks passed${warned ? `, ${warned} with ${warned === 1 ? "a warning" : "warnings"}` : ""}.` : "At least one check failed."}`, "", "| Check | Status | Message |", "|---|---|---|", ...doctor.checks.map((c) => `| ${cell(c.id)} | ${cell(c.status)} | ${cell(c.message)} |`));
   } else {
     lines.push("No doctor report was recorded.");
   }

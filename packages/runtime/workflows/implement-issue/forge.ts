@@ -11,7 +11,8 @@
 // the forge a record names, never one detected again, and a record without the field is GitHub (`forgeNameOf`), as every run before
 // the field existed was.
 // What a forge makes of the text a model wrote for it (GitLab runs quick actions) is here too: `neutralizeGitlabText`.
-// `wf doctor` reads the forge of the cwd's origin (`forgeOfOrigin`) and what to ask the CLI to know it is logged in (`loginOf`).
+// `wf doctor` reads the forge of the cwd's origin (`forgeOfOrigin`) and what to ask the CLI to know it is logged in, and, for GitHub, what
+// its token can do (`loginOf`).
 import { readFileSync } from "node:fs";
 import { FORGE_TITLES, knownForgeOf } from "../../src/config/file.js";
 import { type PrState, prStateOfMr } from "../../src/runtime/forge-pr-state.js";
@@ -162,6 +163,21 @@ export async function detectForge(commands: Commands, cwd: string, forges: Reado
   return forgeOfOrigin(await commands.remoteUrl(cwd), forges).forge;
 }
 
+/**
+ * What `wf doctor` asks about the token a forge's CLI uses, for a forge whose CLI can show what the token may do (GitHub: a classic
+ * token's scopes come back in a response header). The CLI's name and commands are written here and nowhere else (ADR-0009).
+ */
+export interface ForgeToken {
+  /** The arguments that print the response headers of the logged-in user's own profile, where the scopes are, and none of its body. */
+  scopesArgs: string[];
+  /** The environment variables the CLI takes a token from for this host: a token set in one of them is used instead of the stored login. */
+  envNames: readonly string[];
+  /** The command that prints the stored login's token: whatever a step can run, it can read the token with this. */
+  printCommand: string;
+  /** The command that removes `scopes` from the stored login. It cannot narrow a token that comes from `envNames`. */
+  removeScopesCommand(scopes: readonly string[]): string;
+}
+
 /** How a forge's CLI is asked whether the user is logged in, and what to tell the user when it is not (`wf doctor`). */
 export interface ForgeLogin {
   /** The forge and where it is, for the report: `GitHub at github.com`, `GitLab at git.example.com`. */
@@ -173,11 +189,23 @@ export interface ForgeLogin {
   installHint: string;
   /** The command that logs in; the hint when the CLI says the user is not. */
   loginCommand: string;
+  /** What to ask about the token the CLI uses; absent for a forge whose CLI cannot say what its token may do. */
+  token?: ForgeToken;
 }
 
-/** Per forge: its CLI, and where to get that CLI. A total record: a forge added to `ForgeName` is a compile error here. */
-const FORGE_CLIS: Readonly<Record<ForgeName, { cli: string; source: string }>> = {
-  github: { cli: "gh", source: "the GitHub CLI (https://cli.github.com)" },
+/** GitHub's token: `gh api -i --silent user` prints the headers, among them the `X-OAuth-Scopes` of a classic token and none for a fine-grained one. */
+function githubToken(cli: string, onHost: string[], host?: string): ForgeToken {
+  return {
+    scopesArgs: ["api", ...onHost, "-i", "--silent", "user"],
+    envNames: host === undefined || host === "github.com" ? ["GH_TOKEN", "GITHUB_TOKEN"] : ["GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"], // `gh help environment`
+    printCommand: `${cli} auth token`,
+    removeScopesCommand: (scopes) => [cli, "auth", "refresh", "--remove-scopes", scopes.join(","), ...onHost].join(" "),
+  };
+}
+
+/** Per forge: its CLI, where to get that CLI, and, where the CLI can say what its token may do, how to ask. A total record: a forge added to `ForgeName` is a compile error here. */
+const FORGE_CLIS: Readonly<Record<ForgeName, { cli: string; source: string; token?: (cli: string, onHost: string[], host?: string) => ForgeToken }>> = {
+  github: { cli: "gh", source: "the GitHub CLI (https://cli.github.com)", token: githubToken },
   gitlab: { cli: "glab", source: "the GitLab CLI (https://gitlab.com/gitlab-org/cli)" },
 };
 
@@ -186,7 +214,7 @@ const FORGE_CLIS: Readonly<Record<ForgeName, { cli: string; source: string }>> =
  * `auth status` with no host fails for a login of another host that has expired. No host (a local-path origin) asks every host.
  */
 export function loginOf(forge: ForgeName, host?: string): ForgeLogin {
-  const { cli, source } = FORGE_CLIS[forge];
+  const { cli, source, token } = FORGE_CLIS[forge];
   const name = FORGE_TITLES[forge];
   const onHost = host === undefined ? [] : ["--hostname", host];
   const loginCommand = [cli, "auth", "login", ...onHost].join(" ");
@@ -196,6 +224,7 @@ export function loginOf(forge: ForgeName, host?: string): ForgeLogin {
     args: ["auth", "status", ...onHost],
     installHint: `Install ${source} and run \`${loginCommand}\`, in the environment that starts the IDE.`,
     loginCommand,
+    ...(token ? { token: token(cli, onHost, host) } : {}),
   };
 }
 

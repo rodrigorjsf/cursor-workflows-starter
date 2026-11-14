@@ -1,9 +1,11 @@
 // WHAT: Runs the real `gh` for the forge commands the fakes cannot take from gh's own `--json` output, against a real GitHub
 //   repository: `gh issue list` (the dashboard's Backlog, `listIssues` in the forge module,
 //   packages/runtime/workflows/implement-issue/forge.ts) and `gh api repos/.../issues/<n> --jq .author_association` (the author gate of
-//   `implement-issue`, `authorStanding`), the latter for the repository of the cwd, for a named one and for one named by its URL. It writes what gh printed, with
-//   the repository's `owner/name` replaced by `owner/repo`, to packages/runtime/test/fixtures/gh/recordings.json. The fake `gh` of the
-//   dashboard's tests and the one of the `implement-issue` tests read that file. It only reads: nothing is created on GitHub.
+//   `implement-issue`, `authorStanding`), the latter for the repository of the cwd, for a named one and for one named by its URL, and
+//   `gh api -i --silent user` (the response headers `wf doctor` reads the token's scopes from, `readTokenScopes`). It writes what gh printed, with
+//   the repository's `owner/name` replaced by `owner/repo` and the per-request and per-account headers neutralised, to
+//   packages/runtime/test/fixtures/gh/recordings.json. The fake `gh` of the dashboard's tests, the one of the `implement-issue` tests and the
+//   one of the doctor's tests read that file. It only reads: nothing is created on GitHub.
 // WHY: a fake of an external CLI answers from a recording of the real tool (CODING_STANDARDS, Testing): the argument list the forge
 //   sends and what gh prints for it are what the fake accepts and prints, never what someone remembered of gh's documentation.
 // WHEN: after changing the `gh issue list` or the `gh api` command line in forge.ts, or to try a newer gh. Needs `gh auth login`, and at
@@ -19,7 +21,8 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { errorText } from "../../packages/runtime/src/runtime/error-text.js";
 import { createRedactor } from "../../packages/runtime/src/runtime/redaction.js";
 import { directCommands } from "../../packages/runtime/workflows/implement-issue/gc.js";
-import { createForge } from "../../packages/runtime/workflows/implement-issue/forge.js";
+import { createForge, loginOf } from "../../packages/runtime/workflows/implement-issue/forge.js";
+import { readTokenScopes } from "../../packages/runtime/src/github-token-scopes.js";
 import { isEntryPoint } from "../lib/cli.js";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
@@ -28,6 +31,29 @@ export const GH_RECORDINGS_PATH = join(ROOT, "packages", "runtime", "test", "fix
 
 /** The names of the recordings of `gh api ... .author_association`: for the cwd's repository, for one named as `owner/name`, and for one named by its URL. */
 export const AUTHOR_RECORDING = { cwd: "issue-author-association", repo: "issue-author-association-repo", url: "issue-author-association-url" } as const;
+
+/** The name of the recording of `gh api -i --silent user`, made for github.com: the headers a token's scopes are read from. */
+export const TOKEN_SCOPES_RECORDING = "token-scopes";
+
+/**
+ * What replaces the value of a response header that names the request, the moment or the account the recording was made for (the
+ * time, a hash of the profile, when it last changed, the edge that answered, the rate-limit counters). The scopes header keeps what
+ * GitHub sent: it is the field the doctor's tests set.
+ */
+const HEADER_PLACEHOLDERS: Readonly<Record<string, string>> = {
+  date: "Thu, 01 Jan 1970 00:00:00 GMT",
+  "last-modified": "Thu, 01 Jan 1970 00:00:00 GMT",
+  etag: 'W/"0000000000000000000000000000000000000000000000000000000000000000"',
+  "x-github-request-id": "0000:000000:0000000:0000000:00000000",
+  "x-github-edge-region": "region",
+  "x-ratelimit-remaining": "4999",
+  "x-ratelimit-reset": "0",
+  "x-ratelimit-used": "1",
+};
+
+/** `headers` (what `gh api -i` printed) with the value of each header of `HEADER_PLACEHOLDERS` replaced. */
+const neutraliseHeaders = (headers: string): string =>
+  headers.replace(/^([A-Za-z0-9-]+):.*$/gm, (line, name: string) => (Object.hasOwn(HEADER_PLACEHOLDERS, name.toLowerCase()) ? `${name}: ${HEADER_PLACEHOLDERS[name.toLowerCase()]}` : line));
 
 /** What replaces the repository the recording was made on. */
 export const REPO_PLACEHOLDER = "owner/repo";
@@ -101,13 +127,18 @@ export async function record(cwd: string, label: string, repo: string): Promise<
     ...(await recordCalls(() => forge.authorStanding(cwd, listed[0]!.number, repo))),
     ...(await recordCalls(() => forge.authorStanding(cwd, listed[0]!.number, `https://github.com/${repo}`))),
   ];
+  const github = loginOf("github", "github.com");
+  const [scopes] = await recordCalls(() => readTokenScopes(github.cli, github.token!.scopesArgs, 20_000));
   const scrub = (text: string) => createRedactor({ env: {} }).text(text.split(repo).join(REPO_PLACEHOLDER));
   const version = /^gh version (\S+)/.exec(execFileSync("gh", ["--version"], { encoding: "utf8" }))?.[1] ?? "unknown";
   const file: GhRecordingsFile = {
     recordedWith: { gh: version },
     placeholders: { repo: REPO_PLACEHOLDER },
     recordings: Object.fromEntries(
-      Object.entries({ "issue-list": full!, "issue-list-empty": empty!, [AUTHOR_RECORDING.cwd]: author!, [AUTHOR_RECORDING.repo]: authorOfRepo!, [AUTHOR_RECORDING.url]: authorOfUrl! }).map(([name, r]) => [name, { args: r.args.map(scrub), exitCode: r.exitCode, stdout: scrub(r.stdout), stderr: scrub(r.stderr) }]),
+      Object.entries({ "issue-list": full!, "issue-list-empty": empty!, [AUTHOR_RECORDING.cwd]: author!, [AUTHOR_RECORDING.repo]: authorOfRepo!, [AUTHOR_RECORDING.url]: authorOfUrl!, [TOKEN_SCOPES_RECORDING]: scopes! }).map(([name, r]) => [
+        name,
+        { args: r.args.map(scrub), exitCode: r.exitCode, stdout: scrub(name === TOKEN_SCOPES_RECORDING ? neutraliseHeaders(r.stdout) : r.stdout), stderr: scrub(r.stderr) },
+      ]),
     ),
   };
   if (repo !== "" && JSON.stringify(file).includes(repo)) throw new Error("a recording still names the repository: nothing was written");

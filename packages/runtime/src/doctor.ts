@@ -13,15 +13,16 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import semver from "semver";
 import type { ConfigIssue } from "./config/file.js";
 import { ConfigError, type ResolvedConfig, loadEffectiveConfig } from "./config/index.js";
-import { type CheckId, type CheckResult, type DoctorReport, fail, nodeHint, pass, reportOf } from "./doctor-report.js";
+import { type CheckId, type CheckResult, type DoctorReport, fail, nodeHint, pass, reportOf, warn } from "./doctor-report.js";
 import { findOnPath } from "./find-on-path.js";
+import { SECURITY_TOKEN_SECTION, broadScopesOf, readTokenScopes } from "./github-token-scopes.js";
 import { kitCompatibility, kitFileUrl, readKitPackage } from "./kit-version.js";
 import { MCP_CONFIG_FILES, type McpLaunch, type McpLaunches, readMcpLaunches } from "./mcp-launch.js";
 import { errorText } from "./runtime/error-text.js";
 import { createRedactor } from "./runtime/redaction.js";
 import { loadWorkflows } from "./runtime/registry.js";
 import type { WorkflowDefinition } from "./runtime/workflow.js";
-import { type OriginForge, forgeOfOrigin, loginOf } from "../workflows/implement-issue/forge.js";
+import { type ForgeLogin, type ForgeToken, type OriginForge, forgeOfOrigin, loginOf } from "../workflows/implement-issue/forge.js";
 
 export { type CheckResult, type DoctorReport, formatReport } from "./doctor-report.js";
 
@@ -192,9 +193,50 @@ async function runGit(cwd: string, args: string[]): Promise<GitResult> {
 }
 
 /**
+ * What the token the forge CLI would use against `host` can do, once the CLI has said there is a login (`token` is the forge's way to
+ * ask, GitHub's today): a warning when it holds a scope the kit does not need (`BROAD_SCOPES`), because any step that can print the
+ * token can use every power it has. A fine-grained token has no scopes header to read, so it passes; a call that cannot be made is a
+ * warning too, not a failure: the login itself is fine. Nothing of the token or of the response but the scopes header is read or printed.
+ */
+async function checkForgeToken(login: ForgeLogin, token: ForgeToken): Promise<CheckResult> {
+  const authenticated = `${login.service}: \`${login.cli}\` is authenticated`;
+  const fromEnv = token.envNames.find((name) => (process.env[name] ?? "") !== "");
+  const scopes = await readTokenScopes(login.cli, token.scopesArgs, timeoutMs());
+  const securityDoc = `See "${SECURITY_TOKEN_SECTION}" in ${kitFileUrl("SECURITY.md", readKitPackage().version)}.`;
+  switch (scopes.kind) {
+    case "unreadable":
+      return warn(
+        "forge",
+        `${authenticated}, but could not read the token's scopes: ${saidBy(scopes.error)}`,
+        `Run \`${[login.cli, ...token.scopesArgs].join(" ")}\` to see the error, then \`wf doctor\` again. The check compares the scopes with the ones the kit does not need. ${securityDoc}`,
+      );
+    case "none":
+      return pass(
+        "forge",
+        fromEnv
+          ? `${authenticated}; a scoped token is in use (${fromEnv}): GitHub sent no \`X-OAuth-Scopes\` header, which is what it does for a fine-grained token`
+          : `${authenticated}; GitHub sent no \`X-OAuth-Scopes\` header for the stored token, which is what it does for a fine-grained token, so there are no scopes to check`,
+      );
+    case "listed": {
+      const broad = broadScopesOf(scopes.scopes);
+      if (broad.length === 0) return pass("forge", `${authenticated}; the token's scopes are ${scopes.scopes.join(", ") || "none"}`);
+      const narrower = `a fine-grained token limited to the target repository, with an expiry, in ${token.envNames[0]}`;
+      return warn(
+        "forge",
+        `${authenticated}, but its token holds scopes the kit does not need: ${broad.join(", ")}. Any step that can run \`${token.printCommand}\` can use them, and revoking the token does not undo an SSH key, a workflow file or a deleted repository.`,
+        fromEnv
+          ? `${fromEnv} holds a classic token, whose scopes cannot be removed: replace it with ${narrower}. ${securityDoc}`
+          : `Remove them with \`${token.removeScopesCommand(broad)}\`, or use ${narrower}. ${securityDoc}`,
+      );
+    }
+  }
+}
+
+/**
  * Is this repository's forge ready: the CLI of the forge the `origin` remote names (`gh` for GitHub, `glab` for GitLab, found as
  * a run finds it, through the `forges` map of the config), installed and logged in. The workflows that open pull requests and read
  * issues run it as the user. Outside a git repository, or in one with no `origin`, no forge is asked for and the check passes.
+ * For GitHub, a login that works is also asked what its token can do (`checkForgeToken`).
  */
 async function checkForge(cwd: string, resolution: Resolution): Promise<CheckResult> {
   if (!findOnPath("git", process.env.PATH)) {
@@ -222,10 +264,10 @@ async function checkForge(cwd: string, resolution: Resolution): Promise<CheckRes
   if (!findOnPath(login.cli, process.env.PATH)) return fail("forge", `${login.service}: \`${login.cli}\` is not on the PATH`, login.installHint);
   try {
     await promisify(execFile)(login.cli, login.args, { timeout: timeoutMs() });
-    return pass("forge", `${login.service}: \`${login.cli}\` is authenticated`);
   } catch (err) {
     return fail("forge", `${login.service}: \`${[login.cli, ...login.args].join(" ")}\` failed: ${saidBy(err)}`, `Run \`${login.loginCommand}\`.`);
   }
+  return login.token ? checkForgeToken(login, login.token) : pass("forge", `${login.service}: \`${login.cli}\` is authenticated`);
 }
 
 /** A workflow of the repo with the config it resolves to. */

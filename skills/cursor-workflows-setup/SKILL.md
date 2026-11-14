@@ -39,8 +39,9 @@ Pick the task, then run its steps in order. Each step ends on a stated result.
 ## Check the setup
 
 1. Run `wf doctor --json`. Its `checks`, always in this order: `node`, `dependencies`, `login`, `models`, `forge`,
-   `mcp-server`, `config`, `kit-version`, `sandbox`. `ok: true` and exit code 0 mean the setup works. Done when every check is
-   `pass`, or each failing check's `message` and `hint` went to the user.
+   `mcp-server`, `config`, `kit-version`, `sandbox`. `ok: true` and exit code 0 mean the setup works. A check's `status` is
+   `pass`, `warn` or `fail`: a `warn` passed, and names something worth fixing. Done when no check is `fail`, or each failing
+   check's `message` and `hint` went to the user, and each `warn`'s `message` and `hint` went to the user too.
    - On a Node older than 22.13 the report holds the `node` check alone.
    - `node` and `mcp-server` depend on the environment the IDE starts: run `wf doctor` from a terminal the IDE opened.
 2. Fix what a `hint` lets you fix. Hand the user what needs them:
@@ -49,13 +50,19 @@ Pick the task, then run its steps in order. Each step ends on a stated result.
    - `forge`: `gh` (GitHub) or `glab` (GitLab) is missing or logged out: the user runs `gh auth login` or
      `glab auth login --hostname <host>`. A host the kit does not know fails with a message that names the `forges` key:
      declaring it is the user's call (see "Read or change the config").
+   - `forge` with `status: "warn"`: the GitHub login's token holds scopes the kit does not need (`admin:public_key`,
+     `workflow`, `delete_repo`, ...). The `message` names them and the `hint` says how to remove them. Narrowing the token
+     is the user's call: `gh auth refresh --remove-scopes <scopes>` opens a browser, and a fine-grained token goes in
+     `GH_TOKEN`. The doctor never prints the token: keep it out of every command, log and reply. It does not read the scopes of
+     a `glab` token.
    - `sandbox`: the global caps require the SDK sandbox (the installer writes `caps.requireSandbox: true`) and, on Linux,
      `bwrap` is not on the PATH: install bubblewrap (`sudo apt install bubblewrap`). The message also says whether a
      `sandbox.json` limits reads to the workspace (`readBoundary: "workspace"`); without it a step can read the
      Cursor key. Adding that setting, or turning the sandbox off, is the user's call.
    - `models`: a model id in the config is not in the account's catalog; `wf models` lists the ids. Changing the
      config is the user's call (see "Read or change the config").
-3. Run `wf doctor` again. Done when it exits 0, or when the user has the remaining failures and their hints.
+3. Run `wf doctor` again. Done when it exits 0, or when the user has the remaining failures and their hints. A `warn` does not
+   change the exit code: relay it, do not loop on it.
 
 ## Upgrade the kit
 

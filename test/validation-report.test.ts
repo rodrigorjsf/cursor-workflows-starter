@@ -173,6 +173,25 @@ test("the doctor report is kept as ok plus the id, status and message of each ch
   assert.match(r.body, /forge.*fail/);
 });
 
+test("a doctor report with a warning is ok, and the issue body says so instead of claiming every check passed cleanly", () => {
+  const doctor = {
+    ok: true,
+    checks: [
+      { id: "node", title: "Node.js", status: "pass", message: "v22.23.4" },
+      { id: "forge", title: "Forge CLI", status: "warn", message: "the token holds admin:public_key", hint: "gh auth refresh --remove-scopes admin:public_key" },
+    ],
+  };
+  const r = run(progress([]), { doctor });
+  assert.equal(r.report.doctor.ok, true);
+  assert.deepEqual(
+    r.report.doctor.checks.map((c: { id: string; status: string }) => [c.id, c.status]),
+    [["node", "pass"], ["forge", "warn"]],
+  );
+  assert.match(r.body, /All checks passed, 1 with a warning\./);
+  assert.doesNotMatch(r.body, /At least one check failed/);
+  assert.match(run(progress([]), { doctor: { ok: true, checks: [doctor.checks[0]] } }).body, /All checks passed\.\n/, "no warning, no count");
+});
+
 test("no doctor report, or one that is not JSON, leaves doctor null instead of breaking the report", () => {
   assert.equal(run(progress([])).report.doctor, null);
   assert.equal(run(progress([]), { doctor: "this is not json" }).report.doctor, null);
