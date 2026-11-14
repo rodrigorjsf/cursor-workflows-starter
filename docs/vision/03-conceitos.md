@@ -67,7 +67,7 @@ _Evite_: tarefa, processo.
 
 **Travado** (*frozen*):
 O job cujo processo está vivo, é o do job, segura o lock do run (`run.lock`) e parou de mandar heartbeat. Aparece como
-`failed`, mas ainda executa o run: um cancelamento o mata com SIGKILL. Só esse caso é travado (`isFrozen`, em
+`failed`, mas ainda executa o run: um cancelamento o mata com SIGKILL, junto com os comandos de `ctx.exec` que ele tinha em andamento. Só esse caso é travado (`isFrozen`, em
 `packages/runtime/src/runtime/job-state.ts`).
 _Evite_: terminado (o processo de um job travado ainda está lá), morto.
 
@@ -114,7 +114,7 @@ _Evite_: MR fora da interface, change request.
 |---|---|
 | Workflow | `packages/runtime/workflows/*.ts` (embutidos) e `.agents/workflows/*.ts` (do repositório) |
 | Run | `<repo>/.workflows/runs/<runId>/`: `events.jsonl`, `journal.jsonl` e `run.lock` |
-| Job | `<repo>/.workflows/jobs/<jobId>.json` e `<jobId>.log` |
+| Job | `<repo>/.workflows/jobs/<jobId>.json`, `<jobId>.log` e, enquanto um comando de `ctx.exec` roda, `<jobId>.exec-group.<pgid>` (o grupo de processo dele, que o cancelamento de um job travado mata) |
 | Índice global de runs | `~/.cursor-workflows/runs.jsonl`: uma linha por run, de todos os repositórios |
 | Métricas | `~/.cursor-workflows/metrics.db`, um banco SQLite por usuário ([5.3](../operating/03-observabilidade.md)) |
 

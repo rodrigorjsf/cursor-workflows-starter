@@ -23,6 +23,12 @@ export interface CommandSpec {
   timeoutMs: number;
   /** Aborting it kills the command. */
   signal?: AbortSignal;
+  /**
+   * Told the command's process group as soon as the command has started (never where there are no process groups: Windows);
+   * what it returns is called when the call ends. It must not throw. It lets a job record the groups it has live, for a
+   * cancel that kills the process before this runner can (`job-children.ts`).
+   */
+  onGroup?: (pgid: number) => () => void;
 }
 
 /** How a command ended. */
@@ -88,6 +94,7 @@ export function runCommand(spec: CommandSpec, onOutput: (stream: OutputStream, t
       process.on("exit", () => running.forEach((c) => killTree(c, "SIGKILL")));
     }
     running.add(child);
+    const dropGroup = OWN_GROUP && child.pid !== undefined ? spec.onGroup?.(child.pid) : undefined;
 
     let outcome: ExecOutcome = "exit";
     let exited: { code: number | null; signal: NodeJS.Signals | null } | undefined;
@@ -99,6 +106,7 @@ export function runCommand(spec: CommandSpec, onOutput: (stream: OutputStream, t
       timers.forEach(clearTimeout);
       spec.signal?.removeEventListener("abort", onAbort);
       running.delete(child);
+      dropGroup?.();
       resolve(end);
     };
     const ended = () => result(outcome, exited?.code ?? null, exited?.signal ?? null);

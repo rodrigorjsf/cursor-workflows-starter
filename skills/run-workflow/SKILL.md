@@ -110,7 +110,7 @@ ended job is handled as the notes below say, and stays `failed`.
   Relay the note as it came. The job can still show `running` until its heartbeat goes stale (30 s by default); chain
   `wait_workflow` (step 3) and it ends `failed`.
 - A `note` that starts with `process <pid> had no heartbeat and was killed (SIGKILL)`: the process was frozen, so it
-  was killed without undoing the step in progress, and the run stays resumable. The job stays `failed`. Once the
+  was killed, with the commands it had started, without undoing the step in progress, and the run stays resumable. The job stays `failed`. Once the
   process is gone, the runtime cancels the cloud agents the run left running, as for a job that already ended: the note
   goes on to name them after `cancelled the cloud agent it left running:`, or names one it `could not reach`. Relay it.
   In the rare case the process `has not exited yet`, the note says those agents were not cancelled: call

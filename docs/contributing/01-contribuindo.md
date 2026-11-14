@@ -50,6 +50,7 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   │   ├── jobs.ts         # jobs: o que roda um job (heartbeat, `startJob`, os sinais de cancelamento); reexporta o job-spawn.ts
 │       │   │   ├── job-spawn.ts    # o que inicia um job: o registro (`createJob`) e o processo destacado (`spawnJob`), sem o engine (o dashboard o usa)
 │       │   │   ├── job-state.ts    # o registro de um job, o estado projetado do log e o cancelamento, sem o engine (o dashboard o usa)
+│       │   │   ├── job-children.ts # os grupos de processo dos comandos vivos de um job: o job os grava, e o cancelamento de um job travado os mata (o `SIGKILL` pula o gancho de saída)
 │       │   │   ├── run-view.ts     # os runs de todos os repositórios, lidos do índice global e do log, para quem observa de fora (o dashboard), e de que issue cada run do `implement-issue` trata (`runOriginsOf`)
 │       │   │   ├── run-tail.ts     # o log de eventos de um run lido por posição (cada linha tem um id): o stream ao vivo e o conteúdo de uma etapa
 │       │   │   ├── run-cancel.ts   # cancela um run de fora do processo que o executa (o botão Cancel do dashboard), pelo mesmo `cancelJob` do `wf cancel`
