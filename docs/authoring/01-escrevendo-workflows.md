@@ -52,7 +52,7 @@ documento explica o *porquê* das regras e traz as receitas, que a skill aponta.
 
 ### Comandos: `ctx.exec`
 
-Todo comando que o workflow roda (testes, `git`, `gh`) passa por `ctx.exec(comando, args, { label, timeoutMs, cwd, env })`,
+Todo comando que o workflow roda (testes, `git`, `gh` ou `glab`) passa por `ctx.exec(comando, args, { label, timeoutMs, cwd, env })`,
 nunca por `execFileSync`, `execSync` ou `spawnSync`: uma chamada síncrona congela o processo do job, então o
 cancelamento espera atrás dela e nada a interrompe. O `npm test` reprova um arquivo de workflow que faça uma delas.
 
@@ -64,11 +64,39 @@ if (!tests.ok) await ctx.agent(`${FIX_INSTRUCTIONS}\n\n${tests.tail}`, { label: 
 - Devolve `{ ok, exitCode, timedOut, tail, error? }`. Código diferente de zero, tempo estourado e programa que não inicia
   são **resultados**, não exceções: o código decide o que significam. Um run cancelado mata o comando e lança.
 - O comando morre no `timeoutMs` da chamada; sem ele, no `execTimeoutMs` da configuração do workflow
-  ([6.2](../reference/config.md)), 10 minutos por padrão. Dê um prazo curto a um comando de rede (`git push`, `gh`).
+  ([6.2](../reference/config.md)), 10 minutos por padrão. Dê um prazo curto a um comando de rede (`git push`, `gh`, `glab`).
 - A saída vai para o log de eventos enquanto o comando roda, com a redação e a retenção do conteúdo de um agente, e cada
   chamada é um nó do run, ao lado das etapas ([3.1](../internals/01-arquitetura.md#comandos-do-workflow-ctxexec)). `tail`
   é a saída real, sem redação: antes de levá-la a um texto que sai da máquina, passe pela trava de segredos.
 - Um resume roda o comando de novo: `exec` não entra no journal. Mantenha os efeitos idempotentes.
+
+#### Comandos do forge: `gh` e `glab`
+
+Quem abre PR, comenta numa issue ou lê uma issue roda o CLI do forge do repositório por `ctx.exec`. O host do `origin`
+escolhe o forge: `github.com` é GitHub (`gh`), `gitlab.com` é GitLab (`glab`) e qualquer outro host é o que a chave
+`forges` da configuração declara (`{ "git.example.com": "gitlab" }`, que o workflow lê em `ctx.forges`;
+[6.2](../reference/config.md)). Os dois CLIs usam o login do usuário (`gh auth login` ou
+`glab auth login --hostname <host>`).
+
+| Efeito | GitHub (`gh`) | GitLab (`glab`) |
+|---|---|---|
+| Ler uma issue | `gh issue view <n> --json number,title,body,labels` | `glab issue view <n> --output json` |
+| Comentar numa issue | `gh issue comment <n> --body-file <arquivo>` | `glab api --method POST projects/:fullpath/issues/<n>/notes -F body=@<arquivo>` |
+| Abrir o PR | `gh pr create --head <branch> --title <t> --body-file <arquivo>` | `glab mr create --source-branch <branch> --title <t> --description <texto> --yes` |
+| Achar o PR de uma branch | `gh pr view <branch> --json url,state` | `glab api --paginate "projects/:fullpath/merge_requests?source_branch=<branch>&order_by=created_at&sort=desc&per_page=100"` |
+
+- O `glab issue note` lê o texto do stdin, que o `ctx.exec` nunca alimenta: o comentário vai pelo `glab api`.
+- O `glab mr create` não tem flag de arquivo para o corpo: a descrição é um argumento só (o Linux limita um argumento a
+  cerca de 128 KiB, então corte o texto antes), e o `-H` nomeia o repositório de origem, não a branch: use
+  `--source-branch`.
+- O `glab mr view <branch>` falha quando a branch tem mais de um MR; o `gh pr view <branch>` pega o último. Peça a lista
+  ao `glab api` (todas as páginas) e fique com o aberto mais novo, ou com o mais novo. Os estados do MR são `opened`, `locked` (sendo
+  mesclado), `merged` e `closed`: `opened` e `locked` contam como aberto.
+- O GitLab executa como comando a linha de um corpo de MR ou de uma nota que começa com uma ação rápida (`/close`,
+  `/merge`, …), com a conta que publica, e transforma `!12`, `~rótulo` e `%marco` em links e em notas nos outros
+  objetos: passe o texto de um modelo por uma neutralização antes de publicar (o `implement-issue` faz isso).
+- Uma etapa na nuvem num repositório do GitLab depende do suporte do próprio Cursor ao GitLab; o kit não valida esse
+  caminho ([6.2](../reference/config.md)).
 
 ## Custo
 
@@ -288,11 +316,12 @@ combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
    [`packages/runtime/test/fake-sdk.ts`](../../packages/runtime/test/fake-sdk.ts).
 3. A cobertura exigida (ramos, `status` de retorno, invariantes, resume) é a de "Antes de entregar" da skill
    [`cursor-workflow-authoring`](../../skills/cursor-workflow-authoring/SKILL.md).
-4. Para fluxos com `ctx.parallel`, `gh` ou `git`, copie o arnês de
+4. Para fluxos com `ctx.parallel`, `gh`, `glab` ou `git`, copie o arnês de
    [`packages/runtime/test/implement-issue.fixture.ts`](../../packages/runtime/test/implement-issue.fixture.ts):
    - um despachante por `label` no fake SDK, porque com `ctx.parallel` a ordem dos `send()` varia e a fila
      `script` segue a ordem;
-   - `gh` falso no `PATH` (script Node com estado em JSON);
+   - `gh` ou `glab` falso no `PATH`, o do forge do workflow (script Node com estado em JSON; o
+     `implement-issue.fixture.ts` traz os dois);
    - repositório git temporário com `user.name` e `user.email` configurados e um repositório bare como `origin`;
    - o comando de teste real do projeto (`node --test`), que o workflow roda por `runTests`;
    - `process.env.WF_METRICS = "off"` no topo (ou `metricsDb: false` no `runWorkflow`), para o teste não gravar no

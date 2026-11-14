@@ -89,7 +89,7 @@ The recipes cited are in [recipes.md](references/recipes.md).
 | Loop with no cap | `for (let round = 1; round <= N && !ok; round++)` |
 | Review/critique | Recipe "Review by axes": one step per axis, a schema with the skill's own finding categories, routing in code |
 | End-of-turn hook that reopens the loop (Cursor: `stop`/`subagentStop` with `followup_message`; Claude Code: `Stop`/`SubagentStop` with `decision: "block"` and `reason`, or exit 2) | An explicit loop in the workflow, with a cap; the hook is no longer needed |
-| External effect (commit, PR, comment) | Code at the end, after the checks. The real output the skill asks for in the artifact (a failing test, then passing) is captured by the code; the agent writes only the judgment text |
+| External effect (commit, PR, comment, whether it is a `git`, `gh` or `glab` step) | Code at the end, after the checks. The real output the skill asks for in the artifact (a failing test, then passing) is captured by the code; the agent writes only the judgment text |
 | Subagent the workflow wants to delegate *inside* a step | `agents: { name: { description, prompt, model } }` in the step option, with `"task"` in the `tools` allowlist (the tool that fires subagents) |
 | Subagent frontmatter field (`readonly`, `model: inherit`, `isolation`, `maxTurns`, `effort`, `tools`…) | Section "Origin subagent" of [origin-cases.md](references/origin-cases.md) |
 

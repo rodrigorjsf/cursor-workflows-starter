@@ -32,8 +32,9 @@ can make a decision, code **makes** it.
    model the router picked, so compare models with explicit ids.
 5. **Parallel writes only with isolation.** Two simultaneous steps cannot edit the same files. Create a `git worktree`
    per item and pass it as `cwd`.
-6. **External effects stay in code.** Commit, push, opening a PR and commenting on an issue are done with `gh` or `git`
-   (through `ctx.exec`) in the workflow, after the checks. Everything that leaves the machine first passes a **secrets guard**, because an
+6. **External effects stay in code.** Commit, push, opening a PR (a merge request on GitLab) and commenting on an issue
+   are done with `git` and the forge's CLI, `gh` or `glab` (through `ctx.exec`, runtime-api.md "Forge commands"), in the
+   workflow, after the checks. Everything that leaves the machine first passes a **secrets guard**, because an
    issue body with a prompt injection can lead a step to copy `~/.cursor/sdk/auth.json` into the worktree and the
    sandbox does not restrict reads. The guard: before the commit, reset any commits an agent made (`git reset --soft`
    to the base, keeping the tree) and scan the lines added since the base for every credential format the event-log
@@ -42,14 +43,17 @@ can make a decision, code **makes** it.
    secret-named environment variable, and files named `auth.json`, `.env` or `.env.*`; before publishing any text
    (PR body, comment) scan it with the same text rules. A hit stops exactly the effect that would have carried the
    text out, and the run returns `status: "secret-blocked"` with a `reason` naming only the rule that fired, never the
-   snippet. A security review is a second layer, not the only one.
+   snippet. On GitLab, text a model wrote also acts: a line that starts with a quick action (`/close`, `/merge`, ...)
+   runs as that command under the account that posts it, and `!12`, `~label` and `%milestone` turn into links and
+   cross-reference notes on other objects, so show such a line as code and put a zero-width space after those sigils
+   before the text goes into a merge request description or a note. A security review is a second layer, not the only one.
 7. **Cuts and failures are always explicit.** When limiting coverage (top-N, sampling), record with `ctx.log` what was
    left out. `ctx.parallel` and `ctx.pipeline` turn failures into `null`: when the result is required (a mandatory
    review, for example), check the `null`s and end the run with an explicit failure `status`.
 8. **Idempotent effects.** A resume re-executes the code outside the agent steps, and the journal returns a step's
-   result, not its effect on disk. Protect commit (`git diff --cached --quiet`), push and PR creation (`gh pr view`
-   before `gh pr create`). If the code checks the disk between steps, keep the progress per item (recipes.md, "Resume
-   with invariants").
+   result, not its effect on disk. Protect commit (`git diff --cached --quiet`), push and PR creation (look the branch's
+   PR up before `gh pr create` or `glab mr create`: runtime-api.md, "Forge commands"). If the code checks the disk
+   between steps, keep the progress per item (recipes.md, "Resume with invariants").
 9. **Compose with shared TypeScript functions**, called from `run`.
 
 ## What the code guarantees and what is only asked

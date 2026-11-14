@@ -27,7 +27,7 @@ flowchart LR
   CHAT["Chat do Cursor IDE<br/>/run-workflow"]:::etapa -->|MCP| RT
   TERM["Terminal e CI<br/>wf run, wf start"]:::etapa -->|CLI| RT
   RT["Runtime do kit<br/>o workflow decide as etapas,<br/>o teto de custo e o resume"]:::kit -->|"uma etapa, um agente"| AG["Agentes do Cursor SDK<br/>modelo por etapa,<br/>saída com schema"]:::etapa
-  RT -->|"git, gh e testes"| REPO[("Repositório e worktrees")]:::saida
+  RT -->|"git, gh ou glab e testes"| REPO[("Repositório e worktrees")]:::saida
   RT -->|"cada fato do run"| LOG["Estado do run<br/>log de eventos e journal"]:::saida
   classDef kit fill:#fef3c7,stroke:#b45309,color:#0f172a
   classDef etapa fill:#dbeafe,stroke:#1d4ed8,color:#0f172a
@@ -36,8 +36,10 @@ flowchart LR
 
 ## Começo rápido
 
-Requisitos: Node 22.13 ou mais novo, um plano pago do Cursor, `git` e `gh` autenticado. Mais simples: peça a um agente de
-código que siga o [INSTALL-AGENT.md](INSTALL-AGENT.md). À mão:
+Requisitos: Node 22.13 ou mais novo, um plano pago do Cursor, `git` e o CLI do forge do repositório autenticado: `gh`
+(GitHub) ou `glab` (GitLab). O host do `origin` escolhe o forge, e um GitLab self-managed entra na chave `forges` da
+configuração ([6.2](docs/reference/config.md)). Mais simples: peça a um agente de código que siga o
+[INSTALL-AGENT.md](INSTALL-AGENT.md). À mão:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.3.0/scripts/install.sh -o /tmp/wf-install.sh

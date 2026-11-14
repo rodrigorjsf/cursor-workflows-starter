@@ -9,7 +9,7 @@ The origin skill talks to the user in three ways:
 
 | In the origin | In the workflow |
 |---|---|
-| Asks for an input ("what is the fixed point?", "where is the spec?") | `args`, or a value the code derives (base commit, issue via `gh`) |
+| Asks for an input ("what is the fixed point?", "where is the spec?") | `args`, or a value the code derives (base commit, issue via `gh` or `glab`) |
 | Asks for approval of an intermediate result ("confirm the seams with the user") | A **checkpoint** across two runs of the same workflow: recipe "Checkpoint across two runs" in [recipes.md](recipes.md) (in `implement-issue`, `seams-proposed` and `approveSeams`) |
 | Open conversation (interview, brainstorming) | Stays a skill; goes into the report as not converted |
 

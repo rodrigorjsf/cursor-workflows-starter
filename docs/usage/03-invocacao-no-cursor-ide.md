@@ -268,7 +268,7 @@ configuração, [6.2](../reference/config.md), ou `WF_MODEL_PING`). Rode com `/r
 instalado, `~/.cursor-workflows/kit/scripts/verify/validate-cursor-ide.sh`). Rode-o no terminal do próprio Cursor: o
 cenário 1 só vale ali, porque o IDE escolhe o próprio Node e PATH. Ele:
 
-1. confere a máquina (`wf`, `gh` logado, dependências do kit) e pergunta a versão do Cursor;
+1. confere a máquina (`wf`, `gh` logado no GitHub, dependências do kit) e pergunta a versão do Cursor;
 2. cria um repositório privado descartável no GitHub, com três issues `complexity:low`, reaproveitando o
    [`setup-sandbox-repo.sh`](../../scripts/verify/setup-sandbox-repo.sh), e roda `wf init` nele. Pede confirmação antes de criar, e se parar no meio retoma de onde parou, sem criar duas vezes o repositório nem as issues;
 3. roda o `wf doctor` no repositório (cenário 1) e, para cada um dos outros seis, diz exatamente o que digitar no chat (ou o que olhar, no 7)
@@ -313,7 +313,7 @@ formatos conhecidos de segredo viram `[REDACTED]`. O critério de release (`rele
 > Para usar o *runtime nativo* do Claude Code em vez deste kit, escreva o fluxo como workflow do Claude Code
 > (`.claude/workflows/<nome>.js`). A estrutura `meta` + `agent/parallel/pipeline/phase` é praticamente a mesma,
 > então um workflow deste kit converte para lá com poucas mudanças: troque `ctx.agent` por `agent`, e passe
-> `git`/`gh` para uma etapa de agente, porque o sandbox do Claude Code não tem shell.
+> `git`/`gh`/`glab` para uma etapa de agente, porque o sandbox do Claude Code não tem shell.
 
 ---
 

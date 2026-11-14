@@ -27,7 +27,7 @@ flowchart LR
   CHAT["Cursor IDE chat<br/>/run-workflow"]:::etapa -->|MCP| RT
   TERM["Terminal and CI<br/>wf run, wf start"]:::etapa -->|CLI| RT
   RT["Kit runtime<br/>the workflow decides the steps,<br/>the cost cap and the resume"]:::kit -->|"one step, one agent"| AG["Cursor SDK agents<br/>model per step,<br/>schema-checked output"]:::etapa
-  RT -->|"git, gh and tests"| REPO[("Repository and worktrees")]:::saida
+  RT -->|"git, gh or glab and tests"| REPO[("Repository and worktrees")]:::saida
   RT -->|"every fact of the run"| LOG["Run state<br/>event log and journal"]:::saida
   classDef kit fill:#fef3c7,stroke:#b45309,color:#0f172a
   classDef etapa fill:#dbeafe,stroke:#1d4ed8,color:#0f172a
@@ -36,7 +36,9 @@ flowchart LR
 
 ## Quick start
 
-Requires Node 22.13 or newer, a paid Cursor plan, `git` and an authenticated `gh`. Easiest: ask a coding agent to follow
+Requires Node 22.13 or newer, a paid Cursor plan, `git` and the authenticated CLI of the repository's forge: `gh`
+(GitHub) or `glab` (GitLab). The host of `origin` picks the forge, and a self-managed GitLab goes in the config's
+`forges` key ([6.2](docs/reference/config.md)). Easiest: ask a coding agent to follow
 [INSTALL-AGENT.md](INSTALL-AGENT.md). By hand:
 
 ```bash
