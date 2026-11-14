@@ -1154,10 +1154,21 @@ async function executeRun<A, R>(
 
   /**
    * What a job does so that a cancel which kills its frozen process can still reach its live commands: it records the process
-   * group of each (`job-children.ts`). A run with no job has no such cancel, and records nothing.
+   * group of each (`job-children.ts`). A run with no job has no such cancel, and records nothing. A record that cannot be
+   * written is a warning: the command still runs, out of that cancel's reach.
    */
   const jobId = opts.jobId;
-  const recordGroup = jobId === undefined ? undefined : (pgid: number) => recordExecGroup(jobsDirIn(opts.cwd), jobId, pgid);
+  const recordGroup =
+    jobId === undefined
+      ? undefined
+      : (pgid: number) => {
+          try {
+            return recordExecGroup(jobsDirIn(opts.cwd), jobId, pgid);
+          } catch (err) {
+            emit({ type: "warning", message: `could not record the process group ${pgid} of a command: ${errorText(err)}; cancelling this job while it is frozen will not stop that command` });
+            return () => {};
+          }
+        };
 
   /** One `ctx.exec` call: a step node of the run. The command runs in its own process, and the call returns what the command did. */
   async function execCall(command: string, args: string[] = [], callOpts: ExecOptions = {}): Promise<ExecResult> {

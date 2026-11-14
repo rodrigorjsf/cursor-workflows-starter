@@ -1,11 +1,11 @@
 // Seam: the engine's `ctx.exec`, read at the record a cancel reads. A run executed as a job records the process group of each
-// command it has live in the jobs folder, and drops it when the command ends; a run with no job records nothing. Real commands and
-// real process groups, with the fake Cursor SDK standing in for the SDK the engine imports; the kill itself is
-// frozen-cancel.process.test.ts.
+// command it has live in the jobs folder, and drops it when the command ends; a run with no job records nothing; a record that
+// cannot be written is a warning. Real commands and real process groups, with the fake Cursor SDK standing in for the SDK the
+// engine imports; the kill itself is frozen-cancel.process.test.ts.
 process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
 import "./isolate-home.js";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, test } from "node:test";
@@ -13,20 +13,15 @@ import { runWorkflow } from "../src/runtime/engine.js";
 import { recordedExecGroups } from "../src/runtime/job-children.js";
 import { createJob } from "../src/runtime/jobs.js";
 import { jobsDirIn } from "../src/runtime/job-state.js";
+import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { defineWorkflow } from "../src/runtime/workflow.js";
-import { waitFor } from "./wait-for.js";
+import { killGroup, pidIn, sleepArgs } from "./sleeper.js";
 
 const sandbox = mkdtempSync(join(tmpdir(), "wf-exec-groups-"));
 let leaked: number | undefined;
 afterEach(() => {
-  if (leaked !== undefined) {
-    try {
-      process.kill(-leaked, "SIGKILL"); // a sleep a failing test left running
-    } catch {
-      /* already gone */
-    }
-    leaked = undefined;
-  }
+  if (leaked !== undefined) killGroup(leaked);
+  leaked = undefined;
 });
 after(() => rmSync(sandbox, { recursive: true, force: true }));
 
@@ -34,18 +29,7 @@ after(() => rmSync(sandbox, { recursive: true, force: true }));
 const sleeping = (pidFile: string) =>
   defineWorkflow({
     meta: { name: "sleeping", description: "one long ctx.exec" },
-    run: (ctx) => ctx.exec("sh", ["-c", 'echo $$ > "$1"; exec sleep 600', "sh", pidFile], { timeoutMs: 30 * 60_000 }),
-  });
-
-/** The pid in `file`, once the command wrote it. */
-const pidIn = (file: string) =>
-  waitFor("the command to write its pid", () => {
-    try {
-      const pid = Number(readFileSync(file, "utf8").trim());
-      return Number.isInteger(pid) && pid > 1 ? pid : undefined;
-    } catch {
-      return undefined; // not written yet
-    }
+    run: (ctx) => ctx.exec("sh", sleepArgs(pidFile), { timeoutMs: 30 * 60_000 }),
   });
 
 test("a job records the process group of a live ctx.exec command, and drops it when the command ends", async () => {
@@ -78,4 +62,15 @@ test("a run with no job records nothing, and creates no jobs folder", async () =
   const quick = defineWorkflow({ meta: { name: "quick", description: "a command that ends" }, run: (ctx) => ctx.exec("true") });
   assert.equal((await runWorkflow(quick, {}, { cwd, runId: "run-no-job" })).status, "finished");
   assert.equal(existsSync(jobsDirIn(cwd)), false);
+});
+
+test("a record that cannot be written is a warning: the command still runs", async () => {
+  const cwd = mkdtempSync(join(sandbox, "repo-")); // a job id but no jobs folder: the record has nowhere to go
+  const quick = defineWorkflow({ meta: { name: "quick", description: "a command that ends" }, run: (ctx) => ctx.exec("true") });
+  const outcome = await runWorkflow(quick, {}, { cwd, runId: "run-unrecorded", jobId: "job-unrecorded" });
+  assert.equal(outcome.status, "finished");
+  assert.equal((outcome.result as { ok: boolean }).ok, true, "the command ran");
+  const warnings = readEventLog(eventLogPath(cwd, "run-unrecorded")).events.flatMap((e) => (e.type === "warning" ? [e.message] : []));
+  assert.equal(warnings.length, 1, warnings.join("\n"));
+  assert.match(warnings[0]!, /^could not record the process group \d+ of a command: .*ENOENT.*; cancelling this job while it is frozen will not stop that command$/);
 });

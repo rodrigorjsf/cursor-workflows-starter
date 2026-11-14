@@ -15,7 +15,7 @@ import type { LimitOverrides } from "../config/index.js";
 import { cancelLeftCloudAgents, leftAgentsNote } from "./cloud-cancel.js";
 import type { RunStatus } from "./events.js";
 import { type ExecutionState, type Ledger, projectExecution, replayLedger, resumeHint, withRatio } from "./projection.js";
-import { groupsLeftBy, killGroups } from "./job-children.js";
+import { killFrozenJob } from "./job-children.js";
 import { commandLineHas, isAlive } from "./pid.js";
 import { eventLogPath, readEventLog, runLockHolder } from "./run-store.js";
 import { isPlainName, stateDir } from "./state.js";
@@ -279,8 +279,8 @@ export interface CancelResult extends JobState {
  * writes the run's end and exits) and waits up to `timeoutMs` for the job to leave `running`. A process that has stopped
  * answering (its heartbeat is stale, so the job already shows as failed) cannot handle a signal: it is killed, which frees
  * the run for a resume but cannot revert the step, and its record is marked (`killedByCancel`) so the resume does not take
- * that end for a crash. The commands it started outlive a killed process, so their process groups are killed with it
- * (`groupsLeftBy`, `job-children.ts`). Once the process is gone, the cloud agents its run left running are cancelled
+ * that end for a crash. The commands it started outlive a killed process, so they are killed with it (`killFrozenJob`,
+ * `job-children.ts`). Once the process is gone, the cloud agents its run left running are cancelled
  * through the Cursor API, and a resume afterwards starts a new agent in place of each, at new cost. A job whose process
  * already ended gets no signal: those agents are cancelled the same way. So does a job whose pid another process got: the
  * job's process ended, and the other process is left alone. Either way the job stays `failed`, its run's end never written.
@@ -302,14 +302,13 @@ export async function cancelJob(cwd: string, jobId: string, timeoutMs: number): 
     return { ...before, note: `process ${record.pid} is not the job's process (was the pid reused?): the job ended, no signal sent${left || "; nothing to cancel"}` };
   }
   const signal = liveness === "silent" ? "SIGKILL" : "SIGTERM";
-  // A killed process cannot stop the commands it started: its exit hook does not run. They are found before the kill.
-  const stray = signal === "SIGKILL" ? groupsLeftBy(jobsDirIn(cwd), record.jobId, record.pid) : [];
   try {
-    process.kill(record.pid, signal);
+    // A killed process cannot stop the commands it started (its exit hook does not run): the kill takes them along.
+    if (signal === "SIGKILL") killFrozenJob(jobsDirIn(cwd), record.jobId, record.pid);
+    else process.kill(record.pid, signal);
   } catch (err) {
     return { ...before, note: `could not signal process ${record.pid}: ${err instanceof Error ? err.message : String(err)}` };
   }
-  killGroups(stray);
   // The killed process writes no run end and runs no code again (not even its heartbeat): the record says the cancel killed
   // it, so a resume tells this end from a crash (`wasKilledByCancel`). Written now, not once the process is gone: a process
   // that outlives the wait is still killed, and a second cancel finds it gone and marks nothing.

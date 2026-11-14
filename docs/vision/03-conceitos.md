@@ -114,7 +114,7 @@ _Evite_: MR fora da interface, change request.
 |---|---|
 | Workflow | `packages/runtime/workflows/*.ts` (embutidos) e `.agents/workflows/*.ts` (do repositório) |
 | Run | `<repo>/.workflows/runs/<runId>/`: `events.jsonl`, `journal.jsonl` e `run.lock` |
-| Job | `<repo>/.workflows/jobs/<jobId>.json` e `<jobId>.log` |
+| Job | `<repo>/.workflows/jobs/<jobId>.json`, `<jobId>.log` e, enquanto um comando de `ctx.exec` roda, `<jobId>.exec-group.<pgid>` (o grupo de processo dele, que o cancelamento de um job travado mata) |
 | Índice global de runs | `~/.cursor-workflows/runs.jsonl`: uma linha por run, de todos os repositórios |
 | Métricas | `~/.cursor-workflows/metrics.db`, um banco SQLite por usuário ([5.3](../operating/03-observabilidade.md)) |
 

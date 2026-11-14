@@ -42,9 +42,12 @@
   comando de `ctx.exec` roda num grupo de processo próprio e seu encerramento está no gancho de saída do job, que o `SIGKILL`
   pula: um `sleep 600` ou um teste longo continuava rodando depois do cancelamento. Agora o job grava o grupo de processo de
   cada comando vivo num arquivo ao lado do seu registro (`<jobId>.exec-group.<pgid>`, removido quando o comando termina), e o
-  cancelamento mata esses grupos junto com o processo. Também mata os filhos destacados do próprio processo, que é como o SDK
-  roda os comandos de shell do agente local (o agente em si roda dentro do processo do job e morre com ele); isso só vale
-  onde há `/proc`. O cancelamento de um job em execução (`SIGTERM`, desfaz a etapa, `cancelled`) não mudou.
+  cancelamento para o processo (`SIGSTOP`), mata esses grupos e depois o processo. O agente local do SDK roda dentro do
+  processo do job e morre com ele; o que ele inicia não: os comandos de shell das tools, destacados em grupo próprio, e os
+  servidores MCP do projeto, no grupo do job. O cancelamento mata os filhos destacados do processo, que acha em `/proc`
+  (onde não há `/proc`, ficam de fora), e o grupo do próprio job. Se o arquivo de um comando não puder ser gravado, o run
+  avisa com um `warning` e o comando roda fora do alcance desse cancelamento. O cancelamento de um job em execução
+  (`SIGTERM`, desfaz a etapa, `cancelled`) não mudou.
 
 ## 0.4.0 (pré-release, 2026-11-13)
 
