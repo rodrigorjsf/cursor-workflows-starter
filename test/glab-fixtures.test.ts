@@ -8,7 +8,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
-import { type RecordingsFile, scrubRecordings } from "../scripts/verify/record-glab-fixtures.js";
+import { type Recording, type RecordingsFile, scrubRecordings } from "../scripts/verify/record-glab-fixtures.js";
 import { AVATAR_PLACEHOLDER, HOST_PLACEHOLDER, PASSWORD_PLACEHOLDER, SCRATCH_PLACEHOLDER, TOKEN_PLACEHOLDER, leaksIn, leaksWithoutSecrets, scrubText } from "../scripts/lib/scrub-recording.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
@@ -119,6 +119,35 @@ test("every recording the fake glab plays is there, with the shape the offline t
   assert.equal(recordings["auth-status-logged-in"]!.exitCode, 0);
   assert.notEqual(recordings["auth-status-logged-out"]!.exitCode, 0);
   assert.match(json("repo-view").path_with_namespace, /^[^/]+\/[^/]+$/);
+});
+
+test("the dashboard's merge request by URL and the forge's calls with a repo argument were recorded from the real glab too", () => {
+  const { recordings, subjects } = JSON.parse(read(RECORDINGS)) as RecordingsFile;
+  const ran = (name: string): Recording => {
+    const recording = recordings[name];
+    assert.ok(recording, `a recording named ${name}`);
+    assert.equal(recording.exitCode, 0, `${name} succeeded on the real GitLab: ${recording.stderr}`);
+    return recording;
+  };
+  const named = `http://${HOST_PLACEHOLDER}/${subjects.project}`;
+
+  // What the dashboard's PR-state source runs (packages/runtime/src/runtime/pr-by-url.ts), from no checkout.
+  const byUrl = ran("mr-api");
+  assert.deepEqual(byUrl.args, ["api", "--hostname", HOST_PLACEHOLDER, `projects/${encodeURIComponent(subjects.project)}/merge_requests/${subjects.mr}`]);
+  const mr = JSON.parse(byUrl.stdout);
+  assert.equal(mr.iid, subjects.mr);
+  assert.equal(mr.state, "opened");
+
+  // The forge module with a `repo` argument: `--repo <url>` for glab's own commands, `--hostname` and the project's path for `glab api`.
+  const issue = ran("issue-view-repo");
+  assert.deepEqual(issue.args.slice(0, 5), ["issue", "view", String(subjects.issue), "--repo", named]);
+  assert.equal(JSON.parse(issue.stdout).iid, subjects.issue);
+  const project = ran("repo-view-repo");
+  assert.deepEqual(project.args, ["api", "--hostname", HOST_PLACEHOLDER, `projects/${encodeURIComponent(subjects.project)}`]);
+  assert.equal(JSON.parse(project.stdout).path_with_namespace, subjects.project);
+  const created = ran("mr-create-repo");
+  assert.deepEqual(created.args.slice(-2), ["--repo", named]);
+  assert.match(created.stdout, /\/-\/merge_requests\/\d+\n/);
 });
 
 // ── the script stays out of the checks ───────────────────────────────────────────────────────────────────────────
