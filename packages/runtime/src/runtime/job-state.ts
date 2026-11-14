@@ -1,6 +1,7 @@
 // The state of the jobs of a repo, read from disk, and the cancellation of a job: everything about a job that does not need
 // the engine. The dashboard cancels a run through this module (`observe`), so it must stay free of the engine and, with it,
 // of the Cursor SDK: `job-spawn.ts` adds what starts a job, and `jobs.ts` what runs one. See there for what a job is.
+// What a cancel does to a running, a frozen and a dead job is ADR-0010.
 //
 // The job record (`.workflows/jobs/<jobId>.json`) holds the job's identity (job id, run id, pid and heartbeat) and only the
 // facts the job's process cannot put in the run's log (ADR-0008): how the job was started (args and limit flags), so a resume

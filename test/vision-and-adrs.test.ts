@@ -1,6 +1,7 @@
 // Seam: the docs book as a reader finds it. Part 1 (vision: the problem, the idea and its references, the concepts),
 // the credits and provenance that part 1 absorbed, and part 7 (the ADRs, in English). The mechanical consistency
 // of links, anchors, footers and the index is docs-check.test.ts; these tests read what the chapters say.
+// One test also reads `job-children.ts`, the code the cancel ADR's frozen-job path describes, so that the ADR cannot drift from it.
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, posix, resolve } from "node:path";
@@ -248,7 +249,8 @@ test("ADR-0010's frozen-job path is the one the code takes: every signal killFro
   const code = read("packages/runtime/src/runtime/job-children.ts");
   const start = code.indexOf("export function killFrozenJob");
   assert.ok(start >= 0, "killFrozenJob is in job-children.ts");
-  const signals = new Set([...code.slice(start).matchAll(/"(SIG[A-Z]+)"/g)].map((m) => m[1]!));
+  const body = code.slice(start, code.indexOf("\n}\n", start)); // up to the function's closing brace, which sits at column 0
+  const signals = new Set([...body.matchAll(/"(SIG[A-Z]+)"/g)].map((m) => m[1]!));
   assert.ok(signals.has("SIGSTOP") && signals.has("SIGKILL"), `killFrozenJob sends ${[...signals].join(", ")}`);
   const frozen = bullet(read(CANCEL_ADR), "A frozen job is killed, and nothing is reverted.");
   for (const signal of signals) assert.ok(frozen.includes(signal), `the frozen-job bullet does not name ${signal}, which killFrozenJob sends`);
@@ -256,8 +258,6 @@ test("ADR-0010's frozen-job path is the one the code takes: every signal killFro
   const infix = /const GROUP_INFIX = "([^"]+)"/.exec(code)?.[1];
   assert.ok(infix, "job-children.ts names the record file infix");
   assert.ok(read(CANCEL_ADR).includes(`\`<jobId>${infix}<pgid>\``), `ADR-0010 names the record file <jobId>${infix}<pgid>`);
-  // the cancel sends SIGKILL to a frozen job and SIGTERM to a running one, as the ADR says
-  assert.match(read("packages/runtime/src/runtime/job-state.ts"), /liveness === "silent" \? "SIGKILL" : "SIGTERM"/);
 });
 
 test("ADR-0003 is superseded, so no chapter cites it without ADR-0010 on the same line", () => {

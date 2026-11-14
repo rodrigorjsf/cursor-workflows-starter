@@ -2,7 +2,7 @@
 // command runs in a process group of its own, and the process cleans up from an exit hook (command-runner.ts) that a SIGKILL
 // skips: when `cancelJob` kills a frozen job, those commands keep running. So the job records the group of each live command
 // in a file beside its record (`<jobId>.exec-group.<pgid>`: written when the command starts, removed when it ends), and the
-// cancel reads them.
+// cancel reads them. ADR-0010 records this kill with the other cancel paths.
 //
 // It is neither run state (the run's progress is its event log, ADR-0008) nor a field of the job record (the heartbeat worker
 // rewrites the record from a snapshot, and a record field needs an ADR): it is the job process's own transient state, like its
