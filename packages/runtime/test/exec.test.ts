@@ -8,7 +8,7 @@ import { existsSync as existsSyncSafe, mkdirSync, mkdtempSync, readFileSync, rmS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { calls, costConfig, script, stats } from "@cursor/sdk";
+import { calls, costConfig, script, stats } from "./fake-sdk.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import type { ContentEvent, ExecEndEvent, ExecStartEvent, WorkflowEvent } from "../src/runtime/events.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
@@ -35,7 +35,7 @@ const workflow = <R>(run: (ctx: WorkflowContext) => Promise<R>) =>
   defineWorkflow<unknown, R>({ meta: { name: "execwf", description: "exec" }, defaults: { model: { id: "m" } }, run });
 
 /** `node -e <code>` as a `ctx.exec` call: the one portable way to produce a given output and exit code. */
-const node = (code: string) => [process.execPath, ["-e", code]] as const;
+const node = (code: string): [string, string[]] => [process.execPath, ["-e", code]];
 
 test("ctx.exec returns the exit code and the output of a command that succeeds", async () => {
   const wf = workflow(async (ctx) => ctx.exec(...node("process.stdout.write('hello\\n')")));

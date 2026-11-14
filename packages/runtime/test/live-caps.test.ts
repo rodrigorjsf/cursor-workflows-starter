@@ -8,7 +8,7 @@ import "./isolate-home.js";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { RateLimitError, calls, costConfig, script, stats } from "@cursor/sdk";
+import { RateLimitError, calls, costConfig, script, stats } from "./fake-sdk.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import type { WorkflowEvent } from "../src/runtime/events.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
@@ -30,6 +30,8 @@ afterEach(() => {
 /** One finished turn that used `tokens` tokens in all (10 of them output). */
 const turn = (tokens: number) => ({ type: "turn-ended", usage: { inputTokens: tokens - 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 } });
 /** A send() that streams `count` turns of `tokens` tokens each, until the run is cancelled. */
+/** What the fake does on one send(): an entry of its `script`. */
+type Send = (typeof script)[number];
 const live = (count: number, tokens: number) => () => ({ live: true, result: "ok", deltas: Array.from({ length: count }, () => turn(tokens)) });
 
 type StepEnd = Extract<WorkflowEvent, { type: "step-end" }>;
@@ -64,7 +66,7 @@ const deferred = () => {
 };
 
 /** A send() chosen by the step's prompt, so parallel steps need no send order. */
-const byPrompt = (plan: Record<string, ReturnType<typeof live>>) => (o: any, msg: string, n: number) => plan[msg]!(o, msg, n);
+const byPrompt = (plan: Record<string, Send>) => (o: any, msg: string, n: number) => plan[msg]!(o, msg, n);
 
 /**
  * Like `byPrompt`, for live runs that must all exist before any of them streams: the first turn of every run is held until
@@ -72,7 +74,7 @@ const byPrompt = (plan: Record<string, ReturnType<typeof live>>) => (o: any, msg
  * a cap, however late a step's agent was created, so a test can count on every active step having a run to cancel.
  * Push the result once per step of the plan.
  */
-const holdUntilAllSent = (plan: Record<string, ReturnType<typeof live>>) => {
+const holdUntilAllSent = (plan: Record<string, Send>) => {
   let sent = 0;
   const allSent = deferred();
   return (o: any, msg: string, n: number) => {

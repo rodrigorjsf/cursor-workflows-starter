@@ -219,7 +219,8 @@ test("a name and a port of the maintainer's choosing name the container, its vol
 });
 
 test("Docker is never restarted or reconfigured: the script only starts, asks, runs in and removes what it started", () => {
-  for (const env of [{}, READY, { ...READY, FAKE_RECORDER_FAILS: "1" }, { ...READY, FAKE_PROVER_FAILS: "1" }, { FAKE_EXISTING_CONTAINER: "1" }, { FAKE_EXISTING_VOLUME: "1" }]) {
+  const envs: Array<Record<string, string>> = [{}, READY, { ...READY, FAKE_RECORDER_FAILS: "1" }, { ...READY, FAKE_PROVER_FAILS: "1" }, { FAKE_EXISTING_CONTAINER: "1" }, { FAKE_EXISTING_VOLUME: "1" }];
+  for (const env of envs) {
     const { docker } = runScript(env);
     for (const call of docker) {
       assert.ok(DOCKER_COMMANDS.has(call.split(" ")[1]!), `an unexpected docker command: ${call}`);

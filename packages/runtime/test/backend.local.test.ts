@@ -4,7 +4,7 @@
 process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { RateLimitError, calls, costConfig, script, stats } from "@cursor/sdk";
+import { RateLimitError, calls, costConfig, script, stats } from "./fake-sdk.js";
 import { type AttemptEvent, type AttemptResult, type StepOptions, localBackend } from "../src/runtime/backend.js";
 import { waitFor } from "./wait-for.js";
 
@@ -21,6 +21,7 @@ const options = (extra: Partial<StepOptions> = {}): StepOptions => ({
   cwd: "/work",
   settingSources: ["project"],
   sandbox: false,
+  writes: false,
   schemaRetries: 2,
   ...extra,
 });
