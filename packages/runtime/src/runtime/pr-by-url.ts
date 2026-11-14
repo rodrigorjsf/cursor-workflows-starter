@@ -100,12 +100,15 @@ function glabHostsOf(config: string): string[] {
 async function allowedGitlabHosts(): Promise<ReadonlySet<string>> {
   const hosts = new Set(["gitlab.com"]);
   for (const file of glabConfigFiles()) {
+    let config: string;
     try {
-      for (const host of glabHostsOf(await readFile(file, "utf8"))) if (knownForgeOf(host) !== "github") hosts.add(host);
-      break; // glab uses the first config file that is there
-    } catch {
-      /* no config file here: glab looks in the next place, and with none it knows no host but gitlab.com */
+      config = await readFile(file, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") continue; // no config file here: glab looks in the next place
+      break; // there but unreadable (a directory, no permission): glab fails on it too, so it knows no host but gitlab.com
     }
+    for (const host of glabHostsOf(config)) if (knownForgeOf(host) !== "github") hosts.add(host);
+    break; // glab uses the first config file that is there
   }
   return hosts;
 }
