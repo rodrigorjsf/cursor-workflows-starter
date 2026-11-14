@@ -26,7 +26,7 @@ test("the token, the root password, the local host and the machine's paths are r
   const raw = [
     `Authorization: Bearer ${SECRETS.token}`,
     `password=${SECRETS.password}`,
-    "web_url http://localhost:8929/owner/repo/-/merge_requests/1",
+    "web_url http://localhost:8929/owner/repo/-/merge_requests/1 and https://localhost/x",
     "ssh_url git@localhost:owner/repo.git and ssh://git@127.0.0.1:2424/owner/repo.git",
     `config at ${SECRETS.scratch}/glab-config/config.yml and ${SECRETS.home}/.config`,
     "avatar https://www.gravatar.com/avatar/74c8f92c19079e44d84d21d3c0e7cf7d74c8f92c19079e44d84d21d3c0e7cf7d?s=80&d=identicon",
@@ -37,7 +37,7 @@ test("the token, the root password, the local host and the machine's paths are r
     [
       `Authorization: Bearer ${TOKEN_PLACEHOLDER}`,
       `password=${PASSWORD_PLACEHOLDER}`,
-      `web_url https://${HOST_PLACEHOLDER}/owner/repo/-/merge_requests/1`,
+      `web_url http://${HOST_PLACEHOLDER}/owner/repo/-/merge_requests/1 and https://${HOST_PLACEHOLDER}/x`,
       `ssh_url git@${HOST_PLACEHOLDER}:owner/repo.git and ssh://git@${HOST_PLACEHOLDER}/owner/repo.git`,
       `config at ${SCRATCH_PLACEHOLDER}/glab-config/config.yml and /home/user/.config`,
       `avatar ${AVATAR_PLACEHOLDER}?s=80&d=identicon`,
@@ -51,22 +51,35 @@ test("leaksIn finds what a scrubbed text still holds: the token, the password, a
   assert.deepEqual(leaksIn(`p ${SECRETS.password}`, SECRETS), ["the root password"]);
   assert.deepEqual(leaksIn(`s ${SECRETS.scratch}/x h ${SECRETS.home}`, SECRETS), ["the scratch directory", "the home directory"]);
   assert.deepEqual(leaksIn("http://localhost:8929/x", SECRETS), ["a local host"]);
-  assert.deepEqual(leaksIn("an unknown glpat-abc123DEF456 token", SECRETS), ["a GitLab token"]);
+  assert.match(leaksIn(`an unknown glpat-${"a1B2c3D4e5".repeat(2)} token`, SECRETS)[0] ?? "", /^a credential: GitLab token/);
+  assert.match(leaksIn(`"runners_token":"GR1348941${"a1B2c3D4e5".repeat(2)}"`, SECRETS)[0] ?? "", /^a credential: GitLab runner registration token/);
   assert.deepEqual(leaksIn(`only the placeholder ${TOKEN_PLACEHOLDER} and ${HOST_PLACEHOLDER}`, SECRETS), []);
   assert.deepEqual(leaksWithoutSecrets("http://127.0.0.1:8929/x"), ["a local host"], "a committed fixture is checked without knowing the run's secrets");
 });
 
-test("the recorder writes nothing when a recording still holds a secret it was not told about", () => {
+test("the recorder scrubs every stream of every recording, and writes nothing when the file still holds a secret after that", () => {
+  const unknownToken = `glpat-${"a1B2c3D4e5".repeat(2)}`;
   const file: RecordingsFile = {
     recordedWith: { glab: "1.130.0", gitlab: "19.5.5", image: "gitlab/gitlab-ce:19.5.5-ce.0" },
     placeholders: { host: HOST_PLACEHOLDER },
     subjects: { project: "owner/repo", issue: 1, branch: "wf/issue-1-recorded", title: "Recorded", mr: 1 },
-    recordings: { "issue-view": { args: ["issue", "view", "1"], exitCode: 0, stdout: `{"web_url":"http://localhost:8929/x","token":"${SECRETS.token}"}\n`, stderr: "" } },
+    recordings: {
+      "issue-view": {
+        args: ["issue", "view", "1", "--hostname", "localhost:8929"],
+        exitCode: 0,
+        stdout: `{"web_url":"http://localhost:8929/x","token":"${SECRETS.token}","runners_token":"GR1348941${"a1B2c3D4e5".repeat(2)}"}\n`,
+        stderr: `warning: ${unknownToken} and ${SECRETS.password} at ${SECRETS.scratch}\n`,
+      },
+    },
   };
-  const scrubbed = scrubRecordings(file, SECRETS);
-  assert.equal(scrubbed.recordings["issue-view"]!.stdout, `{"web_url":"https://${HOST_PLACEHOLDER}/x","token":"${TOKEN_PLACEHOLDER}"}\n`);
-  file.recordings["issue-view"]!.stderr = "warning: token glpat-another0Token9 is about to expire";
-  assert.throws(() => scrubRecordings(file, SECRETS), /still hold a GitLab token: nothing was written/);
+  const scrubbed = scrubRecordings(file, SECRETS).recordings["issue-view"]!;
+  assert.deepEqual(scrubbed.args, ["issue", "view", "1", "--hostname", HOST_PLACEHOLDER]);
+  assert.equal(scrubbed.stdout, `{"web_url":"http://${HOST_PLACEHOLDER}/x","token":"${TOKEN_PLACEHOLDER}","runners_token":"[REDACTED]"}\n`);
+  assert.equal(scrubbed.stderr, `warning: [REDACTED] and ${PASSWORD_PLACEHOLDER} at ${SCRATCH_PLACEHOLDER}\n`);
+
+  // What the scrubbing does not touch (the subjects and the versions are the recorder's own words) is still checked.
+  file.subjects.title = `a title that holds ${unknownToken}`;
+  assert.throws(() => scrubRecordings(file, SECRETS), /still hold a credential: GitLab token.*: nothing was written/);
 });
 
 // ── the committed recordings ─────────────────────────────────────────────────────────────────────────────────────

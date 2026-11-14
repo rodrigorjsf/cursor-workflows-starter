@@ -81,7 +81,7 @@ sobrar um segredo. É decisão do [ADR-0009](../../docs/adr/0009-forge-seam-gith
 
 **Custa memória e tempo, não tokens.** O GitLab CE em modo de pouca memória (um processo Puma, Sidekiq enxuto, sem
 Prometheus, 256 MB de memória compartilhada) usa cerca de 2,5 GB e leva alguns minutos para subir; o script recusa rodar com
-menos de 4 GiB no Docker (`GITLAB_E2E_MIN_MEMORY_MB`). Fica fora do `npm run check` e do CI.
+menos de 4 GiB no Docker. Fica fora do `npm run check` e do CI.
 
 ```bash
 mise exec -- scripts/verify/gitlab-e2e.sh                                  # o glab fixado no mise.toml fica no PATH
@@ -92,10 +92,13 @@ GITLAB_E2E_IMAGE=gitlab/gitlab-ce:latest mise exec -- scripts/verify/gitlab-e2e.
 |---|---|---|
 | `GITLAB_E2E_IMAGE` | `gitlab/gitlab-ce:19.5.5-ce.0` | A imagem do GitLab. Um resultado só se reproduz com a tag fixada |
 | `GITLAB_E2E_PORT` | `8929` | A porta em `127.0.0.1`: o GitLab nunca fica exposto na rede |
-| `GITLAB_E2E_NAME` | `wf-gitlab-e2e` | O nome do container e o prefixo dos três volumes. O script recusa rodar se já existe um container com esse nome |
+| `GITLAB_E2E_NAME` | `wf-gitlab-e2e` | O nome do container e o prefixo dos três volumes (`-config`, `-logs`, `-data`) |
 | `GITLAB_E2E_TIMEOUT_SECONDS` | `1800` | Quanto esperar o GitLab responder |
+| `GITLAB_E2E_POLL_SECONDS` | `10` | De quanto em quanto tempo olhar se ele já responde |
+| `GITLAB_E2E_MIN_MEMORY_MB` | `4096` | A memória mínima que o script aceita do Docker; abaixo disso ele recusa rodar |
 
-O script nunca reinicia nem reconfigura o Docker (use o Docker que já está de pé), e só remove o que ele mesmo criou: no fim,
+O script nunca reinicia nem reconfigura o Docker (use o Docker que já está de pé), recusa rodar se já existe um container
+ou um volume com os nomes que ele usaria, e só remove o que ele mesmo criou: no fim,
 também quando uma etapa falha ou ele é interrompido, apaga o container e os volumes. O `glab` roda com uma pasta de
 configuração descartável, então o `~/.config/glab-cli` de quem roda não é tocado. Depois de uma gravação, confira com
 `git diff packages/runtime/test/fixtures/glab` e rode `mise exec -- npm run check`.

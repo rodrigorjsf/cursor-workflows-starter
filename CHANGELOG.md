@@ -22,7 +22,9 @@
   memória, roda o `glab` de verdade contra cada comando e rota de API do runtime e grava as saídas, sem token, senha nem host
   local, em `packages/runtime/test/fixtures/glab/recordings.json`; ele nunca reinicia o Docker e apaga seu container e seus
   volumes no fim, também quando falha. As gravações corrigiram o falso: `glab mr create` imprime só a URL no stdout, `--paginate`
-  junta as páginas num array só e o GitLab lista as notas da mais nova para a mais antiga.
+  junta as páginas num array só e o GitLab lista as notas da mais nova para a mais antiga. Uma gravação também mostrou que o JSON
+  de um projeto traz o token de registro de runner (`GR1348941…`, em `runners_token`): ele agora é redigido dos logs e barrado
+  pela guarda de saída do `implement-issue`, como os outros tokens do GitLab.
 
 ### Mudado
 

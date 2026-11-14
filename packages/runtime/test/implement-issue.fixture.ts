@@ -154,7 +154,8 @@ const flag = (n) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefin
 const has = (...n) => n.some((x) => a.includes(x));
 const REC = JSON.parse(fs.readFileSync(${JSON.stringify(RECORDINGS_PATH)}, "utf8"));
 const FAKE_HOST = ${JSON.stringify(TEST_HOST)};
-const fill = (text) => text.split(REC.placeholders.host).join(FAKE_HOST); // the recorded GitLab's placeholder host is the test's
+// The recorded GitLab's placeholder host is the test's, and its http:// URLs (the recording ran on plain http) are gitlab.com's https:// ones: the same swap as recorded() in glab-recordings.ts, which this process cannot import.
+const fill = (text) => text.split("http://" + REC.placeholders.host).join("https://" + FAKE_HOST).split(REC.placeholders.host).join(FAKE_HOST);
 const printed = (name) => REC.recordings[name];
 const recordedJson = (name) => JSON.parse(fill(printed(name).stdout));
 const DEFAULT_PAGE_SIZE = 20; // GitLab's default page size: without --paginate glab prints only the first page; with it, every page as one array

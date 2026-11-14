@@ -31,6 +31,7 @@ case "$1" in
     [ -n "$FAKE_DOCKER_DOWN" ] && exit 1
     case "$*" in *MemTotal*) echo "\${FAKE_DOCKER_MEMORY:-8328593408}" ;; esac ;;
   ps) [ -n "$FAKE_EXISTING_CONTAINER" ] && echo abc123def456 ;;
+  volume) [ "$2" != inspect ] || [ -n "$FAKE_EXISTING_VOLUME" ] || exit 1 ;;
   inspect) echo "\${FAKE_HEALTH:-starting}" ;;
   exec)
     case "$*" in
@@ -140,6 +141,13 @@ test("a container the script did not start is never removed: a name already in u
   assert.deepEqual(r.docker.filter((c) => /^docker (run|rm|volume)/.test(c)), [], "no container was started and nothing was removed");
 });
 
+test("a volume the script did not make is never removed: a name already in use by a volume stops it before anything is started", () => {
+  const r = runScript({ FAKE_EXISTING_VOLUME: "1" });
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.stderr, /^error: a volume named wf-gitlab-e2e-config exists/m);
+  assert.deepEqual(r.docker.filter((c) => /^docker (run|rm|volume rm)/.test(c)), [], "nothing was started and nothing was removed");
+});
+
 test("a name and a port of the maintainer's choosing name the container, its volumes and the published port", () => {
   const r = runScript({ GITLAB_E2E_NAME: "wf-gitlab-e2e-mine", GITLAB_E2E_PORT: "9090" });
   const run = r.docker.find((c) => c.startsWith("docker run "))!;
@@ -150,11 +158,11 @@ test("a name and a port of the maintainer's choosing name the container, its vol
 });
 
 test("Docker is never restarted or reconfigured: the script only starts, asks, runs in and removes what it started", () => {
-  for (const env of [{}, READY, { ...READY, FAKE_RECORDER_FAILS: "1" }, { FAKE_EXISTING_CONTAINER: "1" }]) {
+  for (const env of [{}, READY, { ...READY, FAKE_RECORDER_FAILS: "1" }, { FAKE_EXISTING_CONTAINER: "1" }, { FAKE_EXISTING_VOLUME: "1" }]) {
     const { docker } = runScript(env);
     for (const call of docker) {
       assert.ok(DOCKER_COMMANDS.has(call.split(" ")[1]!), `an unexpected docker command: ${call}`);
-      assert.ok(!/^docker volume (?!rm\b)/.test(call), `only volumes the script started are removed: ${call}`);
+      assert.ok(!/^docker volume (?!rm -f wf-gitlab-e2e-config wf-gitlab-e2e-logs wf-gitlab-e2e-data$|inspect wf-gitlab-e2e-(config|logs|data)$)/.test(call), `a volume command other than asking about, and removing, its own three: ${call}`);
     }
   }
 });

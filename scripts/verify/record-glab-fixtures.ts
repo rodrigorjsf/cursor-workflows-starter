@@ -13,6 +13,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
+import { errorText } from "../../packages/runtime/src/runtime/error-text.js";
 import { Commands } from "../../packages/runtime/workflows/implement-issue/commands.js";
 import { createForge, loginOf, type Forge } from "../../packages/runtime/workflows/implement-issue/forge.js";
 import type { ExecResult } from "../../packages/runtime/src/runtime/workflow.js";
@@ -303,7 +304,7 @@ if (isEntryPoint(import.meta.url)) {
       process.exitCode = code;
     },
     (err: unknown) => {
-      process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(`error: ${errorText(err)}\n`);
       process.exitCode = 1;
     },
   );

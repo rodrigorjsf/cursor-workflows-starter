@@ -12,8 +12,10 @@
 #   Docker has less than 4 GiB of memory.
 # HOW: `mise exec -- scripts/verify/gitlab-e2e.sh` (mise puts the pinned glab on the PATH). `GITLAB_E2E_IMAGE=gitlab/gitlab-ce:<tag>`
 #   tries another image (default gitlab/gitlab-ce:19.5.5-ce.0); `GITLAB_E2E_PORT` (default 8929) is the local port;
-#   `GITLAB_E2E_NAME` (default wf-gitlab-e2e) names the container and its volumes. It refuses to run while a container
-#   of that name exists, never restarts Docker or changes its settings, and removes only what it started.
+#   `GITLAB_E2E_NAME` (default wf-gitlab-e2e) names the container and its volumes; `GITLAB_E2E_TIMEOUT_SECONDS` (default
+#   1800) is how long it waits for GitLab, polling every `GITLAB_E2E_POLL_SECONDS` (default 10); `GITLAB_E2E_MIN_MEMORY_MB`
+#   (default 4096) is the least memory it accepts from Docker. It refuses to run while a container or a volume of those
+#   names exists, never restarts Docker or changes its settings, and removes only what it started.
 
 set -euo pipefail
 
@@ -39,7 +41,7 @@ die() {
 }
 
 usage() {
-  echo "usage: gitlab-e2e.sh   (environment: GITLAB_E2E_IMAGE, GITLAB_E2E_PORT, GITLAB_E2E_NAME, GITLAB_E2E_TIMEOUT_SECONDS)"
+  echo "usage: gitlab-e2e.sh   (environment: GITLAB_E2E_IMAGE, GITLAB_E2E_PORT, GITLAB_E2E_NAME, GITLAB_E2E_TIMEOUT_SECONDS, GITLAB_E2E_POLL_SECONDS, GITLAB_E2E_MIN_MEMORY_MB)"
 }
 
 # The container and its volumes go, on success, on failure and on a signal. A container this run did not start stays.
@@ -63,7 +65,7 @@ pinned_glab() {
 }
 
 preflight() {
-  local tool pinned glab_version memory_bytes
+  local tool pinned glab_version memory_bytes volume
   for tool in docker curl glab node npx; do
     command -v "$tool" >/dev/null 2>&1 || die "\`$tool\` is not on the PATH (run through \`mise exec -- scripts/verify/gitlab-e2e.sh\`)"
   done
@@ -78,6 +80,10 @@ preflight() {
   memory_bytes="$(docker info --format '{{.MemTotal}}')"
   [ "$((memory_bytes / 1024 / 1024))" -ge "$min_memory_mb" ] || die "Docker has $((memory_bytes / 1024 / 1024)) MiB, GitLab CE needs at least $min_memory_mb (GITLAB_E2E_MIN_MEMORY_MB)"
   [ -z "$(docker ps -a --filter "name=^${name}\$" --format '{{.ID}}')" ] || die "a container named $name exists: remove it, or set GITLAB_E2E_NAME"
+  # The cleanup removes these volumes, so none that this run did not make may carry the names.
+  for volume in "${volumes[@]}"; do
+    ! docker volume inspect "$volume" >/dev/null 2>&1 || die "a volume named $volume exists: remove it, or set GITLAB_E2E_NAME"
+  done
 }
 
 # Settings for a small machine: one Puma process, a lean Sidekiq, no Prometheus or exporters, malloc that gives memory back.
