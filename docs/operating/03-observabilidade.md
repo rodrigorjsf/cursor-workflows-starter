@@ -225,8 +225,9 @@ O dashboard é um servidor local, um só por usuário, para os runs de **todos**
 `packages/dashboard/` (as dependências dele nunca entram no runtime) e lê dois lugares: o índice global de runs
 (`~/.cursor-workflows/runs.jsonl`, que aponta o repositório de cada run) e, por run, o log de eventos
 (`<repositório>/.workflows/runs/<runId>/events.jsonl`); mais o banco de métricas, em modo leitura. Ele nunca escreve nos
-arquivos dos runs. A única ação dele é [cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume), pelo mesmo caminho do
-`wf cancel`.
+arquivos dos runs. Tem duas ações: [iniciar um workflow](#iniciar-um-workflow) num repositório que ele já conhece (o que
+escreve é só o registro do job, em `.workflows/jobs/`, como o `wf start` faz) e
+[cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume), pelo mesmo caminho do `wf cancel`.
 
 **Como abrir.** O `start_workflow` garante que o dashboard está rodando (inicia um processo destacado se nada responde
 na porta) e devolve `dashboardUrl`, o link da página do run, ao lado do `jobId`; a skill `run-workflow` abre o link no navegador embutido do
@@ -240,7 +241,7 @@ servidor `workflows`. Um dashboard que já está de pé continua sendo informado
 em `~/.cursor-workflows/dashboard.pid` e a saída em `dashboard.log`; `kill $(jq -r .pid ~/.cursor-workflows/dashboard.pid)`
 o encerra.
 
-**API JSON** (`GET`; a única ação é o `POST` de cancelar um run):
+**API JSON** (`GET`; as únicas ações são os `POST` de iniciar um workflow e de cancelar um run):
 
 | Rota | Resposta |
 |---|---|
@@ -250,7 +251,10 @@ o encerra.
 | `/api/runs/<runId>/events` | stream de eventos (SSE) do log do run, ao vivo: veja [Acompanhar um run ao vivo](#acompanhar-um-run-ao-vivo) |
 | `/runs/<runId>` | a página do run: o grafo ao vivo, veja [Ver um run como grafo](#ver-um-run-como-grafo) (HTML, com o script e o estilo em `/assets/…`) |
 | `/api/runs/<runId>/steps/<stepId>/content` | o conteúdo de uma etapa: prompt, mensagens do agente, chamadas de tool e saída de comandos |
-| `/api/csrf` | `{csrfToken}`: o token que o `POST` de cancelar exige |
+| `/api/csrf` | `{csrfToken}`: o token que os `POST` de iniciar e de cancelar exigem |
+| `/api/repos` | `{repos}`: os repositórios em que o dashboard inicia um workflow: os que o índice global de runs conhece e cuja pasta ainda existe, o de run mais recente primeiro |
+| `/api/workflows?repo=<caminho>` | `{repo, workflows, broken}`: os workflows que o runtime lista para o repositório (cada um com `name`, `description`, `whenToUse`, `argsSkeleton` e `optionalArgs`) e os arquivos de workflow que não carregaram, com o erro; `404` para um repositório que o índice não conhece |
+| `POST /api/start` | inicia um workflow como job (cabeçalho `X-CSRF-Token`; corpo `{repo, workflow, args, maxTokens, maxCents}`) e responde `202` com `{jobId, runId, repo, workflow}`, mais `violations` quando um teto global cortou o pedido; as recusas estão em [Iniciar um workflow](#iniciar-um-workflow) |
 | `POST /api/runs/<runId>/cancel` | cancela o job que executa o run (cabeçalho `X-CSRF-Token`); num run travado, encerra o processo com `SIGKILL` e cancela pela API da Cursor os cloud agents que o run deixou rodando; num run que não está executando, cancela por essa API os cloud agents que o processo morto deixou rodando e responde `200` com um `note`, ou `409` se não havia nada a cancelar: veja [Cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume) |
 | `/api/summary?days=` | o resumo de métricas dos painéis abaixo |
 | `/api/health` | `{app, pid}`: como quem chama sabe que é o dashboard que responde na porta |
@@ -412,7 +416,8 @@ sobe e guardado no mesmo cache por hash (veja [O app](#o-app)): `/assets/run.<ha
 ### O app
 
 A página inicial (`/`) é um só app, em React, com três menus (o menu é o `#` do endereço: `#/runs`, `#/board`,
-`#/metrics`; sem `#`, abre o Board):
+`#/metrics`; sem `#`, abre o Board) e, na barra de cima, o botão **Start**, que abre o painel de
+[Iniciar um workflow](#iniciar-um-workflow):
 
 - **Runs:** os runs de todos os repositórios, do mais novo ao mais antigo, com status, fase, duração e custo;
 - **Board:** o quadro, descrito abaixo;
@@ -438,6 +443,42 @@ dashboard não sobe e diz o motivo.
 - **Painel 3:** faixa de contexto × ¢/1k tokens × taxa de sucesso, por modelo;
 - **Painel 4:** desperdício e economia;
 - **Tabela de modelos.**
+
+### Iniciar um workflow
+
+O botão **Start**, na barra de cima de todos os menus do app, abre o painel que inicia um workflow sem o chat nem um
+terminal. O painel pede:
+
+- **Repositório:** só um que o índice global de runs conhece, isto é, um em que algum run já foi iniciado e cuja pasta ainda
+  existe. Quem resolve a lista é o servidor, não o navegador: um caminho livre deixaria o navegador rodar código em qualquer
+  pasta. Para um repositório novo, o primeiro run sai pelo chat ou por `wf start`.
+- **Workflow:** só um que o runtime lista para aquele repositório (os do kit, os de `.agents/workflows/` e os de
+  `$WORKFLOWS_DIR`, o que o `list_workflows` mostra ao chat). Um arquivo de workflow que não carrega fica de fora e aparece
+  numa nota, com o caminho. Para listar, o dashboard importa os arquivos de workflow do repositório no próprio processo, como
+  o servidor MCP faz, e importa de novo o que mudou desde a última vez.
+- **Args:** uma caixa de JSON já preenchida com um esqueleto do `argsSchema` do workflow: cada campo obrigatório com um
+  valor em branco do tipo dele (`""`, `0`, `false`, `[]`, `{}`, ou o `default` do schema), ou `{}` quando o workflow não
+  declara schema. O branco é de propósito um valor que o schema recusa quando tem mínimo ou tamanho: um campo que ninguém
+  preencheu falha na validação, em vez de iniciar um run sobre um valor inventado. Os campos opcionais ficam de fora e são
+  nomeados embaixo da caixa. Não há formulário gerado. O servidor valida os args com o mesmo Ajv do motor, e o erro, que
+  nomeia o campo (`invalid args: data/issue must be integer`), aparece no painel sem que nada comece.
+- **Tetos:** `maxTokens` e `maxCents` são obrigatórios, para que um clique nunca inicie um run sem teto. Os tetos globais da
+  configuração continuam valendo por cima (a resposta traz em `violations` o que eles cortaram).
+
+Iniciar é um `POST /api/start`, atrás do mesmo token CSRF e das mesmas checagens de origem do cancelamento. O job é o do
+`wf start` (um processo destacado, `spawnJob`), então fechar o dashboard não o interrompe. A resposta `202` traz o `runId`, e
+a página abre o Run view do run, que espera o run aparecer no índice; o card dele aparece no Board a seguir. As recusas
+trazem `{error}` com uma frase que diz o motivo, e nada é criado no repositório:
+
+| Status | Quando |
+|---|---|
+| `403` | o token CSRF falta ou está errado, ou o pedido declara outra origem |
+| `400` | o corpo não é um objeto JSON (ou é maior que 256 KiB); falta `repo` ou `workflow`; `maxTokens` ou `maxCents` falta, não é um número ou não é maior que 0; os args não são um objeto ou não passam no `argsSchema` |
+| `404` | o repositório não está no índice global de runs; o repositório não lista o workflow (a frase diz quais lista) |
+| `409` | o runtime recusa o início: o pedido veio de dentro de uma etapa de workflow, o kit está fora da faixa `kit` do repositório ou a configuração dele não é utilizável |
+
+Retomar um run parado e aprovar as seams do `implement-issue` pelo dashboard não existem ainda: o resume continua sendo o
+comando que o botão [Copy resume command](#cancelar-um-run-e-copiar-o-comando-de-resume) copia.
 
 ### O quadro (Board)
 
@@ -491,9 +532,15 @@ nunca os tokens, e não o registra em lugar nenhum. Um link de outro host, com c
 
 - escuta só em `127.0.0.1`;
 - recusa `Host` diferente de `127.0.0.1` e `localhost` (proteção contra DNS rebinding);
-- aceita `GET` e `HEAD`, e um único `POST`, o de cancelar um run: ele exige o token CSRF (`/api/csrf`, um valor aleatório por
-  processo do dashboard, comparado em tempo constante, que só um script lendo uma resposta desta origem consegue ter) e
-  recusa um pedido que declare outra origem (`Origin` ou `Sec-Fetch-Site`); os outros métodos e as outras rotas dão `405`;
+- aceita `GET` e `HEAD`, e dois `POST`, o de iniciar um workflow e o de cancelar um run: os dois passam pela mesma porta, que
+  exige o token CSRF (`/api/csrf`, um valor aleatório por processo do dashboard, comparado em tempo constante, que só um
+  script lendo uma resposta desta origem consegue ter) e recusa um pedido que declare outra origem (`Origin` ou
+  `Sec-Fetch-Site`) antes de ler o corpo; os outros métodos e as outras rotas dão `405`;
+- só inicia um workflow num repositório que o índice global de runs conhece e só um workflow que o runtime lista para ele, os
+  dois resolvidos no servidor (um caminho ou um nome que o navegador mande e que não esteja lá é recusado), com os dois
+  tetos de custo e de tokens obrigatórios; um corpo de início maior que 256 KiB é recusado sem ser guardado. Listar os
+  workflows de um repositório importa os arquivos dele no processo do dashboard, o que roda o código de nível superior
+  desses arquivos, como o servidor MCP já faz para o repositório dele;
 - não envia cabeçalhos CORS;
 - abre o banco em modo leitura;
 - não carrega nada de fora: os apps web são empacotados localmente, sem CDN, sem fontes nem imagens remotas, e funcionam

@@ -89,11 +89,16 @@ export interface Reply {
   json: any;
 }
 
-/** One request to `url` (the server's origin); `host` replaces the Host header, `method` the verb, `headers` adds request headers. */
-export function http(url: string, path: string, opts: { host?: string; method?: string; headers?: Record<string, string> } = {}): Promise<Reply> {
+/**
+ * One request to `url` (the server's origin); `host` replaces the Host header, `method` the verb, `headers` adds request headers.
+ * `body` is sent as the request body: text as it is, anything else as JSON.
+ */
+export function http(url: string, path: string, opts: { host?: string; method?: string; headers?: Record<string, string>; body?: unknown } = {}): Promise<Reply> {
   const target = new URL(path, url);
+  const payload = opts.body === undefined ? undefined : typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body);
+  const framing = payload === undefined ? {} : { "content-type": "application/json", "content-length": String(Buffer.byteLength(payload)) };
   return new Promise((resolve, reject) => {
-    const req = request({ hostname: target.hostname, port: target.port, path: target.pathname + target.search, method: opts.method ?? "GET", headers: { ...(opts.host === undefined ? {} : { host: opts.host }), ...opts.headers } }, (res) => {
+    const req = request({ hostname: target.hostname, port: target.port, path: target.pathname + target.search, method: opts.method ?? "GET", headers: { ...(opts.host === undefined ? {} : { host: opts.host }), ...framing, ...opts.headers } }, (res) => {
       const chunks: Buffer[] = [];
       res.on("data", (c: Buffer) => chunks.push(c));
       res.on("end", () => {
@@ -108,8 +113,38 @@ export function http(url: string, path: string, opts: { host?: string; method?: 
       });
     });
     req.once("error", reject);
-    req.end();
+    req.end(payload);
   });
+}
+
+/** A workflow with args: `issue` is required, `note` is not, and nothing else is accepted. */
+export const ECHO_WORKFLOW = `export default {
+  meta: {
+    name: "echo",
+    description: "Echoes its args.",
+    whenToUse: "Only in tests.",
+    argsSchema: { type: "object", required: ["issue"], additionalProperties: false, properties: { issue: { type: "integer", minimum: 1 }, note: { type: "string" } } },
+  },
+  async run(ctx) { return { status: "done", args: ctx.args }; },
+};
+`;
+
+/** A workflow that declares no args. */
+export const PLAIN_WORKFLOW = `export default { meta: { name: "plain", description: "Takes no args." }, async run() { return { status: "done" }; } };\n`;
+
+/** A repo the runs index knows (a run of it that ended is registered), with each of `workflows` (file name to source) in its `.agents/workflows/`. */
+export function repoWithWorkflows(box: Sandbox, name: string, workflows: Record<string, string>): string {
+  const repo = box.repo(name);
+  mkdirSync(join(repo, ".agents", "workflows"), { recursive: true });
+  for (const [file, source] of Object.entries(workflows)) writeFileSync(join(repo, ".agents", "workflows", file), source);
+  writeRun(box.home, repo, { runId: `earlier-${name}0001`, workflow: "echo", startedAt: "2026-11-12T10:00:00.000Z", events: [{ type: "run-end", status: "finished" }] });
+  return repo;
+}
+
+/** `POST /api/start` on the dashboard at `url`, with its CSRF token unless `headers` replaces the headers, and `body`. */
+export async function startRequest(url: string, body: unknown, headers?: Record<string, string>): Promise<Reply> {
+  const token = headers === undefined ? ((await http(url, "/api/csrf")).json.csrfToken as string) : "";
+  return http(url, "/api/start", { method: "POST", headers: headers ?? { "x-csrf-token": token }, body });
 }
 
 export interface Frame {

@@ -17,7 +17,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ModelSelection, RunUsage, SettingSource } from "@cursor/sdk";
-import { Ajv } from "ajv";
+import { argsError } from "./args-schema.js";
 import { errorText } from "./error-text.js";
 import { type AgentBackend, type AttemptEvent, type AttemptResult, type ResultVia, type StepLocation, type StepOptions, type UsageReading, localBackend } from "./backend.js";
 import { createCloudBackend } from "./backend-cloud.js";
@@ -29,7 +29,8 @@ import { type InterruptedCloudStep, addUsage, emptyUsage, resumeHint, subtractUs
 import { CONTENT_MAX_CHARS, RunLockedError, RunStore } from "./run-store.js";
 import type { RetentionPolicy } from "./retention.js";
 import { registerRun } from "./runs-index.js";
-import { stateDir as runtimeStateDir } from "./state.js";
+import { INSIDE_WORKFLOW_ENV } from "./inside-workflow.js";
+import { newRunId, stateDir as runtimeStateDir } from "./state.js";
 import type { AgentCallOptions, Budget, ExecOptions, ExecResult, UsageTotals, WorkflowContext, WorkflowDefinition } from "./workflow.js";
 import { workflowSourceHash } from "./workflow-source.js";
 import { type Snapshot, revertToSnapshot, takeSnapshot } from "./worktree-snapshot.js";
@@ -91,12 +92,6 @@ class StepTimeoutError extends StepFailedError {}
  * stop and no step starts. The run is resumable with the same id.
  */
 export class RunCancelledError extends FatalRunError {}
-
-/**
- * Marca o ambiente do processo: o shell das etapas herda (o CLI recusa `wf run/start`). Os servidores MCP do
- * .cursor/mcp.json NÃO herdam (medido); para eles o engine registra o guarda inline de `nestedGuard`.
- */
-export const INSIDE_WORKFLOW_ENV = "WF_INSIDE_WORKFLOW";
 
 /** Nome do servidor MCP do kit no mcp.json do projeto (o default é o do kit). */
 const WORKFLOWS_MCP_NAME = process.env.WF_MCP_SERVER_NAME ?? "workflows";
@@ -200,8 +195,6 @@ async function settledWithin(promises: Promise<unknown>[], ms: number): Promise<
     clearTimeout(timer);
   }
 }
-const ajv = new Ajv({ allErrors: true, strict: false });
-
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
 /**
@@ -460,11 +453,6 @@ async function repoIdentity(cwd: string): Promise<{ name: string; hash: string }
   return { name: basename(top), hash: sha(origin || top).slice(0, 16) };
 }
 
-/** A new run id: the workflow's name, with anything but letters, digits, "_" and "-" made a "-" (the id names the run's folder), and a random suffix. */
-export function newRunId(workflow: string): string {
-  return `${workflow.replace(/[^A-Za-z0-9_-]/g, "-")}-${randomUUID().slice(0, 8)}`;
-}
-
 class Semaphore {
   private active = 0;
   private readonly queue: Array<() => void> = [];
@@ -527,10 +515,8 @@ export async function runWorkflow<A, R>(
   const runId = opts.runId ?? newRunId(def.meta.name);
   const refused = (error: string): RunOutcome<R> => ({ runId, status: "failed", error, refused: true, spentCents: 0, chargedCents: 0, spentTokens: 0, usage: withRatio(emptyUsage()) });
 
-  if (def.meta.argsSchema) {
-    const validate = ajv.compile(def.meta.argsSchema);
-    if (!validate(args)) return refused(`invalid args: ${ajv.errorsText(validate.errors)}`);
-  }
+  const badArgs = argsError(def.meta.argsSchema, args);
+  if (badArgs) return refused(badArgs);
 
   // The config is read afresh at the start of every execution (also a resume): an edit takes effect on the next run.
   let resolved: ResolvedConfig;

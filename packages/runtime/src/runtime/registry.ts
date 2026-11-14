@@ -5,7 +5,7 @@
 // Mesma ideia do Claude Code (.claude/workflows/ do projeto vence ~/.claude/workflows/), num local
 // que Cursor, Claude Code e Codex enxergam igualmente: o runtime é nosso, não de um harness.
 
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { WorkflowDefinition } from "./workflow.js";
@@ -23,9 +23,20 @@ export interface BrokenWorkflow {
   error: string;
 }
 
+export interface DiscoverOptions {
+  /**
+   * Load a file again when it changed since this process last imported it. A process that lives for days (the dashboard) would
+   * otherwise keep listing, and checking args against, the workflow as it was first imported: Node caches a module by its URL.
+   * The URL then carries the file's modification time and size, so an unchanged file is not imported twice. Only the file itself
+   * is loaded again, not the modules it imports.
+   */
+  fresh?: boolean;
+}
+
 /** Loads every workflow it can. A file that fails to import is collected in `broken` instead of aborting the rest. */
 export async function discoverWorkflows(
   cwd: string,
+  { fresh = false }: DiscoverOptions = {},
 ): Promise<{ workflows: Map<string, WorkflowDefinition<any, any>>; broken: BrokenWorkflow[] }> {
   const workflows = new Map<string, WorkflowDefinition<any, any>>();
   const broken: BrokenWorkflow[] = [];
@@ -34,7 +45,8 @@ export async function discoverWorkflows(
       if (!/\.(ts|js|mjs)$/.test(file) || file.endsWith(".d.ts")) continue;
       const path = join(dir, file);
       try {
-        const mod = (await import(pathToFileURL(path).href)) as { default?: WorkflowDefinition<any, any> };
+        const { mtimeMs, size } = fresh ? statSync(path) : { mtimeMs: 0, size: 0 };
+        const mod = (await import(pathToFileURL(path).href + (fresh ? `?v=${mtimeMs}-${size}` : ""))) as { default?: WorkflowDefinition<any, any> };
         if (mod.default?.meta?.name) {
           recordWorkflowSource(mod.default, path);
           workflows.set(mod.default.meta.name, mod.default);

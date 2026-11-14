@@ -26,10 +26,10 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 ├── CLAUDE.md               # guia canônico do mantenedor, em inglês (AGENTS.md é um link simbólico para ele)
 ├── CODING_STANDARDS.md     # as regras de julgamento que o review aplica, em inglês (o review do implement-issue o lê)
 ├── packages/
-│   ├── dashboard/          # o dashboard local (workspace npm @cursor-workflows/dashboard): servidor HTTP sobre os runs e as métricas, que só lê, a não ser para cancelar um run
-│   │   ├── src/            # server.ts (API JSON, stream SSE e páginas), main.ts (o processo), board.ts (as colunas do quadro), pr-state.ts (estado das PRs e MRs, com cache, pelo `observe` do runtime),
+│   ├── dashboard/          # o dashboard local (workspace npm @cursor-workflows/dashboard): servidor HTTP sobre os runs e as métricas, que só lê, a não ser para iniciar um workflow num repositório que conhece e para cancelar um run
+│   │   ├── src/            # server.ts (API JSON, stream SSE e páginas), main.ts (o processo), board.ts (as colunas do quadro), pr-state.ts (estado das PRs e MRs, com cache, pelo `observe` do runtime), start.ts (o que o Start diz ao navegador e recebe dele: o corpo do `POST /api/start`, as respostas e o esqueleto dos args),
 │   │   │                   # web-bundle.ts (o esbuild que empacota as duas páginas quando o dashboard sobe, com cache por hash), pages.ts (o HTML delas)
-│   │   ├── app/            # a página `/`, em React (menus Runs, Board e Metrics); o esbuild a empacota quando o dashboard sobe
+│   │   ├── app/            # a página `/`, em React (menus Runs, Board e Metrics, e o painel Start: StartPanel.tsx, start-form.ts, start-api.ts); o esbuild a empacota quando o dashboard sobe
 │   │   ├── run-view/       # a página do run, `/runs/<runId>` (React, React Flow, elkjs; tsconfig próprio, sem Node nem runtime):
 │   │   │                   # run-graph.ts (eventos → nós, arestas e raias), run-layout.ts (posições, elkjs), RunView.tsx (a tela)
 │   │   └── test/           # testes do servidor por HTTP, do grafo e do layout (puros) e um contrato com o engine de verdade
@@ -47,11 +47,15 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   │   ├── run-store.ts    # log de eventos, journal, lock de cada run e locks nomeados do repositório (`.workflows/locks/`)
 │       │   │   ├── structured.ts   # saída estruturada via custom tool submit_result + Ajv
 │       │   │   ├── journal.ts      # resume sem repetir etapas concluídas
-│       │   │   ├── jobs.ts         # jobs: o que inicia um job (processo destacado, heartbeat)
+│       │   │   ├── jobs.ts         # jobs: o que roda um job (heartbeat, `startJob`, os sinais de cancelamento); reexporta o job-spawn.ts
+│       │   │   ├── job-spawn.ts    # o que inicia um job: o registro (`createJob`) e o processo destacado (`spawnJob`), sem o engine (o dashboard o usa)
 │       │   │   ├── job-state.ts    # o registro de um job, o estado projetado do log e o cancelamento, sem o engine (o dashboard o usa)
 │       │   │   ├── run-view.ts     # os runs de todos os repositórios, lidos do índice global e do log, para quem observa de fora (o dashboard)
 │       │   │   ├── run-tail.ts     # o log de eventos de um run lido por posição (cada linha tem um id): o stream ao vivo e o conteúdo de uma etapa
 │       │   │   ├── run-cancel.ts   # cancela um run de fora do processo que o executa (o botão Cancel do dashboard), pelo mesmo `cancelJob` do `wf cancel`
+│       │   │   ├── run-start.ts    # inicia um job de fora do processo que o executa (o painel Start do dashboard): só num repositório do índice global e num workflow que o runtime lista; sem o engine
+│       │   │   ├── args-schema.ts  # confere os args com o `argsSchema` do workflow, para o engine e para o Start; sem o engine
+│       │   │   ├── inside-workflow.ts  # a variável `WF_INSIDE_WORKFLOW` que marca um processo dentro de uma etapa
 │       │   │   ├── pr-by-url.ts    # o estado de uma PR (`gh`) ou MR (`glab api`) pela URL exata, nos hosts permitidos (github.com, gitlab.com e os do config do glab), para o dashboard
 │       │   │   ├── dashboard-instance.ts  # onde o dashboard escuta, o pid file e o `ensureDashboard` que o `start_workflow` chama
 │       │   │   ├── heartbeat-worker.mjs  # thread que atualiza o heartbeat do job mesmo com a principal bloqueada

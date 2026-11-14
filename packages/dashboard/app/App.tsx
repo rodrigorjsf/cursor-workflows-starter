@@ -1,9 +1,10 @@
 // The app shell: the menus and the view each one opens. The menu is the URL's hash (`#/board`), so a menu can be linked and
 // the back button works, with no router library.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BoardView } from "./BoardView.js";
 import { MetricsView } from "./MetricsView.js";
 import { RunsView } from "./RunsView.js";
+import { StartPanel } from "./StartPanel.js";
 
 const MENUS = [
   { id: "runs", label: "Runs" },
@@ -20,6 +21,8 @@ function menuOf(hash: string): MenuId {
 
 export function App() {
   const [menu, setMenu] = useState(() => menuOf(window.location.hash));
+  const [starting, setStarting] = useState(false);
+  const startButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const follow = () => setMenu(menuOf(window.location.hash));
     window.addEventListener("hashchange", follow);
@@ -43,7 +46,18 @@ export function App() {
             </a>
           ))}
         </nav>
+        <button ref={startButton} type="button" className="btn start-toggle" aria-expanded={starting} aria-controls="start-panel" aria-label="Start a workflow" onClick={() => setStarting((open) => !open)}>
+          Start
+        </button>
       </header>
+      {starting && (
+        <StartPanel
+          onClose={() => {
+            setStarting(false);
+            startButton.current?.focus(); // closing the panel gives the keyboard back to the button that opened it
+          }}
+        />
+      )}
       <main className={`view view-${menu}`}>{menu === "runs" ? <RunsView /> : menu === "board" ? <BoardView /> : <MetricsView />}</main>
     </>
   );

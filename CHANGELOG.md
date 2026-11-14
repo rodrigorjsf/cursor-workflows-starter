@@ -1,5 +1,26 @@
 # Changelog
 
+## Não lançado
+
+### Adicionado
+
+- **O dashboard inicia um workflow, sem o chat nem um terminal.** O botão **Start**, na barra de cima do app, abre um painel:
+  repositório, workflow, args em JSON e os dois tetos (`maxTokens` e `maxCents`, obrigatórios). O servidor resolve o que pode
+  começar: só um repositório que o índice global de runs conhece e só um workflow que o runtime lista para ele (um caminho
+  livre deixaria o navegador rodar código em qualquer pasta). A caixa de args vem preenchida com um esqueleto do `argsSchema`
+  do workflow, e o servidor valida os args com o mesmo Ajv do motor e devolve o erro, com o nome do campo, para o painel. Os
+  tetos globais continuam valendo por cima. O início é o `POST /api/start`, atrás do mesmo token CSRF e das mesmas checagens de
+  origem do cancelamento, e inicia o mesmo job do `wf start`; as rotas `GET /api/repos` e `GET /api/workflows?repo=` alimentam
+  o painel. A API do runtime que o dashboard importa (`@cursor-workflows/runtime/observe`) ganhou `startRun`, `knownRepos` e
+  `listRepoWorkflows`, sem carregar o SDK da Cursor no processo do dashboard. Veja
+  [5.3 §Iniciar um workflow](docs/operating/03-observabilidade.md#iniciar-um-workflow).
+
+### Mudado
+
+- **O erro `invalid args` nomeia o campo que o schema não declara.** Antes, um campo a mais dava só
+  `must NOT have additional properties`; agora a mensagem termina com o nome do campo
+  (`must NOT have additional properties: isue`), no `wf run`, no `start_workflow` e no dashboard.
+
 ## 0.4.0 (pré-release, 2026-11-13)
 
 ### Adicionado
