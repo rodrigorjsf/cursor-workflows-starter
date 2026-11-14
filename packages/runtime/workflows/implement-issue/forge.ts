@@ -1,6 +1,6 @@
 // The forge seam (ADR-0009): everything `implement-issue`, `wf gc` and the dashboard's Backlog (`backlog.ts`) ask of the service
-// that hosts the repository (read an issue, list the issues of a label, list and post an issue's comments, open a PR, find a
-// branch's PR and its state, name a repository), behind one interface.
+// that hosts the repository (read an issue and how its author stands to the repository, list the issues of a label, list and post
+// an issue's comments, open a PR, find a branch's PR and its state, name a repository), behind one interface.
 // This file is the only one that names a forge's CLI (`test/forge-seam.test.ts` enforces it): GitHub through `gh`, GitLab through
 // `glab`, and `glab api` (the REST API) where glab's own commands fall short. Every call goes through `Commands`, so its timeout,
 // its `CommandError` and its node in the run's log are those of every other command the workflow runs.
@@ -40,6 +40,14 @@ export interface ForgeIssueRef {
   url: string;
 }
 
+/** How a forge relates the author of an issue to the repository: whether the author is a stranger to it. */
+export interface AuthorStanding {
+  /** The forge's own word for it, shown to the person who decides: GitHub's `author_association` (`OWNER`, `CONTRIBUTOR`, `NONE`...). */
+  association: string;
+  /** The author is the repository's owner, a member of the organization that owns it, or a collaborator: not a stranger. */
+  trusted: boolean;
+}
+
 /** The most issues one `listIssues` reads: a backlog longer than this is not one an agent works through. */
 export const ISSUE_LIST_LIMIT = 100;
 
@@ -56,6 +64,11 @@ export interface Forge {
   readonly name: ForgeName;
   /** The issue `number`. */
   issue(cwd: string, number: number, repo?: string): Promise<ForgeIssue>;
+  /**
+   * How the author of the issue `number` stands to the repository, or undefined when the forge does not say (GitLab: the author's
+   * access level needs a call that no recording of a real GitLab covers yet). Reads only. A failure is an error, never "trusted".
+   */
+  authorStanding(cwd: string, number: number, repo?: string): Promise<AuthorStanding | undefined>;
   /** The open issues that carry `label`, the way the forge lists them (newest first), at most `ISSUE_LIST_LIMIT`. Reads only: nothing is created. */
   listIssues(cwd: string, label: string): Promise<ForgeIssueRef[]>;
   /** The bodies of the issue's comments, all of them. */
@@ -202,6 +215,8 @@ export function createForge(name: string, commands: Commands): Forge {
 }
 
 const NO_PR_FOUND = /no pull requests? found/i;
+/** The `author_association` values of an author who is no stranger: the owner, a member of the owning organization, a collaborator. Every other value, one GitHub adds later included, is a stranger's. */
+const TRUSTED_ASSOCIATIONS: ReadonlySet<string> = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 const repoFlag = (repo: string | undefined): string[] => (repo ? ["--repo", repo] : []);
 
 /** GitHub, through `gh`. */
@@ -211,6 +226,19 @@ class GithubForge implements Forge {
 
   async issue(cwd: string, number: number, repo?: string): Promise<ForgeIssue> {
     return JSON.parse(await this.gh(cwd, "issue", "view", String(number), ...repoFlag(repo), "--json", "number,title,body,labels")) as ForgeIssue;
+  }
+
+  async authorStanding(cwd: string, number: number, repo?: string): Promise<AuthorStanding> {
+    // `gh issue view --json` has no author association (gh 2.102 rejects the field): the REST issue has it. Without `repo`, gh fills
+    // `{owner}/{repo}` from the cwd's repository; with one, its path names the repository, and a URL's host (another than github.com)
+    // goes in `--hostname`, since `gh api` asks github.com unless told otherwise.
+    const named = repo === undefined ? undefined : parseRemote(repo);
+    const path = repo === undefined ? "{owner}/{repo}" : repoPathOf(repo);
+    if (!/^(?:\{owner\}\/\{repo\}|[\w.-]+\/[\w.-]+)$/.test(path)) throw new Error(`--repo ${JSON.stringify(repo)} is not a GitHub repository (owner/name, or its URL): the issue's author cannot be looked up`);
+    const host = named && named.host !== "github.com" ? ["--hostname", webHost(named)] : [];
+    const association = (await this.gh(cwd, "api", ...host, `repos/${path}/issues/${number}`, "--jq", ".author_association")).trim();
+    if (!/^[A-Z_]+$/.test(association)) throw new Error(`gh api repos/${path}/issues/${number}: unexpected author_association ${JSON.stringify(association.slice(0, 40))}`);
+    return { association, trusted: TRUSTED_ASSOCIATIONS.has(association) };
   }
 
   async listIssues(cwd: string, label: string): Promise<ForgeIssueRef[]> {
@@ -402,6 +430,11 @@ class GitlabForge implements Forge {
       labels?: string[];
     };
     return { number: issue.iid, title: issue.title, body: issue.description ?? "", labels: (issue.labels ?? []).map((name) => ({ name })) };
+  }
+
+  /** GitLab does not say: the author's access level in the project is a `glab api` route that no recording of a real GitLab covers (CODING_STANDARDS, Testing), so the run is not gated there and says so. */
+  async authorStanding(): Promise<undefined> {
+    return undefined;
   }
 
   async listIssues(cwd: string, label: string): Promise<ForgeIssueRef[]> {

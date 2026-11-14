@@ -2,6 +2,7 @@
 // fake `gh` plays (packages/runtime/test/fixtures/gh/recordings.json) are read from disk: they hold no repository of the machine that
 // recorded them, no local host and no credential, and they hold what the Backlog's `gh issue list` printed. The GitHub and the gh that
 // made them are not here: running them is the recorder's job (scripts/verify/record-gh-fixtures.ts), which stays out of `npm run check` and CI.
+// They also hold what `gh api repos/.../issues/<n> --jq .author_association` printed, which the `implement-issue` tests' fake `gh` plays.
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -27,6 +28,18 @@ test("the recordings of gh issue list hold the command line the forge sends, iss
   assert.ok(listed.stdout.endsWith("]\n"), "compact JSON and a newline, as gh prints it to a pipe");
   assert.equal(file.recordings["issue-list-empty"]!.stdout, "[]\n");
   assert.match(file.recordedWith.gh, /^\d+\.\d+\.\d+$/);
+});
+
+test("the recordings of gh api hold the command line the author gate sends, for the cwd's repository and for a named one, and what gh prints: one association", () => {
+  const file = JSON.parse(read(RECORDINGS)) as GhRecordingsFile;
+  const cwd = file.recordings["issue-author-association"]!;
+  const named = file.recordings["issue-author-association-repo"]!;
+  assert.match(cwd.args.join(" "), /^api repos\/\{owner\}\/\{repo\}\/issues\/\d+ --jq \.author_association$/, "forge.ts, authorStanding, without --repo");
+  assert.match(named.args.join(" "), new RegExp(`^api repos/${REPO_PLACEHOLDER}/issues/\\d+ --jq \\.author_association$`), "forge.ts, authorStanding, with --repo");
+  for (const recording of [cwd, named]) {
+    assert.equal(recording.exitCode, 0, recording.stderr);
+    assert.match(recording.stdout, /^[A-Z_]+\n$/, "the bare association and a newline: --jq prints a string without quotes");
+  }
 });
 
 test("the recordings name no repository of the machine that recorded them, no local host and no credential", () => {

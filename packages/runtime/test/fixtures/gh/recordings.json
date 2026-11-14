@@ -37,6 +37,28 @@
       "exitCode": 0,
       "stdout": "[]\n",
       "stderr": ""
+    },
+    "issue-author-association": {
+      "args": [
+        "api",
+        "repos/{owner}/{repo}/issues/98",
+        "--jq",
+        ".author_association"
+      ],
+      "exitCode": 0,
+      "stdout": "OWNER\n",
+      "stderr": ""
+    },
+    "issue-author-association-repo": {
+      "args": [
+        "api",
+        "repos/owner/repo/issues/98",
+        "--jq",
+        ".author_association"
+      ],
+      "exitCode": 0,
+      "stdout": "OWNER\n",
+      "stderr": ""
     }
   }
 }
