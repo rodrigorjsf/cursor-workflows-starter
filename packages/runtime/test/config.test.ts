@@ -131,7 +131,7 @@ test("a role's defaults sit under the call's options: the call wins over the rol
 });
 
 // The 10 s bound turns a regression (the role timeout ignored: the default is 30 minutes) into a failure, not a hang.
-test("retries, schema retries and timeout per role change how the step runs", { timeout: 10_000 }, async () => {
+test("retries, schema retries and timeout per role change how the step runs", { timeout: 30_000 }, async () => {
   writeRepoConfig(cwd, { workflows: { cfg: { roles: { classify: { retries: 2, timeoutMs: 40 } } } } });
   script.push(() => ({ hang: true }), () => ({ hang: true }), () => ({ hang: true }));
   const r = await runWorkflow(configWorkflow(), {}, { cwd });

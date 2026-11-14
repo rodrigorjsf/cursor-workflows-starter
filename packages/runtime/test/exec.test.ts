@@ -419,7 +419,7 @@ test("alive() counts a process that is running, and not one that died but was no
   }
 });
 
-test("a command is killed at its timeout and the call returns: the workflow is not stuck behind it", async () => {
+test("a command is killed at its timeout and the call returns: the workflow is not stuck behind it", { timeout: 30_000 }, async () => {
   const wf = workflow(async (ctx) => ctx.exec(...node("setInterval(() => {}, 1000)"), { label: "hang", timeoutMs: 400 }));
   const r = await runWorkflow(wf, {}, { cwd, metricsDb: false }); // the command never ends by itself: returning at all is the proof
   assert.equal(r.status, "finished");

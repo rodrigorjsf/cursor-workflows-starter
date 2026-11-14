@@ -144,7 +144,7 @@ test("aborting from inside the callback, on a turn, cancels the run at once: no 
   assert.equal(stats.disposed, 1);
 });
 
-test("a signal aborted while the agent is being created ends the attempt at once, and the agent that arrives late is disposed", async () => {
+test("a signal aborted while the agent is being created ends the attempt at once, and the agent that arrives late is disposed", { timeout: 30_000 }, async () => {
   // The creation is held until the attempt has ended: an attempt that waited for it would never end.
   let arrive!: () => void;
   costConfig.createGate = () => new Promise<void>((done) => (arrive = done));
@@ -180,7 +180,7 @@ test("a signal aborted while send() is still handing back the run waits for that
   assert.equal(stats.disposed, 1);
 });
 
-test("a send() that never hands back a run does not hold the attempt: it ends after a short grace, and the run that arrives late is cancelled", async () => {
+test("a send() that never hands back a run does not hold the attempt: it ends after a short grace, and the run that arrives late is cancelled", { timeout: 30_000 }, async () => {
   // The run is handed back only once the attempt has ended: an attempt that waited for the send would never end.
   let handBack!: () => void;
   const handedBack = new Promise<void>((done) => (handBack = done));

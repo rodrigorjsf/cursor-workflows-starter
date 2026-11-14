@@ -24,8 +24,8 @@ before(() => {
   const workflow = (name: string, body: string) =>
     writeFileSync(join(repo, ".agents", "workflows", `${name}.mjs`), `export default {\n  meta: { name: "${name}", description: "${name} fixture" },\n  ${body}\n};\n`);
   mkdirSync(join(repo, ".agents", "workflows"), { recursive: true });
-  // a command that prints its child's pid and then waits for it (a minute)
-  workflow("napper", `async run(ctx) { const r = await ctx.exec("bash", ["-c", "sleep 60 & echo $!; wait"], { label: "nap", timeoutMs: 120000 }); return { status: "done", exitCode: r.exitCode }; }`);
+  // a command that prints its child's pid and then waits for it (ten minutes)
+  workflow("napper", `async run(ctx) { const r = await ctx.exec("bash", ["-c", "sleep 600 & echo $!; wait"], { label: "nap", timeoutMs: 1200000 }); return { status: "done", exitCode: r.exitCode }; }`);
   // the same, but it ignores SIGTERM: only a SIGKILL ends it
   workflow("stubborn-nap", `async run(ctx) { await ctx.exec("bash", ["-c", "trap '' TERM; sleep 60 & echo $!; wait"], { label: "nap", timeoutMs: 120000 }); return { status: "done" }; }`);
   // a command that outlives its timeout
@@ -92,7 +92,7 @@ test("while a long command runs, status shows it as the step in progress, and ca
   assert.equal(state.status, "running");
   assert.ok(state.recent.some((line: string) => /^▶ nap \[bash\]$/.test(line)), `the running command is in the progress lines: ${state.recent}`);
 
-  // `wf cancel` waits 30 s at most for the job to stop, and the command naps for 60: a job whose process froze until the
+  // `wf cancel` waits 30 s at most for the job to stop, and the command naps for 600: a job whose process froze until the
   // command ended would still be running when the wait gives up. No wall-clock bound needed, however slow the machine.
   const cancelled = wf("cancel", started.jobId);
   assert.equal(cancelled.status, "cancelled", `the job's process was free to answer the signal: ${JSON.stringify(cancelled)}`);

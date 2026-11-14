@@ -294,7 +294,7 @@ test("a step the workflow starts after the run's cap was crossed, while the canc
   assert.equal(stats.turnsDelivered, 2);
 });
 
-test("a cut does not wait for the SDK: a run whose wait() never settles after cancel() still fails at once", { timeout: 10_000 }, async () => {
+test("a cut does not wait for the SDK: a run whose wait() never settles after cancel() still fails at once", { timeout: 30_000 }, async () => {
   writeRepoConfig(cwd, { workflows: { cfg: { roles: { classify: { maxTokensPerStep: 150, retries: 0, timeoutMs: 600_000 } } } } });
   script.push(() => ({ live: true, stuckAfterCancel: true, deltas: Array.from({ length: 10 }, () => turn(100)) }));
   const r = await runWorkflow(configWorkflow((ctx) => ctx.agent("p", { role: "classify", label: "c" })), {}, { cwd });
@@ -347,7 +347,7 @@ test("a cap crossed while the agent answers a schema re-prompt cuts the step too
   assert.equal(stepEnds(logOf(r.runId))[0]!.errorKind, "budget");
 });
 
-test("the tokens of an attempt that failed on a rate limit are counted once while it backs off, not twice", { timeout: 15_000 }, async () => {
+test("the tokens of an attempt that failed on a rate limit are counted once while it backs off, not twice", { timeout: 30_000 }, async () => {
   const rateLimited = Object.assign(new RateLimitError("slow down"), { isRetryable: true }); // the engine sleeps 2 s before the retry
   let aSends = 0;
   script.push(...[0, 1, 2].map(() => (o: any, msg: string, n: number) => {

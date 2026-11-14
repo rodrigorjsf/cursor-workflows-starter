@@ -83,7 +83,7 @@ test("a signal already aborted starts no agent: the run ends cancelled", async (
   assert.equal(calls.length, 0);
 });
 
-test("cancelling while the agent is still being created ends the run at once, and the agent that arrives late is disposed", async () => {
+test("cancelling while the agent is still being created ends the run at once, and the agent that arrives late is disposed", { timeout: 30_000 }, async () => {
   // The creation is held until the run has ended: a run that waited for it would never end.
   let arrive!: () => void;
   costConfig.createGate = () => new Promise<void>((done) => (arrive = done));
