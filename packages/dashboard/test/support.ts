@@ -250,3 +250,73 @@ process.stdout.write(line.split(" ")[1] + "\\n");
     },
   };
 }
+
+export interface FakeGlab {
+  /** Merge requests the fake knows: `glab api --hostname <host> projects/<path>/merge_requests/<n>` answers with a merge request of this state. A url not set answers "404 Not Found" and exits 1. */
+  set(url: string, state: "opened" | "locked" | "merged" | "closed"): void;
+  /** Every argument list `glab` was started with, in order. */
+  calls(): string[][];
+  /** Writes glab's `config.yml`, in the directory `GLAB_CONFIG_DIR` names for the length of the test. */
+  config(yaml: string): void;
+  /** Puts PATH and `GLAB_CONFIG_DIR` back and removes the fake. */
+  restore(): void;
+}
+
+/**
+ * glab's `config.yml` the way glab 1.130 writes it (4-space indent, comments between the keys, one block per host with its token),
+ * for hosts that each have a made-up token. Tests that check no token leaks give each host a token they can search for.
+ */
+export function glabConfigOf(tokens: Record<string, string>): string {
+  const hosts = Object.entries(tokens)
+    .map(([host, token]) => `    ${host}:\n        token: ${token}\n        api_host: ${host}\n        git_protocol: ssh\n        api_protocol: https\n        user: someone`)
+    .join("\n");
+  return `# What protocol to use when performing git operations. Supported values: ssh, https\ngit_protocol: ssh\n# Set to true to disable prompts\nno_prompt: false\nhost: gitlab.com\n# Configuration per host\nhosts:\n${hosts}\n`;
+}
+
+/**
+ * A `glab` first on PATH for the length of the test, answering `glab api --hostname <host> projects/<path>/merge_requests/<n>` from the
+ * merge requests set (any other command line exits 2), and logging each start; and an empty `GLAB_CONFIG_DIR` for `config()` to fill.
+ * Restore it before the `fakeGh` that was made before it: each puts back the PATH it found.
+ */
+export function fakeGlab(box: Sandbox): FakeGlab {
+  const dir = box.repo("fake-glab-bin");
+  const configDir = box.repo("glab-config");
+  const states = join(dir, "states.txt");
+  const log = join(dir, "calls.jsonl");
+  writeFileSync(states, "");
+  writeFileSync(log, "");
+  writeFileSync(
+    join(dir, "glab"),
+    `#!/usr/bin/env node
+const fs = require("fs");
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + "\\n");
+const asked = args.length === 4 && args[0] === "api" && args[1] === "--hostname" && /^projects\\/[^/]+\\/merge_requests\\/\\d+$/.exec(args[3]);
+if (!asked) { process.stderr.write("unexpected glab command line"); process.exit(2); }
+const [, project, number] = /^projects\\/([^/]+)\\/merge_requests\\/(\\d+)$/.exec(args[3]);
+const url = "https://" + args[2] + "/" + decodeURIComponent(project) + "/-/merge_requests/" + number;
+const line = fs.readFileSync(${JSON.stringify(states)}, "utf8").split("\\n").find((l) => l.startsWith(url + " "));
+if (!line) { process.stderr.write("glab: 404 Not Found"); process.exit(1); }
+process.stdout.write(JSON.stringify({ id: 1000 + Number(number), iid: Number(number), title: "A merge request", state: line.split(" ")[1], web_url: url }) + "\\n");
+`,
+  );
+  chmodSync(join(dir, "glab"), 0o755);
+  const previous = { path: process.env.PATH, config: process.env.GLAB_CONFIG_DIR };
+  process.env.PATH = `${dir}${delimiter}${previous.path ?? ""}`;
+  process.env.GLAB_CONFIG_DIR = configDir;
+  return {
+    set(url, state) {
+      const kept = readFileSync(states, "utf8").split("\n").filter((l) => l && !l.startsWith(`${url} `));
+      writeFileSync(states, [...kept, `${url} ${state}`].join("\n") + "\n");
+    },
+    calls: () => readFileSync(log, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as string[]),
+    config(yaml) {
+      writeFileSync(join(configDir, "config.yml"), yaml);
+    },
+    restore() {
+      process.env.PATH = previous.path;
+      if (previous.config === undefined) delete process.env.GLAB_CONFIG_DIR;
+      else process.env.GLAB_CONFIG_DIR = previous.config;
+    },
+  };
+}

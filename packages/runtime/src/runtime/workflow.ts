@@ -206,7 +206,7 @@ export interface WorkflowCard {
   title: string;
   /** One line under the headline. */
   subtitle?: string;
-  /** Links on the card. A link to a GitHub pull request also shows the pull request's state (open, merged or closed). Only `http:` and `https:` links are shown. */
+  /** Links on the card. A link to a GitHub pull request or a GitLab merge request also shows its state (open, merged or closed). Only `http:` and `https:` links are shown. */
   links?: Array<{ label: string; url: string }>;
   /** Short labels, like a difficulty tier. */
   badges?: string[];

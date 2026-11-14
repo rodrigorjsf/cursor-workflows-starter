@@ -10,7 +10,7 @@
 //   database, opened read-only the first time it exists. A machine with no history gets empty states, not an error.
 // - A run's event log is also served live: `/api/runs/<runId>/events` is a Server-Sent Events stream that replays the log and
 //   then follows it as the run appends, and `/api/runs/<runId>/steps/<stepId>/content` is one step's content.
-// - The Board is `/api/board`: the runs placed in the columns of their workflow, with the state of the pull requests their cards link to.
+// - The Board is `/api/board`: the runs placed in the columns of their workflow, with the state of the pull requests and merge requests their cards link to.
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
@@ -38,7 +38,7 @@ export interface DashboardServer {
 export interface DashboardOptions {
   /** The port to listen on; 0 picks a free one (tests). */
   port: number;
-  /** How long the state of an open pull request is kept before `gh` is asked again, in milliseconds (a merged or closed one is kept 120 times as long). Default 30 seconds. */
+  /** How long the state of an open pull request or merge request is kept before its forge (`gh`, `glab`) is asked again, in milliseconds (a merged or closed one is kept 120 times as long). Default 30 seconds. */
   prStateCacheMs?: number;
   /** How long a cancel waits for the job to stop before it answers that the job is still stopping, in milliseconds. Default 20 seconds, what `cancel_workflow` waits. */
   cancelTimeoutMs?: number;

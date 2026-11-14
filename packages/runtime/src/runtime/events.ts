@@ -89,7 +89,7 @@ export interface PhaseEvent extends EventBase {
 export interface CardLink {
   /** O texto do link. */
   label: string;
-  /** O endereço. Só `http:` e `https:` aparecem no dashboard; um link de pull request do GitHub mostra também o estado dele (aberto, mesclado ou fechado). */
+  /** O endereço. Só `http:` e `https:` aparecem no dashboard; um link de pull request do GitHub ou de merge request do GitLab mostra também o estado dele (aberto, mesclado ou fechado). */
   url: string;
 }
 
