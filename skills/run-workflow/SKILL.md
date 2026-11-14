@@ -57,6 +57,11 @@ matches, in code spans; match them verbatim.
      `name`, the `args` plus the approval args from the JSON after `--args` in the `next` command (in
      `implement-issue`, `approveSeams: true`, or `seams: [...]` with the ones they ask for) and `resumeRunId` equal
      to `result.runId`; then go back to step 3 with the new `jobId`.
+   - `test-command-proposed` (`implement-issue`, a run with `seams` and no `testCommand`): the planner chose a test
+     command, which runs as `bash -c` with the user's environment, so it waits for them. Show the `testCommand` of
+     the result word for word, and ask. If they approve it, relaunch with the args of the `next` command as they are
+     (`approveSeams: true`, no `seams`: the stored plan holds them) and `resumeRunId` equal to `result.runId`. If they
+     want another command, relaunch with `seams` and their own `testCommand`.
    - `secret-blocked`: relay the `reason` (the rule that fired, without the secret) and leave the inspection of the
      `worktree` (when present: the block at the seams comment brings none) to the user, so the secret stays out of
      the chat.
