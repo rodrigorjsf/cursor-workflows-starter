@@ -32,6 +32,12 @@ O servidor `workflows` é registrado em `.cursor/mcp.json` (Cursor) e em `.mcp.j
 | `get_workflow_status` | `{ jobId }` | Estado, sem esperar |
 | `cancel_workflow` | `{ jobId }` | Cancela o job: para os agentes ativos, desfaz a etapa que estava escrevendo e devolve o estado com `status: "cancelled"`. O run continua retomável. Um processo travado (vivo, sem heartbeat; o job já aparece `failed`) é encerrado com `SIGKILL`, sem desfazer a etapa, e os comandos de `ctx.exec` que ele tinha em andamento morrem com ele. Depois desse `SIGKILL`, e num job cujo processo já morreu (uma queda), cancela os cloud agents que o run deixou rodando, a nota os nomeia e o job continua `failed`; um resume depois cria agentes novos no lugar deles, que custam de novo. O agente do chat só chama quando o usuário pede para parar |
 
+Toda falha de uma tool volta com `isError: true`. As que o servidor produz (workflow desconhecido, job inexistente, config
+ou override recusado, `timeoutSec` que não é número) trazem o texto JSON `{ "error": "..." }`. Uma chamada que quebra o schema
+de entrada (falta `name` ou `jobId`, ou um deles não é texto) volta com o texto simples do SDK, `MCP error -32602: Input
+validation error: Invalid arguments for tool <nome>: ...`, que nomeia a propriedade e não é JSON: o cliente olha o `isError`
+antes de interpretar a resposta.
+
 **Por que start/wait e não uma tool que bloqueia até o fim?** Um workflow de implementação leva minutos, e a
 doc do Cursor não dá o timeout de uma chamada de tool MCP no IDE. O FAQ de MCP só diz que, se o servidor cai ou
 estoura o tempo, a chamada é marcada como falha ([DOC](https://cursor.com/docs/mcp), acesso em 2026-11-11). Os

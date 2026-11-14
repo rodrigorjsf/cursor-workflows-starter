@@ -19,10 +19,10 @@
 | Pacote | Uso |
 |---|---|
 | `@cursor/sdk` (fixado em `1.3.1`) | Criar agentes, enviar prompts, consultar custo. **Fixe a versão** e atualize de forma deliberada. O npm publica `1.3.1` (2026-11-03; ver [8.2](../research/verificacoes-locais.md)), mas as notas de versão do SDK listam `1.0.40` como a mais recente, sem data ([DOC](https://cursor.com/docs/release-notes/sdk)). Nenhuma página da doc chama o SDK de beta ou de GA |
-| `@modelcontextprotocol/sdk` | MCP server (stdio) para o Cursor IDE |
+| `@modelcontextprotocol/sdk` (`^1.32.2`) | MCP server (stdio) para o Cursor IDE, pelo `McpServer` e `registerTool` |
 | `ajv` | Validação de JSON Schema da saída estruturada |
 | `tsx` | Roda os `.ts` direto, sem build. O `mcp.json` aponta para `node_modules/.bin/tsx` (sem `npx`, para não baixar nada na hora) |
-| `zod` | Peer dependency do `@cursor/sdk` |
+| `zod` | Peer dependency do `@cursor/sdk` e do SDK MCP; o servidor MCP declara com ele o schema de entrada de cada tool |
 | `typescript`, `@types/node` (dev) | Typecheck |
 
 ## 3. Instalar
