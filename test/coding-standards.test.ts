@@ -488,6 +488,42 @@ test("every MCP tool failure goes through fail(), which flags it isError", () =>
   assert.deepEqual(scan(["packages/runtime/src/mcp-server.ts"], errorOutsideFail), [], "return fail({ error: \"<sentence>\" })");
 });
 
+/** Lines of a `registerTool` call whose config has no `inputSchema` that is a strict object: `z.strictObject(...)` or `<schema>.strict()`. */
+function lenientToolSchemas(path: string, text: string): number[] {
+  const sf = parse(path, text);
+  const found: number[] = [];
+  const isStrict = (schema: ts.Expression) =>
+    ts.isCallExpression(schema) && ts.isPropertyAccessExpression(schema.expression) && ["strictObject", "strict"].includes(schema.expression.name.text);
+  walk(sf, (node) => {
+    if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression) || node.expression.name.text !== "registerTool") return;
+    const config = node.arguments[1];
+    const schema = config && ts.isObjectLiteralExpression(config) ? config.properties.find((p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "inputSchema") : undefined;
+    if (!schema || !ts.isPropertyAssignment(schema) || !isStrict(schema.initializer)) found.push(lineOf(sf, node));
+  });
+  return found;
+}
+
+test("the strict tool schema check fires on a missing schema, a raw shape and z.object, and passes z.strictObject and .strict()", () => {
+  const offender = [
+    'server.registerTool("a", { description: "d" }, async () => text({}));',
+    'server.registerTool("b", { inputSchema: { jobId: z.string() } }, async () => text({}));',
+    'server.registerTool("c", { inputSchema: z.object({ jobId: z.string() }) }, async () => text({}));',
+    "server.registerTool(\"d\", { inputSchema }, async () => text({}));",
+  ].join("\n");
+  assert.deepEqual(lenientToolSchemas("m.ts", offender), [1, 2, 3, 4]);
+  const strict = [
+    'server.registerTool("a", { inputSchema: z.strictObject({}) }, async () => text({}));',
+    'server.registerTool("b", { description: "d", inputSchema: z.object({ jobId: z.string() }).strict() }, async () => text({}));',
+  ].join("\n");
+  assert.deepEqual(lenientToolSchemas("m.ts", strict), []);
+});
+
+test("every tool of the MCP server has a strict input schema, so that an unknown argument is refused instead of dropped", () => {
+  const server = "packages/runtime/src/mcp-server.ts";
+  assert.match(read(server), /\.registerTool\(/, "the check reads the file that registers the tools");
+  assert.deepEqual(scan([server], lenientToolSchemas), [], "give the tool `inputSchema: z.strictObject({ ... })`: zod 4's z.object strips an unknown key");
+});
+
 // --- Dashboard (React) and Dashboard CSS ------------------------------------------------------------------------------
 
 const URL_HELPERS = ["packages/dashboard/app/format.ts", "packages/dashboard/run-view/location.ts"];

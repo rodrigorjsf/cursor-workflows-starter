@@ -1,13 +1,15 @@
 // Seam: the MCP server over stdio, as a real child process driven by an MCP client (`test/mcp-support.ts`). It is built on
 // `McpServer.registerTool`: the SDK checks each call against the tool's input schema before the handler runs and reports a
 // failure as a tool error. These tests pin what the chat sees: the five tools and their required properties, a call that
-// breaks the schema or names no tool, the arguments the handlers still check themselves (the move refuses nothing there),
-// and the guard that keeps a workflow step from starting workflows. Offline: the fake Cursor SDK replaces `@cursor/sdk`.
+// breaks the schema (a missing, mistyped or unlisted argument) or names no tool, the args a workflow's `argsSchema` refuses,
+// the `timeoutSec` the handler still checks itself, and the guard that keeps a workflow step from starting workflows.
+// Offline: the fake Cursor SDK replaces `@cursor/sdk`.
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import semver from "semver";
 import { FAKE_SDK_TSCONFIG, MCP_TOOLS, ROOT, withMcpServer } from "./mcp-support.js";
@@ -81,6 +83,9 @@ test("tools/list keeps what the model is told about the values: workflow names, 
   assert.match(listed.find((t) => t.name === "start_workflow")!.description!, /Available: .*smoke/);
 });
 
+/** Calls `name` with `args` and returns the reply; a refusal is a tool error, never a thrown JSON-RPC error. */
+const call = async (client: Client, name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as Reply;
+
 test("a call that breaks an input schema is a tool error that names the property, and nothing starts", async () => {
   const cases: Array<[string, Record<string, unknown>, string]> = [
     ["get_workflow_status", {}, "jobId"],
@@ -89,17 +94,69 @@ test("a call that breaks an input schema is a tool error that names the property
     ["start_workflow", {}, "name"],
     ["get_workflow_status", { jobId: 7 }, "jobId"],
     ["start_workflow", { name: 7 }, "name"],
+    ["start_workflow", { name: "smoke", resumeRunId: 7 }, "resumeRunId"],
+    ["start_workflow", { name: "smoke", resumeRunId: null }, "resumeRunId"],
+    ["start_workflow", { name: "smoke", args: "x" }, "args"],
+    ["start_workflow", { name: "smoke", args: null }, "args"],
+    ["start_workflow", { name: "smoke", args: [] }, "args"],
+    ["start_workflow", { name: "smoke", overrides: 5 }, "overrides"],
   ];
   const repo = freshRepo();
   await withMcpServer(mcpServer(repo), async (client) => {
     for (const [name, args, property] of cases) {
-      const reply = (await client.callTool({ name, arguments: args })) as Reply;
+      const reply = await call(client, name, args);
       const label = `${name} ${JSON.stringify(args)}: ${reply.content[0]!.text}`;
       assert.equal(reply.isError, true, label);
       assert.match(reply.content[0]!.text, new RegExp(`Input validation error: Invalid arguments for tool ${name}\\b.*\\b${property}\\b`, "s"), label);
     }
   });
   assert.equal(existsSync(join(repo, ".workflows", "jobs")), false, "a refused call creates no job");
+});
+
+test("an argument a tool does not list is a tool error that names it, for every tool, and nothing starts", async () => {
+  const cases: Array<[string, Record<string, unknown>]> = [
+    ["list_workflows", { extra: 1 }],
+    ["start_workflow", { name: "smoke", extra: 1 }],
+    ["wait_workflow", { jobId: "x", extra: 1 }],
+    ["get_workflow_status", { jobId: "x", extra: 1 }],
+    ["cancel_workflow", { jobId: "x", extra: 1 }],
+  ];
+  assert.deepEqual(cases.map(([name]) => name).sort(), MCP_TOOLS, "every tool is tried");
+  const repo = freshRepo();
+  await withMcpServer(mcpServer(repo), async (client) => {
+    for (const [name, args] of cases) {
+      const reply = await call(client, name, args);
+      const label = `${name} ${JSON.stringify(args)}: ${reply.content[0]!.text}`;
+      assert.equal(reply.isError, true, label);
+      assert.match(reply.content[0]!.text, new RegExp(`Invalid arguments for tool ${name}\\b.*\\bextra\\b`, "s"), label);
+    }
+  });
+  assert.equal(existsSync(join(repo, ".workflows", "jobs")), false, "a refused call creates no job");
+});
+
+test("tools/list advertises that a tool takes no argument beyond the ones it lists", async () => {
+  const listed = await withMcpServer(mcpServer(freshRepo()), async (client) => (await client.listTools()).tools);
+  for (const tool of listed) assert.equal((tool.inputSchema as { additionalProperties?: unknown }).additionalProperties, false, tool.name);
+});
+
+test("start_workflow refuses args that break the workflow's argsSchema, names the property, and starts no job", async () => {
+  const cases: Array<[string, Record<string, unknown>, RegExp]> = [
+    ["smoke", { x: 1 }, /^invalid args: .*\bx\b/],
+    ["implement-issue", { issue: "7" }, /^invalid args: .*\bissue\b/],
+    ["implement-issue", {}, /^invalid args: .*\bissue\b/],
+  ];
+  const repo = freshRepo();
+  await withMcpServer(mcpServer(repo), async (client) => {
+    for (const [name, args, message] of cases) {
+      const reply = await call(client, "start_workflow", { name, args });
+      const label = `${name} ${JSON.stringify(args)}: ${reply.content[0]!.text}`;
+      assert.equal(reply.isError, true, label);
+      const body = JSON.parse(reply.content[0]!.text) as { error: string; jobId?: string };
+      assert.match(body.error, message, label);
+      assert.equal(body.jobId, undefined, label);
+    }
+  });
+  assert.equal(existsSync(join(repo, ".workflows", "jobs")), false, "refused args create no job and start no process");
 });
 
 test("a call to a tool that is not registered is a tool error that names the tool", async () => {
@@ -110,14 +167,19 @@ test("a call to a tool that is not registered is a tool error that names the too
   });
 });
 
-test("a value the handler checks itself reaches the handler: the schema adds no refusal (a numeric string, null and a wait outside 1..50 still count)", async () => {
+test("a timeoutSec the handler checks itself reaches the handler: a numeric string, null and a wait outside 1..50 still count", async () => {
   await withMcpServer(mcpServer(freshRepo()), async (client) => {
     for (const timeoutSec of ["30", null, 999, 0]) {
-      const reply = (await client.callTool({ name: "wait_workflow", arguments: { jobId: "nope1234", timeoutSec } })) as Reply;
+      const reply = await call(client, "wait_workflow", { jobId: "x", timeoutSec });
       assert.equal(reply.isError, true, String(timeoutSec));
       assert.deepEqual(JSON.parse(reply.content[0]!.text), { error: "job not found" }, `timeoutSec ${JSON.stringify(timeoutSec)}`);
     }
-    const unknown = (await client.callTool({ name: "start_workflow", arguments: { name: "no-such-workflow", args: null, resumeRunId: null } })) as Reply;
+    for (const timeoutSec of ["30s", true]) {
+      const refused = await call(client, "wait_workflow", { jobId: "x", timeoutSec });
+      assert.equal(refused.isError, true, String(timeoutSec));
+      assert.match(JSON.parse(refused.content[0]!.text).error, /^timeoutSec must be a number of seconds/, String(timeoutSec));
+    }
+    const unknown = await call(client, "start_workflow", { name: "no-such-workflow" });
     assert.equal(unknown.isError, true);
     assert.deepEqual(JSON.parse(unknown.content[0]!.text), { error: "unknown workflow: no-such-workflow" });
   });
