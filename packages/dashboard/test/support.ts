@@ -89,11 +89,16 @@ export interface Reply {
   json: any;
 }
 
-/** One request to `url` (the server's origin); `host` replaces the Host header, `method` the verb, `headers` adds request headers. */
-export function http(url: string, path: string, opts: { host?: string; method?: string; headers?: Record<string, string> } = {}): Promise<Reply> {
+/**
+ * One request to `url` (the server's origin); `host` replaces the Host header, `method` the verb, `headers` adds request headers.
+ * `body` is sent as the request body: text as it is, anything else as JSON.
+ */
+export function http(url: string, path: string, opts: { host?: string; method?: string; headers?: Record<string, string>; body?: unknown } = {}): Promise<Reply> {
   const target = new URL(path, url);
+  const payload = opts.body === undefined ? undefined : typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body);
+  const framing = payload === undefined ? {} : { "content-type": "application/json", "content-length": String(Buffer.byteLength(payload)) };
   return new Promise((resolve, reject) => {
-    const req = request({ hostname: target.hostname, port: target.port, path: target.pathname + target.search, method: opts.method ?? "GET", headers: { ...(opts.host === undefined ? {} : { host: opts.host }), ...opts.headers } }, (res) => {
+    const req = request({ hostname: target.hostname, port: target.port, path: target.pathname + target.search, method: opts.method ?? "GET", headers: { ...(opts.host === undefined ? {} : { host: opts.host }), ...framing, ...opts.headers } }, (res) => {
       const chunks: Buffer[] = [];
       res.on("data", (c: Buffer) => chunks.push(c));
       res.on("end", () => {
@@ -108,7 +113,7 @@ export function http(url: string, path: string, opts: { host?: string; method?: 
       });
     });
     req.once("error", reject);
-    req.end();
+    req.end(payload);
   });
 }
 

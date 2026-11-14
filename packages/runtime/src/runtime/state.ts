@@ -1,6 +1,7 @@
 // Diretório de estado do runtime no repositório alvo (`.workflows/`): journal, jobs, logs, memo, worktrees.
 
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -52,4 +53,9 @@ export function isPlainName(id: unknown): id is string {
 export function plainName(id: string, what: string): string {
   if (!isPlainName(id)) throw new Error(`invalid ${what} ${JSON.stringify(id)}: letters, digits, "_" and "-" only (it becomes a file name)`);
   return id;
+}
+
+/** A new run id: the workflow's name, with anything but letters, digits, "_" and "-" made a "-" (the id names the run's folder), and a random suffix. */
+export function newRunId(workflow: string): string {
+  return `${workflow.replace(/[^A-Za-z0-9_-]/g, "-")}-${randomUUID().slice(0, 8)}`;
 }

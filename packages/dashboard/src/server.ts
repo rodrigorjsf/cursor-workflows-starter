@@ -1,11 +1,13 @@
 // The dashboard's HTTP server: a JSON API over the runs of every repo and the metrics database, plus the web app that draws
-// them (its two pages, built at start, see web-bundle.ts). It reads, with one action: cancelling a run.
+// them (its two pages, built at start, see web-bundle.ts). It reads, and it has two actions: starting a run and cancelling one.
 //
 // - It listens on 127.0.0.1 only and refuses any `Host` that is not a loopback name (DNS rebinding protection). It sends
 //   no CORS headers, so another site's script cannot read it.
-// - The one POST is `/api/runs/<runId>/cancel`. It needs the CSRF token (`/api/csrf`, one random value per dashboard process)
-//   in the `X-CSRF-Token` header, which only a script that can read an answer of this origin has, and it refuses a request
-//   that says it comes from another origin. It ends in `cancelRun`, which is `wf cancel`'s path (`cancelJob`).
+// - The two POSTs are `/api/runs/<runId>/cancel` and `/api/start`. Both sit behind one gate: the CSRF token (`/api/csrf`, one
+//   random value per dashboard process) in the `X-CSRF-Token` header, which only a script that can read an answer of this
+//   origin has, and a request that does not say it comes from another origin. Cancel ends in `cancelRun`, which is `wf cancel`'s
+//   path (`cancelJob`). Start ends in `startRun`, which starts a detached job as `wf start` does, but only in a repository the
+//   runs index already names and only a workflow the runtime lists for it (`/api/repos` and `/api/workflows` feed the form).
 // - It reads: the global runs index and each run's event log (`@cursor-workflows/runtime/observe`), and the metrics
 //   database, opened read-only the first time it exists. A machine with no history gets empty states, not an error.
 // - A run's event log is also served live: `/api/runs/<runId>/events` is a Server-Sent Events stream that replays the log and
@@ -14,10 +16,11 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
-import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, dashboardUrl, type RunTail, cancelRun, defaultDbPath, leftAgentsNote, listRuns, openDb, readRun, readStepContent, summary, tailRun } from "@cursor-workflows/runtime/observe";
+import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, dashboardUrl, type RunTail, cancelRun, defaultDbPath, knownRepos, leftAgentsNote, listRepoWorkflows, listRuns, openDb, readRun, readStepContent, startRun, summary, tailRun } from "@cursor-workflows/runtime/observe";
 import { buildBoards } from "./board.js";
 import { PAGE_POLICY, assetPath, pageHtml } from "./pages.js";
 import { PrStates } from "./pr-state.js";
+import { MAX_START_BODY_BYTES, parseStartBody, startReply, unknownRepoError, workflowEntry } from "./start.js";
 import { type PageName, buildWeb } from "./web-bundle.js";
 
 /** Host names a request may carry: the loopback names. Anything else is a page of another site asking the browser to talk to us. */
@@ -150,6 +153,20 @@ function stream(req: IncomingMessage, res: ServerResponse, tail: RunTail): void 
   res.once("close", () => clearInterval(timer));
 }
 
+/** The request body as text, or undefined when it is larger than `maxBytes`: the rest is read and dropped, never kept. */
+function readBody(req: IncomingMessage, maxBytes: number): Promise<string | undefined> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size <= maxBytes) chunks.push(chunk);
+    });
+    req.once("end", () => resolve(size > maxBytes ? undefined : Buffer.concat(chunks).toString("utf8")));
+    req.once("error", reject);
+  });
+}
+
 /** Whether `candidate` is the CSRF token, compared in constant time. */
 function sameToken(candidate: string | string[] | undefined, token: string): boolean {
   if (typeof candidate !== "string") return false;
@@ -183,11 +200,16 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
   const csrfToken = randomBytes(32).toString("hex");
   const cancelTimeoutMs = options.cancelTimeoutMs ?? DEFAULT_CANCEL_TIMEOUT_MS;
 
-  /** The cancel action: the token and the origin first, then `cancelRun`, and an answer that says what it did. */
+  /** The gate every action sits behind: the origin and the token. Answers 403 and returns false for a request that does not pass, so the action never reads its body. */
+  function gate(req: IncomingMessage, res: ServerResponse): boolean {
+    if (sameOrigin(req) && sameToken(req.headers["x-csrf-token"], csrfToken)) return true;
+    send(res, 403, { error: "csrf token missing or wrong" });
+    return false;
+  }
+
+  /** The cancel action: the gate first, then `cancelRun`, and an answer that says what it did. */
   async function cancel(req: IncomingMessage, res: ServerResponse, runId: string): Promise<void> {
-    if (!sameOrigin(req) || !sameToken(req.headers["x-csrf-token"], csrfToken)) {
-      return send(res, 403, { error: "csrf token missing or wrong" });
-    }
+    if (!gate(req, res)) return;
     const outcome = await cancelRun(runId, cancelTimeoutMs);
     switch (outcome.kind) {
       case "unknown-run":
@@ -207,6 +229,17 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
     }
   }
 
+  /** The start action: the gate first, then the body checked into a request, then `startRun`, which resolves the repository and the workflow and starts the job. */
+  async function start(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!gate(req, res)) return;
+    const body = await readBody(req, MAX_START_BODY_BYTES);
+    if (body === undefined) return send(res, 400, { error: `the request body is larger than ${MAX_START_BODY_BYTES} bytes` });
+    const parsed = parseStartBody(body);
+    if (!parsed.ok) return send(res, 400, { error: parsed.error });
+    const reply = startReply(await startRun(parsed.request), parsed.request);
+    send(res, reply.status, reply.body);
+  }
+
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!hostAllowed(req.headers.host)) {
       res.writeHead(403, { "content-type": "text/plain; charset=utf-8" }).end("host not allowed");
@@ -216,6 +249,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
     if (req.method === "POST") {
       const target = /^\/api\/runs\/([^/]+)\/cancel$/.exec(url.pathname);
       if (target) return cancel(req, res, decodeSegment(target[1]!));
+      if (url.pathname === "/api/start") return start(req, res);
     }
     if (req.method !== "GET" && req.method !== "HEAD") {
       res.setHeader("allow", "GET, HEAD");
@@ -240,6 +274,20 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
         send(res, 200, { boards: buildBoards(runs, states) });
         return;
       }
+      case "/api/repos":
+        send(res, 200, { repos: knownRepos() });
+        return;
+      case "/api/workflows": {
+        const repo = url.searchParams.get("repo");
+        if (!repo) return send(res, 400, { error: "repo is required: the path of a repository the dashboard knows" });
+        const listed = await listRepoWorkflows(repo);
+        if (!listed) return send(res, 404, { error: unknownRepoError(repo) });
+        send(res, 200, { repo, workflows: listed.workflows.map(workflowEntry), broken: listed.broken });
+        return;
+      }
+      case "/api/start":
+        res.setHeader("allow", "POST");
+        return send(res, 405, { error: "method not allowed" });
       case "/api/summary": {
         const db = await metrics.get();
         send(res, 200, db ? summary(db, clamped(url.searchParams.get("days"), 30, 1, 3650)) : EMPTY_SUMMARY);
