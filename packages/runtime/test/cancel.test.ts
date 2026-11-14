@@ -25,7 +25,7 @@ afterEach(() => {
   script.length = 0;
   calls.length = 0;
   Object.assign(stats, { active: 0, maxActive: 0, disposed: 0, usageReads: 0, cancelled: 0 });
-  Object.assign(costConfig, { raw: 9, charged: 7, getUsageError: undefined, createErrorCode: undefined, createHang: undefined, createDelayMs: undefined });
+  Object.assign(costConfig, { raw: 9, charged: 7, getUsageError: undefined, createErrorCode: undefined, createHang: undefined, createDelayMs: undefined, createGate: undefined });
 });
 
 after(() => rmSync(cwd, { recursive: true, force: true }));
@@ -84,13 +84,14 @@ test("a signal already aborted starts no agent: the run ends cancelled", async (
 });
 
 test("cancelling while the agent is still being created ends the run at once, and the agent that arrives late is disposed", async () => {
-  costConfig.createDelayMs = 3000; // far longer than the run may take, however loaded the machine
+  // The creation is held until the run has ended: a run that waited for it would never end.
+  let arrive!: () => void;
+  costConfig.createGate = () => new Promise<void>((done) => (arrive = done));
   const controller = new AbortController();
-  const startedAt = performance.now();
   const outcome = await runWorkflow(oneStep, {}, { cwd, runId: "r-create", signal: controller.signal, onEvent: abortOnFirstStep(controller) });
   assert.equal(outcome.status, "cancelled");
-  assert.ok(performance.now() - startedAt < 2000, "the run did not wait for the creation");
   assert.equal(stats.disposed, 0, "the agent does not exist yet");
+  arrive();
   await waitFor("the agent that arrived late to be disposed", () => stats.disposed >= 1);
   assert.equal(stats.disposed, 1, "the agent that arrived late was disposed, not left running");
 });
@@ -111,15 +112,20 @@ test("a creation that never answers fails the step on its timeout instead of han
 
 test("schema re-prompts share the step timeout instead of restarting it", async () => {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  // Wide margins, so that a scheduling delay on a busy machine cannot reorder things: the first send ends a second before the
-  // step times out (a longer delay and the re-prompt would never start), and the step may end up to 0.75 s late before it
-  // is taken for one that restarted its timeout.
+  // No wall-clock bound: the test compares timers, which Node fires in the order they expire however late the loop runs.
+  // The step's timer is armed before the first send starts, so a shared timeout expires at most `stepTimeoutMs` after it;
+  // a restarted one, at least `stepTimeoutMs` after the re-prompt, which follows a `firstSendMs` send. A probe armed when
+  // the first send starts expires halfway between the two: when it fires, a shared timeout has fired (and cancelled the
+  // hung re-prompt, which the fake counts at once) and a restarted one has not.
   const stepTimeoutMs = 2_000;
-  const firstSendMs = 1_000;
-  let firstSendAt = 0;
-  let repromptAt = 0;
-  script.push(async () => ((firstSendAt = performance.now()), await sleep(firstSendMs), { status: "finished", result: "no submit_result call" })); // the re-prompt follows
-  script.push(() => ((repromptAt = performance.now()), { hang: true }));
+  const firstSendMs = 200;
+  let probe: Promise<number> | undefined;
+  script.push(async () => {
+    probe = new Promise((done) => setTimeout(() => done(stats.cancelled), stepTimeoutMs + firstSendMs / 2));
+    await sleep(firstSendMs);
+    return { status: "finished", result: "no submit_result call" }; // the re-prompt follows
+  });
+  script.push(() => ({ hang: true }));
   const wf = defineWorkflow({
     meta: { name: "reprompt-timeout", description: "reprompt" },
     defaults: { model },
@@ -130,10 +136,8 @@ test("schema re-prompts share the step timeout instead of restarting it", async 
   const stepEnd = eventsOf("r-reprompt").find((e) => e.type === "step-end");
   assert.ok(stepEnd && stepEnd.type === "step-end" && stepEnd.errorKind === "timeout");
   assert.equal(stepEnd.schemaReprompts, 1, "the first send answered without submit_result, so a re-prompt followed it");
-  // The first send ran for `beforeReprompt` ms before the re-prompt began. With the rest of the allowance the step ends at
-  // `stepTimeoutMs`; with a fresh one, at `beforeReprompt + stepTimeoutMs`. The line is three quarters of the way to the second.
-  const beforeReprompt = repromptAt - firstSendAt;
-  assert.ok(stepEnd.durationMs! < stepTimeoutMs + beforeReprompt * 0.75, `the re-prompt had the rest of the ${stepTimeoutMs} ms, not a fresh ${stepTimeoutMs} ms (took ${stepEnd.durationMs} ms, the re-prompt started after ${beforeReprompt} ms)`);
+  assert.ok(probe, "the first send ran");
+  assert.equal(await probe, 1, `the re-prompt had the rest of the ${stepTimeoutMs} ms, not a fresh ${stepTimeoutMs} ms: the step timed out before the probe`);
   assert.equal(stats.cancelled, 1, "the hung re-prompt run was cancelled");
 });
 
