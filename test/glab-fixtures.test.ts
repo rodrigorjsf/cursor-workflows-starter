@@ -79,7 +79,7 @@ test("the recorder scrubs every stream of every recording, and writes nothing wh
 
   // What the scrubbing does not touch (the subjects and the versions are the recorder's own words) is still checked.
   file.subjects.title = `a title that holds ${unknownToken}`;
-  assert.throws(() => scrubRecordings(file, SECRETS), /still hold a credential: GitLab token.*: nothing was written/);
+  assert.throws(() => scrubRecordings(file, SECRETS), /the recording file still holds a credential: GitLab token.*: nothing was written/);
 });
 
 // ── the committed recordings ─────────────────────────────────────────────────────────────────────────────────────

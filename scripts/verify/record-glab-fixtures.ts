@@ -17,7 +17,7 @@ import { createForge, loginOf, type Forge } from "../../packages/runtime/workflo
 import { isEntryPoint } from "../lib/cli.js";
 import { GitLabApi, basicAuthOf, e2eEnv, execOf, git, loginGlab, mergeRequestNumber, runMain, secretsOf, versionsOf, type E2eEnv } from "../lib/gitlab-e2e.js";
 import type { Versions } from "../lib/gitlab-proofs.js";
-import { HOST_PLACEHOLDER, leaksIn, scrubText, type Secrets } from "../lib/scrub-recording.js";
+import { HOST_PLACEHOLDER, refuseLeaks, scrubText, type Secrets } from "../lib/scrub-recording.js";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
 /** Where the fake `glab` of the offline tests reads the recordings. */
@@ -214,8 +214,7 @@ export function scrubRecordings(file: RecordingsFile, secrets: Secrets): Recordi
     Object.entries(file.recordings).map(([name, r]) => [name, { args: r.args.map(scrub), exitCode: r.exitCode, stdout: scrub(r.stdout), stderr: scrub(r.stderr) }]),
   );
   const scrubbed: RecordingsFile = { recordedWith: file.recordedWith, placeholders: file.placeholders, subjects: file.subjects, recordings };
-  const leaks = leaksIn(JSON.stringify(scrubbed), secrets);
-  if (leaks.length > 0) throw new Error(`the recordings still hold ${leaks.join(", ")}: nothing was written`);
+  refuseLeaks(JSON.stringify(scrubbed), secrets, "the recording file", "written");
   return scrubbed;
 }
 

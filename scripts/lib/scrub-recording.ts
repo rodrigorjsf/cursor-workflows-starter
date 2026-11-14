@@ -8,7 +8,7 @@
 // WHEN: imported by scripts/verify/record-glab-fixtures.ts, and by scripts/verify/prove-gitlab.ts for the evidence it prints
 //   (which goes in a public pull request); test/glab-fixtures.test.ts also reads it, to check the committed fixtures. Not run on its own.
 // HOW: `scrubText(text, secrets)` returns the scrubbed text; `leaksIn(text, secrets)` returns what a scrubbed text still
-//   holds (empty when it is clean).
+//   holds (empty when it is clean); `refuseLeaks(text, secrets, what, outcome)` throws when that is not empty.
 import { createRedactor, findCredential } from "../../packages/runtime/src/runtime/redaction.js";
 
 /** What replaces each kind of detail. The fake `glab` swaps `HOST_PLACEHOLDER` for the host of the repository it runs in. The scheme of a URL stays as glab printed it. */
@@ -65,6 +65,15 @@ export function leaksIn(text: string, secrets: Secrets): string[] {
   const others = secrets.token === "" ? text : text.split(secrets.token).join("");
   if (redactor().text(others) !== others) found.push(`a credential: ${findCredential(others) ?? "a shape the runtime redacts"}`);
   return found;
+}
+
+/**
+ * Throws when a scrubbed `text` still holds anything `leaksIn` finds, so that it is never written or printed: `what` names the text
+ * and `outcome` what did not happen to it (`the evidence still holds the token: nothing was printed`).
+ */
+export function refuseLeaks(text: string, secrets: Secrets, what: string, outcome: "written" | "printed"): void {
+  const leaks = leaksIn(text, secrets);
+  if (leaks.length > 0) throw new Error(`${what} still holds ${leaks.join(", ")}: nothing was ${outcome}`);
 }
 
 /** `leaksIn` for the details a committed fixture can be checked for without knowing this run's secrets: a local host and any credential shape the runtime redacts. */

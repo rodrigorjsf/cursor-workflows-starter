@@ -44,7 +44,7 @@ import {
   type Versions,
   type WorkflowResult,
 } from "../lib/gitlab-proofs.js";
-import { HOST_PLACEHOLDER, leaksIn, scrubText, type Secrets } from "../lib/scrub-recording.js";
+import { HOST_PLACEHOLDER, refuseLeaks, scrubText, type Secrets } from "../lib/scrub-recording.js";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
 const GROUP = "owner";
@@ -451,8 +451,7 @@ class Prover {
 /** The evidence with the token, the root password, the local host and the paths of this machine replaced: it goes in a public pull request. */
 export function publishable(evidence: string, secrets: Secrets): string {
   const scrubbed = scrubText(evidence, secrets);
-  const leaks = leaksIn(scrubbed, secrets);
-  if (leaks.length > 0) throw new Error(`the evidence still holds ${leaks.join(", ")}: nothing was printed`);
+  refuseLeaks(scrubbed, secrets, "the evidence", "printed");
   return scrubbed;
 }
 
