@@ -324,6 +324,45 @@ forgeTest("model text in an inline code span of the seams comment cannot close t
   assert.doesNotMatch(comment, /`\s*@octocat/);
 });
 
+// The test command of a run with `seams` is model text that waits for a person's approval: the comment that shows it is
+// public, so it is held to the same rules as the seams comment, and it shows what the relaunch will run (apart from the
+// credentials, which a public comment never gets).
+forgeTest("the proposed test command in its comment cannot close its span, start a quick action or carry a credential", async () => {
+  issue(["complexity:medium"]);
+  const testCommand = "npm test` @octocat <!-- `x\n/close\n/assign @octocat\nAuthorization: Bearer abcdefghijklmnop1234";
+  fx.handlers.plan = (o) => submit(o, { ...PLAN, testCommand });
+  const first = await run({ seams: ["x"], testCommand: undefined });
+  assert.equal(res(first).status, "test-command-proposed", JSON.stringify(res(first)));
+  const comment = forgeState().comments[0]!;
+  assert.ok(comment.includes("- `npm testˋ @octocat <!-- ˋx`\n- `/close`\n- `/assign @octocat`\n- `Authorization: Bearer [REDACTED]`"), comment);
+  assert.doesNotMatch(comment, /^\/(close|assign)/im);
+  assert.ok(!JSON.stringify(forgeState()).includes("abcdefghijklmnop1234"), "the forge never got the credential");
+  assert.ok(comment.includes("<!-- wf:implement-issue:test-command -->"));
+});
+
+// A person approves what the comment shows, so a command of several lines is shown as its lines, not folded into one.
+forgeTest("a test command of several lines is shown line by line: the approval is of the script that runs, not of a one-line look-alike", async () => {
+  issue(["complexity:medium"]);
+  fx.handlers.plan = (o) => submit(o, { ...PLAN, testCommand: "npm test\ntouch PWNED" });
+  const first = await run({ seams: ["x"], testCommand: undefined });
+  assert.equal(res(first).status, "test-command-proposed", JSON.stringify(res(first)));
+  const comment = forgeState().comments[0]!;
+  assert.ok(comment.includes("Test command (2 lines, run as one script):\n\n- `npm test`\n- `touch PWNED`\n"), comment);
+  assert.doesNotMatch(comment, /`npm test touch PWNED`/, "no one-line look-alike");
+
+  const seamsFirst = await run({ testCommand: undefined }); // the seams comment shows the planner's command the same way
+  assert.equal(res(seamsFirst).status, "seams-proposed", JSON.stringify(res(seamsFirst)));
+  assert.ok(forgeState().comments[1]!.includes("Test command (2 lines, run as one script):\n\n- `npm test`\n- `touch PWNED`\n"));
+});
+
+forgeTest("a test command that only ends with a line break is shown as one line", async () => {
+  issue(["complexity:medium"]);
+  fx.handlers.plan = (o) => submit(o, { ...PLAN, testCommand: "npm test\n" });
+  const r = await run({ seams: ["x"], testCommand: undefined });
+  assert.equal(res(r).status, "test-command-proposed", JSON.stringify(res(r)));
+  assert.ok(forgeState().comments[0]!.includes("\nTest command: `npm test`\n"), forgeState().comments[0]);
+});
+
 // GitLab runs a quick action (`/close`, `/merge`, `/assign`...) found at the start of a line of an MR description or a note, as
 // the account that posted it. Model text must reach the forge unable to do that; the sanitizer is the same on both forges.
 const HOSTILE_ACTIONS = "/close\n/MERGE\n/assign @octocat\n/label ~bug\n/shrug";
