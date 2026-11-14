@@ -1,4 +1,4 @@
-// Child process of heartbeat.test.ts: starts a job whose workflow blocks the whole main thread for 1.5 s (like a
+// Child process of heartbeat.test.ts: starts a job whose workflow blocks the whole main thread for 3 s (like a
 // synchronous test run does), says so on stdout, and then finishes.
 // Usage: blocked-job.ts <cwd> <jobId> <runId>
 process.env.WF_METRICS = "off";
@@ -11,7 +11,7 @@ const blocking = defineWorkflow({
   meta: { name: "blocking", description: "blocks the main thread" },
   run: async () => {
     process.stdout.write("blocking\n");
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3000);
     return { status: "done" };
   },
 });

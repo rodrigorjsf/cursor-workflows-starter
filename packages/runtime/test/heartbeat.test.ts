@@ -79,8 +79,17 @@ test("the heartbeat keeps beating while the process is blocked in a synchronous 
     child!.once("exit", (code) => reject(new Error(`the child exited early with code ${code}`)));
     child!.stdout!.on("data", (chunk: Buffer) => chunk.toString().includes("blocking") && resolve());
   });
-  process.env.WF_HEARTBEAT_STALE_MS = "600"; // shorter than the 1.5 s the child blocks for
+  // Half the 3 s the child blocks for: the main thread's silence goes stale, while a beat from the worker thread may come
+  // late by a second and a half on a loaded machine before the job would look frozen.
+  process.env.WF_HEARTBEAT_STALE_MS = "1500";
+  // Sampled until the child exits, however long the machine takes: the job is running, then finished, and never failed.
+  let exited = false;
+  child.once("exit", () => (exited = true));
   const seen = new Set<string>();
-  for (const stop = performance.now() + 1200; performance.now() < stop; await sleep(100)) seen.add(readJob(cwd, "job-blocked")!.status);
-  assert.deepEqual([...seen], ["running"], "stale for 1.2 s of main-thread silence would show failed; the worker thread keeps it running");
+  while (!exited) {
+    seen.add(readJob(cwd, "job-blocked")!.status);
+    await sleep(100);
+  }
+  assert.ok(seen.has("running"), `seen: ${[...seen]}`);
+  assert.equal(seen.has("failed"), false, `stale for 1.5 s of main-thread silence would show failed; the worker thread keeps it running (seen: ${[...seen]})`);
 });

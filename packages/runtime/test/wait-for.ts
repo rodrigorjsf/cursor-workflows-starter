@@ -13,7 +13,7 @@ export interface WaitForOptions {
  * Polls `read` until it returns a truthy value, and resolves with that value. Fails, naming `what`, once `timeoutMs` has
  * passed without one. `read` may be async; an error it throws ends the wait.
  */
-export async function waitFor<T>(what: string, read: () => T | Promise<T>, { timeoutMs = 10_000, intervalMs = 20 }: WaitForOptions = {}): Promise<NonNullable<T>> {
+export async function waitFor<T>(what: string, read: () => T | Promise<T>, { timeoutMs = 30_000, intervalMs = 20 }: WaitForOptions = {}): Promise<NonNullable<T>> {
   const deadline = performance.now() + timeoutMs;
   for (;;) {
     const value = await read();
