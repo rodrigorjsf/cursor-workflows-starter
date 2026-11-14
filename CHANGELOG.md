@@ -4,6 +4,20 @@
 
 ### Adicionado
 
+- **`verify-sandbox`: uma sonda real do sandbox do SDK, numa etapa que escreve.** O workflow (`scripts/verify/verify-sandbox.ts`) roda uma
+  etapa com o sandbox ligado e um `.cursor/sandbox.json` com `readBoundary: "workspace"`, e tenta um `curl` para um host fora da
+  allowlist, uma escrita fora do repositório e um `cat ~/.cursor/sdk/auth.json`, com controles que distinguem uma tentativa
+  bloqueada de uma que nem rodou. Diz PASS (bloqueou) ou FAIL (passou) para cada uma, e traz, fora do portão, a escrita pela tool
+  `edit`, o host da allowlist e as variáveis `CURSOR_SANDBOX_*` do backend. Exige `bubblewrap` no PATH (sem ele para, nomeando-o, sem
+  registrar resultado), `--max-tokens` e `--max-cents`; `{"readBoundary":"unset"}` roda a base de comparação. Medido em 2026-11-14: os
+  três bloqueados com `readBoundary: "workspace"`, e a leitura da chave passa sem ele. Veja
+  [8.2 §16](docs/research/verificacoes-locais.md) e o [README dos verify](scripts/verify/README.md).
+
+- **`wf doctor` tem uma nona verificação, `sandbox`.** Quando o teto global `caps.requireSandbox` é `true`, no Linux ela falha,
+  nomeando o `bubblewrap`, se o `bwrap` não está no PATH, e diz se um `sandbox.json` (o do repositório ou o `~/.cursor/sandbox.json`)
+  tem `readBoundary: "workspace"`: sem isso uma etapa ainda lê a chave do Cursor. Sem o teto, passa e diz que não é exigido. Veja
+  [2.3](docs/usage/03-invocacao-no-cursor-ide.md#conferindo-o-ambiente-wf-doctor).
+
 - **O dashboard inicia um workflow, sem o chat nem um terminal.** O botão **Start**, na barra de cima do app, abre um painel:
   repositório, workflow, args em JSON e os dois tetos (`maxTokens` e `maxCents`, obrigatórios). O servidor resolve o que pode
   começar: só um repositório que o índice global de runs conhece e só um workflow que o runtime lista para ele (um caminho
@@ -44,6 +58,15 @@
   [7.10](docs/adr/0010-detached-jobs-and-how-each-is-cancelled.md).
 
 ### Mudado
+
+- **O arquivo de configuração global que o instalador grava liga o sandbox do SDK em toda etapa (`caps.requireSandbox: true`).**
+  Uma sonda real mediu o sandbox numa etapa que escreve (8.2 §16): a rede de saída e a escrita fora do repositório (pelo shell e pela
+  tool `edit`) foram bloqueadas, e a leitura do `~/.cursor/sdk/auth.json` também, mas só com `readBoundary: "workspace"` num
+  `sandbox.json`: sem essa chave a etapa leu a chave, e o kit não grava o arquivo por você. Quem já tem um `~/.cursor-workflows/config.json`
+  não muda (o instalador só grava o arquivo quando ele não existe). Uma etapa que baixa pacotes falha até os hosts entrarem no
+  `.cursor/sandbox.json`. No Linux o SDK exige `bubblewrap` (ou um kernel com Landlock: nesta máquina o Landlock impôs as regras); o
+  `wf doctor` falha sem o `bwrap` no PATH. O SECURITY.md, o 5.1, o 2.2, o 4.1 e as skills deixam de dizer que o sandbox não foi
+  testado. Não medidos: macOS, Windows e o `implement-issue` inteiro com o sandbox ligado.
 
 - **Um comando de teste que o planejador escolheu só roda depois de uma pessoa o ver.** O planejador (MED) e o juiz (HIGH) leem o
   corpo da issue e devolvem um `testCommand`, que o `implement-issue` roda por `bash -c`, fora do sandbox, com o ambiente de quem

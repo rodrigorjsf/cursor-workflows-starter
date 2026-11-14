@@ -101,7 +101,7 @@ Valida os dois arquivos de configuração do kit: o global (`~/.cursor-workflows
 | `allowedSettingSources` | `array de "project" \| "user" \| "team" \| "mdm" \| "plugins" \| "all" \| null` | não | Camadas de configuração (`settingSources`) que uma etapa pode carregar. Listas: vale a interseção. O instalador grava todas menos `all`. `null` libera todas. |
 | `allowedLocations` | `array de "local" \| "cloud" \| null` | não | Onde as etapas podem rodar: `local`, `cloud` ou os dois. Sem a chave, só `local`: mandar código para uma VM na nuvem é decisão do dono da máquina, e o arquivo do repositório nunca a toma. Listas: vale a interseção. `null` libera todos. Um papel com `location: "cloud"` que a lista não permite roda local, e o pedido vira uma violação. |
 | `maxConcurrency` | `integer \| null` | não | Máximo de agentes simultâneos num run. `null` desliga. |
-| `requireSandbox` | `boolean \| null` | não | `true` liga o sandbox local do SDK em toda etapa, mesmo quando o código do workflow o desliga: um pull request que edita um workflow não afrouxa o sandbox. Ausente, `false` ou `null`: vale o `sandbox` de cada etapa. |
+| `requireSandbox` | `boolean \| null` | não | `true` liga o sandbox local do SDK em toda etapa, mesmo quando o código do workflow o desliga: um pull request que edita um workflow não afrouxa o sandbox. O arquivo que o instalador grava traz `true`: uma sonda real, de 2026-11-14, mostrou a rede e a escrita fora do repositório bloqueadas (a leitura da chave do Cursor só com `readBoundary: "workspace"` num `sandbox.json`). No Linux exige `bubblewrap`; o `wf doctor` falha sem ele. Ausente, `false` ou `null`: vale o `sandbox` de cada etapa. |
 
 ## Etapas na nuvem
 
@@ -205,7 +205,8 @@ Os campos abaixo são os ajustes do `implement-issue`, validados pelo esquema. U
     "allowedLocations": [
       "local"
     ],
-    "maxConcurrency": 4
+    "maxConcurrency": 4,
+    "requireSandbox": true
   }
 }
 ```

@@ -43,9 +43,11 @@ documento explica o *porquê* das regras e traz as receitas, que a skill aponta.
   repositório para "consertar" o ambiente depois de uma falha causada pelo shell de login dos testes
   ([8.2 §9](../research/verificacoes-locais.md)). A `SCOPE_RULE` reduz a chance, mas nada impede a
   escrita. Ver [5.1 · Segurança](../operating/01-governanca-e-custos.md#segurança).
-- **Sandbox.** No Linux exige `bubblewrap`. Segundo a doc, restringe só as chamadas de shell e os processos que
-  elas disparam (escrita no cwd, em temporários e nos caminhos do `sandbox.json`; leitura livre; rede só pela
-  allowlist) e não diz que restringe `edit` e `write` ([2.2 §5](../usage/02-configuracao-inicial.md#5-contexto-do-projeto-nos-agentes)).
+- **Sandbox.** No Linux exige `bubblewrap` (ou um kernel com Landlock). Medido em 2026-11-14 ([8.2 §16](../research/verificacoes-locais.md)):
+  nega a rede salvo os hosts do `sandbox.json`, recusa a escrita fora do cwd (shell e `edit`) e só recusa a leitura do
+  `~/.cursor/sdk/auth.json` com `readBoundary: "workspace"`. A configuração global do instalador o liga em toda etapa
+  (`caps.requireSandbox`), então uma etapa que baixa pacotes precisa dos hosts no `.cursor/sandbox.json`
+  ([2.2 §5](../usage/02-configuracao-inicial.md#5-contexto-do-projeto-nos-agentes)).
 - **`timeoutMs` curto nas etapas que escrevem, e um `maxTokensPerStep` no papel delas.** O teto de tokens da etapa e o do
   run cancelam a etapa no turno que os ultrapassa, mas o SDK só reporta o uso ao fim de cada turno, e o turno é o envio
   inteiro (medido: 1 `turn-ended` numa etapa com 31 tool calls). Por isso o `timeoutMs`, que cada envio (o pedido e cada re-prompt de schema) tem, continua

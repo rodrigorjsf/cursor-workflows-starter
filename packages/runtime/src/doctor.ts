@@ -3,7 +3,8 @@
 // fixed order. The checks follow what the IDE does: they read the MCP config it reads and start the server it starts.
 
 import { execFile, execFileSync } from "node:child_process";
-import { accessSync, constants, existsSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Cursor } from "@cursor/sdk";
@@ -333,6 +334,43 @@ function checkKitVersion(cwd: string, probes: ServerProbe[]): CheckResult {
   );
 }
 
+/** What the `readBoundary` of a Cursor `sandbox.json` is: undefined when the file is missing, does not parse or sets none. */
+function readBoundaryOf(file: string): unknown {
+  try {
+    return (JSON.parse(readFileSync(file, "utf8")) as { readBoundary?: unknown }).readBoundary;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The SDK sandbox, when the global caps require it (`caps.requireSandbox`): on Linux it needs `bwrap` on the PATH, and a step can
+ * still read `~/.cursor/sdk/auth.json` until a `sandbox.json` (the repository's, which wins, or the user's) sets `readBoundary`
+ * to `workspace`. The kit measured the sandbox on Linux (issue #62): it blocked the network and a write outside the repository
+ * in every run, and a read of the key only with that setting. It also ran, on a kernel with Landlock, with no usable `bwrap`;
+ * the doctor cannot test Landlock, so it asks for bubblewrap, which is the dependency the SDK documents.
+ */
+function checkSandbox(cwd: string, resolution: Resolution): CheckResult {
+  if (!resolution.ok) return fail("sandbox", "cannot tell whether the sandbox is required: the config does not resolve (see the configuration check)", "Fix the configuration first.");
+  if (resolution.workflows[0]?.resolved.config.caps.requireSandbox !== true) {
+    return pass("sandbox", "not required: `caps.requireSandbox` is not true, so a step uses the SDK sandbox only when its workflow asks for it");
+  }
+  const bwrap = process.platform === "linux" ? findOnPath("bwrap", process.env.PATH) : undefined;
+  if (process.platform === "linux" && !bwrap) {
+    return fail(
+      "sandbox",
+      "`caps.requireSandbox` is true and `bwrap` is not on the PATH: the SDK sandbox needs bubblewrap on Linux (a kernel with Landlock, version 6.2 or newer, may run it without; the doctor cannot test that, so it asks for bubblewrap)",
+      "Install bubblewrap (`sudo apt install bubblewrap`, `sudo dnf install bubblewrap`) in the environment that starts the IDE, and run `wf doctor` again from a terminal the IDE opened. To run steps without the sandbox, set `caps.requireSandbox` to false in ~/.cursor-workflows/config.json.",
+    );
+  }
+  const boundary = readBoundaryOf(join(cwd, ".cursor", "sandbox.json")) ?? readBoundaryOf(join(homedir(), ".cursor", "sandbox.json"));
+  const reads =
+    boundary === "workspace"
+      ? "reads are limited to the workspace (`readBoundary` is \"workspace\")"
+      : "`readBoundary` is not \"workspace\" in .cursor/sandbox.json or ~/.cursor/sandbox.json, so a step can still read ~/.cursor/sdk/auth.json: set it to \"workspace\" to block that read";
+  return pass("sandbox", `\`caps.requireSandbox\` is true${bwrap ? `, bubblewrap at ${bwrap}` : `, and ${process.platform} needs no bubblewrap`}; ${reads}`);
+}
+
 /** A check that throws is a failed check: the doctor exists to say what is wrong, not to crash on it. */
 function guarded(id: CheckId, run: () => CheckResult | Promise<CheckResult>): Promise<CheckResult> {
   return Promise.resolve()
@@ -354,6 +392,7 @@ export async function runDoctor({ cwd }: { cwd: string }): Promise<DoctorReport>
     guarded("mcp-server", async () => checkMcpServer(mcp, await servers)),
     guarded("config", async () => checkConfig(await resolution)),
     guarded("kit-version", async () => checkKitVersion(cwd, await servers)),
+    guarded("sandbox", async () => checkSandbox(cwd, await resolution)),
   ]);
   return createRedactor().value(reportOf(checks));
 }

@@ -91,6 +91,12 @@ test("the guide lists the skills the kit ships and the default caps the installe
   }
 });
 
+test("the default global config turns the SDK sandbox on for every step, because a capped probe measured it (issue #62), and the guide says the installer does", () => {
+  const { caps } = JSON.parse(read("templates", "global-config.json")) as { caps: { requireSandbox?: boolean } };
+  assert.equal(caps.requireSandbox, true);
+  assert.ok(GUIDE.replace(/\s+/g, " ").includes("`requireSandbox: true`"), "the guide does not say the installer writes requireSandbox: true");
+});
+
 test("the default global config the installer copies is the first example of the shipped schema", () => {
   const schema = JSON.parse(read("packages", "runtime", "schema", "config.schema.json")) as { examples: unknown[] };
   assert.deepEqual(JSON.parse(read("templates", "global-config.json")), schema.examples[0]);

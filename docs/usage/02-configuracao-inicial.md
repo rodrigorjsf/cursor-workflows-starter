@@ -212,12 +212,14 @@ Para isolar os agentes das regras do repositório (por exemplo, num repositório
 `settingSources` sem `"project"` em `RunOptions`. Só `[]` corta também as skills, e aí saem os hooks do time e do
 MDM.
 
-> **Sandbox (`sandbox: true`):** liga o `local.sandboxOptions.enabled` do SDK. **Não foi testado neste kit.** No
-> Linux ele exige `bubblewrap`; sem ele, o SDK lança `ConfigurationError`. Segundo a doc, ele restringe as chamadas
-> de shell e os processos que elas disparam: escrita só no cwd, em diretórios temporários e nos caminhos do
-> `sandbox.json`; leitura **não** restrita; rede de saída negada, salvo os hosts listados em `.cursor/sandbox.json`
-> (ou `~/.cursor/sandbox.json`) ([DOC](https://cursor.com/docs/sdk/typescript#sandbox-options)). A doc não diz que
-> ele restringe as tools `edit` e `write`. Não o trate como mitigação comprovada
+> **Sandbox (`sandbox: true`):** liga o `local.sandboxOptions.enabled` do SDK. Medido em 2026-11-14, no Linux x64 (WSL2), com
+> `@cursor/sdk@1.3.1` e `composer-2.5` ([8.2 §16](../research/verificacoes-locais.md)): a rede de saída é negada, salvo os hosts
+> do `.cursor/sandbox.json` (ou do `~/.cursor/sandbox.json`, [DOC](https://cursor.com/docs/sdk/typescript#sandbox-options)); a escrita fora do repositório é recusada, pelo shell e pela tool
+> `edit`; e a leitura do `~/.cursor/sdk/auth.json` só é recusada quando um `sandbox.json` tem `readBoundary: "workspace"`: sem
+> essa chave, a etapa lê a chave do Cursor. A configuração global que o instalador grava liga o sandbox em toda etapa
+> (`caps.requireSandbox: true`), então uma etapa que baixa pacotes falha até você listar os hosts. No Linux o SDK exige
+> `bubblewrap` ou um kernel com Landlock (nesta máquina o sandbox impôs as regras pelo Landlock, sem `bwrap` utilizável); o
+> `wf doctor` pede o `bubblewrap` e diz se o `readBoundary` está posto. macOS e Windows não foram medidos
 > ([5.1 · Segurança](../operating/01-governanca-e-custos.md#segurança)).
 
 > **Recursão:** com `"project"`, o SDK sobe os servidores do `.cursor/mcp.json` para a etapa **sem repassar o

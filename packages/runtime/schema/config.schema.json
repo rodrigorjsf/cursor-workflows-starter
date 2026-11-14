@@ -47,7 +47,8 @@
         "allowedModels": null,
         "allowedSettingSources": ["project", "user", "team", "mdm", "plugins"],
         "allowedLocations": ["local"],
-        "maxConcurrency": 4
+        "maxConcurrency": 4,
+        "requireSandbox": true
       }
     },
     {
@@ -100,7 +101,7 @@
         "maxConcurrency": { "type": ["integer", "null"], "minimum": 1, "description": "Máximo de agentes simultâneos num run. `null` desliga." },
         "requireSandbox": {
           "type": ["boolean", "null"],
-          "description": "`true` liga o sandbox local do SDK em toda etapa, mesmo quando o código do workflow o desliga: um pull request que edita um workflow não afrouxa o sandbox. Ausente, `false` ou `null`: vale o `sandbox` de cada etapa."
+          "description": "`true` liga o sandbox local do SDK em toda etapa, mesmo quando o código do workflow o desliga: um pull request que edita um workflow não afrouxa o sandbox. O arquivo que o instalador grava traz `true`: uma sonda real, de 2026-11-14, mostrou a rede e a escrita fora do repositório bloqueadas (a leitura da chave do Cursor só com `readBoundary: \"workspace\"` num `sandbox.json`). No Linux exige `bubblewrap`; o `wf doctor` falha sem ele. Ausente, `false` ou `null`: vale o `sandbox` de cada etapa."
         }
       }
     },

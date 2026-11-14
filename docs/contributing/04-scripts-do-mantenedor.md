@@ -34,8 +34,9 @@ O `npm test` confere os dois (`test/scripts-conventions.test.ts`): um script sem
 | `scripts/verify/verify-cache.ts` | Workflow: cache de prompt entre agentes irmãos | Conta nova ou SDK novo | [`scripts/verify/README.md`](../../scripts/verify/README.md) |
 | `scripts/verify/verify-cloud.ts` | Workflow: uma etapa de leitura num cloud agent (snapshot com arquivo não commitado, resultado em bloco JSON, uso, limpeza da branch) | Conta nova ou SDK novo, e antes de confiar na configuração de nuvem de um time | [`scripts/verify/README.md`](../../scripts/verify/README.md) |
 | `scripts/verify/verify-turn-granularity.ts` | Workflow: quantos `turn-ended` e `token-delta` o SDK real entrega numa etapa local longa que escreve, e se `Run.cancel()` para um run no meio do turno (o limite dos tetos de tokens ao vivo) | Conta nova ou SDK novo, e antes de mudar como os tetos de tokens ao vivo agem | [`scripts/verify/README.md`](../../scripts/verify/README.md) |
+| `scripts/verify/verify-sandbox.ts` | Workflow: uma etapa local que escreve, no sandbox do SDK (`bubblewrap` no Linux), tenta três coisas que uma etapa que leu texto não confiável poderia fazer, com `.cursor/sandbox.json` em `readBoundary: "workspace"`: um `curl` para um host fora da allowlist, uma escrita fora do repositório e um `cat` do `~/.cursor/sdk/auth.json`. Diz PASS (bloqueou) ou FAIL (passou) para cada uma, com controles que distinguem uma tentativa bloqueada de uma que nem rodou, e fecha o resultado que decide se o `templates/global-config.json` liga o `requireSandbox`. Para sem registrar resultado quando o `bwrap` não está no `PATH` | Conta ou máquina nova, depois de atualizar o SDK ou o `bubblewrap`, e antes de mudar o `requireSandbox` do `templates/global-config.json` | [`scripts/verify/README.md`](../../scripts/verify/README.md) |
 
-Os cinco `verify-*` custam tokens: rode sempre com `--max-tokens` e `--max-cents`, e veja a
+Os seis `verify-*` custam tokens: rode sempre com `--max-tokens` e `--max-cents`, e veja a
 política de custo em [9.1](01-contribuindo.md#testes-contra-a-api-real-política-de-custo).
 
 ---

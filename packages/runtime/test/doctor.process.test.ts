@@ -169,14 +169,14 @@ const checkOf = (report: Report, id: string): Check => {
   return check;
 };
 
-test("on a healthy setup every check passes: exit 0, and --json lists the eight checks in a fixed order, none with a hint", () => {
+test("on a healthy setup every check passes: exit 0, and --json lists the nine checks in a fixed order, none with a hint", () => {
   const r = doctor(repoCopy());
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const report = reportOf(r);
   assert.equal(report.ok, true);
   assert.deepEqual(
     report.checks.map((c) => c.id),
-    ["node", "dependencies", "login", "models", "forge", "mcp-server", "config", "kit-version"],
+    ["node", "dependencies", "login", "models", "forge", "mcp-server", "config", "kit-version", "sandbox"],
   );
   for (const c of report.checks) assert.ok(c.status === "pass" && c.hint === undefined, `${c.id}: ${c.message}`);
   assert.equal(r.stderr, "", "the doctor writes its report to stdout and nothing to stderr");
@@ -186,7 +186,7 @@ test("without --json the report is text, one block per check with the fix hint u
   const healthy = doctor(repoCopy(), { args: [] });
   assert.equal(healthy.status, 0, healthy.stdout + healthy.stderr);
   assert.match(healthy.stdout, /\[ok\]\s+Node\.js: v\d+/);
-  assert.match(healthy.stdout, /All good: 8 checks passed\./);
+  assert.match(healthy.stdout, /All good: 9 checks passed\./);
 
   // Logged out and no gh in a GitHub repository: login, models (no catalog without a login) and forge fail.
   const r = doctor(gitRepoCopy("https://github.com/acme/widgets.git"), { args: [], bins: [], env: { FAKE_SDK_LOGGED_OUT: "1" } });
@@ -196,7 +196,7 @@ test("without --json the report is text, one block per check with the fix hint u
   assert.match(r.stdout, /\[FAIL\]\s+Cursor SDK login: /);
   assert.match(r.stdout, /how to fix: Log in with `wf login`/);
   assert.match(r.stdout, /\[FAIL\]\s+Forge CLI: /);
-  assert.match(r.stdout, /3 of 8 checks failed\./);
+  assert.match(r.stdout, /3 of 9 checks failed\./);
 });
 
 test("wf doctor --json reports an unusable repo config with its file and field path and a fix hint, and exits non-zero", () => {
@@ -605,7 +605,7 @@ test("a check that throws is a failed check naming the workflow, not a crashed d
   const r = doctor(repo);
   assert.equal(r.status, 1, r.stderr);
   const report = reportOf(r);
-  assert.equal(report.checks.length, 8);
+  assert.equal(report.checks.length, 9);
   const config = checkOf(report, "config");
   assert.equal(config.status, "fail");
   assert.match(config.message, /bad-roles/);
@@ -687,4 +687,54 @@ test("the kit-version check also tests the kit the IDE would start, which is not
   const same = checkOf(reportOf(doctor(repoAccepting(">=1.0.0 <2.0.0"), { kit: running })), "kit-version");
   assert.equal(same.status, "pass", same.message);
   assert.ok(same.message.includes("wf") && same.message.includes(".cursor/mcp.json") && same.message.includes("1.4.0"), same.message);
+});
+
+/** A user's home with the global config a fresh install writes: `caps.requireSandbox: true`. */
+const sandboxedHome = () => homeWithConfig({ caps: { requireSandbox: true } });
+const onLinux = { skip: process.platform !== "linux" && "bubblewrap is a Linux requirement" };
+
+test("the sandbox check passes, with nothing to look for, when the global caps do not require the sandbox", () => {
+  const check = checkOf(reportOf(doctor(repoCopy())), "sandbox");
+  assert.equal(check.status, "pass", check.message);
+  assert.match(check.message, /not required/);
+});
+
+test("requireSandbox true with no bwrap on the PATH fails the sandbox check, names bubblewrap and says how to fix it (issue #62)", onLinux, () => {
+  const r = doctor(repoCopy(), { home: sandboxedHome() });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  const check = checkOf(reportOf(r), "sandbox");
+  assert.equal(check.status, "fail");
+  assert.match(check.message, /bubblewrap/);
+  assert.match(check.message, /`bwrap` is not on the PATH/);
+  assert.match(check.hint ?? "", /Install bubblewrap/);
+  assert.match(check.hint ?? "", /requireSandbox/);
+});
+
+test("requireSandbox true with bwrap on the PATH passes the sandbox check and says where bubblewrap is", onLinux, () => {
+  const bwrap = fakeBin("bwrap", "exit 0");
+  const check = checkOf(reportOf(doctor(repoCopy(), { home: sandboxedHome(), bins: [ghLoggedIn, bwrap] })), "sandbox");
+  assert.equal(check.status, "pass", check.message);
+  assert.ok(check.message.includes(join(bwrap, "bwrap")), check.message);
+});
+
+test("with the sandbox required, the check says whether reads are limited to the workspace: a step can read the Cursor key until readBoundary is workspace in a sandbox.json", onLinux, () => {
+  const bins = [ghLoggedIn, fakeBin("bwrap", "exit 0")];
+  const open = checkOf(reportOf(doctor(repoCopy(), { home: sandboxedHome(), bins })), "sandbox");
+  assert.equal(open.status, "pass", open.message);
+  assert.match(open.message, /readBoundary.*not "workspace"/);
+  assert.match(open.message, /~\/\.cursor\/sdk\/auth\.json/);
+
+  const repo = repoCopy();
+  put(join(repo, ".cursor", "sandbox.json"), { readBoundary: "workspace" });
+  const inRepo = checkOf(reportOf(doctor(repo, { home: sandboxedHome(), bins })), "sandbox");
+  assert.match(inRepo.message, /reads are limited to the workspace/);
+
+  const userHome = sandboxedHome();
+  put(join(userHome, ".cursor", "sandbox.json"), { readBoundary: "workspace" });
+  const inHome = checkOf(reportOf(doctor(repoCopy(), { home: userHome, bins })), "sandbox");
+  assert.match(inHome.message, /reads are limited to the workspace/);
+
+  const broken = repoCopy();
+  put(join(broken, ".cursor", "sandbox.json"), "{ not json");
+  assert.match(checkOf(reportOf(doctor(broken, { home: sandboxedHome(), bins })), "sandbox").message, /readBoundary.*not "workspace"/, "a sandbox.json that does not parse limits nothing");
 });
