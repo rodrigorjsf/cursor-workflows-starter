@@ -5,7 +5,7 @@
 Workflows de agentes **determinísticos** sobre o [Cursor SDK](https://cursor.com/docs/sdk/typescript) (`@cursor/sdk`),
 chamados do chat do Cursor IDE (via MCP), do terminal e de CI (via CLI).
 
-> **Status: pré-release 0.3.0.** Verificado contra a API real num único ambiente (plano Premium, `@cursor/sdk@1.3.1`,
+> **Status: pré-release 0.4.0.** Verificado contra a API real num único ambiente (plano Premium, `@cursor/sdk@1.3.1`,
 > Linux x64 em WSL2). O Cursor IDE ainda não foi testado. Os agentes das etapas executam tools sem pedir aprovação:
 > leia [SECURITY.md](SECURITY.md) antes de usar. Evidência e pendências: [8.2 · Verificações locais](docs/research/verificacoes-locais.md).
 
@@ -27,7 +27,7 @@ flowchart LR
   CHAT["Chat do Cursor IDE<br/>/run-workflow"]:::etapa -->|MCP| RT
   TERM["Terminal e CI<br/>wf run, wf start"]:::etapa -->|CLI| RT
   RT["Runtime do kit<br/>o workflow decide as etapas,<br/>o teto de custo e o resume"]:::kit -->|"uma etapa, um agente"| AG["Agentes do Cursor SDK<br/>modelo por etapa,<br/>saída com schema"]:::etapa
-  RT -->|"git, gh e testes"| REPO[("Repositório e worktrees")]:::saida
+  RT -->|"git, gh ou glab e testes"| REPO[("Repositório e worktrees")]:::saida
   RT -->|"cada fato do run"| LOG["Estado do run<br/>log de eventos e journal"]:::saida
   classDef kit fill:#fef3c7,stroke:#b45309,color:#0f172a
   classDef etapa fill:#dbeafe,stroke:#1d4ed8,color:#0f172a
@@ -36,12 +36,14 @@ flowchart LR
 
 ## Começo rápido
 
-Requisitos: Node 22.13 ou mais novo, um plano pago do Cursor, `git` e `gh` autenticado. Mais simples: peça a um agente de
-código que siga o [INSTALL-AGENT.md](INSTALL-AGENT.md). À mão:
+Requisitos: Node 22.13 ou mais novo, um plano pago do Cursor, `git` e o CLI do forge do repositório autenticado: `gh`
+(GitHub) ou `glab` (GitLab). O host do `origin` escolhe o forge, e um GitLab self-managed entra na chave `forges` da
+configuração ([6.2](docs/reference/config.md)). Mais simples: peça a um agente de código que siga o
+[INSTALL-AGENT.md](INSTALL-AGENT.md). À mão:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.3.0/scripts/install.sh -o /tmp/wf-install.sh
-bash /tmp/wf-install.sh --tag v0.3.0   # o kit na tag, o comando wf e as skills globais
+curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/scripts/install.sh -o /tmp/wf-install.sh
+bash /tmp/wf-install.sh --tag v0.4.0   # o kit na tag, o comando wf e as skills globais
 wf login                               # login no navegador; o uso fica na SUA conta
 wf init                                # no seu repositório: grava os arquivos do kit, mostra o diff e não faz commit
 wf doctor                              # confere Node, login, modelos, o CLI do forge (gh ou glab), servidor MCP e configuração

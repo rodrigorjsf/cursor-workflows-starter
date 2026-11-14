@@ -1,9 +1,17 @@
 # Changelog
 
-## Não lançado
+## 0.4.0 (pré-release, 2026-11-13)
 
 ### Adicionado
 
+- **O kit tem suporte nativo ao GitLab, pelo `glab`, ao lado do GitHub, pelo `gh`.** O `implement-issue`, o `wf gc`, o
+  `wf doctor` e o Board do dashboard servem os dois forges (as entradas abaixo dão o detalhe de cada um). As skills
+  distribuídas, o livro, o README e o `INSTALL-AGENT.md` agora descrevem os dois CLIs: os requisitos pedem o CLI do
+  forge do repositório (`gh` ou `glab`) com login, a tabela de comandos do forge mostra `gh` e `glab` lado a lado (ler
+  issue, comentar, abrir PR, achar a PR de uma branch), e o `glab` falso dos testes aparece nas referências de teste. No
+  GitLab, o login é `glab auth login --hostname <host>`. O check `gh` do `wf doctor --json` passou a se chamar `forge`
+  (veja "Mudado"). As etapas na nuvem de um repositório do GitLab dependem do suporte do próprio Cursor ao GitLab: o kit
+  não as valida. Decisões no ADR-0009.
 - **O `implement-issue` e o `wf gc` falam com o GitLab, pelo `glab`.** O forge vem do host: `github.com` é GitHub
   (`gh`), `gitlab.com` é GitLab (`glab`), e qualquer outro host precisa de uma entrada na chave nova `forges` da
   configuração (`{ "git.example.com": "gitlab" }`, no arquivo global ou no do repositório; o do repositório vale mais,
@@ -16,12 +24,45 @@
   no ADR-0009.
 - **Tokens do GitLab são redigidos.** `glpat-` e os outros prefixos de token do GitLab entram nos formatos de credencial:
   saem do log de eventos e a guarda de saída do `implement-issue` os recusa, como os tokens do GitHub.
+- **O Board do dashboard mostra o estado do MR do GitLab.** Um link de cartão para um merge request
+  (`https://<host>/<grupo>/<projeto>/-/merge_requests/<n>`) mostra `open`, `merged` ou `closed`, como a PR do GitHub, no
+  `gitlab.com` e em qualquer host do `config.yml` do `glab` (só os nomes dos hosts são lidos, nunca os tokens). O dashboard
+  pergunta pelo ponto de entrada `observe` do runtime, que roda `glab api --hostname <host>` (num host com porta,
+  `GITLAB_HOST=<host:porta>`, que o `--hostname` recusa; nunca `glab mr view <url>`, que exige um checkout do GitLab); a PR do GitHub passa pelo mesmo ponto, com o mesmo `gh pr view`. Um link de outro host,
+  com caminho a mais, `?query`, `#fragmento`, `http:` ou número malformado continua sem estado, e o cache curto e o quadro
+  que nunca espera valem para os dois forges.
+
+- **O `glab` falso dos testes repete o que um GitLab de verdade imprimiu, e o `glab` 1.130.0 está fixado no `mise.toml`.** O
+  `scripts/verify/gitlab-e2e.sh` (opt-in, fora do `npm run check` e do CI) sobe um GitLab CE no Docker em modo de pouca
+  memória, roda o `glab` de verdade contra cada comando e rota de API do runtime e grava as saídas, sem token, senha nem host
+  local, em `packages/runtime/test/fixtures/glab/recordings.json`; ele nunca reinicia o Docker e apaga seu container e seus
+  volumes no fim, também quando falha. As gravações corrigiram o falso: `glab mr create` imprime só a URL no stdout, `--paginate`
+  junta as páginas num array só e o GitLab lista as notas da mais nova para a mais antiga. Uma gravação também mostrou que o JSON
+  de um projeto traz o token de registro de runner (`GR1348941…`, em `runners_token`): ele agora é redigido dos logs e barrado
+  pela guarda de saída do `implement-issue`, como os outros tokens do GitLab.
+
+- **O `implement-issue` e o filtro de texto do modelo foram provados num GitLab de verdade.** Depois de gravar as fixtures, o
+  `scripts/verify/gitlab-e2e.sh` roda o `scripts/verify/prove-gitlab.ts` no mesmo GitLab e imprime a evidência em Markdown,
+  para a descrição do PR. Um `implement-issue` de verdade, com etapas locais, abre um MR com `Closes #N` e o merge dele fecha a
+  issue. O padrão de fechamento do GitLab casa `Implement(s|ed|ing) #N` (os quatro fecham a issue no merge, medido no GitLab CE
+  19.5.5) e o `sanitizeModelText` já as neutraliza, como neutraliza as outras 17 frases que fecham (`Closing`, `Fixing`,
+  `Resolves grupo/projeto#N`, a URL da issue, em frase…); só `CLOSES #N`, tudo em maiúsculas, nunca fechou, porque o padrão do
+  GitLab só aceita a primeira letra em maiúscula. Um `/close` solto fecha a issue (numa nota) ou o MR (na descrição), também
+  depois de `\r`, com CRLF, depois de `$$` e numa cerca que um trecho anterior deixou aberta; depois do filtro nenhuma das 12
+  formas roda, e `!1`, `~bug` e `%v1` não viram link atrás do espaço de largura zero. Cada prova tem um controle que tem de
+  acontecer (o `Closes #N` fecha, um `/close` solto roda, as referências viram link), senão um "não aconteceu nada" não prova
+  nada; as formas que o GitLab 19.5.5 não roda nem como estão (`/close` com tab, depois de `<div>` ou `>>>`, em cerca de til)
+  o filtro neutraliza do mesmo jeito, para as versões que as leem como comando. A última prova gasta tokens da API da Cursor
+  (`GITLAB_E2E_MAX_TOKENS` e `GITLAB_E2E_MAX_CENTS` são os tetos; `GITLAB_E2E_STAGES` escolhe as provas).
 
 ### Mudado
 
 - **`wf doctor`: o check `gh` virou `forge`.** Ele lê o `origin` do repositório, acha o forge como um run acha (com o
   mapa `forges`), e pergunta ao CLI desse forge se há login no host do `origin` (`gh auth status --hostname <host>` ou
-  `glab auth status --hostname <host>`). Quem lê `wf doctor --json` encontra o id `forge` onde estava `gh`.
+  `glab auth status --hostname <host>`). **Quem lê `wf doctor --json` encontra o id `forge` onde estava `gh`: o que
+  procura o check `gh` precisa passar a procurar `forge`.** A ordem dos checks segue a mesma (`node`, `dependencies`,
+  `login`, `models`, `forge`, `mcp-server`, …). Fora de um repositório git, ou num sem `origin`, o `forge` passa e diz
+  que não há forge a checar: o `gh` antigo pedia login em qualquer diretório.
 
 ## 0.3.0 (pré-release, 2026-11-13)
 

@@ -94,7 +94,7 @@ contexto que as etapas carregam (`settingSources`):
   arquivo, como num worktree ligado), sem mexer no `.gitignore` do repositório.
 - **Cada run grava métricas** (tokens, custo, modelo, passos, resultado) em `~/.cursor-workflows/metrics.db`. Os prompts
   ficam só como hash. Desligue com `WF_METRICS=off` (ver [5.3](03-observabilidade.md)).
-- **Commit, push, PR e comentário na issue são feitos pelo código do workflow**, com `git` e `gh`. O `implement-issue`
+- **Commit, push, PR e comentário na issue são feitos pelo código do workflow**, com `git` e o CLI do forge (`gh` ou `glab`). O `implement-issue`
   sempre faz o commit local numa branch só do run, `wf/issue-<n>-<run>`; push e PR, só com `openPr: true`. O push é um
   `--force-with-lease`, restrito às branches `wf/`: um resume depois do PR refaz o commit e entrega por cima, mas só
   sobre commits que o próprio run empurrou. Commit de outra pessoa na branch dá `status: "push-refused"` e não é

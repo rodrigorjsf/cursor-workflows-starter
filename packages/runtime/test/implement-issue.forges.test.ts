@@ -231,12 +231,13 @@ forgeTest("the issue's title and body reach the classifier, and a label, not the
   assert.equal(classified, false, "a label chose the tier: the classifier was not asked");
 });
 
-forgeTest("the seams comment is posted once: a resume does not post it again when the issue has more than 20 comments", async () => {
+forgeTest("the seams comment is posted once: a resume does not post it again when 24 newer comments pushed it past the first page of 20", async () => {
   issue(["complexity:medium"]);
-  changeForgeState((state) => (state.comments = Array.from({ length: 24 }, (_, i) => `an earlier comment, ${i + 1}`)));
   const first = await run({});
   assert.equal(res(first).status, "seams-proposed", JSON.stringify(res(first)));
-  assert.equal(forgeState().comments.length, 25, "the comment is the 25th: past the first page of 20");
+  assert.equal(forgeState().comments.length, 1);
+  // GitLab lists notes newest first and glab prints one page without --paginate: the seams comment is now the 25th, the oldest.
+  changeForgeState((state) => state.comments.push(...Array.from({ length: 24 }, (_, i) => `a newer comment, ${i + 1}`)));
 
   const second = await run({}, first.runId);
   assert.equal(res(second).status, "seams-proposed", JSON.stringify(res(second)));
@@ -307,7 +308,7 @@ forgeTest(
     assert.ok(!create.includes("-H") && !create.includes("--head"), `no -H: ${create.join(" ")}`);
     assert.equal(create[create.indexOf("--title") + 1], "Add subtract(a, b) (#7)");
     assert.match(forgeState().prs[0]!.body, /^Closes #7/m, "the description is the PR body: GitLab closes the issue from `Closes #7`");
-    assert.equal(res(r).prUrl, "https://gitlab.com/owner/repo/-/merge_requests/1", "the URL out of the text glab prints around it");
+    assert.equal(res(r).prUrl, "https://gitlab.com/owner/repo/-/merge_requests/1", "the URL glab prints on stdout");
   },
   ["gitlab"],
 );
@@ -424,7 +425,7 @@ forgeTest(
 );
 
 forgeTest(
-  "a repo URL on another host of a declared forge goes to glab with --hostname, and is another repository than the cwd's even when the path is the same",
+  "a repo URL on another host of a declared forge goes to glab with --hostname (GITLAB_HOST when it has a port), and is another repository than the cwd's even when the path is the same",
   async () => {
     setOrigin("https://git.example.com/group/sub/project.git");
     writeGlobalConfig({ forges: { "git.example.com": "gitlab" } });
@@ -437,7 +438,10 @@ forgeTest(
     const otherPort = await run({ repo: "https://git.example.com:8443/group/sub/project" });
     assert.equal(res(otherPort).status, "seams-proposed", JSON.stringify(res(otherPort)));
     const calls = forgeState().calls;
-    assert.ok(calls.some((c) => c.join(" ") === "api --hostname git.example.com:8443 projects/group%2Fsub%2Fproject"), "an http(s) URL's port is part of the host glab is told");
+    assert.ok(
+      calls.some((c) => c.join(" ") === "GITLAB_HOST=git.example.com:8443 api projects/group%2Fsub%2Fproject"),
+      "an http(s) URL's port is part of the host glab is told, through GITLAB_HOST: its --hostname refuses a port",
+    );
     assert.ok(calls.some((c) => c.join(" ") === "issue view 7 --repo https://git.example.com:8443/group/sub/project --output json"));
 
     assert.deepEqual(await issueLocksDuring({ repo: "https://git.example.com/group/sub/project" }), OWN_LOCK, "the cwd's own repository, by URL");

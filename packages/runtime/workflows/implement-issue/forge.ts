@@ -13,13 +13,12 @@
 // `wf doctor` reads the forge of the cwd's origin (`forgeOfOrigin`) and what to ask the CLI to know it is logged in (`loginOf`).
 import { readFileSync } from "node:fs";
 import { FORGE_TITLES, knownForgeOf } from "../../src/config/file.js";
+import { type PrState, prStateOfMr } from "../../src/runtime/forge-pr-state.js";
+import { type GlabHost, glabApiHost } from "../../src/runtime/glab-host.js";
 import type { ForgeName } from "../../src/runtime/workflow.js";
 import type { Commands } from "./commands.js";
 
-export type { ForgeName };
-
-/** The state of a PR, as the forge reports it. */
-export type PrState = "OPEN" | "MERGED" | "CLOSED";
+export type { ForgeName, PrState };
 
 /** The forge of a record that names none: the only one that existed before the field did. */
 export const DEFAULT_FORGE: ForgeName = "github";
@@ -235,12 +234,10 @@ class GithubForge implements Forge {
   }
 }
 
-/** What GitLab's REST API calls a merge request that is still being worked on or is being merged: both are a live PR. */
-const MR_STATES: Readonly<Record<string, PrState>> = { opened: "OPEN", locked: "OPEN", merged: "MERGED", closed: "CLOSED" };
-/** The URL of a merge request in the output of `glab mr create`, which prints a line of text around it. */
+/** The URL of a merge request in the output of `glab mr create`: glab 1.130.0 prints it alone on stdout and the text around it on stderr (recorded from a real GitLab), and the pattern finds it among text too. */
 const MR_URL = /https?:\/\/\S+\/-\/merge_requests\/\d+/;
 /** The number in the URL of a GitLab merge request, and in the URL of a GitHub pull request. */
-const MR_NUMBER = /\/-\/merge_requests\/(\d+)/;
+export const MR_NUMBER = /\/-\/merge_requests\/(\d+)/;
 const PULL_NUMBER = /\/pull\/(\d+)/;
 
 /** The link text of a PR, as its forge writes it: `PR #9` for `https://github.com/o/r/pull/9`, `MR !9` for `https://gitlab.com/g/p/-/merge_requests/9`. */
@@ -334,18 +331,18 @@ export function neutralizeGitlabText(text: string): string {
 
 /** The path of a repository as the REST API takes it, from what the `repo` argument holds: `group/sub/project`, or a URL of it. */
 const repoPathOf = (repo: string): string => parseRemote(repo)?.path ?? trimmedPath(repo.trim());
-/** `glab api` takes the host of a request apart from its path: the one a URL `repo` names (with its port, when the URL is a web one), else the cwd's own. */
-function hostFlag(repo: string | undefined): string[] {
+/** `glab api` takes the host of a request apart from its path: the one a URL `repo` names (with its port, when the URL is a web one; `glabApiHost`), else the cwd's own. */
+function apiHost(repo: string | undefined): GlabHost {
   const named = repo === undefined ? undefined : parseRemote(repo);
-  if (!named) return [];
-  return ["--hostname", webHost(named)];
+  return named ? glabApiHost(webHost(named)) : { args: [], env: {} };
 }
 /** `projects/<repository>` in the REST API: `repo`'s path, or glab's placeholder for the repository of the cwd. */
 const projectOf = (repo: string | undefined): string => `projects/${repo ? encodeURIComponent(repoPathOf(repo)) : ":fullpath"}`;
 
 /**
- * The JSON arrays and objects `text` holds, one after the other: `glab api --paginate` prints one array per page, or one array
- * for all of them, and this reads both. Output that stops in the middle of a value is an error, never a shorter list.
+ * The JSON arrays and objects `text` holds, one after the other: `glab api --paginate` 1.130.0 prints one array for all the pages
+ * (recorded from a real GitLab), and this reads one array per page too, as another version may print. Output that stops in the
+ * middle of a value is an error, never a shorter list.
  */
 function jsonValues(text: string): unknown[] {
   const values: unknown[] = [];
@@ -415,7 +412,7 @@ class GitlabForge implements Forge {
   async prState(cwd: string, branch: string, repo?: string): Promise<PrState | undefined> {
     const mr = await this.latestMr(cwd, branch, repo);
     if (mr === undefined) return undefined;
-    const state = MR_STATES[mr.state];
+    const state = prStateOfMr(mr.state);
     if (state === undefined) throw new Error(`glab api merge_requests (${branch}): unexpected state ${JSON.stringify(mr.state)}`);
     return state;
   }
@@ -435,7 +432,7 @@ class GitlabForge implements Forge {
     const pages = jsonValues(await this.api(cwd, repo, "--paginate", `${projectOf(repo)}/merge_requests?${query}`));
     if (!pages.every(Array.isArray)) throw new Error(`glab api merge_requests (${branch}): expected a list`);
     const mrs = pages.flat() as GitlabMr[];
-    return mrs.find((mr) => MR_STATES[mr.state] === "OPEN") ?? mrs[0];
+    return mrs.find((mr) => prStateOfMr(mr.state) === "OPEN") ?? mrs[0];
   }
 
   private glab(cwd: string, ...args: string[]): Promise<string> {
@@ -444,6 +441,7 @@ class GitlabForge implements Forge {
 
   /** `glab api`, on the host of `repo` when it names one. */
   private api(cwd: string, repo: string | undefined, ...args: string[]): Promise<string> {
-    return this.glab(cwd, "api", ...hostFlag(repo), ...args);
+    const host = apiHost(repo);
+    return this.commands.forgeReadWith("glab", cwd, host.env, "api", ...host.args, ...args);
   }
 }

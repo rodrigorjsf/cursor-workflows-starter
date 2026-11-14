@@ -250,3 +250,94 @@ process.stdout.write(line.split(" ")[1] + "\\n");
     },
   };
 }
+
+export interface FakeGlab {
+  /** Merge requests the fake knows: `glab api --hostname <host> projects/<path>/merge_requests/<n>` answers with a merge request of this state. A url not set answers "404 Not Found" and exits 1. */
+  set(url: string, state: "opened" | "locked" | "merged" | "closed"): void;
+  /** Every argument list `glab` was started with, in order, after `NAME=value` for each of `GITLAB_HOST` and the token variables it had. */
+  calls(): string[][];
+  /** Writes glab's `config.yml`, in the directory `GLAB_CONFIG_DIR` names for the length of the test. */
+  config(yaml: string): void;
+  /** Puts PATH and `GLAB_CONFIG_DIR` back and removes the fake. */
+  restore(): void;
+}
+
+/**
+ * glab's `config.yml` the way glab 1.130 writes it (4-space indent, comments between the keys, one block per host with its token),
+ * for hosts that each have a made-up token. Tests that check no token leaks give each host a token they can search for.
+ */
+export function glabConfigOf(tokens: Record<string, string>): string {
+  const hosts = Object.entries(tokens)
+    .map(([host, token]) => `    ${host}:\n        token: ${token}\n        api_host: ${host}\n        git_protocol: ssh\n        api_protocol: https\n        user: someone`)
+    .join("\n");
+  return `# What protocol to use when performing git operations. Supported values: ssh, https\ngit_protocol: ssh\n# Set to true to disable prompts\nno_prompt: false\nhost: gitlab.com\n# Configuration per host\nhosts:\n${hosts}\n`;
+}
+
+/**
+ * What the real glab 1.130.0 printed for that command line on a real GitLab, recorded by scripts/verify/gitlab-e2e.sh: the fake
+ * answers with the recorded merge request of the same form (`mr-api-hostname` for `--hostname`, `mr-api` for `GITLAB_HOST`), its
+ * number, state and URL set to the one asked for. A path, not a module: the fake runs as a process of its own.
+ */
+const GLAB_RECORDINGS = join(import.meta.dirname, "..", "..", "runtime", "test", "fixtures", "glab", "recordings.json");
+
+/**
+ * A `glab` first on PATH for the length of the test, answering `glab api --hostname <host> projects/<path>/merge_requests/<n>` (or
+ * `GITLAB_HOST=<host> glab api projects/...`; `--hostname` with a port fails, as on the real glab) from the
+ * merge requests set (any other command line exits 2) with what the real glab printed (`GLAB_RECORDINGS`), and logging each start;
+ * and an empty `GLAB_CONFIG_DIR` for `config()` to fill. Restore it before the `fakeGh` that was made before it: each puts back the
+ * PATH it found.
+ */
+export function fakeGlab(box: Sandbox): FakeGlab {
+  const dir = box.repo("fake-glab-bin");
+  const configDir = box.repo("glab-config");
+  const states = join(dir, "states.txt");
+  const log = join(dir, "calls.jsonl");
+  writeFileSync(states, "");
+  writeFileSync(log, "");
+  writeFileSync(
+    join(dir, "glab"),
+    `#!/usr/bin/env node
+const fs = require("fs");
+const args = process.argv.slice(2);
+// The variables that point glab at a host or carry a token come first in the log, as \`NAME=value\`.
+const env = ["GITLAB_HOST", "GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN", "OAUTH_TOKEN"].filter((k) => process.env[k] !== undefined).map((k) => k + "=" + process.env[k]);
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify([...env, ...args]) + "\\n");
+const ROUTE = /^projects\\/([^/]+)\\/merge_requests\\/(\\d+)$/;
+const byFlag = args.length === 4 && args[0] === "api" && args[1] === "--hostname" && ROUTE.test(args[3]);
+const byEnv = args.length === 2 && args[0] === "api" && process.env.GITLAB_HOST !== undefined && ROUTE.test(args[1]);
+if (!byFlag && !byEnv) { process.stderr.write("unexpected glab command line"); process.exit(2); }
+// glab 1.130.0 takes a bare host in --hostname: with a port it fails before asking anyone, as it did when tried
+if (byFlag && args[2].includes(":")) { process.stderr.write("ERROR error parsing --hostname: invalid hostname."); process.exit(1); }
+const host = byFlag ? args[2] : process.env.GITLAB_HOST;
+const [, project, number] = ROUTE.exec(byFlag ? args[3] : args[1]);
+const url = "https://" + host + "/" + decodeURIComponent(project) + "/-/merge_requests/" + number;
+const line = fs.readFileSync(${JSON.stringify(states)}, "utf8").split("\\n").find((l) => l.startsWith(url + " "));
+if (!line) { process.stderr.write("glab: 404 Not Found"); process.exit(1); }
+const REC = JSON.parse(fs.readFileSync(${JSON.stringify(GLAB_RECORDINGS)}, "utf8"));
+// the recording of the same form: \`--hostname <host>\` for a host with no port, \`GITLAB_HOST\` for one with a port
+const recorded = REC.recordings[byFlag ? "mr-api-hostname" : "mr-api"];
+const onThisHost = (text) => text.split(REC.placeholders.host).join(host);
+process.stderr.write(onThisHost(recorded.stderr));
+process.stdout.write(JSON.stringify({ ...JSON.parse(onThisHost(recorded.stdout)), id: 1000 + Number(number), iid: Number(number), state: line.split(" ")[1], web_url: url }) + "\\n");
+`,
+  );
+  chmodSync(join(dir, "glab"), 0o755);
+  const previous = { path: process.env.PATH, config: process.env.GLAB_CONFIG_DIR };
+  process.env.PATH = `${dir}${delimiter}${previous.path ?? ""}`;
+  process.env.GLAB_CONFIG_DIR = configDir;
+  return {
+    set(url, state) {
+      const kept = readFileSync(states, "utf8").split("\n").filter((l) => l && !l.startsWith(`${url} `));
+      writeFileSync(states, [...kept, `${url} ${state}`].join("\n") + "\n");
+    },
+    calls: () => readFileSync(log, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as string[]),
+    config(yaml) {
+      writeFileSync(join(configDir, "config.yml"), yaml);
+    },
+    restore() {
+      process.env.PATH = previous.path;
+      if (previous.config === undefined) delete process.env.GLAB_CONFIG_DIR;
+      else process.env.GLAB_CONFIG_DIR = previous.config;
+    },
+  };
+}

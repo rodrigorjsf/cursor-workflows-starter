@@ -51,7 +51,7 @@ export default defineWorkflow<{ target: string }>({
 | `ctx.agent(prompt, opts)` | Creates a new Cursor SDK agent and runs one step. With `schema`, returns the validated object (the agent must call `submit_result`). Without `schema`, returns the final text. **Throws** if it fails after `retries`. |
 | `ctx.parallel(thunks)` | Barrier: runs in parallel and waits for all. An item that fails becomes `null`. |
 | `ctx.pipeline(items, ...stages)` | No barrier: each item goes through the stages independently. A stage that fails drops the item (`null`) and skips its later stages. A stage receives `(previousResult, item, index)`. |
-| `ctx.exec(command, args, opts)` | Runs a command (tests, `git`, `gh`) and returns `{ ok, exitCode, timedOut, tail, error? }`. Asynchronous, killed at its timeout, logged. See "`exec()` options" below. |
+| `ctx.exec(command, args, opts)` | Runs a command (tests, `git`, `gh` or `glab`) and returns `{ ok, exitCode, timedOut, tail, error? }`. Asynchronous, killed at its timeout, logged. See "`exec()` options" below. |
 | `ctx.phase(title)` / `ctx.log(message)` | Progress, shown by `wait_workflow` and on the CLI. |
 | `ctx.metric(name, value)` | An outcome or difficulty signal of the run, written to the `metrics` table (observability.md). |
 | `ctx.card({ title, subtitle?, links?, badges? })` | What the run's card shows on the dashboard's Board. `links` is `[{ label, url }]` and `badges` is a list of short strings. Call it again to update the card: the Board shows the latest one. A link to a GitHub pull request also shows whether the pull request is open, merged or closed. A run that never calls it still has a card, titled with the run id. |
@@ -96,7 +96,7 @@ if (!tests.ok) { /* tests.exitCode, tests.timedOut, tests.tail: the last 32768 c
 |---|---|
 | `label` | Name of the command in progress and in the event log. Default: the command's name. |
 | `phase` | Groups progress, like `agent()`'s. Default: the last `ctx.phase`. |
-| `timeoutMs` | The command is killed after this long: SIGTERM to its whole process group, SIGKILL two seconds later. Default: `workflows.<name>.execTimeoutMs` in the config files, 10 minutes when unset. Give a network command (`git push`, `gh`) a short one. |
+| `timeoutMs` | The command is killed after this long: SIGTERM to its whole process group, SIGKILL two seconds later. Default: `workflows.<name>.execTimeoutMs` in the config files, 10 minutes when unset. Give a network command (`git push`, `gh`, `glab`) a short one. |
 | `cwd` | Working directory. Default: the run's cwd. |
 | `env` | Variables added to the process's own environment. A variable set to `undefined` is removed from the command's (`{ NODE_TEST_CONTEXT: undefined }`). |
 
@@ -111,6 +111,30 @@ if (!tests.ok) { /* tests.exitCode, tests.timedOut, tests.tail: the last 32768 c
   parent id and a group id. `tail` is the real output, not redacted: do not paste it into anything that leaves the
   machine without the secrets guard (rules.md, rule 6).
 - A resume runs the command again: `exec` is not journaled. Keep the effects idempotent (rules.md, rule 8).
+
+### Forge commands
+
+A workflow that touches issues or PRs runs the CLI of the repository's forge through `ctx.exec`. The forge is the one of
+the `origin` host: `github.com` is GitHub (`gh`), `gitlab.com` is GitLab (`glab`), and any other host is the one the
+config's `forges` map declares (`{ "git.example.com": "gitlab" }`, read from `ctx.forges`). Both CLIs use the login the
+user made with `gh auth login` or `glab auth login --hostname <host>`. For another repository than the cwd's, the CLIs'
+own commands take `--repo <path>`; `glab api` takes `--hostname <host>` and the URL-encoded path in place of `:fullpath`
+(glab's placeholder for the cwd's repository). glab 1.130.0 refuses a port in `--hostname`: for `host:port`, set
+`GITLAB_HOST=<host:port>` in the command's environment instead.
+
+| Effect | GitHub (`gh`) | GitLab (`glab`) |
+|---|---|---|
+| Read an issue | `gh issue view <n> --json number,title,body,labels` | `glab issue view <n> --output json` |
+| Comment on an issue | `gh issue comment <n> --body-file <file>` | `glab api --method POST projects/:fullpath/issues/<n>/notes -F body=@<file>` |
+| Open a PR | `gh pr create --head <branch> --title <t> --body-file <file>` | `glab mr create --source-branch <branch> --title <t> --description <text> --yes` |
+| Find the PR of a branch | `gh pr view <branch> --json url,state` | `glab api --paginate "projects/:fullpath/merge_requests?source_branch=<branch>&order_by=created_at&sort=desc&per_page=100"` |
+
+- `glab issue note` reads its text from stdin, which `ctx.exec` never feeds, so a comment goes through `glab api`.
+- `glab mr create` has no body-file flag: the description is one argument (Linux caps one argument near 128 KiB, so cut the
+  text first). `-H` names the head repository, not the branch: use `--source-branch`.
+- `glab mr view <branch>` fails when the branch has several MRs; `gh pr view <branch>` takes the latest. Ask `glab api`
+  for the list (every page), take the newest open one, else the newest. GitLab's MR states are `opened`, `locked` (being merged),
+  `merged` and `closed`: `opened` and `locked` are both open.
 
 ## Definition fields
 
@@ -161,6 +185,8 @@ if (!tests.ok) { /* tests.exitCode, tests.timedOut, tests.tail: the last 32768 c
   (`cloud agent <id>, left by an interrupted attempt, was cancelled: starting a new one`). The resume deletes the old agent's
   snapshot branch, so what it committed there does not come back. The client stops waiting for a cloud run after two hours: the engine asks
   the cloud, and a run still going is waited for again, so only the step's `timeoutMs` bounds a long step.
+- The cloud push goes to `cloud.remote`, whichever host it is. On a GitLab repository (gitlab.com or self-managed) the cloud
+  step rests on Cursor's own GitLab support: the kit restricts no host there and does not validate that path.
 
 ## Caps
 

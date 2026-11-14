@@ -67,6 +67,8 @@ const FORMATS: Record<string, string> = {
   "GitLab deploy token": ["gldt", "-", "a1B2c3D4e5F6g7H8i9J0"].join(""),
   "GitLab CI job token": ["glcbt", "-", "a1B2c3D4e5F6g7H8i9J0k1L2"].join(""),
   "GitLab runner authentication token": ["glrt", "-", "t1_a1B2c3D4e5F6g7H8i9J0"].join(""),
+  // `runners_token` of a project in GitLab's REST API, which `glab api projects/:fullpath` prints: the prefix GR1348941, then 20 characters.
+  "GitLab runner registration token": ["GR1348941", "a1B2c3D4e5F6g7H8i9J0"].join(""),
   JWT: ["eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiIxMjM0NTY3ODkwIn0", "abcdefghij1234567890"].join("."),
   "private key block": ["-----BEGIN ", "RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAabc\ndefghijkl\n-----END ", "RSA PRIVATE KEY-----"].join(""),
 };

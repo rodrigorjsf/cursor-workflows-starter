@@ -9,7 +9,7 @@
 | Conta Cursor | Plano pago com acesso ao SDK. Testado: Premium da The X Subscription | Medido em 2026-11-11 ([8.2 §4–5](../research/verificacoes-locais.md)): no Free o SDK não funciona. O `Agent.create` local falha com `UnknownAgentError` `plan_required` (403, `GET /v1/models` na validação local do modelo), e `wf whoami` e `wf models` também. O engine encerra o run na primeira tentativa (`AccountAccessError`). No Premium, funciona. O plano legado Start não inclui o SDK ([DOC](https://cursor.com/docs/account/pricing/legacy-cursor-plans)); o Plus não foi testado |
 | Cursor IDE | Atual | Para usar pelo chat (MCP e skills). Terminal e CI não precisam da IDE |
 | `git` | qualquer recente | O workflow de exemplo cria worktrees e commits |
-| `gh` (GitHub CLI) ou `glab` (GitLab CLI) | o do forge do repositório, autenticado (`gh auth login` ou `glab auth login`) | O exemplo lê a issue e, opcionalmente, abre o PR (no GitLab, o MR). O host do `origin` decide o forge ([6.2](../reference/config.md)) |
+| `gh` (GitHub CLI) ou `glab` (GitLab CLI) | o do forge do repositório, autenticado (`gh auth login --hostname <host>` ou `glab auth login --hostname <host>`) | O exemplo lê a issue e, opcionalmente, abre o PR (no GitLab, o MR). O host do `origin` decide o forge: `github.com` é GitHub, `gitlab.com` é GitLab, e um GitLab self-managed entra na chave `forges` da configuração ([6.2](../reference/config.md)) |
 
 > **Não** use `npm install --omit=optional`: isso remove o binário de plataforma do SDK e do `esbuild` (usado
 > pelo `tsx`).
@@ -33,7 +33,7 @@ usa recebe depois os próprios arquivos, do `wf init` ([2.3](03-invocacao-no-cur
 ### Pelo agente (recomendado)
 
 Aponte qualquer agente de código para o guia, fixado numa tag:
-`https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.3.0/INSTALL-AGENT.md`. Ele checa a máquina,
+`https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/INSTALL-AGENT.md`. Ele checa a máquina,
 instala o kit, confere o login, roda o `wf init` no repositório atual e termina no `wf doctor`. O guia é público, está
 em inglês (texto escrito para agentes) e não depende de nenhum outro documento. A tag que ele traz é sempre a versão do
 pacote: o `npm test` reprova se os dois divergirem, então uma versão nova só sai com o guia apontando para ela.
@@ -41,8 +41,8 @@ pacote: o `npm test` reprova se os dois divergirem, então uma versão nova só 
 ### Pelo instalador
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.3.0/scripts/install.sh -o /tmp/wf-install.sh
-bash /tmp/wf-install.sh --tag v0.3.0
+curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/scripts/install.sh -o /tmp/wf-install.sh
+bash /tmp/wf-install.sh --tag v0.4.0
 ```
 
 Baixar o script para um arquivo, em vez de passá-lo direto ao `bash`, deixa você lê-lo antes de rodar. O instalador:

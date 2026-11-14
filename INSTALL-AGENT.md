@@ -1,7 +1,7 @@
 # Install Cursor Workflows (guide for coding agents)
 
 You are a coding agent installing the Cursor Workflows kit for your user, then setting up the repo you are in. This
-guide is pinned to release `v0.3.0` and needs no other document. Run the steps in order. Each step ends on a stated
+guide is pinned to release `v0.4.0` and needs no other document. Run the steps in order. Each step ends on a stated
 result: when you cannot reach it, stop and tell the user what failed, with the command output.
 
 The kit runs deterministic workflows on the Cursor SDK from the Cursor IDE chat (MCP), Claude Code or a terminal. The
@@ -24,13 +24,13 @@ Stop until they have.
 ## 2. Install the kit, once per machine
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.3.0/scripts/install.sh -o /tmp/wf-install.sh
-bash /tmp/wf-install.sh --tag v0.3.0
+curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/scripts/install.sh -o /tmp/wf-install.sh
+bash /tmp/wf-install.sh --tag v0.4.0
 ```
 
 The installer:
 
-- clones the kit at tag `v0.3.0` into `~/.cursor-workflows/kit` and installs its dependencies;
+- clones the kit at tag `v0.4.0` into `~/.cursor-workflows/kit` and installs its dependencies;
 - writes the `wf` command to `~/.local/bin/wf`;
 - links the kit's skills (`run-workflow`, `cursor-workflow-authoring`, `skill-to-workflow`, `cursor-workflows-setup`)
   into `~/.claude/skills/`, which Cursor and Claude Code both read;
@@ -82,10 +82,12 @@ wf doctor --json
 ```
 
 Done when it exits 0 (`"ok": true`). Otherwise each failing entry in `checks` has a `message` and a `hint`: do what the
-hint says if you can, hand the user what needs them (the login, a newer Node, `gh auth login` or `glab auth login`), and
-run the doctor again. The checks, in this order: `node`, `dependencies`, `login`, `models`, `forge`, `mcp-server`,
+hint says if you can, hand the user what needs them (the login, a newer Node, `gh auth login --hostname <host>` or
+`glab auth login --hostname <host>`), and run the doctor again. The checks, in this order: `node`, `dependencies`, `login`, `models`, `forge`, `mcp-server`,
 `config`, `kit-version`. `forge` asks the CLI of the repository's forge (`gh` for GitHub, `glab` for GitLab) and passes
-outside a git repository.
+outside a git repository. The host of `origin` picks the forge: `github.com` and `gitlab.com` are known, and any other
+host (a self-managed GitLab) must be declared under the `forges` config key: until it is, the check fails with a message
+that names the key. Declaring the host is the user's call.
 
 Run the doctor from a terminal the IDE opened when you can: `node` and `mcp-server` follow the environment the IDE
 starts.

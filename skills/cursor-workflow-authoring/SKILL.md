@@ -13,8 +13,8 @@ what runs, when it runs and how many times; the model only executes each step. C
 
 1. **Shape the steps.** Read [references/runtime-api.md](references/runtime-api.md): the skeleton, the `ctx` calls, the
    `agent()` and `exec()` options and how the caps behave. Done when each step has a name, a model, `tools`,
-   `settingSources` and, if the code reads its result, a `schema`, and every command the code runs (tests, `git`, `gh`)
-   goes through `ctx.exec`, never a synchronous call (`execFileSync`).
+   `settingSources` and, if the code reads its result, a `schema`, and every command the code runs (tests, `git`, `gh` or
+   `glab`) goes through `ctx.exec`, never a synchronous call (`execFileSync`).
 2. **Pick the patterns.** For each case in the flow, read its section of [references/recipes.md](references/recipes.md):
    routing by label, review by axes, fix until it passes, fan-out with isolation, adversarial verification, cheap read
    step, escalate by budget, invariants between steps, resume with invariants, checkpoint across two runs. Done when

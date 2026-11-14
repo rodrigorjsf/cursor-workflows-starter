@@ -18,7 +18,7 @@ export interface BoardColumn {
 export interface BoardLink {
   label: string;
   url: string;
-  /** For a link to a GitHub pull request, when its state is known. */
+  /** For a link to a GitHub pull request or a GitLab merge request, when its state is known. */
   state?: PrState;
 }
 

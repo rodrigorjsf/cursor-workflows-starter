@@ -33,11 +33,14 @@ Import `{ script, calls, stats, costConfig, resetCloud }` from `@cursor/sdk` in 
   `costConfig`, and call `resetCloud()` when the file runs cloud steps (it forgets the fake cloud's agents and the
   `resumes` and `lookups` it recorded). State left by one test leaks into the next.
 
-### Harness for flows with `ctx.parallel`, `gh` or `git`
+### Harness for flows with `ctx.parallel`, `gh`, `glab` or `git`
 
 - One dispatcher by `label` in the fake SDK: with `ctx.parallel` the order of `send()` calls varies, and the `script`
   queue follows call order. The agent's name is `<workflow>:<label>`, so strip the `<workflow>:` prefix to get the label.
-- A fake `gh` on `PATH` (a Node script keeping state in JSON).
+- A fake `gh` or `glab` on `PATH`, the one of the forge the workflow talks to (a Node script keeping state in JSON). It
+  answers only the commands the workflow runs and exits non-zero for any other, so a command the test did not expect
+  fails it. For a GitLab test, point `origin` at a `gitlab.com` URL, or at another host declared under `forges` in the
+  repo config.
 - A temporary git repository with `user.name` and `user.email` set, and a bare repository as `origin`.
 - The project's real test command (`node --test`), which the workflow runs through its test runner helper.
 
@@ -58,8 +61,10 @@ defect a review finds, write the test that reproduces it before the fix and watc
   `budget.maxTokens` and both caps always set (the cents cap goes blind when Cursor reports no cost).
   A workflow with an external effect runs with `--cwd` in a disposable repository:
   - with push, PR or comment: a throwaway GitHub repository (`gh repo create <owner>/<new-repo> --private --source .
-    --push`) holding a minimal Node project (`package.json` with `"test": "node --test"`, `src/math.js` exporting `add`,
-    `test/math.test.js`), a label `complexity:low` and one issue ("Add subtract(a, b) to src/math.js", labelled);
+    --push`), or for a GitLab workflow a throwaway GitLab project (`glab repo create <group>/<new-repo> --private`, then
+    point `origin` at it and push; a self-managed host goes under `forges` first), holding a minimal Node project
+    (`package.json` with `"test": "node --test"`, `src/math.js` exporting `add`, `test/math.test.js`), a label
+    `complexity:low` and one issue ("Add subtract(a, b) to src/math.js", labelled);
   - with commit only: a local `git init` repository with the same files and one commit.
 
   Done when the run returns the expected `status` and each step's usage (the `step-end` lines on the CLI's stderr, or
