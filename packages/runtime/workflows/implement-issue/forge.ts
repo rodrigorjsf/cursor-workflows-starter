@@ -230,12 +230,12 @@ class GithubForge implements Forge {
 
   async authorStanding(cwd: string, number: number, repo?: string): Promise<AuthorStanding> {
     // `gh issue view --json` has no author association (gh 2.102 rejects the field): the REST issue has it. Without `repo`, gh fills
-    // `{owner}/{repo}` from the cwd's repository; with one, its path names the repository, and a URL's host (another than github.com)
-    // goes in `--hostname`, since `gh api` asks github.com unless told otherwise.
+    // `{owner}/{repo}` from the cwd's repository; with one, its path names the repository, and the host of a URL goes in `--hostname`,
+    // since `gh api` asks github.com unless told otherwise.
     const named = repo === undefined ? undefined : parseRemote(repo);
     const path = repo === undefined ? "{owner}/{repo}" : repoPathOf(repo);
-    if (!/^(?:\{owner\}\/\{repo\}|[\w.-]+\/[\w.-]+)$/.test(path)) throw new Error(`--repo ${JSON.stringify(repo)} is not a GitHub repository (owner/name, or its URL): the issue's author cannot be looked up`);
-    const host = named && named.host !== "github.com" ? ["--hostname", webHost(named)] : [];
+    if (!/^(?:\{owner\}\/\{repo\}|[\w.-]+\/[\w.-]+)$/.test(path)) throw new Error(`--repo ${JSON.stringify(repo)} is not a GitHub repository, so the issue's author cannot be looked up: pass owner/name or the repository's URL, or allowExternalAuthor: true after reading the issue`);
+    const host = named ? ["--hostname", webHost(named)] : [];
     const association = (await this.gh(cwd, "api", ...host, `repos/${path}/issues/${number}`, "--jq", ".author_association")).trim();
     if (!/^[A-Z_]+$/.test(association)) throw new Error(`gh api repos/${path}/issues/${number}: unexpected author_association ${JSON.stringify(association.slice(0, 40))}`);
     return { association, trusted: TRUSTED_ASSOCIATIONS.has(association) };

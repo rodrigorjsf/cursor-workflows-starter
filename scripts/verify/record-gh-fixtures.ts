@@ -1,7 +1,7 @@
 // WHAT: Runs the real `gh` for the forge commands the fakes cannot take from gh's own `--json` output, against a real GitHub
 //   repository: `gh issue list` (the dashboard's Backlog, `listIssues` in the forge module,
 //   packages/runtime/workflows/implement-issue/forge.ts) and `gh api repos/.../issues/<n> --jq .author_association` (the author gate of
-//   `implement-issue`, `authorStanding`), the latter for the repository of the cwd and for a named one. It writes what gh printed, with
+//   `implement-issue`, `authorStanding`), the latter for the repository of the cwd, for a named one and for one named by its URL. It writes what gh printed, with
 //   the repository's `owner/name` replaced by `owner/repo`, to packages/runtime/test/fixtures/gh/recordings.json. The fake `gh` of the
 //   dashboard's tests and the one of the `implement-issue` tests read that file. It only reads: nothing is created on GitHub.
 // WHY: a fake of an external CLI answers from a recording of the real tool (CODING_STANDARDS, Testing): the argument list the forge
@@ -84,7 +84,7 @@ async function recordCalls(run: () => Promise<unknown>): Promise<GhRecording[]> 
   }
 }
 
-/** The recordings of `gh issue list` for `label` and for a label no issue has, and of the author of the first issue listed (of the cwd's repository, and of `repo` by name), made in `cwd`, whose origin names the repository. */
+/** The recordings of `gh issue list` for `label` and for a label no issue has, and of the author of the first issue listed (of the cwd's repository, and of `repo` by name and by URL), made in `cwd`, whose origin names the repository. */
 export async function record(cwd: string, label: string, repo: string): Promise<GhRecordingsFile> {
   const forge = createForge("github", directCommands());
   const listed: Array<{ number: number }> = [];
@@ -93,9 +93,10 @@ export async function record(cwd: string, label: string, repo: string): Promise<
     ...(await recordCalls(() => forge.listIssues(cwd, NO_SUCH_LABEL))),
   ];
   if (listed.length < 2) throw new Error(`${repo} has ${listed.length} open issue(s) labelled ${label}: the recording needs at least two, to show how gh prints a list of them (GH_RECORD_LABEL names another label)`);
-  const [author, authorOfRepo] = [
+  const [author, authorOfRepo, authorOfUrl] = [
     ...(await recordCalls(() => forge.authorStanding(cwd, listed[0]!.number))),
     ...(await recordCalls(() => forge.authorStanding(cwd, listed[0]!.number, repo))),
+    ...(await recordCalls(() => forge.authorStanding(cwd, listed[0]!.number, `https://github.com/${repo}`))),
   ];
   const scrub = (text: string) => createRedactor({ env: {} }).text(text.split(repo).join(REPO_PLACEHOLDER));
   const version = /^gh version (\S+)/.exec(execFileSync("gh", ["--version"], { encoding: "utf8" }))?.[1] ?? "unknown";
@@ -103,7 +104,7 @@ export async function record(cwd: string, label: string, repo: string): Promise<
     recordedWith: { gh: version },
     placeholders: { repo: REPO_PLACEHOLDER },
     recordings: Object.fromEntries(
-      Object.entries({ "issue-list": full!, "issue-list-empty": empty!, "issue-author-association": author!, "issue-author-association-repo": authorOfRepo! }).map(([name, r]) => [name, { args: r.args.map(scrub), exitCode: r.exitCode, stdout: scrub(r.stdout), stderr: scrub(r.stderr) }]),
+      Object.entries({ "issue-list": full!, "issue-list-empty": empty!, "issue-author-association": author!, "issue-author-association-repo": authorOfRepo!, "issue-author-association-url": authorOfUrl! }).map(([name, r]) => [name, { args: r.args.map(scrub), exitCode: r.exitCode, stdout: scrub(r.stdout), stderr: scrub(r.stderr) }]),
     ),
   };
   if (repo !== "" && JSON.stringify(file).includes(repo)) throw new Error("a recording still names the repository: nothing was written");

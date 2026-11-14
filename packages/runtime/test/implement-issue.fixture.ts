@@ -127,8 +127,9 @@ if (a[0] === "issue" && a[1] === "view") {
   save(); process.stdout.write(JSON.stringify(out));
 } else if (a[0] === "api") {
   const REC = JSON.parse(fs.readFileSync(${JSON.stringify(GH_RECORDINGS_PATH)}, "utf8")).recordings;
-  const shape = (args) => args.map((x) => x.replace(/^repos\\/\\{owner\\}\\/\\{repo\\}\\/issues\\/\\d+$/, "repos/{owner}/{repo}/issues/<n>").replace(/^repos\\/(?!\\{owner\\}\\/\\{repo\\}\\/)[^/]+\\/[^/]+\\/issues\\/\\d+$/, "repos/<repo>/issues/<n>")).join(" ");
-  const recording = ["issue-author-association", "issue-author-association-repo"].map((n) => REC[n]).find((r) => shape(r.args) === shape(a));
+  // the form of a call: the number, the repository and the host of the call are not part of it
+  const shape = (args) => args.map((x, i) => (args[i - 1] === "--hostname" ? "<host>" : x.replace(/^repos\\/\\{owner\\}\\/\\{repo\\}\\/issues\\/\\d+$/, "repos/{owner}/{repo}/issues/<n>").replace(/^repos\\/(?!\\{owner\\}\\/\\{repo\\}\\/)[^/]+\\/[^/]+\\/issues\\/\\d+$/, "repos/<repo>/issues/<n>"))).join(" ");
+  const recording = ["issue-author-association", "issue-author-association-repo", "issue-author-association-url"].map((n) => REC[n]).find((r) => shape(r.args) === shape(a));
   if (!recording) { save(); process.stderr.write("fake gh: no recording of " + a.join(" ")); process.exit(2); }
   save(); process.stdout.write(recording.stdout.replace(/^[A-Z_]+/, st.issue.author_association));
 } else if (a[0] === "issue" && a[1] === "comment") {
