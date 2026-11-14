@@ -1,0 +1,45 @@
+# gitleaks configuration: the default rules, plus an allowlist for the fake credentials the tests use on purpose.
+# Read by the pre-commit hook (.githooks/pre-commit) and the `secrets` job of .github/workflows/ci.yml.
+#
+# Each allowlist matches one rule, one file and the exact fake values in it (condition AND): a real token of the same
+# shape in the same file is still a finding. A rule may report a prefix of the value (gitlab-pat keeps 20 characters
+# after `glpat-`), so a regex anchors the start of the fake, not always its end. Add a fake here the same way, never
+# by path alone.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fake GitLab tokens of the dashboard tests (glab config hosts and GITLAB_TOKEN)"
+condition = "AND"
+targetRules = ["gitlab-pat"]
+paths = ['''(^|/)packages/dashboard/test/pr-state\.test\.ts$''']
+regexes = ['''^glpat-(DOTCOM-0123456789|SELFMANAGED-98765432|ENV-FOR-ANOTHER-HOST)''']
+
+[[allowlists]]
+description = "Fake GitLab token the GitLab proofs feed to the redactor"
+condition = "AND"
+targetRules = ["gitlab-pat", "generic-api-key"]
+paths = ['''(^|/)test/gitlab-proofs\.test\.ts$''']
+regexes = ['''^glpat-0123456789abcdefghij$''']
+
+[[allowlists]]
+description = "Fake saved Cursor key of the implement-issue hardening tests"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''(^|/)packages/runtime/test/implement-issue\.hardening\.test\.ts$''']
+regexes = ['''^segredo-salvo-1234567890$''']
+
+[[allowlists]]
+description = "Fake Cursor keys the doctor tests check never reach the output"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''(^|/)packages/runtime/test/doctor\.process\.test\.ts$''']
+regexes = ['''^crsr_(0123456789abcdef|fedcba9876543210)$''']
+
+[[allowlists]]
+description = "Fake secret-named environment value of the redaction tests"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''(^|/)packages/runtime/test/redaction\.test\.ts$''']
+regexes = ['''^tok-1234567890$''']

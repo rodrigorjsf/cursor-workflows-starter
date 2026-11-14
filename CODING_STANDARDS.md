@@ -107,7 +107,7 @@ Enforced by tooling: `packages/dashboard/test/tokens.test.ts` (colours are writt
 
 ## Maintainer scripts and Bash
 
-Enforced by tooling: `test/scripts-conventions.test.ts` (every file under `scripts/` opens with an English `WHAT:`/`WHY:`/`WHEN:`/`HOW:` header, and every script outside `scripts/lib/` has a row in the 9.4 table); `test/coding-standards.test.ts` (every shell script opens with `#!/usr/bin/env bash` and sets `-euo pipefail`, locates itself through `BASH_SOURCE`, never `$0`, and gives the reason for each `shellcheck disable` on the same line). What an agent-run script prints is in the English check of Documentation; `scripts/verify/verify-*.ts` are workflows (see Workflow authoring).
+Enforced by tooling: `test/scripts-conventions.test.ts` (every file under `scripts/` opens with an English `WHAT:`/`WHY:`/`WHEN:`/`HOW:` header, and every script outside `scripts/lib/` has a row in the 9.4 table); `test/coding-standards.test.ts` (every shell script, the git hooks of `.githooks/` included, opens with `#!/usr/bin/env bash` and sets `-euo pipefail`, locates itself through `BASH_SOURCE`, never `$0`, and gives the reason for each `shellcheck disable` on the same line). What an agent-run script prints is in the English check of Documentation; `scripts/verify/verify-*.ts` are workflows (see Workflow authoring).
 
 - **A TypeScript script is importable and exits through `process.exitCode`.** Write exported functions plus `if (isEntryPoint(import.meta.url)) process.exitCode = main(process.argv.slice(2))` from `scripts/lib/cli.ts`; a checker takes `--root <dir>`; the body never calls `process.exit`. _Why:_ tests import the functions or run the script against a throwaway root, and `process.exit` cuts the stdout of a piped run. _See:_ `scripts/check-docs.ts` `main`. [check candidate]
 - **A generated page has a generator, a `--check` mode and a test.** The script exports its generator and calls `writeGeneratedPage`, has an `npm run docs:<name>` alias, and a root test fails when the committed page is stale. _Why:_ generated pages drift silently from their source otherwise. _See:_ `scripts/config-reference.ts` `generateConfigReference`.
@@ -245,7 +245,7 @@ Enforced by tooling: `.github/workflows/ci.yml` (`npm ci` fails on a stale lockf
 
 ## CI
 
-Enforced by tooling: `test/mermaid-check.test.ts` (a `mermaid` job runs `npm run docs:mermaid`); `test/coding-standards.test.ts` (each workflow sets top-level `permissions: contents: read` and grants no write; every `uses:` is a first-party `actions/<name>@vN`).
+Enforced by tooling: `test/mermaid-check.test.ts` (a `mermaid` job runs `npm run docs:mermaid`); `test/coding-standards.test.ts` (each workflow sets top-level `permissions: contents: read` and grants no write; every `uses:` is a first-party `actions/<name>@vN`); the `secrets` job in `.github/workflows/ci.yml` (`gitleaks dir .` finds no secret in the tree beyond the test fakes `.gitleaks.toml` allowlists by rule, file and value), with `.githooks/pre-commit` running `gitleaks git --staged` before each commit once a clone sets `core.hooksPath`.
 
 - **CI holds no secrets.** Real-API checks never run in CI. _Why:_ CI runs on every PR, forks included, and the tests use the fake SDK. _See:_ `.github/workflows/ci.yml` `test`.
 - **The CI test job runs exactly the contributor gate.** `npm ci` then `npm run check`, on a Node matrix of the engines minimum and the latest 22.x with fail-fast off; no test logic lives in YAML. _Why:_ a green local `npm run check` then predicts a green CI. _See:_ `.github/workflows/ci.yml` `test`.

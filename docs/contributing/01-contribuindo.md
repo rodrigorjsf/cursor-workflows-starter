@@ -6,6 +6,11 @@ Rode `npm ci` e `npm run check`, que faz o `typecheck` e o `npm test` (com o Nod
 e são os mesmos do CI (Node 22.13.0 e 22.x). O `npm test` inclui o docs check ([9.2](02-convencoes-do-livro.md#o-que-o-docs-check-confere)):
 um link quebrado, um rodapé errado ou um capítulo fora do índice reprova o PR.
 
+Uma vez por clone, ative o hook de pre-commit, que passa o `gitleaks` no que está staged e recusa o commit que traz um
+segredo: `git config core.hooksPath .githooks`. Vale para todos os worktrees do clone e pede o `gitleaks` no `PATH`. O
+job `secrets` do CI roda o mesmo `gitleaks dir .` na árvore. Um valor falso que um teste usa de propósito entra no
+`.gitleaks.toml` com a regra, o arquivo e o valor exato, nunca só pelo caminho.
+
 Mudou o dashboard? Monte runs de fixture com `scripts/dev/dash-fixtures.ts` e capture as telas com
 `scripts/dev/dash-shots.py` ([9.4](04-scripts-do-mantenedor.md)), em vez de montar runs e capturas à mão.
 
@@ -83,6 +88,8 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 ├── .claude/rules/          # regras do Claude Code com escopo por caminho
 ├── .cursor/mcp.json        # MCP server no Cursor
 ├── .mcp.json               # o mesmo MCP server no Claude Code
+├── .githooks/              # o hook de pre-commit que barra segredos com o gitleaks (ative com `git config core.hooksPath .githooks`)
+├── .gitleaks.toml          # as regras do gitleaks: as padrão, mais as credenciais falsas dos testes, uma a uma
 ├── scripts/                # procedimentos do mantenedor (tabela em 9.4); install.sh é o instalador do kit
 ├── SECURITY.md · CHANGELOG.md · README.md · README.en.md
 └── docs/                   # o livro: README.md é o índice; uma pasta por parte (vision/, usage/, internals/, ..., adr/)

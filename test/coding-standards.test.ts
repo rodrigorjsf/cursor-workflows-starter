@@ -38,7 +38,8 @@ const TEST_CODE = TEST_DIRS.flatMap((d) => files(d, /\.ts$/));
 const PRODUCT_CODE = ["packages/runtime/src", "packages/runtime/workflows", "packages/dashboard/src", ".agents/workflows"].flatMap((d) => files(d, CODE));
 /** Code bundled for the browser. */
 const BROWSER_CODE = ["packages/dashboard/app", "packages/dashboard/run-view"].flatMap((d) => files(d, /\.tsx?$/));
-const SHELL = files("scripts", /\.sh$/);
+/** Every shell script: the maintainer scripts and the git hooks (extensionless, under .githooks/). */
+const SHELL = [...files("scripts", /\.sh$/), ...files(".githooks", /^[\w-]+$/)];
 
 const parse = (path: string, text: string) =>
   ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
@@ -601,7 +602,7 @@ test("the shell checks fire on a lax script, on $0 and on a bare shellcheck disa
 });
 
 test("every shell script starts strict, locates itself through BASH_SOURCE, and explains each shellcheck disable", () => {
-  assert.ok(SHELL.length >= 5, `found ${SHELL.join(", ")}`);
+  assert.ok(SHELL.length >= 5 && SHELL.includes(".githooks/pre-commit"), `found ${SHELL.join(", ")}`);
   assert.deepEqual(scan(SHELL, lax), [], "open with #!/usr/bin/env bash and set -euo pipefail");
   assert.deepEqual(scan(SHELL, dollarZero), [], 'use "$(dirname "${BASH_SOURCE[0]}")", not $0');
   assert.deepEqual(scan(SHELL, unexplainedDisables), [], "put the reason on the same line: # shellcheck disable=SCnnnn # <why>");

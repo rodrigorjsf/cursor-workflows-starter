@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# WHAT: Git pre-commit hook: refuses a commit whose staged changes hold a secret, by running `gitleaks git --staged`
+#   with the repository's .gitleaks.toml (the default rules plus the allowlisted test fakes).
+# WHY: a real GitLab runner registration token once reached a commit and only GitHub push protection caught it, after
+#   the commit existed. Scanning before the commit keeps a secret out of history, where removing it means a rewrite.
+# WHEN: on every `git commit`, once a clone has run `git config core.hooksPath .githooks` (chapter 9.1).
+# HOW: needs `gitleaks` on the PATH. A finding prints the rule and the file, with the secret redacted, and exits 1.
+set -euo pipefail
+
+main() {
+  local root
+  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "error: gitleaks is not on the PATH: install it (https://github.com/gitleaks/gitleaks#installing) to commit here" >&2
+    exit 1
+  fi
+  gitleaks git --staged --redact --no-banner --config "$root/.gitleaks.toml" "$root"
+}
+
+main "$@"
