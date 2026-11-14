@@ -3,13 +3,12 @@
 // fixtures/glab/recordings.json. Nothing in them is written by hand: to change one, record again (the script's HOW line). The host
 // of the GitLab they came from is a placeholder; `recorded` swaps it for the host of the test.
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import type { Recording, RecordingsFile } from "../../../scripts/verify/record-glab-fixtures.js"; // the recorder owns the format; a type import loads nothing
+import { RECORDINGS_PATH, type Recording, type RecordingsFile } from "../../../scripts/verify/record-glab-fixtures.js"; // the recorder owns the format and the path; importing it runs nothing
 
 export type { Recording };
 
-/** The file the fake `glab` reads. It is a path, not a module: the fake runs as a child process of the test. */
-export const RECORDINGS_PATH = join(import.meta.dirname, "fixtures", "glab", "recordings.json");
+/** The file the fake `glab` reads, where the recorder writes it. It is a path, not a module: the fake runs as a child process of the test. */
+export { RECORDINGS_PATH };
 
 /** The host the fake GitLab of the tests answers for: the `gitlab.com` of a repository whose origin is `https://gitlab.com/owner/repo.git`. */
 export const TEST_HOST = "gitlab.com";
