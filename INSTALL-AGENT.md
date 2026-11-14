@@ -35,7 +35,10 @@ The installer:
 - links the kit's skills (`run-workflow`, `cursor-workflow-authoring`, `skill-to-workflow`, `cursor-workflows-setup`)
   into `~/.claude/skills/`, which Cursor and Claude Code both read;
 - writes `~/.cursor-workflows/config.json` with the default hard caps (3,000,000 tokens and 500 cents per run, 600,000
-  tokens per step, concurrency 4, local steps only) when the file does not exist yet.
+  tokens per step, concurrency 4, local steps only, and `requireSandbox: true`, which runs every step in the Cursor SDK
+  sandbox: no network except the hosts of a `.cursor/sandbox.json`, and no writes outside the repository) when the
+  file does not exist yet. On Linux the sandbox needs `bubblewrap` (`bwrap` on the PATH) unless the kernel offers
+  Landlock; `wf doctor` fails, naming bubblewrap, when it is missing.
 
 Running it again is safe. Done when it exits 0 after printing `kit ready at <kit>`, and `wf list` prints a JSON list
 that includes `implement-issue`.
@@ -84,7 +87,7 @@ wf doctor --json
 Done when it exits 0 (`"ok": true`). Otherwise each failing entry in `checks` has a `message` and a `hint`: do what the
 hint says if you can, hand the user what needs them (the login, a newer Node, `gh auth login --hostname <host>` or
 `glab auth login --hostname <host>`), and run the doctor again. The checks, in this order: `node`, `dependencies`, `login`, `models`, `forge`, `mcp-server`,
-`config`, `kit-version`. `forge` asks the CLI of the repository's forge (`gh` for GitHub, `glab` for GitLab) and passes
+`config`, `kit-version`, `sandbox`. `forge` asks the CLI of the repository's forge (`gh` for GitHub, `glab` for GitLab) and passes
 outside a git repository. The host of `origin` picks the forge: `github.com` and `gitlab.com` are known, and any other
 host (a self-managed GitLab) must be declared under the `forges` config key: until it is, the check fails with a message
 that names the key. Declaring the host is the user's call.

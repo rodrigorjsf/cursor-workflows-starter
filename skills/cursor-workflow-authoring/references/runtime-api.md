@@ -79,7 +79,7 @@ export default defineWorkflow<{ target: string }>({
 | `settingSources` | Which config layers the step loads: `"project"` (AGENTS.md, rules, skills, hooks, project MCP), `"team"`, `"mdm"`, `"user"`, `"plugins"`, `"all"` (the global cap `allowedSettingSources` leaves `"all"` out by default). Default when omitted: `["project","team","mdm"]`. Every layer adds fixed context to every call (cost.md). |
 | `memo` | Result cache across runs, keyed by prompt, model, schema, tools, context and repository state. Accepted only with read-only `tools`. |
 | `revertOnRetry` | Before each retry of a step that can write, puts `cwd` back as it was when the step started (files created are deleted, files changed are restored, the index is unstaged). Default off. Use it only when no other step writes in that directory at the same time (a worktree of the step's own): the undo restores the whole directory. In a directory that is not a git repository the retry runs anyway, with a warning. |
-| `sandbox` | Turns on the SDK's local sandbox for shell calls (Linux needs `bubblewrap`). Untested here; leave it off. |
+| `sandbox` | Turns on the SDK's local sandbox (Linux needs `bubblewrap` or a kernel with Landlock). Measured: it denies the network except the hosts of `.cursor/sandbox.json`, blocks shell writes outside `cwd` (the `edit` tool did not create a file there either), and refuses reading `~/.cursor/sdk/auth.json` only with `readBoundary: "workspace"` in the repository's `.cursor/sandbox.json`. The installer's global config already turns it on for every step (`caps.requireSandbox`); a step that downloads packages then needs its hosts listed. |
 
 ## `exec()`: commands the workflow runs itself
 

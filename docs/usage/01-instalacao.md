@@ -171,7 +171,8 @@ são os candidatos mais prováveis.
    IDE e a CLI bloqueiam o servidor que não está na lista ([DOC](https://cursor.com/docs/release-notes)). Então um
    membro pode precisar que o admin libere o servidor antes.
 3. Rode o `wf doctor` num terminal aberto pelo próprio IDE: ele confere o Node que o IDE usa, as dependências, o login, os
-   modelos, o CLI do forge do repositório (`gh` ou `glab`), o servidor MCP e a configuração
+   modelos, o CLI do forge do repositório (`gh` ou `glab`), o servidor MCP, a configuração e o sandbox, que a configuração
+   global do instalador exige em toda etapa (no Linux, com o `bubblewrap`)
    ([2.3](03-invocacao-no-cursor-ide.md#conferindo-o-ambiente-wf-doctor)).
    Sobre o Node: confira o que a IDE usa. O Cursor sobe o servidor com o `node` do PATH do próprio processo (o `tsx` do
    `mcp.json` começa com `#!/usr/bin/env node`), e um gerenciador de versões (mise, nvm) ativado pelo perfil do

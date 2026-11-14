@@ -112,6 +112,7 @@ test("the installer writes the default global config with the agreed caps, which
     allowedSettingSources: ["project", "user", "team", "mdm", "plugins"],
     allowedLocations: ["local"],
     maxConcurrency: 4,
+    requireSandbox: true,
   });
 
   // `wf config show` validates the file against the shipped schema and reports where it found it.

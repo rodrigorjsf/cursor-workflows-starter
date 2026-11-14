@@ -28,7 +28,7 @@ The installer writes these defaults to the global file when it has none:
 | `allowedSettingSources` | `project`, `user`, `team`, `mdm`, `plugins` (never `all`) |
 | `allowedLocations` | `local` |
 | `maxConcurrency` | 4 |
-| `requireSandbox` | absent: each step's own `sandbox` applies; `true` forces the SDK's local sandbox on every step |
+| `requireSandbox` | `true`: the SDK's local sandbox runs every step (no network but the hosts of a `.cursor/sandbox.json`, no writes outside the repo; Linux needs bubblewrap). Absent: each step's own `sandbox` applies |
 
 `null` switches a cap off. An absent key inherits from the layer below. Zero is zero.
 

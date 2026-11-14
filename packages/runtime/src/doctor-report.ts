@@ -11,6 +11,7 @@ export const CHECK_TITLES = {
   "mcp-server": "MCP server",
   config: "Configuration",
   "kit-version": "Kit version",
+  sandbox: "SDK sandbox",
 } as const;
 
 export type CheckId = keyof typeof CHECK_TITLES;

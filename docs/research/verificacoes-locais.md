@@ -297,6 +297,11 @@ aponta onde o texto corrigido está agora: docs do kit (`docs N.M`), relatório 
 - **X05 ◐:** no IDE, chamadas MCP seguem o Run Mode, como o shell; sem allowlist, cada `wait_workflow` pode pedir
   aprovação (docs 2.3 §1).
 
+> **Nota (2026-11-14, [#62](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/62)):** a linha C46 ("Com sandbox, escrita só no cwd e rede só pela allowlist") ficou `◐; teste: ⏭ sem
+> bubblewrap`. A §16 mediu o sandbox numa etapa que escreve: a rede e a escrita fora do repositório (shell e tool `edit`) foram
+> bloqueadas, e a leitura do `~/.cursor/sdk/auth.json` só com `readBoundary: "workspace"`. A linha fica como foi medida.
+
+
 ## 12. Não executado (pendências)
 
 O que ficou sem teste nesta sessão. Cada linha diz por que e como testar. Para os itens que exigem modelos que
@@ -319,6 +324,9 @@ política de custo em [9.1](../contributing/01-contribuindo.md#testes-contra-a-a
 | Concorrência e rate limit acima de 2 agentes em paralelo | O máximo medido foi 2 etapas em `ctx.parallel` (§8); a doc não dá limite de agentes por usuário (C15) | `concurrency` 4, 8 e 16 com etapas curtas; registrar `RateLimitError`, `AgentBusyError` e tempo por etapa |
 | Etapas na nuvem contra a API real (`verify-cloud`) | Exige um plano com Cloud Agents e um repositório num code host conectado, e o run empurra e apaga uma branch no `origin`: não rodou na sessão que escreveu o workflow (§14) | `scripts/verify/README.md` (seção `verify-cloud`), com tetos baixos; registrar o resultado em §14 |
 | `getUsage()` em agentes locais (custo real no kit) | A doc do SDK diz que o uso de agentes locais "is rolling out gradually and is enabled per account" ([doc](https://cursor.com/docs/sdk/typescript#agentgetusage)); nesta conta deu `feature_unavailable` em todas as chamadas, inclusive no Premium (§5). Não há como pedir a liberação pela doc. Enquanto isso, o teto em centavos fica cego e o custo vem da tabela `pricing` | Reconfirmar de tempos em tempos: `npm run wf -- metrics reconcile` (se passar a atualizar tentativas, a conta foi liberada, desde que o Cursor ainda guarde o uso dos agentes descartados) ou `npx tsx scripts/probe-sdk.ts --mode smoke --model composer-2.5` (cerca de 3 mil tokens, na franquia): `getUsageReads` com `cost` em vez de `feature_unavailable`. Quando liberar, registrar aqui e revisar o Status do README e os docs 2.2 §3, 5.1 e 5.3 |
+
+> **Nota (2026-11-14, [#62](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/62)):** a linha "Sandbox (`sandbox: true`)" foi executada na §16, com o `bubblewrap` instalado. As linhas
+> da tabela ficam como estavam.
 
 ## 13. Fase 6: o `implement-issue` com TDD, review em três eixos e checkpoint (2026-11-11)
 
@@ -420,6 +428,52 @@ chamado direto no SDK, parou um envio no meio em 3 ms (o caminho do motor até e
 `cutters`, `AttemptAbort.cut`, `RunCanceller`). O custo é o da linha acima: o envio cortado não reporta uso. Os textos do teto (2.2 §3, 3.1, 4.1, 5.1, 6.2 e as skills) passam a dizer "limitado por um envio".
 
 Esta medição é de etapas **locais**. Num run da nuvem, o `onDelta` e o `turn-ended` seguem sem medida (§14).
+
+## 16. Fase 9: o sandbox do SDK numa etapa que escreve (2026-11-14)
+
+O [SECURITY.md](../../SECURITY.md) dizia que o sandbox do SDK "não foi testado neste kit", e o arquivo de configuração que o instalador
+grava não o ligava: uma etapa que leu texto não confiável rodava com shell e rede abertos, e podia ler o `~/.cursor/sdk/auth.json`. A
+pergunta é do [#62](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/62): o sandbox segura o que este kit precisa? Só uma medição decide se o padrão muda.
+
+**Ambiente:** Premium da The X Subscription · `@cursor/sdk@1.3.1` · `composer-2.5` · `settingSources` default do engine
+(`["project","team","mdm"]`), todas as tools, como uma etapa que escreve do `implement-issue` · Linux x64 (WSL2, kernel 6.18) ·
+`bubblewrap` 0.13.1 do Homebrew (`/home/linuxbrew/.linuxbrew/bin/bwrap`, que pertence ao usuário, não ao root). O workflow é o
+[`verify-sandbox`](../../scripts/verify/README.md): uma etapa local com o sandbox ligado, num repositório descartável (um projeto Node
+mínimo, sem remoto), com este `.cursor/sandbox.json`: `readBoundary: "workspace"` e `networkPolicy` com `default: "deny"` e
+`allow: ["registry.npmjs.org"]`. A etapa roda, em ordem, `curl` para um host da allowlist (controle) e para `example.com`, um
+`touch` dentro do repositório (controle) e um `touch` na home, um `cat` do `~/.cursor/sdk/auth.json` (a saída vai para o
+`/dev/null`: a chave não entra no contexto nem no log), o `env` filtrado pelas variáveis `CURSOR_SANDBOX_*` e um pedido de escrita pela
+tool `edit`. O veredito não vem do que o agente diz: vem do log de eventos (a chamada e a saída de cada tool) e dos arquivos que o
+código do workflow confere, de fora do sandbox, depois da etapa. Seis runs, com `--max-tokens 150000 --max-cents 25`; os runs 2 a 5
+rodaram revisões anteriores do verificador, que ainda não conferiam o `exit` do `touch`, a escrita na home fora do sandbox nem o
+controle da tool `edit` dentro do repositório, e o run 6 rodou o verificador final.
+
+| Item | Método | Resultado | Evidência | Ação tomada |
+|---|---|---|---|---|
+| `curl` para um host fora da allowlist | `curl -m 20 https://example.com/` na etapa; o mesmo `curl` fora do sandbox é o controle | ✅ bloqueado | runs 2, 4, 5 e 6: `exit 7`, `http=000` e `curl: (7) CONNECT tunnel failed, response 403`; fora do sandbox, o mesmo `curl` deu 200 | Rede negada confirmada |
+| `curl` para um host da allowlist | `curl https://registry.npmjs.org/` na etapa | ✅ passa | `http=200` nos runs 2 a 6 | O `.cursor/sandbox.json` do projeto vale para runs locais do SDK com o `settingSources` default |
+| Escrita fora do repositório, pelo shell | `touch "$HOME/.wf-sandbox-…"`; o arquivo é procurado de fora do sandbox | ✅ bloqueada | runs 2, 4, 5 e 6: `touch: cannot touch …: Permission denied`, `exit 1`, o arquivo não existe depois; o `touch` dentro do repositório (controle) criou o arquivo, e, no run 6, a máquina escreve na home fora do sandbox (controle) | Escrita fora do cwd negada confirmada |
+| Escrita fora do repositório, pela tool `edit` | a tool `edit` pedida para criar um arquivo na home; o arquivo é procurado de fora | ✅ não criou o arquivo | runs 2 a 6: o arquivo não existe depois, e o agente disse que a política do sandbox recusou a escrita (as palavras são dele: o log não guarda a saída da tool `edit`); no run 6, a mesma tool criou um arquivo dentro do repositório (controle) | A doc não dizia se o sandbox cobria `edit`: nesta medição cobriu. É o caminho do incidente da §9 |
+| Leitura do `~/.cursor/sdk/auth.json` com `readBoundary: "workspace"` | `cat ~/.cursor/sdk/auth.json > /dev/null` | ✅ bloqueada | runs 2, 4, 5 e 6: `cat: …/auth.json: Permission denied`, `exit 1`; a chave é legível fora do sandbox (controle) | O portão do #62 abre |
+| Leitura **sem** `readBoundary` (base de comparação) | o mesmo `cat`, com um `.cursor/sandbox.json` que só tem a `networkPolicy` | ❌ passou | run 3: `exit 0`: a etapa leu a chave | Só o `readBoundary` bloqueia a leitura: ligar o sandbox sozinho não a bloqueia |
+| Qual mecanismo impôs as regras | `env` filtrado pelas variáveis `CURSOR_SANDBOX_*`; run 5 com só um `bwrap` que sai com 1 no PATH | ◐ Landlock, não bubblewrap | runs 4 a 6: `CURSOR_SANDBOX_LANDLOCK_STATUS=fully_enforced`; no run 5 o `bwrap` de verdade estava fora do PATH e os três bloqueios se repetiram. O helper do SDK (`cursorsandbox`) tem dois backends, `landlock` e `bubblewrap`, e a mensagem "Linux auto backend selection failed. Landlock error" | Nesta máquina o `bubblewrap` não foi necessário. A doc do SDK o exige no Linux; num kernel sem Landlock (a ABI 3 pede o 6.2 ou mais novo) ele deve ser o único caminho, o que não foi medido |
+| Custo | `wf stats` do banco de métricas dos runs | ◐ | 315.548 tokens nos seis runs (de 24 mil a 83 mil cada), cerca de 11 centavos no preço de lista, `spentCents: 0` e `chargedCents: 0` (uso incluído no plano); o `getUsage()` segue `feature_unavailable` | Dentro dos 100 centavos que a medição dividia com a sonda do #37 (cerca de 20 centavos) |
+
+O run 1 foi descartado: o verificador procurava o conteúdo das chamadas pelo rótulo da etapa, que as linhas de conteúdo não trazem
+(trazem o `attemptId`), então ele não achou nenhuma chamada e não deu veredito. O log cru do run 1 mostra os mesmos quatro bloqueios.
+O verificador passou a achar o conteúdo pela tentativa aberta pelo `step-start` da etapa.
+
+**Decisão (portão do #62):** com `readBoundary: "workspace"`, as três tentativas ficaram bloqueadas em todos os runs, então
+`templates/global-config.json` passa a gravar `caps.requireSandbox: true`, o `wf doctor` ganha a verificação `sandbox` (falha, nomeando o
+`bubblewrap`, quando o `bwrap` não está no PATH, porque o kit não testa o Landlock), e o SECURITY.md diz o resultado. O `readBoundary`
+**não** vem do `requireSandbox`: o kit não grava o `sandbox.json`, e o `wf doctor` diz se ele está posto. A medição usou o
+`.cursor/sandbox.json` do repositório; o `~/.cursor/sandbox.json`, que a doc do Cursor diz valer para todos os workspaces, com o
+arquivo do repositório prevalecendo, **não foi medido**, e o `wf doctor` diz isso quando só ele tem o `readBoundary`.
+
+**Não medido:** macOS (seatbelt) e Windows; o `implement-issue` inteiro com o sandbox ligado (uma etapa que baixa pacotes
+precisa dos hosts no `sandbox.json`; se o `git` dentro de um worktree, que escreve no `.git` do repositório principal, funciona
+no sandbox, é suspeita, no [#99](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/99)); um kernel sem Landlock.
+
 
 ---
 
