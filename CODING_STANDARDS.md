@@ -2,7 +2,7 @@
 
 Read at review time. Rules a tool enforces live in that tool's config and are not repeated here. A rule in a domain section overrides the Baseline.
 
-Domain words follow the glossary, `docs/vision/03-conceitos.md`: workflow, run, execution, job, step, role, journal, event log, location, frozen, ended. A rule tagged `[check candidate]` is mechanical: it stays here until a check enforces it. An exemplar is cited as a file plus the symbol, heading or key that shows the rule (`path` `symbol`, `outer.inner` for a nested one), or as the file alone for its header; `test/coding-standards.test.ts` resolves each one, so cite no line numbers.
+Domain words follow the glossary, `docs/vision/03-conceitos.md`: workflow, run, execution, job, step, role, journal, event log, location, frozen, ended. A rule tagged `[check candidate]` is mechanical: it stays here until a check enforces it. An exemplar is cited as a file plus the symbol, heading or key that shows the rule (`path` `symbol`, `outer.inner` for a nested one), or as the file alone when the exemplar is the whole file or its header; `test/coding-standards.test.ts` resolves each one, so cite no line numbers.
 
 ## Documentation and agent-facing text
 
