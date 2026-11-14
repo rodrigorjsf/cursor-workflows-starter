@@ -34,6 +34,15 @@
   envios diretos pelo SDK, num repositório novo de `scripts/verify/setup-probe-repo.sh`, com `--max-tokens` e `--max-cents`
   (custo e comando em `scripts/verify/README.md`). O resultado de 2026-11-14 está em `docs/research/verificacoes-locais.md` §15.
 
+- **O ADR-0010 substitui o ADR-0003 e registra todos os caminhos de cancelamento.** O ADR-0003 dizia que um cancelamento
+  desfaz a etapa em andamento e termina o job `cancelled`, e isso só vale para um job em execução. O ADR-0010 repete o que
+  continua valendo (jobs destacados, heartbeat, um processo por run) e registra os três caminhos: o job em execução recebe
+  SIGTERM, desfaz a etapa e termina `cancelled`; o travado é morto com SIGKILL, sem desfazer, fica `failed` e retomável, e
+  leva junto os grupos de processo dos comandos de `ctx.exec` e o que o SDK iniciou; o morto não recebe sinal e só tem os
+  cloud agents cancelados. O ADR-0003 passa a `superseded by ADR-0010`, os capítulos que o citavam apontam para o novo, e
+  `test/vision-and-adrs.test.ts` confere a troca e o caminho do job travado contra `job-children.ts`. Veja
+  [7.10](docs/adr/0010-detached-jobs-and-how-each-is-cancelled.md).
+
 ### Mudado
 
 - **O erro `invalid args` nomeia o campo que o schema não declara.** Antes, um campo a mais dava só

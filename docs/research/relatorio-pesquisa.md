@@ -601,4 +601,4 @@ condicional** sobre o Cursor SDK. Esse é o espaço que o starter kit ocupa.
 
 ---
 
-[← Anterior: 7.9 · ADR-0009: The forge is a seam: GitHub and GitLab](../adr/0009-forge-seam-github-and-gitlab.md) · [Índice](../README.md) · [Próximo: 8.2 · Verificações locais (2026-11-11) →](verificacoes-locais.md)
+[← Anterior: 7.10 · ADR-0010: Detached jobs, and how each one is cancelled](../adr/0010-detached-jobs-and-how-each-is-cancelled.md) · [Índice](../README.md) · [Próximo: 8.2 · Verificações locais (2026-11-11) →](verificacoes-locais.md)

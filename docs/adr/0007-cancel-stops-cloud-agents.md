@@ -2,6 +2,8 @@
 
 **Status:** accepted · decided by the repo owner on 2026-11-12, while hardening [spec #5](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/5); supersedes [ADR-0006](0006-cloud-steps-as-built.md)
 
+**Amended:** 2026-11-14: killing a frozen job now also kills the process groups of its `ctx.exec` commands, the detached children of the SDK's local agent and the job's own process group, after a SIGSTOP; the rule here, that a cancel cancels the cloud agents, is unchanged. [ADR-0010](0010-detached-jobs-and-how-each-is-cancelled.md) records every cancel path.
+
 ## Context
 
 [ADR-0006](0006-cloud-steps-as-built.md) recorded cloud steps as built. Two of its lifecycle statements stopped holding

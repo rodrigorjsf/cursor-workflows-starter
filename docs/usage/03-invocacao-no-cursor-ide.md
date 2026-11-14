@@ -42,7 +42,7 @@ dura no máximo 50 s e o agente do chat repete a espera.
 
 **Se o servidor reiniciar no meio** (por exemplo, ao reiniciar o Cursor ou ao desligar e religar o servidor em
 **Customize** [DOC](https://cursor.com/docs/mcp)): o run continua, porque roda em um processo destacado
-([ADR-0003](../adr/0003-detached-jobs.md)). O servidor novo o encontra pelos arquivos do job e
+([ADR-0010](../adr/0010-detached-jobs-and-how-each-is-cancelled.md)). O servidor novo o encontra pelos arquivos do job e
 `wait_workflow` segue de onde parou. A doc não diz se mudar o `mcp.json` reinicia um servidor que já está rodando.
 
 **Se o processo do job morrer** (ou parar de dar sinal de vida: o heartbeat dele fica mais de 30 s sem atualizar),

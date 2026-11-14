@@ -62,12 +62,12 @@ MCP server e ao Cursor. Tem identidade própria (job id, run id, pid, heartbeat;
 `get_workflow_status` respondem é uma projeção do log de eventos do run. Um job termina `finished`, `failed` ou
 `cancelled` (`cancel_workflow`, `wf cancel`, Ctrl-C): cancelar um job em execução não é falhar (um job travado ou já
 terminado continua `failed`), e o run continua retomável.
-Retomar um run abre outro job sobre o mesmo run. Decisão em [ADR-0003](../adr/0003-detached-jobs.md).
+Retomar um run abre outro job sobre o mesmo run. Decisão em [ADR-0010](../adr/0010-detached-jobs-and-how-each-is-cancelled.md), que substitui o ADR-0003.
 _Evite_: tarefa, processo.
 
 **Travado** (*frozen*):
 O job cujo processo está vivo, é o do job, segura o lock do run (`run.lock`) e parou de mandar heartbeat. Aparece como
-`failed`, mas ainda executa o run: um cancelamento o mata com SIGKILL, junto com os comandos de `ctx.exec` que ele tinha em andamento. Só esse caso é travado (`isFrozen`, em
+`failed`, mas ainda executa o run: um cancelamento o mata com SIGKILL, junto com os comandos de `ctx.exec` que ele tinha em andamento ([ADR-0010](../adr/0010-detached-jobs-and-how-each-is-cancelled.md)). Só esse caso é travado (`isFrozen`, em
 `packages/runtime/src/runtime/job-state.ts`).
 _Evite_: terminado (o processo de um job travado ainda está lá), morto.
 

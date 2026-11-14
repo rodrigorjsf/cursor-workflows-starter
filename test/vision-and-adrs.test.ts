@@ -101,20 +101,21 @@ const ADRS: Array<{ file: string; number: string; topic: RegExp[] }> = [
   { file: "docs/adr/0007-cancel-stops-cloud-agents.md", number: "0007", topic: [/cloud/i, /read-only/, /fast-forward/i, /supersedes/i, /cancel/i] },
   { file: "docs/adr/0008-job-record-keeps-what-the-log-cannot.md", number: "0008", topic: [/event log/i, /source of truth/i, /job record/i, /killedByCancel/, /supersedes/i] },
   { file: "docs/adr/0009-forge-seam-github-and-gitlab.md", number: "0009", topic: [/forge/i, /GitLab/, /glab api/, /forges/] },
+  { file: "docs/adr/0010-detached-jobs-and-how-each-is-cancelled.md", number: "0010", topic: [/detached/i, /heartbeat/i, /cancel/i, /frozen/i, /SIGKILL/, /supersedes/i] },
 ];
 
-test("part 7 lists nine ADRs, one per load-bearing decision, in order", () => {
+test("part 7 lists ten ADRs, one per load-bearing decision, in order", () => {
   assert.deepEqual(
     indexPart(7),
     ADRS.map((adr) => adr.file),
   );
 });
 
-/** Every ADR on disk, not only the nine: the format below binds the ones added later too. */
+/** Every ADR on disk, not only the ten: the format below binds the ones added later too. */
 const adrFiles = () => readdirSync(join(ROOT, "docs/adr")).filter((name) => /^\d{4}-.*\.md$/.test(name)).map((name) => `docs/adr/${name}`);
 
 test("every ADR is titled ADR-NNNN, names its status and records the context, the decision, the consequences and the options considered", () => {
-  assert.ok(adrFiles().length >= ADRS.length, "the nine ADRs are on disk");
+  assert.ok(adrFiles().length >= ADRS.length, "the ten ADRs are on disk");
   for (const file of adrFiles()) {
     const number = /\/(\d{4})-/.exec(file)![1]!;
     const doc = parseMarkdown(read(file));
@@ -129,7 +130,7 @@ test("every ADR is titled ADR-NNNN, names its status and records the context, th
   }
 });
 
-test("each of the nine ADRs is about its decision", () => {
+test("each of the ten ADRs is about its decision", () => {
   for (const adr of ADRS) for (const pattern of adr.topic) assert.match(read(adr.file), pattern, `${adr.file}: should be about ${pattern}`);
 });
 
@@ -199,4 +200,75 @@ test("ADR-0002's job record changed, so ADR-0008 supersedes it: 0002 keeps its t
   assert.match(flat, /Killing a frozen job writes nothing in the log/);
   assert.match(flat, /the job stays `failed`/);
   assert.match(flat, /wasKilledByCancel/);
+});
+
+const CANCEL_ADR = "docs/adr/0010-detached-jobs-and-how-each-is-cancelled.md";
+
+/** The bullet of `adr` that starts with the bold `lead`, nested lines and the paragraph that follows them included, whitespace flattened. */
+function bullet(adr: string, lead: string): string {
+  const found = new RegExp(`^- \\*\\*${lead.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[\\s\\S]*?(?=\\n- \\*\\*|\\n\\n(?=\\S)|(?![\\s\\S]))`, "m").exec(adr);
+  assert.ok(found, `no bullet starts with **${lead}**`);
+  return found[0].replace(/\s+/g, " ");
+}
+
+test("ADR-0003's cancel decision changed, so ADR-0010 supersedes it: 0003 keeps its text, 0010 restates what holds and records the cancel of a running, a frozen and a dead job", () => {
+  const old = read("docs/adr/0003-detached-jobs.md");
+  assert.match(old, /^\*\*Status:\*\* superseded by ADR-0010/m);
+  assert.match(old, /cancel the active agent\s+runs, revert the in-flight write step, mark the job `cancelled`/, "the original decision text");
+  const adr = read(CANCEL_ADR);
+  assert.match(adr, /^\*\*Status:\*\* accepted .*supersedes \[ADR-0003\]/m);
+  const flat = adr.replace(/\s+/g, " ");
+
+  // what ADR-0003 decided and still holds: detached job processes, the heartbeat, one process per run
+  assert.match(flat, /spawn a detached child process/);
+  assert.match(flat, /heartbeat/);
+  assert.match(flat, /One process per run/);
+  assert.match(flat, /SIGINT and SIGTERM cancel the run/);
+
+  // a running job: SIGTERM, the in-flight write step is reverted, the job ends `cancelled`
+  const running = bullet(adr, "A running job gets SIGTERM.");
+  assert.match(running, /reverts the in-flight write step/);
+  assert.match(running, /ends `cancelled`/);
+
+  // a frozen job: SIGKILL, no revert, stays `failed` and resumable, and the process groups of its `ctx.exec` commands die with it
+  const frozen = bullet(adr, "A frozen job is killed, and nothing is reverted.");
+  assert.match(frozen, /SIGKILL/);
+  assert.match(frozen, /stays `failed`/);
+  assert.match(frozen, /run stays resumable/);
+  assert.match(frozen, /process group of every `ctx\.exec` command/);
+  assert.match(frozen, /cloud agents the run left running are cancelled/);
+
+  // a dead job: no signal, only the cloud agents it left are cancelled
+  const dead = bullet(adr, "A dead job gets no signal.");
+  assert.match(dead, /Only the cloud agents/);
+  assert.match(dead, /cancelled, through the Cursor API/);
+});
+
+test("ADR-0010's frozen-job path is the one the code takes: every signal killFrozenJob sends, its function and its record file are named", () => {
+  const code = read("packages/runtime/src/runtime/job-children.ts");
+  const start = code.indexOf("export function killFrozenJob");
+  assert.ok(start >= 0, "killFrozenJob is in job-children.ts");
+  const signals = new Set([...code.slice(start).matchAll(/"(SIG[A-Z]+)"/g)].map((m) => m[1]!));
+  assert.ok(signals.has("SIGSTOP") && signals.has("SIGKILL"), `killFrozenJob sends ${[...signals].join(", ")}`);
+  const frozen = bullet(read(CANCEL_ADR), "A frozen job is killed, and nothing is reverted.");
+  for (const signal of signals) assert.ok(frozen.includes(signal), `the frozen-job bullet does not name ${signal}, which killFrozenJob sends`);
+  assert.ok(frozen.includes("killFrozenJob"), "the frozen-job bullet names the function");
+  const infix = /const GROUP_INFIX = "([^"]+)"/.exec(code)?.[1];
+  assert.ok(infix, "job-children.ts names the record file infix");
+  assert.ok(read(CANCEL_ADR).includes(`\`<jobId>${infix}<pgid>\``), `ADR-0010 names the record file <jobId>${infix}<pgid>`);
+  // the cancel sends SIGKILL to a frozen job and SIGTERM to a running one, as the ADR says
+  assert.match(read("packages/runtime/src/runtime/job-state.ts"), /liveness === "silent" \? "SIGKILL" : "SIGTERM"/);
+});
+
+test("ADR-0003 is superseded, so no chapter cites it without ADR-0010 on the same line", () => {
+  const stale: string[] = [];
+  // the ADRs keep their text (their footers link the neighbours), the CHANGELOG is history, and docs/agents holds a generic example
+  for (const file of markdownFiles(ROOT).filter((f) => !f.startsWith("docs/adr/") && !f.startsWith("docs/agents/") && f !== "CHANGELOG.md")) {
+    read(file)
+      .split("\n")
+      .forEach((line, i) => {
+        if (/ADR-0003|adr\/0003-/.test(line) && !/ADR-0010/.test(line)) stale.push(`${file}:${i + 1}: ${line.trim().slice(0, 140)}`);
+      });
+  }
+  assert.deepEqual(stale, [], "these lines cite ADR-0003 as the decision in force; point them at ADR-0010 (or name it next to its successor)");
 });
