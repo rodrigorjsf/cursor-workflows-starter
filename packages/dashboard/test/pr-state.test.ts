@@ -432,3 +432,32 @@ test("glab's config is found where glab looks: GLAB_CONFIG_DIR alone when it is 
     }
   }
 });
+
+test("a config file glab cannot read ends the lookup: the next place is not read, and gitlab.com is still answered", async () => {
+  dash = await startDashboard({ port: 0, prStateCacheMs: 20 });
+  const env = { GLAB_CONFIG_DIR: process.env.GLAB_CONFIG_DIR, HOME: process.env.HOME, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME };
+  const home = box.repo("a-home");
+  const xdg = box.repo("an-xdg-config-home");
+  try {
+    delete process.env.GLAB_CONFIG_DIR;
+    process.env.HOME = home;
+    process.env.XDG_CONFIG_HOME = xdg;
+    mkdirSync(join(home, ".config", "glab-cli", "config.yml"), { recursive: true }); // there, but not a file: EISDIR, and glab fails on it too
+    mkdirSync(join(xdg, "glab-cli"), { recursive: true });
+    writeFileSync(join(xdg, "glab-cli", "config.yml"), glabConfigOf({ "xdg.example.com": "glpat-X" }));
+    const control = MR(1);
+    const behind = MR(2, "xdg.example.com");
+    glab.set(control, "opened");
+    glab.set(behind, "opened");
+    runWithLinks("implement-issue-aaaa0001", 1, [control, behind]);
+
+    assert.equal(await until("gitlab.com is answered", () => stateOf("implement-issue-aaaa0001", control), Boolean), "open");
+    await new Promise((r) => setTimeout(r, 100)); // fixed-wait-ok: time for a wrong ask to show up
+    assert.equal(await stateOf("implement-issue-aaaa0001", behind), undefined, "the XDG config is not read past an unreadable one");
+  } finally {
+    for (const [key, value] of Object.entries(env)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
