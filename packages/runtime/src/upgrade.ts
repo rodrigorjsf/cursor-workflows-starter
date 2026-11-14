@@ -1,13 +1,16 @@
 // `wf upgrade`: moves the installed kit (the clone at `~/.cursor-workflows/kit` that `scripts/install.sh --tag` made) to the
 // newest release tag, then runs that tag's own `install.sh --refresh`, which reinstalls the dependencies and redoes the
 // `wf` shim, the global skill links and the default config. A dev install (the kit location is a link to a working copy)
-// and a `wf` that does not run from the installed kit are refused: both would move a checkout the user did not hand over.
+// and a `wf` that does not run from the installed kit are refused: both would move a checkout the user did not hand over. So
+// is a kit with local changes (`kit-state.ts`): a checkout keeps some of them, and the installer would run them.
 
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import semver from "semver";
+import { assertKitClean, kitGit } from "./kit-state.js";
 import { readKitPackage } from "./kit-version.js";
+import { errorText } from "./runtime/error-text.js";
 import { userDir } from "./runtime/state.js";
 
 /** The kit this code runs from: two levels above the runtime package. */
@@ -23,17 +26,7 @@ export interface UpgradeResult {
   tag: string;
 }
 
-const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
-
 const installerOf = (kit: string): string => join(kit, "scripts", "install.sh");
-
-const git = (kit: string, ...args: string[]): string => {
-  try {
-    return execFileSync("git", ["-C", kit, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-  } catch (err) {
-    throw new Error((err as { stderr?: string }).stderr?.trim() || messageOf(err));
-  }
-};
 
 /** Throws unless the kit running this code is the clone the installer made. */
 function installedKit(): string {
@@ -51,11 +44,11 @@ function installedKit(): string {
 /** The newest release tag (`vX.Y.Z`; pre-releases are not releases) of the clone, after fetching the tags of its origin. */
 function newestReleaseTag(kit: string): string {
   try {
-    git(kit, "fetch", "--quiet", "--tags", "--force");
+    kitGit(kit, "fetch", "--quiet", "--tags", "--force");
   } catch (err) {
-    throw new Error(`could not fetch the tags of the kit's origin repository: ${messageOf(err)}`);
+    throw new Error(`could not fetch the tags of the kit's origin repository: ${errorText(err)}`);
   }
-  const releases = git(kit, "tag", "--list", "v*")
+  const releases = kitGit(kit, "tag", "--list", "v*")
     .split("\n")
     .filter((tag) => semver.valid(tag) !== null && semver.prerelease(tag) === null)
     .sort(semver.rcompare);
@@ -66,15 +59,16 @@ function newestReleaseTag(kit: string): string {
 /** Moves the installed kit to the newest release; does nothing when it is already there. Progress goes to stderr. */
 export function upgradeKit(): UpgradeResult {
   const kit = installedKit();
+  assertKitClean(kit); // before anything else: even at the newest tag, a kit that was edited is for the user to hear about
   const from = readKitPackage().version;
   const tag = newestReleaseTag(kit);
   const to = semver.parse(tag)!.version;
   if (semver.lte(to, from)) return { upgraded: false, from, to: from, tag };
 
   try {
-    git(kit, "-c", "advice.detachedHead=false", "checkout", "--quiet", tag);
+    kitGit(kit, "-c", "advice.detachedHead=false", "checkout", "--quiet", tag);
   } catch (err) {
-    throw new Error(`could not move the kit to ${tag}; it stays at version ${from}: ${messageOf(err)}`);
+    throw new Error(`could not move the kit to ${tag}; it stays at version ${from}: ${errorText(err)}`);
   }
   // The new tag's installer, not this one: it knows what the new tag ships. Its output must not mix into our stdout.
   const refresh = spawnSync("bash", [installerOf(kit), "--refresh"], { stdio: ["ignore", 2, 2] });

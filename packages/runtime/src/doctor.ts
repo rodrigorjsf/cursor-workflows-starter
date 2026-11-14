@@ -3,7 +3,7 @@
 // fixed order. The checks follow what the IDE does: they read the MCP config it reads and start the server it starts.
 
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -15,11 +15,13 @@ import type { ConfigIssue } from "./config/file.js";
 import { ConfigError, type ResolvedConfig, loadEffectiveConfig } from "./config/index.js";
 import { type CheckId, type CheckResult, type DoctorReport, fail, nodeHint, pass, reportOf } from "./doctor-report.js";
 import { findOnPath } from "./find-on-path.js";
+import { kitChanges, kitTagsAtHead } from "./kit-state.js";
 import { kitCompatibility, kitFileUrl, readKitPackage } from "./kit-version.js";
 import { MCP_CONFIG_FILES, type McpLaunch, type McpLaunches, readMcpLaunches } from "./mcp-launch.js";
 import { errorText } from "./runtime/error-text.js";
 import { createRedactor } from "./runtime/redaction.js";
 import { loadWorkflows } from "./runtime/registry.js";
+import { userDir } from "./runtime/state.js";
 import type { WorkflowDefinition } from "./runtime/workflow.js";
 import { type OriginForge, forgeOfOrigin, loginOf } from "../workflows/implement-issue/forge.js";
 
@@ -362,6 +364,50 @@ function checkSandbox(cwd: string, resolution: Resolution): CheckResult {
   return pass("sandbox", `\`caps.requireSandbox\` is true${bwrap ? `, bubblewrap at ${bwrap}` : `, and ${process.platform} needs no bubblewrap`}; ${reads}`);
 }
 
+/** The `version` of the kit's runtime package at `kit`: undefined when the manifest is missing or is not JSON with a version. */
+function installedKitVersion(kit: string): string | undefined {
+  try {
+    const { version } = JSON.parse(readFileSync(join(kit, "packages", "runtime", "package.json"), "utf8")) as { version?: unknown };
+    return typeof version === "string" ? version : undefined;
+  } catch {
+    return undefined; // the manifest is missing or broken: the caller reports a kit with no readable version
+  }
+}
+
+/**
+ * The installed kit (`~/.cursor-workflows/kit`): a tag install must be on exactly the tag of its package version and have a clean
+ * tree. The kit holds the engine that enforces the caps, the redaction and the tool allowlists, any unsandboxed step can write to
+ * it, and an edit survives `wf upgrade` (`kit-state.ts`). A development install (a link to a working copy, `install.sh --dev`) is
+ * reported as such and not checked, as `wf upgrade` does not touch it either. With no kit at that path there is nothing to check.
+ */
+function checkKit(): CheckResult {
+  const kit = join(userDir(), "kit");
+  let entry: ReturnType<typeof lstatSync>;
+  try {
+    entry = lstatSync(kit);
+  } catch (err) {
+    if ((err as { code?: unknown }).code === "ENOENT") return pass("kit", `no kit is installed at ${kit}: nothing to check`);
+    throw err;
+  }
+  if (entry.isSymbolicLink()) return pass("kit", `development install: ${kit} points to ${readlinkSync(kit)}, a working copy that is not checked`);
+
+  const hint = `Reinstall the kit: move ${kit} aside (it keeps the changes, if you want to look at them) and install the kit again with the guide ${kitFileUrl("INSTALL-AGENT.md", readKitPackage().version)}. The global config and the skill links stay.`;
+  if (!existsSync(join(kit, ".git"))) return fail("kit", `${kit} is not a git clone of the kit, so its version and its changes cannot be checked`, hint);
+  const version = installedKitVersion(kit);
+  if (version === undefined) return fail("kit", `the kit at ${kit} has no readable package version (packages/runtime/package.json)`, hint);
+
+  const problems: string[] = [];
+  try {
+    const changes = kitChanges(kit);
+    if (changes.length) problems.push(`the kit at ${kit} has local changes: ${changes.join(", ")}`);
+    const tags = kitTagsAtHead(kit);
+    if (!tags.includes(`v${version}`)) problems.push(`HEAD of the kit at ${kit} is ${tags.length ? `tagged ${tags.join(", ")}` : "not tagged"}, and the tag of its package version is v${version}`);
+  } catch (err) {
+    return fail("kit", `could not read the state of the kit at ${kit}: ${errorText(err)}`, hint);
+  }
+  return problems.length ? fail("kit", problems.join("\n"), hint) : pass("kit", `${kit} is at v${version} with a clean tree`);
+}
+
 /** A check that throws is a failed check: the doctor exists to say what is wrong, not to crash on it. */
 function guarded(id: CheckId, run: () => CheckResult | Promise<CheckResult>): Promise<CheckResult> {
   return Promise.resolve()
@@ -384,6 +430,7 @@ export async function runDoctor({ cwd }: { cwd: string }): Promise<DoctorReport>
     guarded("config", async () => checkConfig(await resolution)),
     guarded("kit-version", async () => checkKitVersion(cwd, await servers)),
     guarded("sandbox", async () => checkSandbox(cwd, await resolution)),
+    guarded("kit", checkKit),
   ]);
   return createRedactor().value(reportOf(checks));
 }

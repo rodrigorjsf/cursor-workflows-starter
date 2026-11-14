@@ -12,6 +12,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { type Recording, recorded } from "./glab-recordings.js";
 import { copyKit } from "./kit-copy.js";
+import { KIT_TAMPERING, git as gitIn, makeOrigin } from "./kit-origin.js";
 
 const PACKAGE = join(import.meta.dirname, "..");
 const KIT_ROOT = join(PACKAGE, "..", "..");
@@ -169,14 +170,14 @@ const checkOf = (report: Report, id: string): Check => {
   return check;
 };
 
-test("on a healthy setup every check passes: exit 0, and --json lists the nine checks in a fixed order, none with a hint", () => {
+test("on a healthy setup every check passes: exit 0, and --json lists the ten checks in a fixed order, none with a hint", () => {
   const r = doctor(repoCopy());
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const report = reportOf(r);
   assert.equal(report.ok, true);
   assert.deepEqual(
     report.checks.map((c) => c.id),
-    ["node", "dependencies", "login", "models", "forge", "mcp-server", "config", "kit-version", "sandbox"],
+    ["node", "dependencies", "login", "models", "forge", "mcp-server", "config", "kit-version", "sandbox", "kit"],
   );
   for (const c of report.checks) assert.ok(c.status === "pass" && c.hint === undefined, `${c.id}: ${c.message}`);
   assert.equal(r.stderr, "", "the doctor writes its report to stdout and nothing to stderr");
@@ -186,7 +187,7 @@ test("without --json the report is text, one block per check with the fix hint u
   const healthy = doctor(repoCopy(), { args: [] });
   assert.equal(healthy.status, 0, healthy.stdout + healthy.stderr);
   assert.match(healthy.stdout, /\[ok\]\s+Node\.js: v\d+/);
-  assert.match(healthy.stdout, /All good: 9 checks passed\./);
+  assert.match(healthy.stdout, /All good: 10 checks passed\./);
 
   // Logged out and no gh in a GitHub repository: login, models (no catalog without a login) and forge fail.
   const r = doctor(gitRepoCopy("https://github.com/acme/widgets.git"), { args: [], bins: [], env: { FAKE_SDK_LOGGED_OUT: "1" } });
@@ -196,7 +197,7 @@ test("without --json the report is text, one block per check with the fix hint u
   assert.match(r.stdout, /\[FAIL\]\s+Cursor SDK login: /);
   assert.match(r.stdout, /how to fix: Log in with `wf login`/);
   assert.match(r.stdout, /\[FAIL\]\s+Forge CLI: /);
-  assert.match(r.stdout, /3 of 9 checks failed\./);
+  assert.match(r.stdout, /3 of 10 checks failed\./);
 });
 
 test("wf doctor --json reports an unusable repo config with its file and field path and a fix hint, and exits non-zero", () => {
@@ -605,7 +606,7 @@ test("a check that throws is a failed check naming the workflow, not a crashed d
   const r = doctor(repo);
   assert.equal(r.status, 1, r.stderr);
   const report = reportOf(r);
-  assert.equal(report.checks.length, 9);
+  assert.equal(report.checks.length, 10);
   const config = checkOf(report, "config");
   assert.equal(config.status, "fail");
   assert.match(config.message, /bad-roles/);
@@ -743,4 +744,100 @@ test("with the sandbox required, the check says whether reads are limited to the
   const broken = repoCopy();
   put(join(broken, ".cursor", "sandbox.json"), "{ not json");
   assert.match(checkOf(reportOf(doctor(broken, { home: sandboxedHome(), bins })), "sandbox").message, /readBoundary.*not "workspace"/, "a sandbox.json that does not parse limits nothing");
+});
+
+// ---- the installed kit (issue #64) ----
+
+let kitOrigin: string | undefined;
+/** A kit repository with one release, `v0.3.0`: the stand-in for GitHub that every tag install and working copy below is cloned from. */
+const kitRepository = (): string => (kitOrigin ??= makeOrigin(join(sandbox, "kit-origin"), "0.3.0"));
+
+/**
+ * A user's home with a tag install: `.cursor-workflows/kit` is a clone of the kit at `v0.3.0`, as the installer leaves it.
+ * Its dependencies are not installed: these tests read the `kit` check, and the others may fail for want of them.
+ */
+function homeWithTagInstall(): { userHome: string; kit: string } {
+  const userHome = join(sandbox, `home-${++counter}`);
+  mkdirSync(join(userHome, ".cursor-workflows"), { recursive: true });
+  const kit = join(userHome, ".cursor-workflows", "kit");
+  gitIn(sandbox, "clone", "--quiet", "--branch", "v0.3.0", kitRepository(), kit);
+  return { userHome, kit };
+}
+
+const kitCheck = (userHome: string) => checkOf(reportOf(doctor(repoCopy(), { home: userHome })), "kit");
+
+test("the kit check passes for a tag install whose HEAD is the tag of its package version and whose tree is clean", () => {
+  const { userHome, kit } = homeWithTagInstall();
+  const check = kitCheck(userHome);
+  assert.equal(check.status, "pass", check.message);
+  assert.ok(check.message.includes(kit) && check.message.includes("v0.3.0"), check.message);
+  assert.equal(check.hint, undefined);
+});
+
+for (const { what, listed, plant } of KIT_TAMPERING) {
+  test(`the kit check fails for a tag install with ${what}: it lists the change and says to reinstall`, () => {
+    const { userHome, kit } = homeWithTagInstall();
+    plant(kit);
+    const check = kitCheck(userHome);
+    assert.equal(check.status, "fail", check.message);
+    assert.ok(check.message.includes(`the kit at ${kit} has local changes: ${listed}`), check.message);
+    assert.match(check.hint ?? "", /Reinstall the kit/);
+  });
+}
+
+test("the kit check fails when HEAD of a tag install is not exactly the tag of its package version, with a clean tree", () => {
+  const { userHome, kit } = homeWithTagInstall();
+  gitIn(kit, "commit", "--quiet", "--allow-empty", "-m", "a commit after the release");
+  const untagged = kitCheck(userHome);
+  assert.equal(untagged.status, "fail", untagged.message);
+  assert.ok(untagged.message.includes(`HEAD of the kit at ${kit} is not tagged, and the tag of its package version is v0.3.0`), untagged.message);
+  assert.doesNotMatch(untagged.message, /local changes/);
+  assert.match(untagged.hint ?? "", /Reinstall the kit/);
+
+  // Another release tag is not the tag of this kit's package version either.
+  gitIn(kit, "tag", "v0.3.1");
+  const otherTag = kitCheck(userHome);
+  assert.equal(otherTag.status, "fail", otherTag.message);
+  assert.ok(otherTag.message.includes("is tagged v0.3.1, and the tag of its package version is v0.3.0"), otherTag.message);
+});
+
+test("the kit check lists both problems of a kit that is on the wrong commit and has local changes", () => {
+  const { userHome, kit } = homeWithTagInstall();
+  gitIn(kit, "commit", "--quiet", "--allow-empty", "-m", "a commit after the release");
+  KIT_TAMPERING[1]!.plant(kit);
+  const check = kitCheck(userHome);
+  assert.equal(check.status, "fail");
+  assert.match(check.message, /local changes: \?\? \.npmrc/);
+  assert.match(check.message, /is not tagged/);
+});
+
+test("the kit check reports a development install and does not check it, not even a working copy with local changes", () => {
+  // The default home links this checkout at the kit location, as `install.sh --dev` does.
+  const linked = kitCheck(home);
+  assert.equal(linked.status, "pass", linked.message);
+  assert.match(linked.message, /development install/);
+  assert.ok(linked.message.includes(KIT_ROOT), linked.message);
+
+  const copy = join(sandbox, `working-copy-${++counter}`);
+  gitIn(sandbox, "clone", "--quiet", kitRepository(), copy);
+  KIT_TAMPERING[1]!.plant(copy);
+  gitIn(copy, "commit", "--quiet", "--allow-empty", "-m", "work in progress");
+  const dirty = kitCheck(homeWithKit(copy));
+  assert.equal(dirty.status, "pass", dirty.message);
+  assert.match(dirty.message, /development install/);
+});
+
+test("the kit check has nothing to check when no kit is installed in the home, and fails for a kit folder that is not a clone", () => {
+  const empty = join(sandbox, `home-${++counter}`);
+  mkdirSync(join(empty, ".cursor-workflows"), { recursive: true });
+  const none = kitCheck(empty);
+  assert.equal(none.status, "pass", none.message);
+  assert.match(none.message, /no kit is installed/);
+
+  const copied = join(sandbox, `home-${++counter}`);
+  mkdirSync(join(copied, ".cursor-workflows", "kit"), { recursive: true });
+  const notAClone = kitCheck(copied);
+  assert.equal(notAClone.status, "fail", notAClone.message);
+  assert.match(notAClone.message, /not a git clone/);
+  assert.match(notAClone.hint ?? "", /Reinstall the kit/);
 });

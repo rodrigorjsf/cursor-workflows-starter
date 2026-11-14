@@ -66,13 +66,27 @@ warn() {
   echo "warning: $*" >&2
 }
 
+# Dies unless the clone at $1 has a clean tree. `git checkout` keeps a tracked file that the old and the new tag share, and every
+# untracked file, and `npm ci` then reads an .npmrc planted in the clone: a step that can write to the kit could make the
+# install run its code, so a kit with local changes is reinstalled, not moved. Mirrors `kitChanges` in
+# packages/runtime/src/kit-state.ts: the changes are listed as `git status --porcelain` prints them, ignored files (a planted
+# .npmrc can sit in .git/info/exclude) included, and the kit's own node_modules/ is the one ignored thing left out.
+require_clean_kit() {
+  local kit="$1" status changes
+  status="$(git -C "$kit" status --porcelain --untracked-files=all --ignored=matching)" || die "could not read the state of the kit at $kit; reinstall it"
+  changes="$(printf '%s\n' "$status" | grep -v -E '^!! (.*/)?node_modules/$' || true)"
+  [ -z "$changes" ] ||
+    die "the kit at $kit has local changes: $(printf '%s\n' "$changes" | awk 'NR > 1 { printf ", " } { sub(/^ +/, ""); printf "%s", $0 }'); reinstall it"
+}
+
 # Puts the kit at $kit on the tag: clones it, or moves an existing clone to the tag. A kit location that is a link is a dev
-# install: it points at somebody's working copy, which this script must not check out. An existing clone fetches from
-# its own origin; a --repo given on the command line replaces that origin first.
+# install: it points at somebody's working copy, which this script must not check out. An existing clone must have no local
+# changes, and fetches from its own origin; a --repo given on the command line replaces that origin first.
 fetch_kit() {
   local kit="$1" tag="$2" repo="$3" repo_given="$4"
   [ ! -L "$kit" ] || die "$kit is a development install (it points to $(readlink "$kit")); remove the link to install a tag"
   if [ -d "$kit/.git" ]; then
+    require_clean_kit "$kit"
     [ -z "$repo_given" ] || git -C "$kit" remote set-url origin "$repo"
     git -C "$kit" fetch --quiet --tags --force || die "could not fetch the tags of $(git -C "$kit" remote get-url origin)"
     git -C "$kit" -c advice.detachedHead=false checkout --quiet "$tag" || die "tag $tag does not exist in $kit"

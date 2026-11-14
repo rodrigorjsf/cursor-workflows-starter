@@ -37,6 +37,18 @@ falhas de segurança.
     mesmo com o `bwrap` fora do PATH, mas o `wf doctor` falha, nomeando o `bubblewrap`, quando o `bwrap` não está no PATH, porque
     não testa o Landlock. Uma etapa que baixa pacotes falha até você listar os hosts em `.cursor/sandbox.json`.
   - **Não medido:** macOS e Windows, e o `implement-issue` inteiro com o sandbox ligado (a sonda é uma etapa que escreve; veja [#99](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/99)).
+- **O kit instalado fica numa pasta que uma etapa sem sandbox pode editar.** O `~/.cursor-workflows/kit` tem o motor que aplica
+  os tetos, a redação e as allowlists, e é o mesmo código em todo repositório. O `git checkout` de uma tag nova mantém um arquivo
+  rastreado editado que as duas tags compartilham, e todo arquivo não rastreado (reproduzido num repositório de teste: saiu com 0),
+  e o `npm ci` do instalador lê um `.npmrc` que esteja na pasta. Por isso o `wf upgrade` e o instalador recusam um kit com mudanças
+  locais, antes de mover o que for (`the kit at <kit> has local changes: <lista>; reinstall it`), e o `wf doctor` tem a verificação
+  `kit`: numa instalação por tag, o HEAD tem de estar exatamente na tag da versão do pacote e a árvore tem de estar limpa. Uma
+  instalação de desenvolvimento (um link) é informada, não conferida. O que fazer: [reinstalar o kit](docs/usage/01-instalacao.md#reinstalar-o-kit).
+  - **Limite:** a verificação vê o que o git vê, e os arquivos que o `.gitignore` ou o `.git/info/exclude` escondem também
+    contam (medido: um `.npmrc` listado no `.git/info/exclude` some do `git status`, e aparece com `--ignored=matching`). Ela não vê
+    o que está em `.git/` (hooks, configuração do clone) nem no `node_modules/`, que o `npm ci` refaz. Quem pode escrever no kit
+    controla o código que ele roda até a próxima reinstalação: o sandbox das etapas é a proteção, e a verificação é como você fica
+    sabendo.
 - **Com `settingSources` contendo `"project"` (o default), o repositório alvo roda código na sua máquina:** hooks de
   `.cursor/hooks.json` e de `.claude/settings.json` e servidores MCP de `.cursor/mcp.json`. Não use o default em
   repositórios em que você não confia.

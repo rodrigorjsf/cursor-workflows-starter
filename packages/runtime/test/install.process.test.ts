@@ -8,7 +8,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
-import { git, makeOrigin, release } from "./kit-origin.js";
+import { KIT_TAMPERING, git, makeOrigin, release } from "./kit-origin.js";
 
 const KIT_ROOT = join(import.meta.dirname, "..", "..", "..");
 const NODE_DIR = dirname(process.execPath);
@@ -26,8 +26,10 @@ before(() => {
   npmLog = join(sandbox, "npm.log");
   npmBin = join(sandbox, "npm-bin");
   mkdirSync(npmBin);
-  // `npm ci` empties node_modules first; `npm install` keeps it. Both end with the checkout's own node_modules linked in.
-  writeFileSync(join(npmBin, "npm"), `#!/bin/sh\necho "$PWD $*" >> "$NPM_LOG"\nrm -rf node_modules\nln -s "${join(KIT_ROOT, "node_modules")}" node_modules\n`);
+  // `npm ci` empties node_modules first; `npm install` keeps it. Both end with a real node_modules folder (the kit's .gitignore
+  // ignores a folder, not a link) whose entries are links to this checkout's own packages.
+  const packages = join(KIT_ROOT, "node_modules");
+  writeFileSync(join(npmBin, "npm"), `#!/bin/sh\necho "$PWD $*" >> "$NPM_LOG"\nrm -rf node_modules\nmkdir node_modules\nln -s "${packages}"/* "${packages}/.bin" node_modules/\n`);
   chmodSync(join(npmBin, "npm"), 0o755);
 });
 after(() => rmSync(sandbox, { recursive: true, force: true }));
@@ -59,6 +61,9 @@ function install(home: string, args: string[], { from = origin, ...extra }: { fr
 const kitOf = (home: string) => join(home, ".cursor-workflows", "kit");
 const shimOf = (home: string) => join(home, ".local", "bin", "wf");
 const npmCalls = () => (existsSync(npmLog) ? readFileSync(npmLog, "utf8").trim().split("\n").filter(Boolean) : []);
+
+/** Two changes that do not hide each other, for the tests that list every change. */
+const TWO_CHANGES = KIT_TAMPERING.slice(0, 2);
 
 test("the installer clones the kit at the tag, installs its dependencies and writes a wf shim that runs the kit", () => {
   const home = newHome();
@@ -142,7 +147,7 @@ test("running the installer again at the same tag changes nothing and still succ
   assert.equal(again.status, 0, again.stderr);
   assert.equal(readFileSync(shimOf(home), "utf8"), shim);
   assert.equal(git(kitOf(home), "describe", "--tags", "--exact-match"), "v0.3.0");
-  assert.equal(git(kitOf(home), "status", "--porcelain", "--untracked-files=no"), "");
+  assert.equal(git(kitOf(home), "status", "--porcelain", "--untracked-files=all"), "", "an installed kit, node_modules included, has a clean tree: that is what the upgrade and the doctor rely on");
   for (const name of skillNames(join(kitOf(home), "skills"))) assert.equal(readlinkSync(join(home, ".claude", "skills", name)), join(kitOf(home), "skills", name));
 });
 
@@ -347,6 +352,37 @@ test("a Node older than the kit's engines.node stops the installer before it ins
   assert.ok(!existsSync(shimOf(home)) && !existsSync(join(home, ".claude")) && !existsSync(globalConfigOf(home)));
 });
 
+for (const { what, file, listed, plant } of KIT_TAMPERING) {
+  test(`the installer refuses an existing clone with ${what} before it moves it to another tag: it names the change and leaves the kit as it was`, () => {
+    const dir = originWithReleases();
+    const home = newHome();
+    assert.equal(install(home, ["--tag", "v0.3.0", "--repo", dir], { from: dir }).status, 0);
+    const kit = kitOf(home);
+    const head = git(kit, "rev-parse", "HEAD");
+    plant(kit);
+    const before = npmCalls().length;
+
+    const r = install(home, ["--tag", "v0.4.0"], { from: dir });
+    assert.equal(r.status, 1);
+    assert.ok(r.stderr.includes(`error: the kit at ${kit} has local changes: ${listed}; reinstall it`), r.stderr);
+    assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.3.0");
+    assert.equal(git(kit, "rev-parse", "HEAD"), head);
+    assert.deepEqual(npmCalls().slice(before), [], "npm ci reads an .npmrc of the kit: no installer step may run in it");
+    assert.ok(existsSync(join(kit, file)), "the change is left for the user to look at");
+  });
+}
+
+test("the installer lists every change of the clone, also when it is asked for the tag the clone is on", () => {
+  const home = newHome();
+  assert.equal(install(home, ["--tag", "v0.3.0", "--repo", origin]).status, 0);
+  const kit = kitOf(home);
+  for (const { plant } of TWO_CHANGES) plant(kit);
+
+  const r = install(home, ["--tag", "v0.3.0", "--repo", origin]);
+  assert.equal(r.status, 1);
+  assert.ok(r.stderr.includes(`the kit at ${kit} has local changes: ${TWO_CHANGES.map((k) => k.listed).join(", ")}; reinstall it`), r.stderr);
+});
+
 // ---- wf upgrade ----
 
 /** An origin of its own (the shared one must stay at v0.3.0) with a skill added, a skill dropped and a pre-release after it. */
@@ -455,8 +491,8 @@ test("wf upgrade whose checkout fails says which tag it could not move to and le
   const home = newHome();
   assert.equal(install(home, ["--tag", "v0.3.0", "--repo", dir], { from: dir }).status, 0);
   const kit = kitOf(home);
-  // A local edit to a file that v0.4.0 changes: git will not overwrite it.
-  writeFileSync(join(kit, "package.json"), `${readFileSync(join(kit, "package.json"), "utf8")}\n`);
+  // A leftover lock in the clone: the tree is clean, so the upgrade goes ahead, and git cannot take the lock to move HEAD.
+  writeFileSync(join(kit, ".git", "index.lock"), "");
   const before = npmCalls().length;
 
   const r = upgrade(home);
@@ -464,4 +500,38 @@ test("wf upgrade whose checkout fails says which tag it could not move to and le
   assert.match(r.stderr, /could not move the kit to v0\.4\.0/);
   assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.3.0");
   assert.deepEqual(npmCalls().slice(before), []);
+});
+
+for (const { what, file, listed, plant } of KIT_TAMPERING) {
+  test(`wf upgrade refuses a kit with ${what}: it names the change, runs no installer and leaves the kit on its tag`, () => {
+    const dir = originWithReleases();
+    const home = newHome();
+    assert.equal(install(home, ["--tag", "v0.3.0", "--repo", dir], { from: dir }).status, 0);
+    const kit = kitOf(home);
+    const head = git(kit, "rev-parse", "HEAD");
+    plant(kit);
+    const before = npmCalls().length;
+
+    const r = upgrade(home);
+    assert.equal(r.status, 1);
+    assert.ok(r.stderr.includes(`the kit at ${kit} has local changes: ${listed}; reinstall it`), r.stderr);
+    assert.equal(r.stdout, "");
+    assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.3.0");
+    assert.equal(git(kit, "rev-parse", "HEAD"), head);
+    assert.deepEqual(npmCalls().slice(before), [], "npm ci reads an .npmrc of the kit: no installer may run in it");
+    assert.ok(existsSync(join(kit, file)), "the change is left for the user to look at");
+  });
+}
+
+test("wf upgrade lists every change of the kit, and refuses even when the kit is already at the newest tag", () => {
+  const dir = originWithReleases();
+  const home = newHome();
+  assert.equal(install(home, ["--tag", "v0.4.0", "--repo", dir], { from: dir }).status, 0);
+  const kit = kitOf(home);
+  for (const { plant } of TWO_CHANGES) plant(kit);
+
+  const r = upgrade(home);
+  assert.equal(r.status, 1);
+  assert.ok(r.stderr.includes(`the kit at ${kit} has local changes: ${TWO_CHANGES.map((k) => k.listed).join(", ")}; reinstall it`), r.stderr);
+  assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.4.0");
 });

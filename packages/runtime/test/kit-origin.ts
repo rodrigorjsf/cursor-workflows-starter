@@ -1,8 +1,8 @@
-// Shared by the install and upgrade process tests: a git repository laid out like the kit's own repo (the installer, the
+// Shared by the install, upgrade and doctor process tests: a git repository laid out like the kit's own repo (the installer, the
 // distributed skills, the templates, the runtime package) that stands in for GitHub. The installer clones it, `wf upgrade`
 // fetches its tags. Every release is a commit that sets the version of both package manifests, and a tag `v<version>`.
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 const KIT_ROOT = join(import.meta.dirname, "..", "..", "..");
@@ -10,6 +10,7 @@ const KIT_ROOT = join(import.meta.dirname, "..", "..", "..");
 /** What an installed kit needs, relative to the kit root. The docs, the tests and the handoffs stay out: they are not installed. */
 const KIT_PATHS = [
   ".gitattributes", // eol=lf: a clone made with core.autocrlf=true (this user's) must not turn the installer into CRLF
+  ".gitignore", // ignores node_modules/: an installed kit holds its dependencies and must still have a clean tree
   "package.json",
   "package-lock.json",
   "scripts/install.sh",
@@ -57,3 +58,33 @@ export function makeOrigin(dir: string, version: string): string {
   release(dir, version);
   return dir;
 }
+
+/**
+ * What an unsandboxed step can leave in the installed kit, and the line `git status --porcelain` shows for it. None is
+ * something `git checkout` of a newer tag removes or refuses: the research reproduced the first two surviving it with exit
+ * code 0. The tracked file is one that no release of the test origin changes. The third is the second made invisible to a
+ * `git status` that does not ask for ignored files: the step lists the file in `.git/info/exclude` of the clone.
+ */
+export const KIT_TAMPERING = [
+  {
+    what: "a modified tracked file",
+    file: "packages/runtime/src/runtime/engine.ts",
+    listed: "M packages/runtime/src/runtime/engine.ts",
+    plant: (kit: string) => appendFileSync(join(kit, "packages", "runtime", "src", "runtime", "engine.ts"), "\n// planted by a step\n"),
+  },
+  {
+    what: "an untracked .npmrc",
+    file: ".npmrc",
+    listed: "?? .npmrc",
+    plant: (kit: string) => writeFileSync(join(kit, ".npmrc"), "ignore-scripts=false\n"),
+  },
+  {
+    what: "an .npmrc that a step hid in .git/info/exclude",
+    file: "packages/runtime/.npmrc",
+    listed: "!! packages/runtime/.npmrc",
+    plant: (kit: string) => {
+      appendFileSync(join(kit, ".git", "info", "exclude"), "/packages/runtime/.npmrc\n");
+      writeFileSync(join(kit, "packages", "runtime", ".npmrc"), "ignore-scripts=false\n");
+    },
+  },
+];
