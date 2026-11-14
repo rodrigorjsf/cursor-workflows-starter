@@ -88,6 +88,8 @@ rodou: custo zero.
 
 > **Nota (2026-11-12, [#51](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/51)):** os prompts do `scripts/probe-sdk.ts` estão em inglês desde então. As linhas das §4 a §6 foram medidas com os prompts em pt-BR e ficam como foram medidas.
 
+> **Nota (2026-11-14, [#37](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/37)):** a linha "Granularidade dos eventos" veio de uma sonda curta (1 `send` que lê 4 arquivos). Um envio longo que escreve, medido em §15, também dá **1** `turn-ended`: o turno do SDK é o envio inteiro, e os tetos de tokens ao vivo só olham o uso quando ele termina. As linhas desta seção ficam como foram medidas.
+
 ## 7. Fase 2, Blocos 4 e 5: saída estruturada, contexto do projeto e guarda contra recursão
 
 **Ambiente:** Premium da The X Subscription · `@cursor/sdk@1.3.1` · `composer-2.5` · `settingSources`
@@ -386,6 +388,37 @@ Para a API real (`verify-cloud` e a conferência manual do ciclo de vida, descri
 | Uma etapa que escreve: o cloud agent commita e empurra para a branch de snapshot, mesmo com um prompt que manda não rodar git | uma etapa de escrita num papel `ok` na `sandbox-repo`; olhar `git log` depois e o aviso "made no commit" | ⏭ não executado | — | — |
 | O trabalho volta: o `git fetch` da branch de snapshot traz os commits do agente e o worktree avança sem aviso de não fast-forward | o mesmo run | ⏭ não executado | — | — |
 | `resultVia: "artifact"`: onde o agente grava o `result.json` e que caminho `listArtifacts` devolve | uma etapa de leitura com schema e `resultVia: "artifact"` | ⏭ não executado | — | — |
+
+## 15. Fase 8: o turno de uma etapa local longa e o `Run.cancel()` (2026-11-14)
+
+Os tetos de tokens ao vivo (`maxTokens` e `maxTokensPerStep`) olham o uso quando o SDK entrega um `turn-ended`
+([2.2 §3](../usage/02-configuracao-inicial.md#3-teto-de-custo)). A única medição era a sonda curta da §6 (1 `send` = 1
+`turn-ended`); o SDK falso emite os turnos que o teste manda, então só um run real diz se um envio longo também dá um só. A
+pergunta é do [#37](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/37).
+
+**Ambiente:** Premium da The X Subscription · `@cursor/sdk@1.3.1` · `composer-2.5` · `settingSources: []` · Linux x64 (WSL2). O
+workflow é o [`verify-turn-granularity`](../../scripts/verify/README.md): uma etapa local que escreve, pelo motor, e dois
+envios diretos pelo SDK, todos com o mesmo pedido (seis módulos com testes, um por vez, com `node --test` entre eles). Rodou
+duas vezes, cada uma num repositório novo, com `--max-tokens 400000 --max-cents 40`. O `getUsage()` de agente local deu
+`feature_unavailable` (como na §5), então o `step-end` conta os tokens pela soma dos eventos `turn`.
+
+| Item | Método | Resultado | Evidência | Ação tomada |
+|---|---|---|---|---|
+| `turn-ended` numa etapa longa do motor | etapa `long-write` (`ctx.agent`, 31 e 24 tool calls: edit, shell, read e glob); eventos `turn` do `events.jsonl` contra o `step-end` | ✅ **1** | run 1: 1 `turn`, `step-end` com `turns: 1` e `steps: 1`, 267.526 tokens (261.343 de entrada, 6.183 de saída) em 57,2 s; run 2: 1 `turn`, `turns: 1`, `steps: 1`, 133.969 tokens (129.594 e 4.375) em 51,9 s. Os tokens dos eventos `turn` e o `usage.totalTokens` do `step-end` são iguais, mas por construção (a soma dos `turn` é a fonte, pelo `feature_unavailable`) | Documentado: o teto só vê o uso quando o envio termina |
+| `turn-ended` num envio longo direto | `agent.send` com `onDelta`, contando cada update | ✅ **1** | run 1: 1 `turn-ended` e 1 `step-completed` para 21 `tool-call-started`, 14 `tool-requests-listed` e 15 `thinking-completed`; `RunResult.usage` 124.436 de entrada e 3.655 de saída (128.091 no total). Run 2: as mesmas contagens, 124.331 e 4.023 (128.354) | Idem |
+| `token-delta` × `RunResult.usage` | soma dos valores do mesmo envio | ❌ não soma ao uso | run 1: 149 `token-delta`, soma 5.596, que é 1,53 vezes o `outputTokens` e 4,4% do `totalTokens`; run 2: 166, soma 5.651, 1,41 vezes o `outputTokens`. O `RunResult.usage` não trouxe `reasoningTokens`. Nos 20 primeiros valores do run 1, quase todos são 1 ou 2, e um é 121 | Nenhum teto no meio do turno: o `token-delta` passa do `outputTokens` e, mesmo certo, cobriria só a saída, menos de 5% do total (a entrada, reenviada a cada chamada ao modelo, é o resto) |
+| O que mais sinaliza uso no meio do turno | contagem dos tipos de update do envio | ❌ nada | `step-completed` chegou uma vez, no fim, e `tool-requests-listed` não traz tokens | — |
+| `Run.cancel()` no meio do turno | segundo envio direto, cancelado na 3ª `tool-call-started` (a soma dos `token-delta` estava em 491 e 504, longe do teto de 3.000 que a sonda tinha como primeiro gatilho) | ✅ para | run 1: cancelado 5.040 ms depois do `send`, com 3 tool calls iniciadas e 2 concluídas e nenhum `turn-ended`; `cancel()` resolveu em 3 ms, `wait()` assentou 3 ms depois do cancelamento, `status: "cancelled"` e nenhum update chegou depois. Run 2: igual (5.525 ms, 3 ms e 3 ms) | O corte do run funciona no meio de um envio e é imediato: falta só um sinal de uso para decidir quando cortar |
+| Uso de um run cancelado no meio | `RunResult.usage` dos dois envios cancelados | ◐ ausente | `RunResult.usage` não veio (e nenhum `turn-ended` chegou) nos dois: os tokens gastos até o corte não aparecem em lugar nenhum, também sem o `getUsage()` | Documentado: um corte no meio do envio seria cego ao próprio uso |
+| Custo | `spentCents`, `chargedCents`, `spentTokens` e a tabela `pricing` | ◐ | `spentCents: 0` e `chargedCents: 0` nos dois (uso incluído no plano). Pelo preço de lista da tabela `pricing`, o run 1 custaria cerca de 11 centavos (7,5 da etapa do motor e 3,8 do envio direto longo, fora o cancelado) e o run 2 cerca de 8,5 | Dentro do orçamento de 100 centavos que a medição dividia com a sonda do sandbox |
+
+**Decisão (regra do #37):** nenhum envio longo deu mais de um `turn-ended`, e o `token-delta` não soma ao uso: vale a regra 3.
+Os tetos de tokens ao vivo agem **entre envios**, não dentro de um: uma etapa que escreve de 130 mil a 270 mil tokens num
+envio só é vista pelo teto quando o envio termina, e o freio de dentro dele é o `timeoutMs` da tentativa. O que o teto faz
+depois que o envio termina continua valendo: o teto do run corta os envios das outras etapas ativas (o `Run.cancel()` mede 3 ms
+no meio do turno). Os textos do teto (2.2 §3, 3.1, 4.1, 5.1, 6.2 e as skills) passam a dizer "limitado por um envio".
+
+Esta medição é de etapas **locais**. Num run da nuvem, o `onDelta` e o `turn-ended` seguem sem medida (§14).
 
 ---
 

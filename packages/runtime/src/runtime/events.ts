@@ -315,7 +315,7 @@ export interface StepStartEvent extends EventBase, StepRef {
   promptChars: number;
 }
 
-/** Um turno do agente terminou (pode ter vários passos/chamadas ao modelo). */
+/** Um turno do agente terminou. No SDK real o turno é o envio inteiro: um envio longo, com dezenas de tool calls, dá um só (medido em 2026-11-14, #37). */
 export interface TurnEvent extends EventBase, StepRef {
   type: "turn";
   /** A tentativa a que o turno pertence (o `attemptId` do `step-start`). */
