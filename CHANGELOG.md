@@ -49,6 +49,20 @@
   `must NOT have additional properties`; agora a mensagem termina com o nome do campo
   (`must NOT have additional properties: isue`), no `wf run`, no `start_workflow` e no dashboard.
 
+- **O servidor MCP usa o `McpServer` do SDK, com uma chamada `registerTool` por tool.** Antes ele montava o `Server` de baixo
+  nível, que o SDK marcou como obsoleto, com os JSON Schemas escritos à mão e um `switch` no nome da tool. As cinco tools
+  (`list_workflows`, `start_workflow`, `wait_workflow`, `get_workflow_status`, `cancel_workflow`) listam os mesmos nomes,
+  descrições e schemas, e o SDK valida os argumentos antes do handler. O que o SDK acha antes do handler volta com
+  `isError: true` e o texto do próprio SDK, que não é JSON: uma chamada que quebra o schema (falta `name` ou `jobId`, ou um
+  deles não é texto), com `MCP error -32602: Input validation error: ...` e o nome da propriedade, e uma chamada a uma tool
+  que não existe, com `MCP error -32602: Tool <nome> not found` (antes, `{ "error": "unknown tool: <nome>" }`). As falhas dos
+  handlers seguem `{ "error": "..." }`. A única recusa nova é essa: um `name` ou `jobId` ausente ou que não é texto (antes
+  virava `unknown workflow: 7` ou `job not found`). `args`, `resumeRunId`, `overrides` e `timeoutSec` aceitam o que
+  aceitavam, e os handlers os conferem. Um erro lançado dentro de um handler volta como `isError` (antes era um erro
+  JSON-RPC). O servidor sem tools que substitui o `workflows` dentro das etapas também usa o `McpServer`. A faixa do
+  `@modelcontextprotocol/sdk` subiu para `^1.32.2`, a versão cujo `McpServer` sem tool registrada já lista zero tools; o
+  `zod`, que o servidor importa agora, já era dependência do runtime. Veja [2.3 §1](docs/usage/03-invocacao-no-cursor-ide.md#1-mcp-server-principal).
+
 - **Os tetos de tokens ao vivo agem entre envios, não dentro de um: é o limite medido.** Uma etapa local que escreve, com 31
   tool calls, deu **1** `turn-ended`, no fim, depois de 267.526 tokens, e o `token-delta` do SDK não soma ao uso (passa do
   `outputTokens` e cobre menos de 5% do total), então nenhum sinal de uso chega no meio do envio. O motor não ganhou
