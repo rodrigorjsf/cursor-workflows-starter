@@ -767,7 +767,7 @@ test("the exemplar check fires on a missing file, a dangling anchor and a line n
 test("every exemplar CODING_STANDARDS.md cites is a file that exists, with an anchor it still declares", () => {
   const md = read("CODING_STANDARDS.md");
   const { cited } = citations(md);
-  assert.ok(cited.length >= 138, `found ${cited.length} citations`);
+  assert.ok(cited.length >= 141, `found ${cited.length} citations`);
   const readFile = (path: string) => (existsSync(join(ROOT, path)) ? read(path) : undefined);
   assert.deepEqual(brokenCitations(md, readFile), [], "an exemplar was renamed, moved or deleted: cite a symbol or heading that still shows the rule");
 });
