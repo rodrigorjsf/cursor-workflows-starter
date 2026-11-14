@@ -15,7 +15,7 @@ import type { LimitOverrides } from "../config/index.js";
 import { cancelLeftCloudAgents, leftAgentsNote } from "./cloud-cancel.js";
 import type { RunStatus } from "./events.js";
 import { type ExecutionState, type Ledger, projectExecution, replayLedger, resumeHint, withRatio } from "./projection.js";
-import { killGroups, recordedExecGroups } from "./job-children.js";
+import { groupsLeftBy, killGroups } from "./job-children.js";
 import { commandLineHas, isAlive } from "./pid.js";
 import { eventLogPath, readEventLog, runLockHolder } from "./run-store.js";
 import { isPlainName, stateDir } from "./state.js";
@@ -302,7 +302,7 @@ export async function cancelJob(cwd: string, jobId: string, timeoutMs: number): 
   }
   const signal = liveness === "silent" ? "SIGKILL" : "SIGTERM";
   // A killed process cannot stop the commands it started: its exit hook does not run. They are found before the kill.
-  const stray = signal === "SIGKILL" ? recordedExecGroups(jobsDirIn(cwd), record.jobId) : [];
+  const stray = signal === "SIGKILL" ? groupsLeftBy(jobsDirIn(cwd), record.jobId, record.pid) : [];
   try {
     process.kill(record.pid, signal);
   } catch (err) {

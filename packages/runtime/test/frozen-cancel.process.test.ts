@@ -95,3 +95,13 @@ test("cancelling a frozen job kills a command the process spawned itself in its 
   await waitFor("the sleep started by ctx.exec to be gone", () => !running(job.exec));
   await waitFor("the detached sleep to be gone", () => !running(job.detached!));
 });
+
+test("cancelling a frozen job leaves alone a process in a group of its own that is not the job's child", async () => {
+  const bystander = spawn("sleep", ["600"], { detached: true, stdio: "ignore" }); // a child of this test, leading its own group
+  bystander.unref();
+  sleepers.add(bystander.pid!);
+  const job = await startJob("frozen-bystander", "detached");
+  await freezeAndCancel(job, "frozen-bystander");
+  await waitFor("the job's own sleeps to be gone", () => !running(job.exec) && !running(job.detached!));
+  assert.ok(running(bystander.pid!), "the bystander's sleep still runs");
+});

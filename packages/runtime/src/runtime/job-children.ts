@@ -7,8 +7,12 @@
 // rewrites the record from a snapshot, and a record field needs an ADR): it is the job process's own transient state, like its
 // log file.
 //
+// The Cursor SDK's local agent is not a child process: it runs inside the job's process, so the kill ends it. The shell commands
+// its tools run are children, spawned detached in a group of their own, and the process cannot record them; the cancel finds them
+// in the process table instead (`groupsLeftBy`). Where there is no /proc, only the recorded commands are found.
+//
 // No engine and no SDK here: the dashboard cancels through job-state.ts, which imports this.
-import { readdirSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isPlainName } from "./state.js";
 
@@ -48,6 +52,41 @@ export function recordedExecGroups(jobsDir: string, jobId: string): number[] {
   }
   const prefix = `${jobId}${GROUP_INFIX}`;
   return names.filter((name) => name.startsWith(prefix)).map((name) => Number(name.slice(prefix.length))).filter(isGroupId);
+}
+
+/**
+ * The direct children of process `pid` that lead a process group of their own: what a process spawns detached. Empty where
+ * /proc is not there.
+ */
+function detachedChildGroups(pid: number): number[] {
+  let entries: string[];
+  try {
+    entries = readdirSync("/proc");
+  } catch {
+    return [];
+  }
+  const groups: number[] = [];
+  for (const entry of entries) {
+    if (!/^\d+$/.test(entry)) continue;
+    let stat: string;
+    try {
+      stat = readFileSync(`/proc/${entry}/stat`, "utf8");
+    } catch {
+      continue; // it ended since the listing
+    }
+    // `<pid> (<command>) <state> <ppid> <pgrp> ...`: the command may hold spaces and parentheses, so read after the last `)`.
+    const [, ppid, pgrp] = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    if (Number(ppid) === pid && Number(pgrp) === Number(entry) && isGroupId(Number(entry))) groups.push(Number(entry));
+  }
+  return groups;
+}
+
+/**
+ * The process groups that outlive job `jobId`, whose process is `pid`, when that process is killed: the commands it recorded
+ * and its detached children. Read before the kill: a child that loses its parent is no longer found by it.
+ */
+export function groupsLeftBy(jobsDir: string, jobId: string, pid: number): number[] {
+  return [...new Set([...recordedExecGroups(jobsDir, jobId), ...detachedChildGroups(pid)])];
 }
 
 /** Sends SIGKILL to each process group. A group that is already gone is not an error. */
