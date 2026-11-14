@@ -83,7 +83,7 @@ Valida os dois arquivos de configuração do kit: o global (`~/.cursor-workflows
 | Campo | Tipo | Obrigatório | Descrição |
 | --- | --- | --- | --- |
 | `$schema` | `string` | não | Endereço deste esquema: dá autocompletar e validação no editor. |
-| `kit` | `string` | não | Faixa semver do kit que este repositório aceita (por exemplo `>=0.3.0 <0.4.0`). Só vale no arquivo do repositório: um kit fora da faixa é recusado. |
+| `kit` | `string` | não | Faixa semver do kit que este repositório aceita (por exemplo `>=0.4.0 <0.5.0`). Só vale no arquivo do repositório: um kit fora da faixa é recusado. |
 | `caps` | [Tetos globais (caps)](#tetos-globais-caps) | não | Tetos rígidos. Só valem no arquivo global: o arquivo do repositório e o chat só podem apertá-los, nunca afrouxar. Um `caps` no arquivo do repositório é registrado como violação e não tem efeito. |
 | `cloud` | [Etapas na nuvem](#etapas-na-nuvem) | não | Preferências das etapas na nuvem (`location: "cloud"`). Valem nos dois arquivos; o do repositório vale mais. |
 | `forges` | `objeto: nome → "github" \| "gitlab"` | não | Qual forge (o serviço que hospeda o repositório, as issues e os PRs) é cada host que o kit não conhece: `{ "git.example.com": "gitlab" }`. O kit conhece `github.com` (GitHub, CLI `gh`) e `gitlab.com` (GitLab, CLI `glab`); o `origin` de um repositório em qualquer outro host, ou um argumento `repo` que o nomeia, precisa estar aqui, senão o run falha antes de qualquer etapa, com o host e esta chave no erro. A chave é o host em minúsculas, com a porta quando a URL dela tem uma (`git.example.com:8443`); sem porta, vale para o host em qualquer porta. Valem os dois arquivos, host a host: o do repositório vale mais, e os hosts que só um deles nomeia seguem valendo. É uma preferência, não um teto, e não há variável de ambiente nem flag para ela. Repetir `github.com` ou `gitlab.com` com o forge que o kit já conhece é aceito; com o outro, é erro. |
@@ -188,7 +188,7 @@ Os campos abaixo são os ajustes do `implement-issue`, validados pelo esquema. U
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.3.0/packages/runtime/schema/config.schema.json",
+  "$schema": "https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/packages/runtime/schema/config.schema.json",
   "caps": {
     "maxTokens": 3000000,
     "maxTokensPerStep": 600000,
@@ -213,7 +213,7 @@ Os campos abaixo são os ajustes do `implement-issue`, validados pelo esquema. U
 
 ```json
 {
-  "kit": ">=0.3.0 <0.4.0",
+  "kit": ">=0.4.0 <0.5.0",
   "workflows": {
     "implement-issue": {
       "maxCents": 300,

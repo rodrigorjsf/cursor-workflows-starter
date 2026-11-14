@@ -1,7 +1,7 @@
 # Install Cursor Workflows (guide for coding agents)
 
 You are a coding agent installing the Cursor Workflows kit for your user, then setting up the repo you are in. This
-guide is pinned to release `v0.3.0` and needs no other document. Run the steps in order. Each step ends on a stated
+guide is pinned to release `v0.4.0` and needs no other document. Run the steps in order. Each step ends on a stated
 result: when you cannot reach it, stop and tell the user what failed, with the command output.
 
 The kit runs deterministic workflows on the Cursor SDK from the Cursor IDE chat (MCP), Claude Code or a terminal. The
@@ -24,13 +24,13 @@ Stop until they have.
 ## 2. Install the kit, once per machine
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.3.0/scripts/install.sh -o /tmp/wf-install.sh
-bash /tmp/wf-install.sh --tag v0.3.0
+curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/scripts/install.sh -o /tmp/wf-install.sh
+bash /tmp/wf-install.sh --tag v0.4.0
 ```
 
 The installer:
 
-- clones the kit at tag `v0.3.0` into `~/.cursor-workflows/kit` and installs its dependencies;
+- clones the kit at tag `v0.4.0` into `~/.cursor-workflows/kit` and installs its dependencies;
 - writes the `wf` command to `~/.local/bin/wf`;
 - links the kit's skills (`run-workflow`, `cursor-workflow-authoring`, `skill-to-workflow`, `cursor-workflows-setup`)
   into `~/.claude/skills/`, which Cursor and Claude Code both read;

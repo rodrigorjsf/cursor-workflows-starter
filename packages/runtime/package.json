@@ -1,6 +1,6 @@
 {
   "name": "@cursor-workflows/runtime",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "The kit's runtime: workflow engine, CLI, MCP server, built-in workflows and run metrics on the Cursor SDK.",
   "license": "MIT",

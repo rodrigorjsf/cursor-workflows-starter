@@ -5,7 +5,7 @@
 Workflows de agentes **determinísticos** sobre o [Cursor SDK](https://cursor.com/docs/sdk/typescript) (`@cursor/sdk`),
 chamados do chat do Cursor IDE (via MCP), do terminal e de CI (via CLI).
 
-> **Status: pré-release 0.3.0.** Verificado contra a API real num único ambiente (plano Premium, `@cursor/sdk@1.3.1`,
+> **Status: pré-release 0.4.0.** Verificado contra a API real num único ambiente (plano Premium, `@cursor/sdk@1.3.1`,
 > Linux x64 em WSL2). O Cursor IDE ainda não foi testado. Os agentes das etapas executam tools sem pedir aprovação:
 > leia [SECURITY.md](SECURITY.md) antes de usar. Evidência e pendências: [8.2 · Verificações locais](docs/research/verificacoes-locais.md).
 
@@ -42,8 +42,8 @@ configuração ([6.2](docs/reference/config.md)). Mais simples: peça a um agent
 [INSTALL-AGENT.md](INSTALL-AGENT.md). À mão:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.3.0/scripts/install.sh -o /tmp/wf-install.sh
-bash /tmp/wf-install.sh --tag v0.3.0   # o kit na tag, o comando wf e as skills globais
+curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/scripts/install.sh -o /tmp/wf-install.sh
+bash /tmp/wf-install.sh --tag v0.4.0   # o kit na tag, o comando wf e as skills globais
 wf login                               # login no navegador; o uso fica na SUA conta
 wf init                                # no seu repositório: grava os arquivos do kit, mostra o diff e não faz commit
 wf doctor                              # confere Node, login, modelos, o CLI do forge (gh ou glab), servidor MCP e configuração

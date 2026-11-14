@@ -216,6 +216,12 @@ test("the runtime package and the repo carry the same version", () => {
   assert.equal(version("packages", "dashboard"), version(), "the workspace packages are released together: bump them together");
 });
 
+test("the changelog has a dated section for the package version, so a bump never ships without its release notes", () => {
+  const version = (JSON.parse(read("package.json")) as { version: string }).version;
+  const heading = new RegExp(`^## ${version.replaceAll(".", "\\.")} \\([^)]+, \\d{4}-\\d{2}-\\d{2}\\)$`, "m");
+  assert.match(read("CHANGELOG.md"), heading, `CHANGELOG.md has no "## ${version} (pré-release, YYYY-MM-DD)" section: move "Não lançado" under it when the version is bumped`);
+});
+
 test("the dashboard is its own workspace package: its dependencies never enter the runtime, and it reaches the runtime through one entry point", () => {
   const manifest = (...p: string[]) => JSON.parse(read(...p, "package.json"));
   const runtime = manifest("packages", "runtime");

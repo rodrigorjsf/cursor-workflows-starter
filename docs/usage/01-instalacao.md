@@ -33,7 +33,7 @@ usa recebe depois os próprios arquivos, do `wf init` ([2.3](03-invocacao-no-cur
 ### Pelo agente (recomendado)
 
 Aponte qualquer agente de código para o guia, fixado numa tag:
-`https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.3.0/INSTALL-AGENT.md`. Ele checa a máquina,
+`https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/INSTALL-AGENT.md`. Ele checa a máquina,
 instala o kit, confere o login, roda o `wf init` no repositório atual e termina no `wf doctor`. O guia é público, está
 em inglês (texto escrito para agentes) e não depende de nenhum outro documento. A tag que ele traz é sempre a versão do
 pacote: o `npm test` reprova se os dois divergirem, então uma versão nova só sai com o guia apontando para ela.
@@ -41,8 +41,8 @@ pacote: o `npm test` reprova se os dois divergirem, então uma versão nova só 
 ### Pelo instalador
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.3.0/scripts/install.sh -o /tmp/wf-install.sh
-bash /tmp/wf-install.sh --tag v0.3.0
+curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/scripts/install.sh -o /tmp/wf-install.sh
+bash /tmp/wf-install.sh --tag v0.4.0
 ```
 
 Baixar o script para um arquivo, em vez de passá-lo direto ao `bash`, deixa você lê-lo antes de rodar. O instalador:

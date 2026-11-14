@@ -193,7 +193,7 @@ que a forma B precisa e imprime o diff do que mudou; não faz commit nem `git ad
 |---|---|
 | `.cursor/mcp.json` | O servidor `workflows` apontando para o kit em `${userHome}/.cursor-workflows/kit`, com `WF_CWD=${workspaceFolder}` e sem `WF_MAX_*` (os tetos ficam na configuração, [6.2](../reference/config.md)). Não tem caminho absoluto: o mesmo arquivo vale para o time inteiro |
 | `.mcp.json` | O mesmo servidor para o Claude Code, com `${HOME}` no lugar de `${userHome}` |
-| `.agents/workflows/config.json` | `$schema` (autocompletar no editor) e `kit`, a faixa de versão do kit que rodou o `init` (`>=0.3.0 <0.4.0` para o kit 0.3.x). O que o arquivo já tem fica, a faixa inclusive |
+| `.agents/workflows/config.json` | `$schema` (autocompletar no editor) e `kit`, a faixa de versão do kit que rodou o `init` (`>=0.4.0 <0.5.0` para o kit 0.4.x). O que o arquivo já tem fica, a faixa inclusive |
 | `.gitignore` | A linha `.workflows/`, a não ser que uma forma usual dela já esteja lá |
 | `AGENTS.md` | Um bloco de quatro linhas entre `<!-- cursor-workflows:begin -->` e `<!-- cursor-workflows:end -->`: as regras de segurança e o link do guia de instalação. O arquivo é criado se não existir. Como diz a tabela de onde cada harness procura, o Claude Code não lê o `AGENTS.md` quando há um `CLAUDE.md`, `.claude/CLAUDE.md` ou `CLAUDE.local.md` na raiz do repositório ou em qualquer pasta acima dela, a pasta pessoal inclusive: `~/CLAUDE.md` conta, `~/.claude/CLAUDE.md` (a memória do usuário) não ([memória do Claude Code](https://code.claude.com/docs/en/memory); K02 em [8.2](../research/verificacoes-locais.md)). Se algum desses arquivos existe e nenhum deles é o próprio `AGENTS.md` nem o importa, o `init` avisa no stderr a cada execução, também quando não tem nada a mudar (`wf init: Claude Code reads <arquivos>, not AGENTS.md: ...`) e não cria nem edita esses arquivos. O aviso traz a linha que funciona no arquivo a editar, porque o Claude Code resolve um `@caminho` a partir da pasta do arquivo que o contém e ignora os que estão em bloco ou trecho de código: `@AGENTS.md` num `CLAUDE.md` ou `CLAUDE.local.md` da raiz, `@../AGENTS.md` no `.claude/CLAUDE.md`. Quando o arquivo está só numa pasta acima do repositório, o aviso sugere criar na raiz um `CLAUDE.md` com `@AGENTS.md`, em vez de importar no arquivo de cima: ele vale também para os outros repositórios abaixo dele. Sem nenhum desses arquivos o Claude Code lê o `AGENTS.md`, e não há aviso |
 
@@ -230,7 +230,7 @@ mais do kit carrega nele: o relatório (em texto ou em `--json`) traz só a veri
 relatório passa pela mesma redação de segredos dos logs de run (`[REDACTED]`), inclusive o stderr do servidor.
 
 **A faixa de versão do kit.** O `kit` do `.agents/workflows/config.json` (o `wf init` escreve a do kit que o rodou, como
-`>=0.3.0 <0.4.0`) aceita qualquer faixa semver, como `^0.3.0`. O `wf doctor`, o `wf run`, o `wf start` e o
+`>=0.4.0 <0.5.0`) aceita qualquer faixa semver, como `^0.4.0`. O `wf doctor`, o `wf run`, o `wf start` e o
 `start_workflow` do MCP recusam um kit fora dela, antes de iniciar o que for, dizendo a versão do kit, a faixa e se o kit é mais
 antigo ou mais novo; um kit mais antigo que a faixa se atualiza com `wf upgrade` ([2.1 §3](01-instalacao.md#atualizar-wf-upgrade)). Os comandos que só leem (`wf list`, `wf config show`) continuam funcionando. Um repositório sem
 `kit` aceita qualquer versão.
