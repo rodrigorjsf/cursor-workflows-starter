@@ -470,12 +470,20 @@ textos (título e subtítulo em 200 caracteres, no máximo 8 links e 8 rótulos)
 O `implement-issue` põe o cartão no ar depois da triagem (`#<n> <título da issue>` e o tier) e o atualiza na entrega, com
 a branch e o link da PR.
 
-**Estado da PR.** Um link de cartão para uma pull request do GitHub (`https://github.com/<dono>/<repo>/pull/<n>`, exatamente
-esse formato) mostra se ela está `open`, `merged` ou `closed`. O servidor pergunta ao `gh pr view <url> --json state` (a
-sessão do `gh` é a do usuário) em segundo plano, no máximo quatro por vez, e **o quadro nunca espera por isso**: a primeira
-resposta traz o link sem o estado, e a seguinte, o estado. A resposta é guardada por 30 segundos enquanto a PR está
-aberta, 1 hora depois de mesclada ou fechada, e 5 minutos quando o `gh` não consegue responder (sem login, sem rede, sem
-`gh`); uma consulta que falha mantém o último estado conhecido. Só a URL exata de uma PR do github.com vai ao `gh`.
+**Estado da PR.** Um link de cartão para uma pull request do GitHub (`https://github.com/<dono>/<repo>/pull/<n>`) ou para
+um merge request do GitLab (`https://<host>/<grupo>/<projeto>/-/merge_requests/<n>`), exatamente nesse formato, mostra se
+ela está `open`, `merged` ou `closed` (um MR `locked`, que está sendo mesclado, aparece como `open`). O servidor pergunta
+pelo ponto de entrada `observe` do runtime, em segundo plano e no máximo quatro por vez, ao `gh pr view <url> --json state`
+ou ao `glab api --hostname <host>` do MR do projeto (nunca ao `glab mr view <url>`, que exige um checkout do GitLab na
+pasta atual); a sessão do `gh` e a do `glab` são as do usuário. **O quadro nunca espera por isso**: a primeira resposta
+traz o link sem o estado, e a seguinte, o estado. A resposta é guardada por 30 segundos enquanto a PR está aberta, 1 hora
+depois de mesclada ou fechada, e 5 minutos quando o CLI não consegue responder (sem login, sem rede, sem o CLI); uma
+consulta que falha mantém o último estado conhecido.
+
+Só a URL exata vai ao CLI, e só de um host permitido: `github.com` (`gh`), `gitlab.com` e os hosts do `config.yml` do
+`glab`, ou seja, os de quem fez `glab auth login --hostname <host>`. Desse arquivo o dashboard lê só os nomes dos hosts,
+nunca os tokens, e não o registra em lugar nenhum. Um link de outro host, com caminho a mais, `?query`, `#fragmento`,
+`http:` ou número malformado, e um link de issue ficam sem estado.
 
 ### Segurança do dashboard
 

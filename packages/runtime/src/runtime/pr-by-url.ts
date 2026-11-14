@@ -15,7 +15,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { knownForgeOf } from "../config/file.js";
-import { type PrState, prStateOfMr } from "../../workflows/implement-issue/forge.js";
+import { type PrState, prStateOfMr } from "./forge-pr-state.js";
 
 export type { PrState };
 
@@ -24,12 +24,14 @@ export type PrUrl = { forge: "github"; url: string } | { forge: "gitlab"; host: 
 
 /** A pull request of github.com, exactly: no query, no fragment, no path after the number. */
 const GITHUB_PR = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d{1,9}$/;
+/** A host name as an MR URL and glab's config spell it: lower case, a letter or a digit first (so it can never be taken for an option), a port when the instance has one. */
+const HOST = "[a-z0-9][a-z0-9.-]*(?::\\d{1,5})?";
 /**
  * A merge request, exactly: `https://<host>[:port]/<namespace path>/-/merge_requests/<n>`, the namespace path being a group (and
  * subgroups) and a project, each name starting with a letter, a digit or an underscore (as GitLab's own rule says). The host is
- * written in lower case, as it is on a GitHub URL, and starts with a letter or a digit, so it can never be taken for an option.
+ * written in lower case, as it is on a GitHub URL.
  */
-const GITLAB_MR = /^https:\/\/([a-z0-9][a-z0-9.-]*(?::\d{1,5})?)\/(\w[\w.-]*(?:\/\w[\w.-]*)+)\/-\/merge_requests\/(\d{1,9})$/;
+const GITLAB_MR = new RegExp(`^https://(${HOST})/(\\w[\\w.-]*(?:/\\w[\\w.-]*)+)/-/merge_requests/(\\d{1,9})$`);
 
 /** What `url` is, when it has exactly the shape of a PR or MR address; undefined for anything else. The host of an MR is not judged here. */
 export function parsePrUrl(url: string): PrUrl | undefined {
@@ -48,7 +50,15 @@ const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 /** The states `gh pr view --json state` prints. */
 const GITHUB_STATES: ReadonlySet<string> = new Set<PrState>(["OPEN", "MERGED", "CLOSED"]);
 
-/** Where glab keeps its config, in the order it looks (glab 1.130, `internal/config/config_file.go`): `GLAB_CONFIG_DIR` alone when set, else `~/.config`, else `XDG_CONFIG_HOME`. */
+// Why the hosts come from glab's config file and not from a glab command: the only command that lists them, `glab auth status --all`
+// (`--output json` in 1.130), also asks every host's API for the user with a 30 s timeout, host after host, so one host that is down
+// would hold back the badges of all the others, and it contacts every instance on each refresh. Reading the file asks no one.
+
+/**
+ * Where glab keeps its config, in the order it looks (glab 1.130, `internal/config/config_file.go`): `GLAB_CONFIG_DIR` alone when
+ * set, else `~/.config`, else `XDG_CONFIG_HOME`. The platform default of macOS (`~/Library/Application Support/glab-cli`) and of
+ * Windows is not read: the kit is tested on Linux only (`docs/usage/01-instalacao.md`); `GLAB_CONFIG_DIR` set for both glab and the dashboard covers them.
+ */
 function glabConfigFiles(): string[] {
   const dir = process.env.GLAB_CONFIG_DIR;
   if (dir) return [join(dir, "config.yml")];
@@ -56,8 +66,8 @@ function glabConfigFiles(): string[] {
   return [join(homedir(), ".config", "glab-cli", "config.yml"), ...(xdg ? [join(xdg, "glab-cli", "config.yml")] : [])];
 }
 
-/** A host name, as glab's config spells one: lower case, a letter or a digit first (never an option), and a port when the instance has one. */
-const HOST_NAME = /^[a-z0-9][a-z0-9.-]*(?::\d{1,5})?$/;
+/** A host name as glab's config spells one: the pattern the host of an MR URL has. */
+const HOST_NAME = new RegExp(`^${HOST}$`);
 /** A line of the config that is a bare key (`name:`, `"name":`, `'name':`), with a comment allowed after it: the key without its quotes. A line with a value is not one. */
 const BARE_KEY = /^(?:"([^"]+)"|'([^']+)'|([^\s:"'#][^\s]*?)):(?:\s+#.*|\s*)$/;
 
@@ -66,7 +76,7 @@ const BARE_KEY = /^(?:"([^"]+)"|'([^']+)'|([^\s:"'#][^\s]*?)):(?:\s+#.*|\s*)$/;
  * no YAML parser here (the kit has none to spare), and nothing else of the file is read: a host's settings, its token among them,
  * sit one level deeper, so they never match, and only a key that looks like a host name is kept.
  */
-export function glabHostsOf(config: string): string[] {
+function glabHostsOf(config: string): string[] {
   const hosts: string[] = [];
   let inHosts = false;
   let indent: number | undefined; // the indent of the keys one level below `hosts:`, set by the first one

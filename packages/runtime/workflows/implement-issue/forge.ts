@@ -13,13 +13,11 @@
 // `wf doctor` reads the forge of the cwd's origin (`forgeOfOrigin`) and what to ask the CLI to know it is logged in (`loginOf`).
 import { readFileSync } from "node:fs";
 import { FORGE_TITLES, knownForgeOf } from "../../src/config/file.js";
+import { type PrState, prStateOfMr } from "../../src/runtime/forge-pr-state.js";
 import type { ForgeName } from "../../src/runtime/workflow.js";
 import type { Commands } from "./commands.js";
 
-export type { ForgeName };
-
-/** The state of a PR, as the forge reports it. */
-export type PrState = "OPEN" | "MERGED" | "CLOSED";
+export type { ForgeName, PrState };
 
 /** The forge of a record that names none: the only one that existed before the field did. */
 export const DEFAULT_FORGE: ForgeName = "github";
@@ -235,10 +233,6 @@ class GithubForge implements Forge {
   }
 }
 
-/** What GitLab's REST API calls a merge request that is still being worked on or is being merged: both are a live PR. */
-const MR_STATES: Readonly<Record<string, PrState>> = { opened: "OPEN", locked: "OPEN", merged: "MERGED", closed: "CLOSED" };
-/** The `PrState` of the `state` GitLab's REST API reports for a merge request, or undefined for one this version does not know. */
-export const prStateOfMr = (state: string): PrState | undefined => (Object.hasOwn(MR_STATES, state) ? MR_STATES[state] : undefined);
 /** The URL of a merge request in the output of `glab mr create`, which prints a line of text around it. */
 const MR_URL = /https?:\/\/\S+\/-\/merge_requests\/\d+/;
 /** The number in the URL of a GitLab merge request, and in the URL of a GitHub pull request. */

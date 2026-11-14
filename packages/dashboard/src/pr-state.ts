@@ -12,7 +12,7 @@
 // - A refresh that fails keeps the state it had.
 import { type ForgePrState, isPrUrl, prStateOfUrl } from "@cursor-workflows/runtime/observe";
 
-/** How a forge says a PR or MR stands. */
+/** How a forge says a PR or MR stands, in lower case as the Board's API and page spell it (the runtime's `ForgePrState` is upper case). */
 export type PrState = "open" | "merged" | "closed";
 
 /** How many forge CLI processes run at once. */

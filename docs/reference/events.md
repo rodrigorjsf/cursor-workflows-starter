@@ -289,7 +289,7 @@ Um link do cartão de um run.
 | Campo | Tipo | Obrigatório | Descrição |
 | --- | --- | --- | --- |
 | `label` | `string` | sim | O texto do link. |
-| `url` | `string` | sim | O endereço. Só `http:` e `https:` aparecem no dashboard; um link de pull request do GitHub mostra também o estado dele (aberto, mesclado ou fechado). |
+| `url` | `string` | sim | O endereço. Só `http:` e `https:` aparecem no dashboard; um link de pull request do GitHub ou de merge request do GitLab mostra também o estado dele (aberto, mesclado ou fechado). |
 
 ### EffectiveConfig
 
