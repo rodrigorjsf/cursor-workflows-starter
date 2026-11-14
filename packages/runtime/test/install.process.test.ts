@@ -8,7 +8,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
-import { KIT_TAMPERING, git, makeOrigin, release } from "./kit-origin.js";
+import { EDITED_FILE, KIT_TAMPERING, type KitTampering, PLANTED_NPMRC, git, makeOrigin, release } from "./kit-origin.js";
 
 const KIT_ROOT = join(import.meta.dirname, "..", "..", "..");
 const NODE_DIR = dirname(process.execPath);
@@ -63,7 +63,7 @@ const shimOf = (home: string) => join(home, ".local", "bin", "wf");
 const npmCalls = () => (existsSync(npmLog) ? readFileSync(npmLog, "utf8").trim().split("\n").filter(Boolean) : []);
 
 /** Two changes that do not hide each other, for the tests that list every change. */
-const TWO_CHANGES = KIT_TAMPERING.slice(0, 2);
+const TWO_CHANGES = [EDITED_FILE, PLANTED_NPMRC];
 
 test("the installer clones the kit at the tag, installs its dependencies and writes a wf shim that runs the kit", () => {
   const home = newHome();
@@ -147,7 +147,11 @@ test("running the installer again at the same tag changes nothing and still succ
   assert.equal(again.status, 0, again.stderr);
   assert.equal(readFileSync(shimOf(home), "utf8"), shim);
   assert.equal(git(kitOf(home), "describe", "--tags", "--exact-match"), "v0.3.0");
-  assert.equal(git(kitOf(home), "status", "--porcelain", "--untracked-files=all"), "", "an installed kit, node_modules included, has a clean tree: that is what the upgrade and the doctor rely on");
+  assert.equal(
+    git(kitOf(home), "status", "--porcelain", "--untracked-files=all", "--ignored=matching"),
+    "!! node_modules/",
+    "an installed kit has a clean tree, and its node_modules/ is the one ignored thing in it: that is what the upgrade and the doctor rely on",
+  );
   for (const name of skillNames(join(kitOf(home), "skills"))) assert.equal(readlinkSync(join(home, ".claude", "skills", name)), join(kitOf(home), "skills", name));
 });
 
@@ -352,23 +356,32 @@ test("a Node older than the kit's engines.node stops the installer before it ins
   assert.ok(!existsSync(shimOf(home)) && !existsSync(join(home, ".claude")) && !existsSync(globalConfigOf(home)));
 });
 
-for (const { what, file, listed, plant } of KIT_TAMPERING) {
-  test(`the installer refuses an existing clone with ${what} before it moves it to another tag: it names the change and leaves the kit as it was`, () => {
-    const dir = originWithReleases();
-    const home = newHome();
-    assert.equal(install(home, ["--tag", "v0.3.0", "--repo", dir], { from: dir }).status, 0);
-    const kit = kitOf(home);
-    const head = git(kit, "rev-parse", "HEAD");
-    plant(kit);
-    const before = npmCalls().length;
+/** A kit installed at v0.3.0 from a fresh origin that also has v0.4.0, with `tampering` planted in it: what a test compares afterwards. */
+function tamperedKit(tampering: KitTampering[]) {
+  const dir = originWithReleases();
+  const home = newHome();
+  assert.equal(install(home, ["--tag", "v0.3.0", "--repo", dir], { from: dir }).status, 0);
+  const kit = kitOf(home);
+  const head = git(kit, "rev-parse", "HEAD");
+  for (const { plant } of tampering) plant(kit);
+  return { dir, home, kit, head, npmBefore: npmCalls().length };
+}
 
-    const r = install(home, ["--tag", "v0.4.0"], { from: dir });
+/** What a refused move leaves: the kit on the tag it was on, no installer step run in it, and the planted files for the user to read. */
+function assertKitLeftAlone({ kit, head, npmBefore }: ReturnType<typeof tamperedKit>, tampering: KitTampering[]): void {
+  assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.3.0");
+  assert.equal(git(kit, "rev-parse", "HEAD"), head);
+  assert.deepEqual(npmCalls().slice(npmBefore), [], "npm ci reads an .npmrc of the kit: no installer step may run in it");
+  for (const { file } of tampering) assert.ok(existsSync(join(kit, file)), `${file} is left for the user to look at`);
+}
+
+for (const tampering of KIT_TAMPERING) {
+  test(`the installer refuses an existing clone with ${tampering.what} before it moves it to another tag: it names the change and leaves the kit as it was`, () => {
+    const planted = tamperedKit([tampering]);
+    const r = install(planted.home, ["--tag", "v0.4.0"], { from: planted.dir });
     assert.equal(r.status, 1);
-    assert.ok(r.stderr.includes(`error: the kit at ${kit} has local changes: ${listed}; reinstall it`), r.stderr);
-    assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.3.0");
-    assert.equal(git(kit, "rev-parse", "HEAD"), head);
-    assert.deepEqual(npmCalls().slice(before), [], "npm ci reads an .npmrc of the kit: no installer step may run in it");
-    assert.ok(existsSync(join(kit, file)), "the change is left for the user to look at");
+    assert.ok(r.stderr.includes(`error: the kit at ${planted.kit} has local changes: ${tampering.listed}; reinstall it`), r.stderr);
+    assertKitLeftAlone(planted, [tampering]);
   });
 }
 
@@ -515,24 +528,14 @@ test("wf upgrade whose checkout fails says which tag it could not move to and le
   assert.deepEqual(npmCalls().slice(before), []);
 });
 
-for (const { what, file, listed, plant } of KIT_TAMPERING) {
-  test(`wf upgrade refuses a kit with ${what}: it names the change, runs no installer and leaves the kit on its tag`, () => {
-    const dir = originWithReleases();
-    const home = newHome();
-    assert.equal(install(home, ["--tag", "v0.3.0", "--repo", dir], { from: dir }).status, 0);
-    const kit = kitOf(home);
-    const head = git(kit, "rev-parse", "HEAD");
-    plant(kit);
-    const before = npmCalls().length;
-
-    const r = upgrade(home);
+for (const tampering of KIT_TAMPERING) {
+  test(`wf upgrade refuses a kit with ${tampering.what}: it names the change, runs no installer and leaves the kit on its tag`, () => {
+    const planted = tamperedKit([tampering]);
+    const r = upgrade(planted.home);
     assert.equal(r.status, 1);
-    assert.ok(r.stderr.includes(`the kit at ${kit} has local changes: ${listed}; reinstall it`), r.stderr);
+    assert.ok(r.stderr.includes(`the kit at ${planted.kit} has local changes: ${tampering.listed}; reinstall it`), r.stderr);
     assert.equal(r.stdout, "");
-    assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.3.0");
-    assert.equal(git(kit, "rev-parse", "HEAD"), head);
-    assert.deepEqual(npmCalls().slice(before), [], "npm ci reads an .npmrc of the kit: no installer may run in it");
-    assert.ok(existsSync(join(kit, file)), "the change is left for the user to look at");
+    assertKitLeftAlone(planted, [tampering]);
   });
 }
 

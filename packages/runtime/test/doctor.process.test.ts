@@ -12,7 +12,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { type Recording, recorded } from "./glab-recordings.js";
 import { copyKit } from "./kit-copy.js";
-import { KIT_TAMPERING, git as gitIn, makeOrigin } from "./kit-origin.js";
+import { KIT_TAMPERING, PLANTED_NPMRC, git as gitIn, makeOrigin } from "./kit-origin.js";
 
 const PACKAGE = join(import.meta.dirname, "..");
 const KIT_ROOT = join(PACKAGE, "..", "..");
@@ -804,7 +804,7 @@ test("the kit check fails when HEAD of a tag install is not exactly the tag of i
 test("the kit check lists both problems of a kit that is on the wrong commit and has local changes", () => {
   const { userHome, kit } = homeWithTagInstall();
   gitIn(kit, "commit", "--quiet", "--allow-empty", "-m", "a commit after the release");
-  KIT_TAMPERING[1]!.plant(kit);
+  PLANTED_NPMRC.plant(kit);
   const check = kitCheck(userHome);
   assert.equal(check.status, "fail");
   assert.match(check.message, /local changes: \?\? \.npmrc/);
@@ -820,7 +820,7 @@ test("the kit check reports a development install and does not check it, not eve
 
   const copy = join(sandbox, `working-copy-${++counter}`);
   gitIn(sandbox, "clone", "--quiet", kitRepository(), copy);
-  KIT_TAMPERING[1]!.plant(copy);
+  PLANTED_NPMRC.plant(copy);
   gitIn(copy, "commit", "--quiet", "--allow-empty", "-m", "work in progress");
   const dirty = kitCheck(homeWithKit(copy));
   assert.equal(dirty.status, "pass", dirty.message);

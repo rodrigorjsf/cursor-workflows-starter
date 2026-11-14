@@ -15,7 +15,7 @@ import type { ConfigIssue } from "./config/file.js";
 import { ConfigError, type ResolvedConfig, loadEffectiveConfig } from "./config/index.js";
 import { type CheckId, type CheckResult, type DoctorReport, fail, nodeHint, pass, reportOf } from "./doctor-report.js";
 import { findOnPath } from "./find-on-path.js";
-import { kitChanges, kitTagsAtHead } from "./kit-state.js";
+import { kitChanges, kitChangesMessage, kitTagsAtHead } from "./kit-state.js";
 import { kitCompatibility, kitFileUrl, readKitPackage } from "./kit-version.js";
 import { MCP_CONFIG_FILES, type McpLaunch, type McpLaunches, readMcpLaunches } from "./mcp-launch.js";
 import { errorText } from "./runtime/error-text.js";
@@ -399,11 +399,11 @@ function checkKit(): CheckResult {
   const problems: string[] = [];
   try {
     const changes = kitChanges(kit);
-    if (changes.length) problems.push(`the kit at ${kit} has local changes: ${changes.join(", ")}`);
+    if (changes.length) problems.push(kitChangesMessage(kit, changes));
     const tags = kitTagsAtHead(kit);
     if (!tags.includes(`v${version}`)) problems.push(`HEAD of the kit at ${kit} is ${tags.length ? `tagged ${tags.join(", ")}` : "not tagged"}, and the tag of its package version is v${version}`);
   } catch (err) {
-    return fail("kit", `could not read the state of the kit at ${kit}: ${errorText(err)}`, hint);
+    return fail("kit", errorText(err), hint); // names the kit it could not read
   }
   return problems.length ? fail("kit", problems.join("\n"), hint) : pass("kit", `${kit} is at v${version} with a clean tree`);
 }

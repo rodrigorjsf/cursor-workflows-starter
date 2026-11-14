@@ -7,7 +7,8 @@
 # WHEN: Once per machine (INSTALL-AGENT.md drives it), and with `--dev` by a maintainer who wants the kit location to be
 #   a working copy. `wf upgrade` runs it with `--refresh`.
 # HOW: `bash install.sh --tag vX.Y.Z [--repo <url>]`, `scripts/install.sh --dev`, or `install.sh --refresh` (dependencies,
-#   shim, skill links and config for the kit already in place). Safe to run again. WF_HOME replaces ~/.cursor-workflows.
+#   shim, skill links and config for the kit already in place). Safe to run again. An existing clone with local changes is
+#   refused, not moved: reinstall it (docs/usage/01-instalacao.md). WF_HOME replaces ~/.cursor-workflows.
 
 # Everything runs inside main(), called on the last line: bash reads a function whole before running it, so a
 # half-downloaded script (curl | bash) does nothing, and `wf upgrade` can check out a new install.sh under a running one.

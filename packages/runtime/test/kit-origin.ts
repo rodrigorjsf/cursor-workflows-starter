@@ -59,32 +59,43 @@ export function makeOrigin(dir: string, version: string): string {
   return dir;
 }
 
+/** Something an unsandboxed step can leave in the installed kit, and the line `git status --porcelain` shows for it. */
+export interface KitTampering {
+  what: string;
+  /** The planted file, relative to the kit. */
+  file: string;
+  /** The line `git status --porcelain` shows for it. */
+  listed: string;
+  plant: (kit: string) => void;
+}
+
 /**
- * What an unsandboxed step can leave in the installed kit, and the line `git status --porcelain` shows for it. None is
- * something `git checkout` of a newer tag removes or refuses: the research reproduced the first two surviving it with exit
- * code 0. The tracked file is one that no release of the test origin changes. The third is the second made invisible to a
- * `git status` that does not ask for ignored files: the step lists the file in `.git/info/exclude` of the clone.
+ * None of the three is something `git checkout` of a newer tag removes or refuses: the research reproduced the first two
+ * surviving it with exit code 0. The tracked file is one that no release of the test origin changes.
  */
-export const KIT_TAMPERING = [
-  {
-    what: "a modified tracked file",
-    file: "packages/runtime/src/runtime/engine.ts",
-    listed: "M packages/runtime/src/runtime/engine.ts",
-    plant: (kit: string) => appendFileSync(join(kit, "packages", "runtime", "src", "runtime", "engine.ts"), "\n// planted by a step\n"),
+export const EDITED_FILE: KitTampering = {
+  what: "a modified tracked file",
+  file: "packages/runtime/src/runtime/engine.ts",
+  listed: "M packages/runtime/src/runtime/engine.ts",
+  plant: (kit) => appendFileSync(join(kit, "packages", "runtime", "src", "runtime", "engine.ts"), "\n// planted by a step\n"),
+};
+
+export const PLANTED_NPMRC: KitTampering = {
+  what: "an untracked .npmrc",
+  file: ".npmrc",
+  listed: "?? .npmrc",
+  plant: (kit) => writeFileSync(join(kit, ".npmrc"), "ignore-scripts=false\n"),
+};
+
+/** The planted `.npmrc` made invisible to a `git status` that does not ask for ignored files: the step lists it in `.git/info/exclude`. */
+export const HIDDEN_NPMRC: KitTampering = {
+  what: "an .npmrc that a step hid in .git/info/exclude",
+  file: "packages/runtime/.npmrc",
+  listed: "!! packages/runtime/.npmrc",
+  plant: (kit) => {
+    appendFileSync(join(kit, ".git", "info", "exclude"), "/packages/runtime/.npmrc\n");
+    writeFileSync(join(kit, "packages", "runtime", ".npmrc"), "ignore-scripts=false\n");
   },
-  {
-    what: "an untracked .npmrc",
-    file: ".npmrc",
-    listed: "?? .npmrc",
-    plant: (kit: string) => writeFileSync(join(kit, ".npmrc"), "ignore-scripts=false\n"),
-  },
-  {
-    what: "an .npmrc that a step hid in .git/info/exclude",
-    file: "packages/runtime/.npmrc",
-    listed: "!! packages/runtime/.npmrc",
-    plant: (kit: string) => {
-      appendFileSync(join(kit, ".git", "info", "exclude"), "/packages/runtime/.npmrc\n");
-      writeFileSync(join(kit, "packages", "runtime", ".npmrc"), "ignore-scripts=false\n");
-    },
-  },
-];
+};
+
+export const KIT_TAMPERING: KitTampering[] = [EDITED_FILE, PLANTED_NPMRC, HIDDEN_NPMRC];
