@@ -2,6 +2,8 @@
 
 **Status:** accepted · decided in [spec #2](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/2), amended on 2026-11-12 while hardening [spec #5](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/5); supersedes [ADR-0002](0002-event-log-source-of-truth.md)
 
+**Amended:** 2026-11-14: the citation of the detached-jobs decision points at ADR-0010, which superseded ADR-0003; the decision here is unchanged.
+
 ## Context
 
 [ADR-0002](0002-event-log-source-of-truth.md) made the per-run event log the source of truth and said that the job record
@@ -84,7 +86,7 @@ log.
   privacy rule for content. A binary file is also harder to read after a crash than a text file whose last line can be
   dropped.
 - **A service that owns the state:** it would have to run all the time, and the kit's runs must survive without one
-  ([ADR-0003](0003-detached-jobs.md)).
+  ([ADR-0010](0010-detached-jobs-and-how-each-is-cancelled.md)).
 - **Write the cancel mark into the event log.** The canceller would write into a log whose run lock it does not hold: it
   writes the mark right after the kill, while the killed process may still hold the lock until it is gone. A run end
   written for the killed execution would also project the run as `cancelled`, not `failed`, and the kill leaves the

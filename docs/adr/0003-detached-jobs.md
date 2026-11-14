@@ -1,6 +1,6 @@
 # 7.3 · ADR-0003: Runs are detached processes
 
-**Status:** accepted · decided in [spec #2](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/2)
+**Status:** superseded by ADR-0010 ([7.10](0010-detached-jobs-and-how-each-is-cancelled.md)) · decided in [spec #2](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/2)
 
 ## Context
 

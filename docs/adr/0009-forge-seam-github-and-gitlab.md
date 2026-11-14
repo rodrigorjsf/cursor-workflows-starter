@@ -71,4 +71,4 @@ one implementation per forge: GitHub through `gh`, GitLab through `glab`.
 
 ---
 
-[← Anterior: 7.8 · ADR-0008: The job record keeps what the event log cannot](0008-job-record-keeps-what-the-log-cannot.md) · [Índice](../README.md) · [Próximo: 8.1 · Cursor SDK como motor de workflows determinísticos: relatório de pesquisa →](../research/relatorio-pesquisa.md)
+[← Anterior: 7.8 · ADR-0008: The job record keeps what the event log cannot](0008-job-record-keeps-what-the-log-cannot.md) · [Índice](../README.md) · [Próximo: 7.10 · ADR-0010: Detached jobs, and how each one is cancelled →](0010-detached-jobs-and-how-each-is-cancelled.md)
