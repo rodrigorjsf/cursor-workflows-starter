@@ -14,7 +14,8 @@
 # WHEN: After bumping the pinned glab in mise.toml, after changing a glab command or API route in the forge module
 #   (packages/runtime/workflows/implement-issue/forge.ts) or the sanitizer for model text (packages/runtime/workflows/implement-issue/pr-body.ts),
 #   or to try a newer GitLab image. Never on a machine whose Docker has less than 4 GiB of memory, and not without `wf login` done.
-# HOW: `mise exec -- scripts/verify/gitlab-e2e.sh` (mise puts the pinned glab on the PATH). `GITLAB_E2E_IMAGE=gitlab/gitlab-ce:<tag>`
+# HOW: `GITLAB_E2E_MAX_TOKENS=600000 GITLAB_E2E_MAX_CENTS=100 mise exec -- scripts/verify/gitlab-e2e.sh` (mise puts the pinned glab on
+#   the PATH; the two caps bound the `implement-issue` run). `GITLAB_E2E_IMAGE=gitlab/gitlab-ce:<tag>`
 #   tries another image (default gitlab/gitlab-ce:19.5.5-ce.0); `GITLAB_E2E_PORT` (default 8929) is the local port;
 #   `GITLAB_E2E_NAME` (default wf-gitlab-e2e) names the container and its volumes; `GITLAB_E2E_TIMEOUT_SECONDS` (default
 #   1800) is how long it waits for GitLab, polling every `GITLAB_E2E_POLL_SECONDS` (default 10); `GITLAB_E2E_MIN_MEMORY_MB`

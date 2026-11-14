@@ -86,9 +86,9 @@ menos de 4 GiB no Docker. A última prova roda o `implement-issue` de verdade, c
 (`wf login` feito) e passa `--max-tokens` e `--max-cents` ao `wf run`. Fica fora do `npm run check` e do CI.
 
 ```bash
-mise exec -- scripts/verify/gitlab-e2e.sh                                  # o glab fixado no mise.toml fica no PATH
+GITLAB_E2E_MAX_TOKENS=600000 GITLAB_E2E_MAX_CENTS=100 mise exec -- scripts/verify/gitlab-e2e.sh   # o glab fixado no mise.toml fica no PATH
 GITLAB_E2E_STAGES=closing,quick-actions,references mise exec -- scripts/verify/gitlab-e2e.sh   # sem gastar tokens
-GITLAB_E2E_IMAGE=gitlab/gitlab-ce:latest mise exec -- scripts/verify/gitlab-e2e.sh   # a imagem mais nova, só para ver
+GITLAB_E2E_IMAGE=gitlab/gitlab-ce:latest GITLAB_E2E_MAX_TOKENS=600000 GITLAB_E2E_MAX_CENTS=100 mise exec -- scripts/verify/gitlab-e2e.sh   # a imagem mais nova, só para ver
 ```
 
 | Variável | Padrão | O que muda |
