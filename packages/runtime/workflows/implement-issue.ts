@@ -20,7 +20,7 @@
 //   - the issue's text is a stranger's: before the first agent call the run asks the forge how the issue's author stands to the repository
 //     (GitHub: `author_association`, through `gh api`), and an author who is not the owner, a member or a collaborator stops the run
 //     with "untrusted-author" until the user passes `allowExternalAuthor` after reading the issue (GitLab says nothing, so it is not
-//     gated, and the log says so). The text that does reach an agent (the issue's title and body, the output of a test run, the
+//     gated, and the log says so: see #100). The text that does reach an agent (the issue's title and body, the output of a test run, the
 //     diff of the run's own changes) comes behind a fixed line that says it is data, in a fence nothing in it can close
 //     (implement-issue/untrusted.ts);
 //   - a suíte tem de estar verde antes da primeira fatia ("baseline-red"; um runner sem nenhum teste conta como

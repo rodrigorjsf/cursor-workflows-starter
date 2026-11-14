@@ -445,7 +445,7 @@ class GitlabForge implements Forge {
     return { number: issue.iid, title: issue.title, body: issue.description ?? "", labels: (issue.labels ?? []).map((name) => ({ name })) };
   }
 
-  /** GitLab does not say: the author's access level in the project is a `glab api` route that no recording of a real GitLab covers (CODING_STANDARDS, Testing), so the run is not gated there and says so. */
+  /** GitLab does not say: the author's access level in the project is a `glab api` route that no recording of a real GitLab covers (CODING_STANDARDS, Testing), so the run is not gated there and says so (see #100). */
   async authorStanding(): Promise<undefined> {
     return undefined;
   }
