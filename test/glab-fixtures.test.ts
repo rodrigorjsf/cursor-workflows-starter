@@ -123,10 +123,10 @@ test("every recording the fake glab plays is there, with the shape the offline t
 
 // ── the script stays out of the checks ───────────────────────────────────────────────────────────────────────────
 
-test("the opt-in script and its recorder are not run by npm run check, by any package script or by CI", () => {
+test("the opt-in script, its recorder and its prover are not run by npm run check, by any package script or by CI", () => {
   const manifests = ["package.json", ...readdirSync(join(ROOT, "packages")).map((p) => `packages/${p}/package.json`)].filter((rel) => existsSync(join(ROOT, rel)));
   const workflows = readdirSync(join(ROOT, ".github", "workflows")).map((name) => `.github/workflows/${name}`);
   for (const rel of [...manifests, ...workflows]) {
-    assert.ok(!/gitlab-e2e|record-glab-fixtures/.test(read(rel)), `${rel} must not run the real-GitLab script: it needs Docker and minutes`);
+    assert.ok(!/gitlab-e2e|record-glab-fixtures|prove-gitlab/.test(read(rel)), `${rel} must not run the real-GitLab script: it needs Docker and minutes, and the prover spends tokens`);
   }
 });

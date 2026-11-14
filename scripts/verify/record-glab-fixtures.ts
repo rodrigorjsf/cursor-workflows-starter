@@ -16,8 +16,8 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { errorText } from "../../packages/runtime/src/runtime/error-text.js";
 import { Commands } from "../../packages/runtime/workflows/implement-issue/commands.js";
 import { createForge, loginOf, type Forge } from "../../packages/runtime/workflows/implement-issue/forge.js";
-import type { ExecResult } from "../../packages/runtime/src/runtime/workflow.js";
 import { isEntryPoint } from "../lib/cli.js";
+import { GitLabApi, basicAuthOf, execOf, git, loginGlab, requireEnv } from "../lib/gitlab-e2e.js";
 import { HOST_PLACEHOLDER, leaksIn, scrubText, type Secrets } from "../lib/scrub-recording.js";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
@@ -72,30 +72,13 @@ interface Env {
 }
 
 function envOf(): Env {
-  const read = (key: string): string => {
-    const value = process.env[key];
-    if (!value) throw new Error(`${key} is not set: this script is run by scripts/verify/gitlab-e2e.sh`);
-    return value;
+  return {
+    url: requireEnv("GITLAB_E2E_URL"),
+    token: requireEnv("GITLAB_E2E_TOKEN"),
+    password: requireEnv("GITLAB_E2E_PASSWORD"),
+    image: requireEnv("GITLAB_E2E_IMAGE"),
+    scratch: requireEnv("GITLAB_E2E_SCRATCH"),
   };
-  return { url: read("GITLAB_E2E_URL"), token: read("GITLAB_E2E_TOKEN"), password: read("GITLAB_E2E_PASSWORD"), image: read("GITLAB_E2E_IMAGE"), scratch: read("GITLAB_E2E_SCRATCH") };
-}
-
-/** GitLab's REST API as the root user, from this process (the token never goes on a command line). */
-class GitLabApi {
-  constructor(
-    private readonly base: string,
-    private readonly token: string,
-  ) {}
-
-  async call<T = Record<string, unknown>>(method: string, path: string, body?: unknown): Promise<T> {
-    const response = await fetch(`${this.base}/api/v4${path}`, {
-      method,
-      headers: { "PRIVATE-TOKEN": this.token, "content-type": "application/json" },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
-    if (!response.ok) throw new Error(`${method} ${path}: HTTP ${response.status} ${(await response.text()).slice(0, 300)}`);
-    return (await response.json()) as T;
-  }
 }
 
 /** The glab that wraps the real one: it runs it, keeps what it printed beside the call, and prints the same. The runtime's own code calls it by name. */
@@ -111,24 +94,6 @@ process.stdout.write(r.stdout);
 process.stderr.write(r.stderr);
 process.exitCode = r.status ?? 1;
 `;
-
-/** The `Exec` the runtime's `Commands` is built on, as a plain process run: the workflow engine is not involved. */
-function exec(command: string, args: string[] = [], opts: { cwd?: string; env?: Record<string, string | undefined> } = {}): Promise<ExecResult> {
-  return new Promise((done) => {
-    try {
-      const output = execFileSync(command, args, { cwd: opts.cwd, env: { ...process.env, ...opts.env }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 256 * 1024 * 1024 });
-      done({ ok: true, exitCode: 0, timedOut: false, tail: output });
-    } catch (err) {
-      const failure = err as { status?: number | null; stdout?: string; stderr?: string; message: string };
-      done({ ok: false, exitCode: failure.status ?? null, timedOut: false, tail: `${failure.stdout ?? ""}${failure.stderr ?? ""}`, error: failure.status === undefined ? failure.message : undefined });
-    }
-  });
-}
-
-/** `git` in `cwd`, with the token as HTTP basic auth on this one command, never stored in the repository's configuration. */
-function git(cwd: string, auth: string, ...args: string[]): string {
-  return execFileSync("git", ["-c", `http.extraHeader=Authorization: Basic ${auth}`, "-c", "core.autocrlf=false", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-}
 
 /** The recorder: it makes the GitLab side, then runs the forge module and the doctor's login check through the wrapper glab. */
 class Recorder {
@@ -165,7 +130,7 @@ class Recorder {
   }
 
   private forge(): Forge {
-    const commands = new Commands((command, args, opts) => exec(command, args, { cwd: opts?.cwd, env: { ...this.glabEnv, ...opts?.env } }), { networkMs: 120_000 });
+    const commands = new Commands(execOf(this.glabEnv), { networkMs: 120_000 });
     return createForge("gitlab", commands);
   }
 
@@ -199,7 +164,7 @@ class Recorder {
     const many = await api.call<{ iid: number }>("POST", `${base}/issues`, { title: "Recorded issue with many comments" });
     for (let i = 1; i <= MANY_COMMENTS; i++) await api.call("POST", `${base}/issues/${many.iid}/notes`, { body: `Comment ${i}` });
 
-    const auth = Buffer.from(`oauth2:${this.env.token}`).toString("base64");
+    const auth = basicAuthOf(this.env.token);
     const remote = `${this.env.url}/${GROUP}/${PROJECT}.git`;
     git(this.env.scratch, auth, "clone", "--quiet", remote, this.repo);
     git(this.repo, auth, "config", "user.name", "Recorder");
@@ -211,12 +176,7 @@ class Recorder {
     git(this.repo, auth, "push", "--quiet", "origin", MR_BRANCH);
     // The branch checked out on main again: the run of the workflow starts from there.
     git(this.repo, auth, "checkout", "--quiet", "main");
-    execFileSync(this.realGlab, ["config", "set", "api_protocol", "http", "--host", this.host, "--global"], { env: { ...process.env, ...this.glabEnv }, stdio: "ignore" });
-    execFileSync(this.realGlab, ["auth", "login", "--hostname", this.host, "--stdin", "--insecure-storage"], {
-      env: { ...process.env, ...this.glabEnv },
-      input: this.env.token,
-      stdio: ["pipe", "ignore", "ignore"],
-    });
+    loginGlab(this.realGlab, this.glabEnv, this.host, this.env.token);
     // The login and the configuration above are glab calls of the setup, not recordings.
     rmSync(this.recordDir, { recursive: true, force: true });
     mkdirSync(this.recordDir);
@@ -242,8 +202,8 @@ class Recorder {
     await this.record("repo-view", () => forge.repoUrl(cwd));
 
     const login = loginOf("gitlab", this.host);
-    await this.record("auth-status-logged-in", () => exec("glab", login.args, { cwd, env: this.glabEnv }));
-    await this.record("auth-status-logged-out", () => exec("glab", login.args, { cwd, env: { ...this.glabEnv, GLAB_CONFIG_DIR: join(this.env.scratch, "no-login") } }));
+    await this.record("auth-status-logged-in", () => execOf(this.glabEnv)("glab", login.args, { cwd }));
+    await this.record("auth-status-logged-out", () => execOf({ ...this.glabEnv, GLAB_CONFIG_DIR: join(this.env.scratch, "no-login") })("glab", login.args, { cwd }));
 
     const mr = Number(/\/-\/merge_requests\/(\d+)$/.exec(url)?.[1]);
     if (!Number.isInteger(mr)) throw new Error(`mr-create: no merge request number in ${url}`);

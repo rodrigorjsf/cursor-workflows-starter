@@ -33,6 +33,18 @@
   de um projeto traz o token de registro de runner (`GR1348941…`, em `runners_token`): ele agora é redigido dos logs e barrado
   pela guarda de saída do `implement-issue`, como os outros tokens do GitLab.
 
+- **O `implement-issue` e o filtro de texto do modelo foram provados num GitLab de verdade.** Depois de gravar as fixtures, o
+  `scripts/verify/gitlab-e2e.sh` roda o `scripts/verify/prove-gitlab.ts` no mesmo GitLab e imprime a evidência em Markdown,
+  para a descrição do PR. Um `implement-issue` de verdade, com etapas locais, abre um MR com `Closes #N` e o merge dele fecha a
+  issue. O padrão de fechamento do GitLab casa `Implement(s|ed|ing) #N` (os quatro fecham a issue no merge, medido no GitLab CE
+  19.5.5) e o `sanitizeModelText` já as neutraliza, como neutraliza as outras 17 frases que fecham (`Closing`, `Fixing`,
+  `Resolves grupo/projeto#N`, a URL da issue, em frase…); só `CLOSES #N`, tudo em maiúsculas, nunca fechou, porque o padrão do
+  GitLab só aceita a primeira letra em maiúscula. Um `/close` solto fecha a issue (numa nota) ou o MR (na descrição), também
+  depois de `\r`, com CRLF, depois de `$$` e numa cerca que um trecho anterior deixou aberta; depois do filtro nenhuma das 12
+  formas roda, e `!1`, `~bug` e `%v1` não viram link atrás do espaço de largura zero. Cada "não aconteceu nada" vem ao lado do
+  mesmo texto sem o filtro, que acontece, senão a checagem não prova nada. A última prova gasta tokens da API da Cursor
+  (`GITLAB_E2E_MAX_TOKENS` e `GITLAB_E2E_MAX_CENTS` são os tetos; `GITLAB_E2E_STAGES` escolhe as provas).
+
 ### Mudado
 
 - **`wf doctor`: o check `gh` virou `forge`.** Ele lê o `origin` do repositório, acha o forge como um run acha (com o

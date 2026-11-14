@@ -1,7 +1,7 @@
 // Seam: the process. `scripts/verify/gitlab-e2e.sh` is run the way a maintainer runs it, with stand-ins on the PATH for what it drives:
 // a `docker` that logs every call and answers from environment variables (no GitLab is started: that takes minutes and 2.5 GB), a
-// `curl` that says the sign-in page answers, a `glab` that prints a version, and an `npx` that stands for the recorder and logs what the
-// script handed it. The tests read the exit code, what the script printed, the calls the stand-ins logged and the files left behind;
+// `curl` that says the sign-in page answers, a `glab` that prints a version, and an `npx` that stands for the recorder and the prover and
+// logs what the script handed each. The tests read the exit code, what the script printed, the calls the stand-ins logged and the files left behind;
 // none of them looks inside the script. What a real GitLab and a real glab do is the script's own run, which is opt-in.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -43,11 +43,16 @@ exit 0`;
 
 const GLAB = `echo "glab \${FAKE_GLAB_VERSION:-1.130.0} (0000000)"`;
 
-/** The recorder's stand-in: logs the environment the script gave it, and fails when told to. */
+/** The stand-in for the recorder and the prover: logs the environment the script gave it, and fails when told to. */
 const NPX = `printf '%s\\n' "npx $*" >> "$FAKE_LOG"
-printf '%s\\n' "recorder url=$GITLAB_E2E_URL token=$GITLAB_E2E_TOKEN password=$GITLAB_E2E_PASSWORD image=$GITLAB_E2E_IMAGE scratch=$GITLAB_E2E_SCRATCH" >> "$FAKE_LOG"
+case "$*" in
+  *record-glab-fixtures*) who=recorder; fails="$FAKE_RECORDER_FAILS" ;;
+  *prove-gitlab*) who=prover; fails="$FAKE_PROVER_FAILS" ;;
+  *) exit 4 ;;
+esac
+printf '%s\\n' "$who url=$GITLAB_E2E_URL token=$GITLAB_E2E_TOKEN password=$GITLAB_E2E_PASSWORD image=$GITLAB_E2E_IMAGE scratch=$GITLAB_E2E_SCRATCH maxTokens=$GITLAB_E2E_MAX_TOKENS maxCents=$GITLAB_E2E_MAX_CENTS stages=$GITLAB_E2E_STAGES" >> "$FAKE_LOG"
 [ -d "$GITLAB_E2E_SCRATCH" ] || exit 3
-[ -z "$FAKE_RECORDER_FAILS" ] || exit 1
+[ -z "$fails" ] || exit 1
 exit 0`;
 
 function bin(dir: string, name: string, script: string) {
@@ -134,6 +139,38 @@ test("the container and its volumes are removed when the recorder fails, and the
   assert.ok(r.docker.includes("docker volume rm -f wf-gitlab-e2e-config wf-gitlab-e2e-logs wf-gitlab-e2e-data"));
 });
 
+test("the prover runs after the recorder, on the same GitLab, with the same URL, token, password, image and scratch directory", () => {
+  const r = runScript({ ...READY, GITLAB_E2E_IMAGE: "gitlab/gitlab-ce:latest" });
+  assert.equal(r.status, 0, r.out);
+  const recorder = r.calls.find((c) => c.startsWith("recorder "))!;
+  const prover = r.calls.find((c) => c.startsWith("prover "))!;
+  assert.match(prover, /url=http:\/\/localhost:8929 token=glpat-fake-token-0123 password=fake-root-password image=gitlab\/gitlab-ce:latest scratch=\//);
+  assert.equal(/scratch=(\S+)/.exec(prover)![1], /scratch=(\S+)/.exec(recorder)![1], "one scratch directory for both");
+  const order = (call: string) => r.calls.findIndex((c) => c === call);
+  assert.ok(order("npx tsx scripts/verify/prove-gitlab.ts") > order("npx tsx scripts/verify/record-glab-fixtures.ts"), "the recorder makes the fixtures first");
+  assert.ok(order("docker rm -f -v wf-gitlab-e2e") > order("npx tsx scripts/verify/prove-gitlab.ts"), "the container goes after the proofs");
+});
+
+test("the caps and the stages the maintainer sets reach the prover, which is where the tokens are spent", () => {
+  const r = runScript({ ...READY, GITLAB_E2E_MAX_TOKENS: "300000", GITLAB_E2E_MAX_CENTS: "40", GITLAB_E2E_STAGES: "closing,quick-actions" });
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.calls.find((c) => c.startsWith("prover "))!, /maxTokens=300000 maxCents=40 stages=closing,quick-actions$/);
+});
+
+test("the container and its volumes are removed when a proof fails, and the script says it failed", () => {
+  const r = runScript({ ...READY, FAKE_PROVER_FAILS: "1" });
+  assert.notEqual(r.status, 0, r.out);
+  assert.ok(r.calls.some((c) => c.startsWith("prover ")), "the prover ran");
+  assert.ok(r.docker.includes("docker rm -f -v wf-gitlab-e2e"), r.docker.join("\n"));
+  assert.ok(r.docker.includes("docker volume rm -f wf-gitlab-e2e-config wf-gitlab-e2e-logs wf-gitlab-e2e-data"));
+});
+
+test("a recorder that fails stops the script before the proofs, which would spend tokens on a GitLab that did not record", () => {
+  const r = runScript({ ...READY, FAKE_RECORDER_FAILS: "1" });
+  assert.notEqual(r.status, 0, r.out);
+  assert.deepEqual(r.calls.filter((c) => c.startsWith("prover ") || c.includes("prove-gitlab")), []);
+});
+
 test("a container the script did not start is never removed: a name already in use stops it before anything is started", () => {
   const r = runScript({ FAKE_EXISTING_CONTAINER: "1" });
   assert.equal(r.status, 1, r.out);
@@ -158,7 +195,7 @@ test("a name and a port of the maintainer's choosing name the container, its vol
 });
 
 test("Docker is never restarted or reconfigured: the script only starts, asks, runs in and removes what it started", () => {
-  for (const env of [{}, READY, { ...READY, FAKE_RECORDER_FAILS: "1" }, { FAKE_EXISTING_CONTAINER: "1" }, { FAKE_EXISTING_VOLUME: "1" }]) {
+  for (const env of [{}, READY, { ...READY, FAKE_RECORDER_FAILS: "1" }, { ...READY, FAKE_PROVER_FAILS: "1" }, { FAKE_EXISTING_CONTAINER: "1" }, { FAKE_EXISTING_VOLUME: "1" }]) {
     const { docker } = runScript(env);
     for (const call of docker) {
       assert.ok(DOCKER_COMMANDS.has(call.split(" ")[1]!), `an unexpected docker command: ${call}`);

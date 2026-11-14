@@ -5,8 +5,8 @@
 // WHY: the recorded outputs of `glab` become the fixtures of the fake `glab` (packages/runtime/test/fixtures/glab), which
 //   are committed. A recording that kept a token or a local host would put a credential or a machine detail in the
 //   repository, so the recorder scrubs and then refuses to write anything `leaksIn` still finds.
-// WHEN: imported by scripts/verify/record-glab-fixtures.ts; test/glab-fixtures.test.ts also reads it, to check the
-//   committed fixtures. Not run on its own.
+// WHEN: imported by scripts/verify/record-glab-fixtures.ts, and by scripts/verify/prove-gitlab.ts for the evidence it prints
+//   (which goes in a public pull request); test/glab-fixtures.test.ts also reads it, to check the committed fixtures. Not run on its own.
 // HOW: `scrubText(text, secrets)` returns the scrubbed text; `leaksIn(text, secrets)` returns what a scrubbed text still
 //   holds (empty when it is clean).
 import { createRedactor, findCredential } from "../../packages/runtime/src/runtime/redaction.js";

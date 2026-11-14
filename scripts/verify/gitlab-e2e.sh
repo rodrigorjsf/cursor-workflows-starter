@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
 # WHAT: Starts a real GitLab CE in Docker with memory-constrained settings, waits until it answers, creates a root
-#   personal access token inside the container, then runs scripts/verify/record-glab-fixtures.ts against it: the real
+#   personal access token inside the container, then runs two scripts against it. scripts/verify/record-glab-fixtures.ts: the real
 #   `glab` runs the commands and API routes the runtime uses, and their scrubbed outputs become the fixtures of the
-#   fake `glab` (packages/runtime/test/fixtures/glab/recordings.json). Removes its container and volumes at the end,
-#   also when a step fails or the script is interrupted.
+#   fake `glab` (packages/runtime/test/fixtures/glab/recordings.json). scripts/verify/prove-gitlab.ts: which phrases close an issue
+#   on merge (`Implement(s|ed|ing) #N` among them), whether a `/close` in model text runs after the sanitizer, and a real
+#   `implement-issue` run with local steps whose merge request closes its issue; it prints the evidence as Markdown. Removes its
+#   container and volumes at the end, also when a step fails or the script is interrupted.
 # WHY: The GitLab code paths are tested offline against a fake `glab`; recording that fake's outputs from a real GitLab
-#   keeps the offline tests resting on what glab really prints (ADR-0009), and it is the base the other real-GitLab
-#   proofs run on. It is outside `npm run check` and CI: GitLab CE needs about 2.5 GB of memory and minutes to start.
+#   keeps the offline tests resting on what glab really prints (ADR-0009), and the proofs show on a real GitLab what the
+#   sanitizer for model text was written to prevent. It is outside `npm run check` and CI: GitLab CE needs about 2.5 GB of memory
+#   and minutes to start, and the last proof spends tokens of the Cursor API.
 # WHEN: After bumping the pinned glab in mise.toml, after changing a glab command or API route in the forge module
-#   (packages/runtime/workflows/implement-issue/forge.ts), or to try a newer GitLab image. Never on a machine whose
-#   Docker has less than 4 GiB of memory.
+#   (packages/runtime/workflows/implement-issue/forge.ts) or the sanitizer for model text (packages/runtime/workflows/implement-issue/pr-body.ts),
+#   or to try a newer GitLab image. Never on a machine whose Docker has less than 4 GiB of memory, and not without `wf login` done.
 # HOW: `mise exec -- scripts/verify/gitlab-e2e.sh` (mise puts the pinned glab on the PATH). `GITLAB_E2E_IMAGE=gitlab/gitlab-ce:<tag>`
 #   tries another image (default gitlab/gitlab-ce:19.5.5-ce.0); `GITLAB_E2E_PORT` (default 8929) is the local port;
 #   `GITLAB_E2E_NAME` (default wf-gitlab-e2e) names the container and its volumes; `GITLAB_E2E_TIMEOUT_SECONDS` (default
 #   1800) is how long it waits for GitLab, polling every `GITLAB_E2E_POLL_SECONDS` (default 10); `GITLAB_E2E_MIN_MEMORY_MB`
-#   (default 4096) is the least memory it accepts from Docker. It refuses to run while a container or a volume of those
-#   names exists, never restarts Docker or changes its settings, and removes only what it started.
+#   (default 4096) is the least memory it accepts from Docker. The `implement-issue` run is capped by `GITLAB_E2E_MAX_TOKENS`
+#   (default 600000) and `GITLAB_E2E_MAX_CENTS` (default 100), passed to `wf run` as `--max-tokens` and `--max-cents`;
+#   `GITLAB_E2E_STAGES=closing,quick-actions,references` runs only the proofs that cost no tokens (the fourth stage is `workflow`).
+#   It refuses to run while a container or a volume of those names exists, never restarts Docker or changes its settings, and
+#   removes only what it started.
 
 set -euo pipefail
 
@@ -34,6 +40,9 @@ volumes=("$name-config" "$name-logs" "$name-data")
 container_started=""
 volumes_started=""
 scratch=""
+# What the scripts run against the GitLab need: the root password and the token of the personal access token made in the container.
+password=""
+token=""
 
 die() {
   echo "error: $*" >&2
@@ -41,7 +50,7 @@ die() {
 }
 
 usage() {
-  echo "usage: gitlab-e2e.sh   (environment: GITLAB_E2E_IMAGE, GITLAB_E2E_PORT, GITLAB_E2E_NAME, GITLAB_E2E_TIMEOUT_SECONDS, GITLAB_E2E_POLL_SECONDS, GITLAB_E2E_MIN_MEMORY_MB)"
+  echo "usage: gitlab-e2e.sh   (environment: GITLAB_E2E_IMAGE, GITLAB_E2E_PORT, GITLAB_E2E_NAME, GITLAB_E2E_TIMEOUT_SECONDS, GITLAB_E2E_POLL_SECONDS, GITLAB_E2E_MIN_MEMORY_MB, GITLAB_E2E_MAX_TOKENS, GITLAB_E2E_MAX_CENTS, GITLAB_E2E_STAGES)"
 }
 
 # The container and its volumes go, on success, on failure and on a signal. A container this run did not start stays.
@@ -142,6 +151,19 @@ create_token() {
   ' | sed -n 's/^WF_E2E_TOKEN=//p'
 }
 
+# A TypeScript script of this repo, run against the GitLab: the same URL, token, password, image and scratch directory for each.
+run_script() {
+  (
+    cd "$root"
+    GITLAB_E2E_URL="http://localhost:${port}" \
+      GITLAB_E2E_TOKEN="$token" \
+      GITLAB_E2E_PASSWORD="$password" \
+      GITLAB_E2E_IMAGE="$image" \
+      GITLAB_E2E_SCRATCH="$scratch" \
+      npx tsx "$1"
+  )
+}
+
 main() {
   case "${1:-}" in
     "") ;;
@@ -159,21 +181,14 @@ main() {
   scratch="$(mktemp -d "${TMPDIR:-/tmp}/wf-gitlab-e2e-XXXXXX")"
   start_gitlab
   wait_until_ready
-  local password token
   password="$(root_password)"
   [ -n "$password" ] || die "GitLab left no initial root password in the container"
   token="$(create_token)"
   [ -n "$token" ] || die "could not create a personal access token inside the container"
   echo "GitLab is ready: recording the fixtures" >&2
-  (
-    cd "$root"
-    GITLAB_E2E_URL="http://localhost:${port}" \
-      GITLAB_E2E_TOKEN="$token" \
-      GITLAB_E2E_PASSWORD="$password" \
-      GITLAB_E2E_IMAGE="$image" \
-      GITLAB_E2E_SCRATCH="$scratch" \
-      npx tsx scripts/verify/record-glab-fixtures.ts
-  )
+  run_script scripts/verify/record-glab-fixtures.ts
+  echo "fixtures recorded: proving the GitLab behaviours (the last stage runs implement-issue and spends tokens)" >&2
+  run_script scripts/verify/prove-gitlab.ts
 }
 
 main "$@"

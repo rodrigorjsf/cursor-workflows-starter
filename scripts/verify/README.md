@@ -77,14 +77,17 @@ O código de GitLab do runtime é testado offline contra um `glab` falso. As sa�
 rota de API que o runtime usa e grava o que ele imprimiu em
 [`packages/runtime/test/fixtures/glab/recordings.json`](../../packages/runtime/test/fixtures/glab/recordings.json). O token, a
 senha do root e o host local saem trocados por placeholders fixos, e o gravador (`record-glab-fixtures.ts`) não escreve nada se
-sobrar um segredo. É decisão do [ADR-0009](../../docs/adr/0009-forge-seam-github-and-gitlab.md).
+sobrar um segredo. Depois do gravador, o mesmo GitLab serve às provas do [`prove-gitlab.ts`](prove-gitlab.ts), num projeto
+`owner/proof` que ele cria. É decisão do [ADR-0009](../../docs/adr/0009-forge-seam-github-and-gitlab.md).
 
-**Custa memória e tempo, não tokens.** O GitLab CE em modo de pouca memória (um processo Puma, Sidekiq enxuto, sem
+**Custa memória, tempo e, na última prova, tokens.** O GitLab CE em modo de pouca memória (um processo Puma, Sidekiq enxuto, sem
 Prometheus, 256 MB de memória compartilhada) usa cerca de 2,5 GB e leva alguns minutos para subir; o script recusa rodar com
-menos de 4 GiB no Docker. Fica fora do `npm run check` e do CI.
+menos de 4 GiB no Docker. A última prova roda o `implement-issue` de verdade, com etapas locais, contra a API da Cursor
+(`wf login` feito) e passa `--max-tokens` e `--max-cents` ao `wf run`. Fica fora do `npm run check` e do CI.
 
 ```bash
 mise exec -- scripts/verify/gitlab-e2e.sh                                  # o glab fixado no mise.toml fica no PATH
+GITLAB_E2E_STAGES=closing,quick-actions,references mise exec -- scripts/verify/gitlab-e2e.sh   # sem gastar tokens
 GITLAB_E2E_IMAGE=gitlab/gitlab-ce:latest mise exec -- scripts/verify/gitlab-e2e.sh   # a imagem mais nova, só para ver
 ```
 
@@ -96,12 +99,29 @@ GITLAB_E2E_IMAGE=gitlab/gitlab-ce:latest mise exec -- scripts/verify/gitlab-e2e.
 | `GITLAB_E2E_TIMEOUT_SECONDS` | `1800` | Quanto esperar o GitLab responder |
 | `GITLAB_E2E_POLL_SECONDS` | `10` | De quanto em quanto tempo olhar se ele já responde |
 | `GITLAB_E2E_MIN_MEMORY_MB` | `4096` | A memória mínima que o script aceita do Docker; abaixo disso ele recusa rodar |
+| `GITLAB_E2E_MAX_TOKENS` | `600000` | O `--max-tokens` do `implement-issue` da última prova (um LOW gasta cerca de 340 mil) |
+| `GITLAB_E2E_MAX_CENTS` | `100` | O `--max-cents` do mesmo run |
+| `GITLAB_E2E_STAGES` | todas | As provas a rodar, separadas por vírgula: `closing`, `quick-actions`, `references` e `workflow`. Sem a última, nada gasta tokens |
+| `GITLAB_E2E_WORKFLOW_TIMEOUT_SECONDS` | `2700` | Quanto o `implement-issue` da última prova pode levar antes de ser cancelado |
 
 O script nunca reinicia nem reconfigura o Docker (use o Docker que já está de pé), recusa rodar se já existe um container
 ou um volume com os nomes que ele usaria, e só remove o que ele mesmo criou: no fim,
 também quando uma etapa falha ou ele é interrompido, apaga o container e os volumes. O `glab` roda com uma pasta de
 configuração descartável, então o `~/.config/glab-cli` de quem roda não é tocado. Depois de uma gravação, confira com
 `git diff packages/runtime/test/fixtures/glab` e rode `mise exec -- npm run check`.
+
+### O que as provas mostram
+
+O [`prove-gitlab.ts`](prove-gitlab.ts) imprime no stdout a evidência em Markdown (sem token, senha, host local nem caminho desta
+máquina), pronta para a descrição do PR, e sai com 1 se uma prova não valeu. Cada "não aconteceu nada" vem ao lado do mesmo
+texto sem o filtro, que acontece: sem esse controle a checagem não prova nada.
+
+| Etapa | O que faz | Vale quando |
+|---|---|---|
+| `closing` | Mergeia um MR por frase de fechamento (`Closes #N`, `Implements #N`, `Fixing #N`, `Resolves grupo/projeto#N`, a URL da issue, em frase…), com a frase como está e passada pelo `sanitizeModelText` | A frase como está fecha a issue (o `Closes #N` do controle sempre), e a mesma frase depois do filtro não fecha. Responde se o padrão de fechamento do GitLab casa `Implement(s\|ed\|ing) #N` |
+| `quick-actions` | Posta 11 formas de `/close` (`/CLOSE`, com tab, depois de `\r`, em cerca de crase, til ou quatro crases, depois de `<div>`, `>>>` ou `$$`, numa cerca que fica aberta…) como nota numa issue e como descrição de MR | Um `/close` solto fecha a issue (ou o MR), e nenhuma forma passada pelo filtro roda |
+| `references` | Renderiza e posta `!1`, `~bug` e `%v1` antes e depois do espaço de largura zero | O texto como está vira link e deixa uma nota de referência no `!1`, e o filtrado não |
+| `workflow` | Roda `implement-issue` (etapas locais, `testCommand: npm test`) na issue 1 de um projeto Node mínimo, mergeia o MR que ele abriu e espera a issue fechar | O run termina `done`, o MR abre com `Closes #1` na descrição, e o merge fecha a issue |
 
 ## Validação no Cursor IDE
 
