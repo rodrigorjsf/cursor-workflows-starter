@@ -49,7 +49,7 @@ Baixar o script para um arquivo, em vez de passá-lo direto ao `bash`, deixa voc
 
 | Passo | Resultado |
 |---|---|
-| Kit | Clona o repositório na tag em `~/.cursor-workflows/kit` (`WF_HOME` muda a pasta `~/.cursor-workflows`). Se já há um clone, busca as tags da origem dele e o move para a tag (um `--repo` dado de novo troca essa origem antes) |
+| Kit | Antes de mexer no kit, confere a tag ([abaixo](#tag-movida-e-release-que-não-é-imutável)): a release dela no GitHub tem de ser imutável. Depois clona o repositório na tag em `~/.cursor-workflows/kit` (`WF_HOME` muda a pasta `~/.cursor-workflows`). Se já há um clone, busca as tags da origem dele, sem `--force`, e o move para a tag (um `--repo` dado de novo troca essa origem antes) |
 | Node | Para antes de instalar qualquer coisa se o `node` do PATH for mais antigo que o `engines.node` do kit (22.13), dizendo as duas versões |
 | Dependências | `npm ci` na pasta do kit: a árvore exata do `package-lock.json` |
 | Comando `wf` | Escreve `~/.local/bin/wf`, um script que roda o CLI do kit instalado. Se a pasta não está no PATH, o instalador avisa e diz como corrigir (bash ou zsh: `export PATH` no `~/.profile`; fish: `fish_add_path`). Um `wf` que não é dele fica como está, com aviso |
@@ -58,6 +58,26 @@ Baixar o script para um arquivo, em vez de passá-lo direto ao `bash`, deixa voc
 
 Rodar de novo é seguro: o instalador refaz o que falta e não muda o que já está certo. Cada skill ligada passa pelo local
 fixo do kit, então o link continua valendo quando o kit troca de uma tag para outra.
+
+### Tag movida e release que não é imutável
+
+Quem consegue mover uma tag de release (um token roubado, uma sessão comprometida) faz toda instalação seguinte rodar o
+código dele. O instalador e o `wf upgrade` fecham essa porta de duas formas, antes de trocar o kit de lugar:
+
+- **Buscam as tags sem `--force`.** O git recusa sobrescrever uma tag que já existe no clone e mudou na origem
+  (`! [rejected] ... (would clobber existing tag)`), e a mensagem diz que a tag `moved upstream`. O kit fica onde estava.
+  Não instale até o dono do repositório explicar a mudança.
+- **Leem a release da tag e só seguem se ela for imutável.** Uma release imutável do GitHub trava a tag no commit dela. A
+  consulta é `https://api.github.com/repos/rodrigorjsf/cursor-workflows-starter/releases/tags/<tag>`, que não pede token, e o
+  campo `immutable` tem de ser `true`. Uma release que não é imutável (`is not immutable`), uma tag sem release
+  (`has no release for tag`) e uma chamada que falha, como a falta de rede (`could not read the release of`), são erros,
+  nunca um "pula a checagem". O checksum do `install.sh` não entra no `INSTALL-AGENT.md`: um commit não contém o próprio
+  hash, então a âncora é a release imutável.
+
+O `--allow-mutable-tag` (`install.sh --tag ... --allow-mutable-tag`, `wf upgrade --allow-mutable-tag`) pula só a consulta à
+release, e é a escolha explícita de quem instala de um fork com `--repo`: a consulta cobre só o repositório oficial, e um
+kit cuja origem é outro é recusado sem a flag (a resposta para uma tag de mesmo nome no repositório oficial nada diz sobre a do
+fork). A tag movida continua recusada com a flag.
 
 ### Atualizar: `wf upgrade`
 
@@ -72,8 +92,9 @@ arquivo seu. O stdout é `{ "upgraded", "from", "to", "tag" }`; o andamento vai 
 só diz isso. Depois de atualizar, rode `wf doctor` em cada repositório: um kit fora da faixa `kit` do repositório é recusado
 ([2.3](03-invocacao-no-cursor-ide.md#conferindo-o-ambiente-wf-doctor)).
 
-Ele recusa o que não é um kit instalado: um kit em modo de desenvolvimento (abaixo), um `wf` que roda de outra pasta, e a
-falta de rede (o kit continua na versão em que estava). Se o instalador falhar depois do checkout, a mensagem diz o
+Ele recusa o que não é um kit instalado: um kit em modo de desenvolvimento (abaixo), um `wf` que roda de outra pasta, a
+falta de rede (o kit continua na versão em que estava), uma tag que se moveu e uma release que não é imutável
+(`wf upgrade --allow-mutable-tag` pula só a consulta à release; [veja acima](#tag-movida-e-release-que-não-é-imutável)). Se o instalador falhar depois do checkout, a mensagem diz o
 comando para terminar: `bash ~/.cursor-workflows/kit/scripts/install.sh --refresh`.
 
 ### Modo de desenvolvimento

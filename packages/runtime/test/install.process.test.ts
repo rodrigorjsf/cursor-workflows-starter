@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, afterEach, before, test } from "node:test";
@@ -329,10 +330,18 @@ test("the installer works in a home whose path has spaces, quotes and a dollar s
   assert.equal(readlinkSync(join(home, ".claude", "skills", "run-workflow")), join(kitOf(home), "skills", "run-workflow"));
 });
 
+/** A fork of the origin: a clone, so it has the origin's v0.3.0 (the same commit), and its own v0.4.0. */
+function fork(): string {
+  const dir = join(sandbox, `fork-${++counter}`);
+  git(sandbox, "clone", "--quiet", origin, dir);
+  release(dir, "0.4.0");
+  return dir;
+}
+
 test("--repo given again points an existing clone at that repository before it fetches the tag", () => {
   const home = newHome();
   assert.equal(install(home, ["--tag", "v0.3.0", "--repo", origin]).status, 0);
-  const other = originWithReleases();
+  const other = fork();
 
   const r = install(home, ["--tag", "v0.4.0", "--repo", other], { from: other });
   assert.equal(r.status, 0, r.stderr);
@@ -364,7 +373,8 @@ test("a Node older than the kit's engines.node stops the installer before it ins
   const home = newHome();
   const old = join(sandbox, `old-node-${++counter}`);
   mkdirSync(old);
-  writeFileSync(join(old, "node"), '#!/bin/sh\n[ "$1" = "--version" ] && echo v22.11.0\n');
+  // Only `--version` is faked: the installer's release lookup runs a script on this Node, as it would on a real 22.11.
+  writeFileSync(join(old, "node"), `#!/bin/sh\nif [ "$1" = "--version" ]; then echo v22.11.0; exit 0; fi\nexec "${process.execPath}" "$@"\n`);
   chmodSync(join(old, "node"), 0o755);
   const before = npmCalls().length;
 
@@ -514,6 +524,15 @@ function serveRelease(tag: string, immutable: boolean | undefined): void {
   writeFileSync(join(releaseApiDir, `${tag}.json`), JSON.stringify({ tag_name: tag, ...(immutable === undefined ? {} : { immutable }) }));
 }
 
+/** The URL of a port nothing listens on (fetch refuses the well-known low ports as "bad port", so a port the OS just gave and took back). */
+async function closedApiUrl(): Promise<string> {
+  const probe = createServer();
+  await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+  const { port } = probe.address() as { port: number };
+  await new Promise((resolve) => probe.close(resolve));
+  return `http://127.0.0.1:${port}`;
+}
+
 const OFFICIAL_RELEASE_PATH = "/repos/rodrigorjsf/cursor-workflows-starter/releases/tags";
 
 /** A bare repository, as GitHub serves a repository, with the releases of `originWithReleases()`; `dir` holds the installer to run. */
@@ -613,11 +632,11 @@ test("a tag with no release is an error: only a published release installs", () 
   assert.ok(!existsSync(kitOf(home)));
 });
 
-test("a releases API that cannot be reached stops the installer: the check is never skipped", () => {
+test("a releases API that cannot be reached stops the installer: the check is never skipped", async () => {
   const home = newHome();
-  const r = install(home, ["--tag", "v0.3.0", "--repo", origin], { WF_GITHUB_API_URL: "http://127.0.0.1:1" });
+  const r = install(home, ["--tag", "v0.3.0", "--repo", origin], { WF_GITHUB_API_URL: await closedApiUrl() });
   assert.equal(r.status, 1, r.stdout);
-  assert.match(r.stderr, /could not read the release of v0\.3\.0/);
+  assert.match(r.stderr, /could not read the release of v0\.3\.0 from .*ECONNREFUSED/);
   assert.ok(!existsSync(kitOf(home)) && !existsSync(shimOf(home)));
 });
 
@@ -656,14 +675,14 @@ test("wf upgrade refuses a release that is not immutable and leaves the kit on i
   assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.4.0");
 });
 
-test("wf upgrade with a releases API that cannot be reached fails and leaves the kit on its old tag", () => {
+test("wf upgrade with a releases API that cannot be reached fails and leaves the kit on its old tag", async () => {
   const dir = originWithReleases();
   const home = newHome();
   assert.equal(install(home, ["--tag", "v0.3.0", "--repo", dir], { from: dir }).status, 0);
 
-  const r = upgrade(home, [], { WF_GITHUB_API_URL: "http://127.0.0.1:1" });
+  const r = upgrade(home, [], { WF_GITHUB_API_URL: await closedApiUrl() });
   assert.equal(r.status, 1, r.stdout);
-  assert.match(r.stderr, /could not read the release of v0\.4\.0/);
+  assert.match(r.stderr, /could not read the release of v0\.4\.0 from .*ECONNREFUSED/);
   assert.equal(git(kitOf(home), "describe", "--tags", "--exact-match"), "v0.3.0");
 });
 

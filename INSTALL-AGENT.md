@@ -30,6 +30,9 @@ bash /tmp/wf-install.sh --tag v0.4.0
 
 The installer:
 
+- first checks the tag: it reads the GitHub release of `v0.4.0` and stops unless the release is immutable (GitHub locks
+  an immutable release's tag to its commit, so nobody can move the tag to other code), and, when a clone of the kit
+  already exists, it fetches the tags without `--force`, so a tag that moved since the last fetch stops the install;
 - clones the kit at tag `v0.4.0` into `~/.cursor-workflows/kit` and installs its dependencies;
 - writes the `wf` command to `~/.local/bin/wf`;
 - links the kit's skills (`run-workflow`, `cursor-workflow-authoring`, `skill-to-workflow`, `cursor-workflows-setup`)
@@ -50,6 +53,11 @@ that includes `implement-issue`.
 - A line starting `error:` is a failure: fix what it names and run the installer again. For example,
   `<tool> is not on the PATH; install it and run again` or `Node <have> (<path>) is too old: the kit needs <need> or
   newer. Install a newer Node, put it on the PATH and run again`.
+- An `error:` line about the tag means the install is unsafe or not possible: it contains `moved upstream` (a release
+  tag was re-pointed), `is not immutable`, `has no release for tag` or `could not read the release of`. Stop and tell
+  the user, with the command output. Retry once only for `could not read the release of`, which is usually the
+  network. Never add `--allow-mutable-tag` yourself: it skips the release check, and only the user may choose that,
+  for a fork they install with `--repo`.
 
 ## 3. Log in to the Cursor SDK
 
@@ -109,6 +117,8 @@ From here on the `cursor-workflows-setup` skill (now installed) covers init, doc
 
 ## Later
 
-- **Upgrade:** `wf upgrade` moves the kit to the newest release and keeps the skill links valid.
+- **Upgrade:** `wf upgrade` moves the kit to the newest release and keeps the skill links valid. It makes the same tag
+  checks as the installer and fails with the same messages (without the `error:` prefix); the same rule applies to
+  `--allow-mutable-tag`.
 - **Develop the kit itself:** in a clone, `scripts/install.sh --dev` points `~/.cursor-workflows/kit` at that clone
   instead of a tag. `wf upgrade` refuses such an install.
