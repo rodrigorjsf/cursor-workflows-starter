@@ -23,6 +23,7 @@ documento explica o *porquê* das regras e traz as receitas, que a skill aponta.
 | Commit, push e PR feitos pelo código, depois das verificações | Código do workflow | Garantida |
 | Trava de segredos antes do commit, do comentário na issue e do corpo do PR | `implement-issue` | Checada por código, só nesses formatos |
 | Testes no ambiente de quem chamou (`bash -c`, não `bash -lc`) | `runTests` | Garantida |
+| Um comando de teste que o planejador escolheu só roda depois de uma pessoa o ver | `implement-issue` | Garantida |
 | Escrever só dentro do repositório (`SCOPE_RULE`) | Instruções das etapas que escrevem | **Só pedido no prompt** |
 | Sandbox (`sandbox: true`) | Opção da etapa | Não testado neste kit |
 
@@ -286,7 +287,10 @@ combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
    escapadas) e o caminho pelo chat (`resumeRunId`). O texto passa pela trava de segredos antes.
 3. O run 2 é o resume com o arg de aprovação (`approveSeams: true`) e executa **o resultado guardado**, não um
    recalculado: uma issue editada ou um arquivo de contexto novo mudaria o prompt do planejador e o plano. Uma
-   edição do humano (`seams: [...]`) refaz a etapa com a edição no prompt. O resultado guardado só é achado com o
+   edição do humano (`seams: [...]`) refaz a etapa com a edição no prompt. No `implement-issue` essa etapa também
+   escolhe o comando de teste, texto de modelo que roda por `bash -c`: com `seams` e sem `testCommand`, o run 2 não o
+   executa; para em `test-command-proposed` (também em `PENDING`), com o comando no comentário e um `next` sem `seams`,
+   e só o resume com `approveSeams: true` roda o plano guardado. O resultado guardado só é achado com o
    mesmo `runId` e o mesmo repositório, porque o progresso fica em `<cwd>/.workflows/runs/<runId>/`: rode o run 2 do
    mesmo diretório (ou com o mesmo `--cwd`) do run 1. Sem o resultado guardado, o `implement-issue` para com
    `seams-not-proposed` em vez de aprovar um plano que ninguém viu.

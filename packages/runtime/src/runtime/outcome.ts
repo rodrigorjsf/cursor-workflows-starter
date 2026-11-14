@@ -4,7 +4,7 @@ import type { RunStatus } from "./events.js";
 
 const DELIVERED = new Set(["done", "delivered", "ok", "success", "succeeded"]);
 /** Status que aguardam alguém (ex.: seams propostas esperando aprovação): não são entrega nem falha. */
-const PENDING = new Set(["seams-proposed", "pending"]);
+const PENDING = new Set(["seams-proposed", "test-command-proposed", "pending"]);
 
 export type OutcomeClass = "delivered" | "failed" | "error" | "cancelled" | "pending" | "unknown";
 

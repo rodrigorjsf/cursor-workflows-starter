@@ -36,6 +36,19 @@
 
 ### Mudado
 
+- **Um comando de teste que o planejador escolheu só roda depois de uma pessoa o ver.** O planejador (MED) e o juiz (HIGH) leem o
+  corpo da issue e devolvem um `testCommand`, que o `implement-issue` roda por `bash -c`, fora do sandbox, com o ambiente de quem
+  chamou. Com `seams: [...]`, o planejador rodava de novo e o comando dele era usado direto, sem que ninguém o visse (o
+  checkpoint de `seams-proposed` só para quando nem `seams` nem `approveSeams` vêm). Agora um comando de teste vem só de uma
+  destas fontes: o `testCommand` que você digitou, o plano que você aprovou com `approveSeams`, ou o `npm test` do LOW (uma
+  constante do kit). Com `seams` e sem `testCommand`, o run guarda o plano, comenta o comando na issue (num trecho de código, linha
+  a linha se tiver várias; sem credenciais) e para com o status novo `test-command-proposed`, sem criar o worktree nem rodar
+  nada. A linha `next` tem `approveSeams: true` e não tem `seams` (o plano guardado já as tem); retomar com ela executa
+  exatamente esse plano, sem chamar o planejador de novo e sem voltar em silêncio para `npm test`. Quem passa `seams` e
+  `testCommand` juntos não vê mudança. O status conta como pendente (coluna **Awaiting approval** do Board), como o
+  `seams-proposed`. O comentário das seams também passou a mostrar um comando de várias linhas linha a linha, não dobrado em uma.
+  Veja [5.1 §Segurança](docs/operating/01-governanca-e-custos.md#segurança).
+
 - **O erro `invalid args` nomeia o campo que o schema não declara.** Antes, um campo a mais dava só
   `must NOT have additional properties`; agora a mensagem termina com o nome do campo
   (`must NOT have additional properties: isue`), no `wf run`, no `start_workflow` e no dashboard.

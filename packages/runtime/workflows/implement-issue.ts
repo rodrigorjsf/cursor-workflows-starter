@@ -11,7 +11,12 @@
 //     run): o segundo run, com `--resume <runId>` e `approveSeams: true`, executa EXATAMENTE o plano proposto; com
 //     `seams: [...]`, refaz o plano com as seams dadas. A skill tdd manda combinar as seams antes dos testes, e o
 //     runtime não pausa para perguntar. Sem plano proposto no progresso (outro runId ou outro --cwd), `approveSeams`
-//     para com "seams-not-proposed" em vez de aprovar um plano novo; para pular o checkpoint, passe `seams`;
+//     para com "seams-not-proposed" em vez de aprovar um plano novo; para pular o checkpoint das seams, passe `seams`;
+//   - the test command runs through `bash -c`, outside the sandbox: one the planner chose (after reading the issue body) runs only
+//     after a person saw it. It comes from `testCommand` (the user typed it), from the plan the user approved with `approveSeams`
+//     or, in LOW, it is the kit's `npm test`. With `seams` and no `testCommand` the run stores the plan, comments the command on
+//     the issue and stops with "test-command-proposed"; its `next` line drops `seams` (the stored plan holds them) and, resumed,
+//     runs that plan;
 //   - a suíte tem de estar verde antes da primeira fatia ("baseline-red"; um runner sem nenhum teste conta como
 //     verde); `setupCommand` opcional antes; os testes têm teto de tempo ("tests-timeout"), e uma suíte morta por um sinal não conta como red ("tests-killed");
 //   - cada fatia é um ciclo red → green controlado pelo código. Red: o que a etapa mudar fora dos testes é
@@ -184,6 +189,8 @@ const READ_ONLY = ["read", "grep", "glob", "ls", "semSearch"];
 const REVIEW_TOOLS = ["read", "grep", "glob", "ls"];
 const NO_SETTING_SOURCES: SettingSource[] = [];
 const SEAMS_MARKER = "<!-- wf:implement-issue:seams -->";
+/** The comment of a stopped `test-command-proposed` run: its own marker, so a run that already posted its seams still posts the command. */
+const TEST_COMMAND_MARKER = "<!-- wf:implement-issue:test-command -->";
 /** Arquivos que orientam o desenho e o review, quando existem no repositório. */
 const CONTEXT_FILES = ["GLOSSARY.md", "CONTEXT.md", "AGENTS.md", "CODING_STANDARDS.md", "CONTRIBUTING.md", "docs/adr"];
 const STANDARDS_FILES = ["CODING_STANDARDS.md", "CONTRIBUTING.md", "AGENTS.md", ".editorconfig"];
@@ -192,14 +199,14 @@ interface Args {
   issue: number;
   /** owner/repo, group/sub/project, or a repository URL; default: the cwd's repository. A URL names its host, which decides the forge (the host of `origin` decides otherwise). */
   repo?: string;
-  /** Comando de teste; default: o que o plano sugerir, ou `npm test`. */
+  /** The test command you typed: it runs as written. Default: the one of the plan you approved with `approveSeams`, or `npm test`. With `seams` and no `testCommand`, the run stops at "test-command-proposed" so you see the planner's command first. */
   testCommand?: string;
   /** Roda uma vez no worktree novo antes da suíte de base (ex.: `npm ci`). */
   setupCommand?: string;
   openPr?: boolean;
   /** Segundo run de MED/HIGH (com `--resume <runId>` e o mesmo `--cwd`): aprova o plano proposto no primeiro. */
   approveSeams?: boolean;
-  /** Seams aprovadas por você, no lugar das propostas: o plano é refeito com elas. */
+  /** Seams approved by you, in place of the proposed ones: the plan is made again with them (without `testCommand`, the command the planner chooses waits for your approval). */
   seams?: string[];
   /** O que conta como arquivo de teste (default: DEFAULT_TEST_GLOBS). */
   testGlobs?: string[];
@@ -209,6 +216,21 @@ interface Args {
 
 interface Slice { behavior: string; seam: string; testIdea: string }
 interface Plan { seams: Array<{ name: string; interface: string; why: string }>; slices: Slice[]; testCommand: string; rationale?: string }
+/** The test command of a LOW run, and of any run whose planner proposed none: a constant of the kit, not model text. */
+const DEFAULT_TEST_COMMAND = "npm test";
+/** The test command the planner proposed; a blank one is no proposal (the run then takes the kit's `npm test`). */
+const proposedCommand = (plan: Plan): string | undefined => (plan.testCommand?.trim() ? plan.testCommand : undefined);
+/**
+ * How a comment shows the test command, which `bash -c` runs as written. An inline code span cannot hold a line break, so a
+ * command of several lines goes line by line, one span each: a person who approves it sees the script that runs, not a one-line
+ * look-alike (`npm test\ntouch PWNED` folded into `npm test touch PWNED`).
+ */
+const testCommandLines = (command: string): string[] => {
+  const lines = command.trimEnd().split(/\r\n|\r|\n/); // the line break `bash -c` ignores at the end is not a line
+  return lines.length === 1
+    ? [`Test command: ${inlineCode(lines[0]!)}`]
+    : [`Test command (${lines.length} lines, run as one script):`, "", ...lines.map((line) => `- ${inlineCode(line)}`)];
+};
 interface Impl { summary: string; filesChanged: string[] }
 interface TestOut { testFile: string; testName: string; alreadySatisfied?: boolean; evidence?: string }
 
@@ -569,7 +591,7 @@ export default defineWorkflow<Args>({
         plan = {
           seams: [{ name: "affected public interface", interface: "chosen by the test step", why: "LOW: one slice, no planner" }],
           slices: [{ behavior: issue.title, seam: "the public interface closest to the requested behaviour", testIdea: "use an example from the issue as the expected value" }],
-          testCommand: ctx.args.testCommand ?? "npm test",
+          testCommand: ctx.args.testCommand ?? DEFAULT_TEST_COMMAND,
         };
       } else if (ctx.args.approveSeams && !ctx.args.seams?.length && !progress.data.proposedPlan) {
         // Aprovar exige um plano mostrado: sem ele, um planejador novo produziria um plano que ninguém viu.
@@ -622,10 +644,46 @@ export default defineWorkflow<Args>({
           });
         }
         // tdd: seams combinadas antes de qualquer teste. O runtime não pausa: propõe na issue, guarda o plano e para.
-        if (!ctx.args.seams?.length && !ctx.args.approveSeams) {
+        const proposesSeams = !ctx.args.seams?.length && !ctx.args.approveSeams;
+        // The test command runs through `bash -c`, outside the sandbox, with the caller's environment. A command the planner wrote
+        // after reading an issue body runs only after a person saw it: in the plan they approved with `approveSeams`, or typed by
+        // them in `testCommand`. With `seams` and no `testCommand`, the run proposes the command and stops.
+        const proposesCommand = !!ctx.args.seams?.length && ctx.args.testCommand === undefined && proposedCommand(plan) !== undefined;
+        if (proposesSeams || proposesCommand) {
+          const { seams: _seams, ...argsWithoutSeams } = ctx.args;
+          const chatApproval = `In the chat: \`/run-workflow implement-issue\` with \`resumeRunId: "${ctx.runId}"\` and \`approveSeams: true\``;
+          // What differs between the two stops. The relaunch of the proposed command drops `seams`: the stored plan already holds
+          // them, and with `seams` the stored-plan branch would not fire (the planner would run again and the run would stop here again).
+          const stop = proposesSeams
+            ? {
+                status: "seams-proposed",
+                marker: SEAMS_MARKER,
+                heading: `## Seams proposed by the \`implement-issue\` workflow (tier ${tier})`,
+                intro: [] as string[],
+                relaunchArgs: { ...ctx.args, approveSeams: true },
+                approve: "Relaunch with the same args and `approveSeams: true`, in the same directory as this run (or with the same `--cwd`); it executes exactly this plan:",
+                chat: `${chatApproval}. To change the seams, pass \`seams: [...]\` instead of \`approveSeams\`.`,
+                commentName: "seams comment",
+                result: {},
+              }
+            : {
+                status: "test-command-proposed",
+                marker: TEST_COMMAND_MARKER,
+                heading: `## Test command proposed by the \`implement-issue\` workflow (tier ${tier})`,
+                intro: [
+                  "The run was started with `seams` and no `testCommand`, so the planner chose the test command below. The workflow runs a command a model wrote only after a person saw it: nothing has run.",
+                  "",
+                ],
+                relaunchArgs: { ...argsWithoutSeams, approveSeams: true },
+                approve:
+                  "Relaunch with `approveSeams: true` and without `seams` (the stored plan already holds them), in the same directory as this run (or with the same `--cwd`); it executes exactly this plan, with this test command:",
+                chat: `${chatApproval}, without \`seams\`. To run another command, pass \`testCommand\` yourself.`,
+                commentName: "test command comment",
+                result: { testCommand: plan.testCommand },
+              };
           progress.data.proposedPlan = plan;
           progress.save();
-          const relaunch = `npm run wf -- run implement-issue --args ${shellQuote(JSON.stringify({ ...ctx.args, approveSeams: true }))} --resume ${ctx.runId}`;
+          const relaunch = `npm run wf -- run implement-issue --args ${shellQuote(JSON.stringify(stop.relaunchArgs))} --resume ${ctx.runId}`;
           // Model text goes to a public issue: neutralized like the PR body's (closing keywords, mentions, `<!--`, and on GitLab its
           // quick actions and references). The interface and the test command sit in inline code spans, where the forge gives them no effect only while
           // the span holds: inlineCode turns their backticks and line breaks into characters that cannot close it.
@@ -634,9 +692,10 @@ export default defineWorkflow<Args>({
           // command, a `Bearer` header) for the workflow to run, but a public comment gets none of them.
           const redactOutbound = createRedactor({ extra: savedSecrets() }).text;
           const comment = redactOutbound([
-            SEAMS_MARKER,
-            `## Seams proposed by the \`implement-issue\` workflow (tier ${tier})`,
+            stop.marker,
+            stop.heading,
             "",
+            ...stop.intro,
             ...plan.seams.map((s) => `- **${prose(s.name)}**: ${inlineCode(s.interface)} — ${prose(s.why)}`),
             "",
             "### Slices (one per red → green cycle)",
@@ -648,26 +707,26 @@ export default defineWorkflow<Args>({
               ? ["", `The slices marked deferred are left out by the tier ${tier} slice cap (${sliceCap} slices): the PR only references the issue, without closing it.`]
               : []),
             "",
-            `Test command: ${inlineCode(ctx.args.testCommand ?? plan.testCommand)}`,
+            ...testCommandLines(ctx.args.testCommand ?? proposedCommand(plan) ?? DEFAULT_TEST_COMMAND), // what the run executes, whatever the planner wrote
             ...(plan.rationale ? ["", `### Why this design\n\n${prose(plan.rationale)}`] : []),
             "",
             "### To approve",
             "",
-            "Relaunch with the same args and `approveSeams: true`, in the same directory as this run (or with the same `--cwd`); it executes exactly this plan:",
+            stop.approve,
             "",
             "```bash",
             relaunch,
             "```",
             "",
-            `In the chat: \`/run-workflow implement-issue\` with \`resumeRunId: "${ctx.runId}"\` and \`approveSeams: true\`. To change the seams, pass \`seams: [...]\` instead of \`approveSeams\`.`,
+            stop.chat,
           ].join("\n"));
           const leak = findSecretInText(comment);
-          if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the seams comment` };
+          if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the ${stop.commentName}` };
           const existing = await forge.issueComments(ctx.cwd, issue.number, repo);
-          if (!existing.some((body) => body.includes(SEAMS_MARKER) && body.includes(ctx.runId))) {
+          if (!existing.some((body) => body.includes(stop.marker) && body.includes(ctx.runId))) {
             await withBodyFile(comment, (f) => forge.commentOnIssue(ctx.cwd, issue.number, f, repo));
           }
-          return { ...base, status: "seams-proposed", runId: ctx.runId, seams: plan.seams, slices: plan.slices, next: relaunch };
+          return { ...base, status: stop.status, runId: ctx.runId, ...stop.result, seams: plan.seams, slices: plan.slices, next: relaunch };
         }
       }
 
@@ -745,7 +804,7 @@ export default defineWorkflow<Args>({
           hint: "find what makes this step kill the process, or raise workflows.implement-issue.settings.maxStepCrashes in the config and resume the run; a new run starts the count again",
         };
       }
-      const testCommand = ctx.args.testCommand ?? plan.testCommand ?? "npm test";
+      const testCommand = ctx.args.testCommand ?? proposedCommand(plan) ?? DEFAULT_TEST_COMMAND;
       const suite = (label: string) => runTests(cmd, testCommand, worktree, { timeoutMs: testTimeout, label: `suite:${label}` });
       if (!progress.data.baselineGreen) {
         if (ctx.args.setupCommand) {
