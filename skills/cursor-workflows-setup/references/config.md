@@ -88,6 +88,8 @@ Under `workflows.<name>`:
     whether it ran this long.
   - `networkTimeoutSec`: the time limit, in seconds, of each network command (`git push`, `git ls-remote`, every `gh` or `glab`),
     for the workflow and `wf gc`.
+  - `backlogLabel`: the label that marks an open issue as ready for `implement-issue` (default `ready-for-agent`; one
+    label, no comma). The dashboard's Backlog column lists the open issues that carry it and have no run.
   - `gcFailedAfterDays`: `wf gc` removes a failed run's worktree and branches once it failed more days ago than this; a
     cancelled run never counts as failed. A run whose PR was merged or closed goes without waiting, and the origin
     branch stays while its PR is open.

@@ -1,0 +1,42 @@
+{
+  "recordedWith": {
+    "gh": "2.102.0"
+  },
+  "placeholders": {
+    "repo": "owner/repo"
+  },
+  "recordings": {
+    "issue-list": {
+      "args": [
+        "issue",
+        "list",
+        "--state",
+        "open",
+        "--label=ready-for-agent",
+        "--limit",
+        "100",
+        "--json",
+        "number,title,url"
+      ],
+      "exitCode": 0,
+      "stdout": "[{\"number\":98,\"title\":\"Dashboard: approve or replace an implement-issue run's proposed seams\",\"url\":\"https://github.com/owner/repo/issues/98\"},{\"number\":97,\"title\":\"Dashboard: resume a stopped run from its Run view\",\"url\":\"https://github.com/owner/repo/issues/97\"},{\"number\":96,\"title\":\"implement-issue: comment on the issue when seams are approved or replaced\",\"url\":\"https://github.com/owner/repo/issues/96\"},{\"number\":95,\"title\":\"Spec: Open backlog — hardening, real-API measurements, cancel fix and dashboard control\",\"url\":\"https://github.com/owner/repo/issues/95\"},{\"number\":76,\"title\":\"CODING_STANDARDS: second batch of mechanical checks\",\"url\":\"https://github.com/owner/repo/issues/76\"},{\"number\":75,\"title\":\"implement-issue: let a target repo declare where its glossary and other context files live\",\"url\":\"https://github.com/owner/repo/issues/75\"},{\"number\":73,\"title\":\"SECURITY.md: who receives your data, the WSL trust boundary, account hardening\",\"url\":\"https://github.com/owner/repo/issues/73\"},{\"number\":72,\"title\":\"Data at rest: private file modes and retention for the journal and memo\",\"url\":\"https://github.com/owner/repo/issues/72\"},{\"number\":71,\"title\":\"Pin where credentials may be sent: Cursor endpoint, repo argument, installer download\",\"url\":\"https://github.com/owner/repo/issues/71\"},{\"number\":70,\"title\":\"Runtime hardening: job cap, scrubbed env, snapshot guard, repo config, init symlinks, exfiltration links, dashboard error boundary\",\"url\":\"https://github.com/owner/repo/issues/70\"},{\"number\":68,\"title\":\"Supply-chain hardening for installs and CI\",\"url\":\"https://github.com/owner/repo/issues/68\"},{\"number\":69,\"title\":\"TypeScript strictness: typecheck the tests and turn on the flags that pay\",\"url\":\"https://github.com/owner/repo/issues/69\"},{\"number\":67,\"title\":\"Type the fake Cursor SDK against the real one\",\"url\":\"https://github.com/owner/repo/issues/67\"},{\"number\":66,\"title\":\"Make Privacy Mode an install precondition\",\"url\":\"https://github.com/owner/repo/issues/66\"},{\"number\":65,\"title\":\"The installer and wf upgrade refuse a moved tag and a release that is not immutable\",\"url\":\"https://github.com/owner/repo/issues/65\"},{\"number\":64,\"title\":\"wf upgrade and the installer refuse a kit with local changes\",\"url\":\"https://github.com/owner/repo/issues/64\"},{\"number\":63,\"title\":\"wf doctor reports a GitHub token broader than the kit needs\",\"url\":\"https://github.com/owner/repo/issues/63\"},{\"number\":62,\"title\":\"Run write steps in the SDK sandbox, proven by a capped real-API probe\",\"url\":\"https://github.com/owner/repo/issues/62\"},{\"number\":61,\"title\":\"Treat issue text and test output as untrusted data, and gate outside authors\",\"url\":\"https://github.com/owner/repo/issues/61\"},{\"number\":60,\"title\":\"A planner's test command runs only after human approval\",\"url\":\"https://github.com/owner/repo/issues/60\"},{\"number\":59,\"title\":\"Validate every MCP tool argument against its advertised schema\",\"url\":\"https://github.com/owner/repo/issues/59\"},{\"number\":58,\"title\":\"Move the MCP server to McpServer.registerTool\",\"url\":\"https://github.com/owner/repo/issues/58\"},{\"number\":50,\"title\":\"ADR-0003's cancel decision changed without a superseding ADR\",\"url\":\"https://github.com/owner/repo/issues/50\"},{\"number\":49,\"title\":\"Cancelling a frozen job leaves its ctx.exec commands running\",\"url\":\"https://github.com/owner/repo/issues/49\"},{\"number\":47,\"title\":\"Cloud steps ship unmeasured: verify-cloud has never run against the real API, so every real-API row of the research report §14 is open\",\"url\":\"https://github.com/owner/repo/issues/47\"},{\"number\":45,\"title\":\"implement-issue's write roles are declared cloud: never, so its TDD loop cannot use cloud write steps; whether it survives a cloud agent is unverified\",\"url\":\"https://github.com/owner/repo/issues/45\"},{\"number\":37,\"title\":\"Live token caps may fire only at the end of a send: the real SDK's turn-ended granularity and cancel() are unmeasured\",\"url\":\"https://github.com/owner/repo/issues/37\"},{\"number\":7,\"title\":\"Dashboard: Backlog column of ready-for-agent issues with a run button\",\"url\":\"https://github.com/owner/repo/issues/7\"},{\"number\":6,\"title\":\"Dashboard: start a workflow in a known repository\",\"url\":\"https://github.com/owner/repo/issues/6\"},{\"number\":2,\"title\":\"Spec: Foundation & Cursor IDE release — config, install, durable runs, validation\",\"url\":\"https://github.com/owner/repo/issues/2\"}]\n",
+      "stderr": ""
+    },
+    "issue-list-empty": {
+      "args": [
+        "issue",
+        "list",
+        "--state",
+        "open",
+        "--label=no-issue-has-this-label",
+        "--limit",
+        "100",
+        "--json",
+        "number,title,url"
+      ],
+      "exitCode": 0,
+      "stdout": "[]\n",
+      "stderr": ""
+    }
+  }
+}

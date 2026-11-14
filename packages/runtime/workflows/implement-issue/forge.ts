@@ -1,5 +1,6 @@
-// The forge seam (ADR-0009): everything `implement-issue` and `wf gc` ask of the service that hosts the repository (read an
-// issue, list and post its comments, open a PR, find a branch's PR and its state, name a repository), behind one interface.
+// The forge seam (ADR-0009): everything `implement-issue`, `wf gc` and the dashboard's Backlog (`backlog.ts`) ask of the service
+// that hosts the repository (read an issue, list the issues of a label, list and post an issue's comments, open a PR, find a
+// branch's PR and its state, name a repository), behind one interface.
 // This file is the only one that names a forge's CLI (`test/forge-seam.test.ts` enforces it): GitHub through `gh`, GitLab through
 // `glab`, and `glab api` (the REST API) where glab's own commands fall short. Every call goes through `Commands`, so its timeout,
 // its `CommandError` and its node in the run's log are those of every other command the workflow runs.
@@ -31,6 +32,17 @@ export interface ForgeIssue {
   labels: Array<{ name: string }>;
 }
 
+/** An issue as a list shows it: enough to name it and to link to it. */
+export interface ForgeIssueRef {
+  number: number;
+  title: string;
+  /** The address of the issue's page on the forge. */
+  url: string;
+}
+
+/** The most issues one `listIssues` reads: a backlog longer than this is not one an agent works through. */
+export const ISSUE_LIST_LIMIT = 100;
+
 /** A PR to open: from `branch`, with `title`, the text of the file `bodyFile` as its description, in `repo` (absent: the repository of the cwd). */
 export interface NewPr {
   branch: string;
@@ -44,6 +56,8 @@ export interface Forge {
   readonly name: ForgeName;
   /** The issue `number`. */
   issue(cwd: string, number: number, repo?: string): Promise<ForgeIssue>;
+  /** The open issues that carry `label`, the way the forge lists them (newest first), at most `ISSUE_LIST_LIMIT`. Reads only: nothing is created. */
+  listIssues(cwd: string, label: string): Promise<ForgeIssueRef[]>;
   /** The bodies of the issue's comments, all of them. */
   issueComments(cwd: string, number: number, repo?: string): Promise<string[]>;
   /** Posts the text of the file `bodyFile` as a comment on the issue. */
@@ -73,7 +87,7 @@ export interface RemoteName {
 /** The host to name to a forge's CLI: the web host, with its port when the URL is an http one that has it (an ssh remote's port is not the web port). */
 const webHost = (remote: RemoteName): string => (remote.web && remote.port ? `${remote.host}:${remote.port}` : remote.host);
 
-const trimmedPath = (path: string): string => path.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/, "");
+export const trimmedPath = (path: string): string => path.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/, "");
 
 /** The host and path of a git remote URL (`https://…`, `ssh://…` or scp-like `git@host:path`); undefined for text that names no host: a local path, `owner/repo`, `group/sub/project`. */
 export function parseRemote(text: string): RemoteName | undefined {
@@ -197,6 +211,11 @@ class GithubForge implements Forge {
 
   async issue(cwd: string, number: number, repo?: string): Promise<ForgeIssue> {
     return JSON.parse(await this.gh(cwd, "issue", "view", String(number), ...repoFlag(repo), "--json", "number,title,body,labels")) as ForgeIssue;
+  }
+
+  async listIssues(cwd: string, label: string): Promise<ForgeIssueRef[]> {
+    // `--label=<label>`, one argument: a label that starts with `-` is still a value
+    return JSON.parse(await this.gh(cwd, "issue", "list", "--state", "open", `--label=${label}`, "--limit", String(ISSUE_LIST_LIMIT), "--json", "number,title,url")) as ForgeIssueRef[];
   }
 
   async issueComments(cwd: string, number: number, repo?: string): Promise<string[]> {
@@ -383,6 +402,12 @@ class GitlabForge implements Forge {
       labels?: string[];
     };
     return { number: issue.iid, title: issue.title, body: issue.description ?? "", labels: (issue.labels ?? []).map((name) => ({ name })) };
+  }
+
+  async listIssues(cwd: string, label: string): Promise<ForgeIssueRef[]> {
+    // glab lists the open issues unless told otherwise, one page of `--per-page` (the first 100, newest first), as the REST API's own objects.
+    const issues = JSON.parse(await this.glab(cwd, "issue", "list", `--label=${label}`, "--per-page", String(ISSUE_LIST_LIMIT), "--output", "json")) as Array<{ iid: number; title: string; web_url: string }>;
+    return issues.map((issue) => ({ number: issue.iid, title: issue.title, url: issue.web_url }));
   }
 
   async issueComments(cwd: string, number: number, repo?: string): Promise<string[]> {

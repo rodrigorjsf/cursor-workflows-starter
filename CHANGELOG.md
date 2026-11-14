@@ -15,6 +15,20 @@
   `listRepoWorkflows`, sem carregar o SDK da Cursor no processo do dashboard. Veja
   [5.3 §Iniciar um workflow](docs/operating/03-observabilidade.md#iniciar-um-workflow).
 
+- **O Board mostra o ciclo inteiro de uma issue: uma coluna Backlog, com as issues prontas que ninguém começou, e um botão
+  "run" em cada card.** A coluna fica na frente do quadro do `implement-issue` e lista, de cada repositório que o índice global
+  de runs conhece, as issues abertas com a label `ready-for-agent` e sem run (um run do `implement-issue` iniciado para a
+  issue, qualquer que tenha sido o fim dele). A label é o novo ajuste `backlogLabel` do `implement-issue`
+  (`workflows.implement-issue.settings.backlogLabel`, no arquivo do repositório ou no global). As issues são lidas pelo forge
+  seam, então GitHub e GitLab valem igual (`gh issue list`, `glab issue list`; o `Forge` ganhou `listIssues`), e a resposta de
+  cada repositório é guardada por 60 segundos. Um erro do forge aparece na coluna, com o motivo, e o resto do quadro segue
+  funcionando. O botão "run" abre o painel Start já preenchido com o repositório, `implement-issue` e `{"issue": <n>}`: o
+  início é o `POST /api/start`, com os mesmos tetos obrigatórios e as mesmas recusas. A rota é `GET /api/backlog`; o
+  `observe` do runtime ganhou `readBacklog` e `issuesWithRuns`. O `gh` falso dos testes do dashboard passou a responder ao
+  `gh issue list` com o que o `gh` de verdade imprimiu (`scripts/verify/record-gh-fixtures.ts`), e o `glab` falso, com o que o
+  `glab` imprimiu num GitLab de verdade (gravação nova no `record-glab-fixtures.ts`). Veja
+  [5.3 §O Backlog](docs/operating/03-observabilidade.md#o-backlog).
+
 - **O workflow `verify-turn-granularity` mede, contra o SDK real, quantos `turn-ended` e `token-delta` uma etapa local longa
   gera e quanto o `Run.cancel()` leva para assentar no meio do turno.** Ele roda uma etapa que escreve (pelo motor) e dois
   envios diretos pelo SDK, num repositório novo de `scripts/verify/setup-probe-repo.sh`, com `--max-tokens` e `--max-cents`

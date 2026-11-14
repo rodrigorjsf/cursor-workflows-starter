@@ -1,29 +1,54 @@
 // The Board: one kanban per workflow, a column per phase plus Awaiting approval, Done, Failed and Cancelled, a card per run.
 // The server decides which column a run is in; the Board polls, so a card moves a moment after its run does. An empty column
 // folds into a narrow strip, so the columns that hold runs (Failed among them) stay in view on a wide screen.
-import type { Board, BoardCard, BoardLink, BoardResponse } from "../src/board.js";
+//
+// The board of the workflow the Backlog starts (`implement-issue`) has one more column in front: the Backlog, the open issues that
+// carry the backlog label and have no run, each with a run button that opens the Start form for it. The Backlog is its own poll
+// (`/api/backlog`: it waits for the forge, which the Board does not), so a forge that is slow or down never holds the runs back.
+import type { ReactNode } from "react";
+import type { BacklogCard, BacklogReply } from "../src/backlog.js";
+import type { Board, BoardCard, BoardColumn, BoardLink, BoardResponse } from "../src/board.js";
+import { backlogPreset, withBacklogBoard } from "./backlog-board.js";
 import { formatCents, formatCount, repoName, runDuration, runHref } from "./format.js";
 import { Empty, Loaded, PageHeader } from "./Loaded.js";
-import { usePoll } from "./usePoll.js";
+import type { StartPreset } from "./start-form.js";
+import { type Polled, usePoll } from "./usePoll.js";
 
 const POLL_MS = 2000;
+/** The forge's answer is kept for a minute by the server: asking again every few seconds costs a look at the runs, not a forge call. */
+const BACKLOG_POLL_MS = 5000;
 
-export function BoardView() {
+const BACKLOG_COLUMN: BoardColumn = { key: "backlog", title: "Backlog", kind: "backlog" };
+
+export function BoardView({ onRun }: { onRun(preset: StartPreset): void }) {
   const poll = usePoll<BoardResponse>("/api/board", POLL_MS);
+  const backlog = usePoll<BacklogReply>("/api/backlog", BACKLOG_POLL_MS);
   return (
     <>
       <PageHeader title="Board" summary={poll.data ? boardSummary(poll.data) : undefined} />
       <Loaded poll={poll} what="the board">
-        {(data) =>
-          data.boards.length === 0 ? (
-            <Empty title="No runs yet">
-              Start a workflow from the chat or with <code>npm run wf -- start &lt;workflow&gt;</code>, and its card appears here.
-            </Empty>
-          ) : (
-            data.boards.map((board) => <WorkflowBoard key={board.workflow} board={board} />)
-          )
-        }
+        {(data) => <Boards data={data} backlog={backlog} onRun={onRun} />}
       </Loaded>
+    </>
+  );
+}
+
+/** The boards, and the Backlog in front of the one it starts. The Backlog shows only when it has an issue or an error to show. */
+export function Boards({ data, backlog, onRun }: { data: BoardResponse; backlog: Polled<BacklogReply>; onRun(preset: StartPreset): void }) {
+  const shown = backlog.data && (backlog.data.cards.length > 0 || backlog.data.errors.length > 0) ? backlog.data : undefined;
+  const boards = shown ? withBacklogBoard(data.boards, shown.workflow) : data.boards;
+  return (
+    <>
+      <Loaded poll={backlog} what="the Backlog">
+        {() => null /* the Backlog's own state is the column in front of its board: `Loaded` says only that it is loading, or why it failed */}
+      </Loaded>
+      {boards.length === 0 ? (
+        <Empty title="No runs yet">
+          Start a workflow from the chat or with <code>npm run wf -- start &lt;workflow&gt;</code>, and its card appears here.
+        </Empty>
+      ) : (
+        boards.map((board) => <WorkflowBoard key={board.workflow} board={board} backlog={board.workflow === shown?.workflow ? shown : undefined} onRun={onRun} />)
+      )}
     </>
   );
 }
@@ -37,20 +62,18 @@ function boardSummary(data: BoardResponse): string {
   return parts.join(" · ");
 }
 
-export function WorkflowBoard({ board }: { board: Board }) {
+export function WorkflowBoard({ board, backlog, onRun }: { board: Board; backlog?: BacklogReply; onRun(preset: StartPreset): void }) {
   return (
     <section className="board" aria-label={`${board.workflow} board`}>
       <h2>
         {board.workflow} <span className="count">{formatCount(board.cards.length)}</span>
       </h2>
       <div className="columns">
+        {backlog && <BacklogColumn backlog={backlog} onRun={onRun} />}
         {board.columns.map((column) => {
           const cards = board.cards.filter((card) => card.column === column.key);
           return (
-            <div key={column.key} className={`column column-${column.kind}${cards.length === 0 ? " empty" : ""}`} role="group" aria-label={`${column.title}: ${cards.length}`}>
-              <h3>
-                <span className="column-title">{column.title}</span> <span className="count">{formatCount(cards.length)}</span>
-              </h3>
+            <ColumnFrame key={column.key} column={column} count={cards.length} folded={cards.length === 0}>
               {cards.length > 0 && (
                 <ul>
                   {cards.map((card) => (
@@ -58,11 +81,66 @@ export function WorkflowBoard({ board }: { board: Board }) {
                   ))}
                 </ul>
               )}
-            </div>
+            </ColumnFrame>
           );
         })}
       </div>
     </section>
+  );
+}
+
+/** A column: its title with the number of cards in it, and what it holds. A `folded` one is a strip: it holds nothing to read. */
+function ColumnFrame({ column, count, folded, children }: { column: BoardColumn; count: number; folded: boolean; children: ReactNode }) {
+  return (
+    <div className={`column column-${column.kind}${folded ? " empty" : ""}`} role="group" aria-label={`${column.title}: ${count}`}>
+      <h3>
+        <span className="column-title">{column.title}</span> <span className="count">{formatCount(count)}</span>
+      </h3>
+      {children}
+    </div>
+  );
+}
+
+/** The Backlog column: a card for each issue ready and not started, and the repositories whose forge could not say. */
+function BacklogColumn({ backlog, onRun }: { backlog: BacklogReply; onRun(preset: StartPreset): void }) {
+  return (
+    <ColumnFrame column={BACKLOG_COLUMN} count={backlog.cards.length} folded={backlog.cards.length === 0 && backlog.errors.length === 0}>
+      {backlog.errors.map(({ repo, error }) => (
+        <p key={repo} className="banner error" role="alert">
+          {repoName(repo)}: {error}
+        </p>
+      ))}
+      {backlog.cards.length > 0 && (
+        <ul>
+          {backlog.cards.map((card) => (
+            <BacklogCardView key={`${card.repo}#${card.issue}`} card={card} workflow={backlog.workflow} onRun={onRun} />
+          ))}
+        </ul>
+      )}
+    </ColumnFrame>
+  );
+}
+
+function BacklogCardView({ card, workflow, onRun }: { card: BacklogCard; workflow: string; onRun(preset: StartPreset): void }) {
+  const title = `#${card.issue} ${card.title}`;
+  return (
+    <li className="card">
+      {card.url ? (
+        <a className="card-title" href={card.url} target="_blank" rel="noreferrer noopener">
+          {title}
+        </a>
+      ) : (
+        <span className="card-title">{title}</span>
+      )}
+      <div className="card-foot">
+        <span className="repo" title={card.repo}>
+          {repoName(card.repo)}
+        </span>
+        <button type="button" className="btn" aria-label={`Run ${workflow} for issue ${card.issue}`} onClick={() => onRun(backlogPreset(workflow, card))}>
+          run
+        </button>
+      </div>
+    </li>
   );
 }
 

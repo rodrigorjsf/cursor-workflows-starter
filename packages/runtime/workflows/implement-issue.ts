@@ -157,6 +157,8 @@ type Settings = {
   testTimeoutSec: number;
   /** Teto de tempo de cada comando de rede (`git push` e o CLI do forge), em segundos: uma credencial pedida ou uma conexão parada falha a etapa. */
   networkTimeoutSec: number;
+  /** The label that marks an open issue as ready for this workflow: the dashboard's Backlog lists the issues that carry it. Read by the Backlog (`implement-issue/backlog.ts`), not by the run. */
+  backlogLabel: string;
 };
 const SETTINGS: Settings = {
   sliceCaps: { LOW: 1, MED: 3, HIGH: 5 },
@@ -176,6 +178,7 @@ const SETTINGS: Settings = {
   gcSnapshotGraceHours: SNAPSHOT_GRACE_HOURS,
   testTimeoutSec: 600,
   networkTimeoutSec: NETWORK_TIMEOUT_SEC,
+  backlogLabel: "ready-for-agent",
 };
 const READ_ONLY = ["read", "grep", "glob", "ls", "semSearch"];
 const REVIEW_TOOLS = ["read", "grep", "glob", "ls"];

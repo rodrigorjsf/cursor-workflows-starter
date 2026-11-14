@@ -1,5 +1,5 @@
 // WHAT: Runs the real `glab` against a running GitLab for every command and API route the runtime uses (the forge module,
-//   packages/runtime/workflows/implement-issue/forge.ts, with and without a `repo` argument; the `wf doctor` login check; and the
+//   packages/runtime/workflows/implement-issue/forge.ts, with and without a `repo` argument, and the Backlog's issue list; the `wf doctor` login check; and the
 //   dashboard's merge request by URL, packages/runtime/src/runtime/pr-by-url.ts; `glab api` both with `GITLAB_HOST=<host:port>` and
 //   with `--hostname <host>`, the form a host with no port gets), and writes what glab printed,
 //   scrubbed of the token, the root password and the local host, to packages/runtime/test/fixtures/glab/recordings.json.
@@ -163,6 +163,8 @@ class Recorder {
     await api.call("POST", `${base}/issues/${issue.iid}/notes`, { body: "A first comment, written before the recording." });
     const many = await api.call<{ iid: number }>("POST", `${base}/issues`, { title: "Recorded issue with many comments" });
     for (let i = 1; i <= MANY_COMMENTS; i++) await api.call("POST", `${base}/issues/${many.iid}/notes`, { body: `Comment ${i}` });
+    // A third issue, made last and with the backlog label from the start (no system note), so a list of that label holds two issues in the order GitLab gives.
+    await api.call("POST", `${base}/issues`, { title: "Another recorded issue, ready for an agent", labels: "ready-for-agent" });
 
     const auth = basicAuthOf(this.env.token);
     const remote = `${this.env.url}/${GROUP}/${PROJECT}.git`;
@@ -208,6 +210,9 @@ class Recorder {
     // GitLab notes the merge request on the issue it mentions, a little after it is opened: that is its system note.
     await this.waitForSystemNote();
     await this.record("issue-view", () => forge.issue(cwd, 1));
+    // The dashboard's Backlog: the open issues that carry a label (issues 1 and 3 do, issue 2 does not), and a label no issue carries.
+    await this.record("issue-list", () => forge.listIssues(cwd, "ready-for-agent"));
+    await this.record("issue-list-empty", () => forge.listIssues(cwd, "no-issue-has-this-label"));
     await this.record("issue-notes", () => forge.issueComments(cwd, 1));
     await this.record("issue-notes-two-pages", () => forge.issueComments(cwd, 2));
     writeFileSync(bodyFile, "A comment the workflow posted.\n");

@@ -29,7 +29,9 @@ falhas de segurança.
   `127.0.0.1`, recusa um `Host` estranho, abre o banco de métricas só para leitura e aceita dois `POST`, o de iniciar um
   workflow e o de cancelar um run, os dois protegidos por token CSRF. O de iniciar só vale para um repositório em que o
   dashboard já viu um run e para um workflow que o runtime lista nele, e exige os dois tetos (`maxTokens` e `maxCents`);
-  listar os workflows de um repositório importa os arquivos dele no processo do dashboard. Num run cujo processo morreu, o
+  listar os workflows de um repositório importa os arquivos dele no processo do dashboard, e o Backlog roda o `gh` ou o `glab`
+  (com o seu login) na pasta de cada repositório que o dashboard conhece, para listar as issues abertas com a label de
+  pronta. Num run cujo processo morreu, o
   `POST` de cancelar chama a API da Cursor com a sua chave para cancelar os cloud agents que o run deixou rodando. Detalhes em
   [5.3 §Segurança do dashboard](docs/operating/03-observabilidade.md#segurança-do-dashboard).
 - **Uma etapa na nuvem manda o seu código para fora da máquina.** Com `location: "cloud"` num papel (só vale se o teto

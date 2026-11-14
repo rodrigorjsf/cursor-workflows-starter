@@ -4,6 +4,8 @@
 
 **Amended:** 2026-11-13: a `wf/` branch on the origin that no run of this repo owns has no record to read, so `wf gc` asks the forge of the origin's host for its PR; the rule "a run keeps its forge" stays for every branch a run owns.
 
+**Amended:** 2026-11-14: the dashboard's Backlog (the open issues that carry the backlog label and have no run) is read through the seam too: `Forge.listIssues`, called by `readBacklog` (`workflows/implement-issue/backlog.ts`), which `observe` exports. The seam stays internal and the decision stays: `observe` still exports no forge object, only what the dashboard shows (a PR's state by URL, the Backlog of a repository), asked of the forge of the repository's `origin` through the same detection.
+
 ## Context
 
 The kit opened pull requests, read issues and commented on them only through the GitHub CLI (`gh`). `gh` was called
