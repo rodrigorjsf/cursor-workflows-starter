@@ -83,18 +83,18 @@ escolhe o forge: `github.com` é GitHub (`gh`), `gitlab.com` é GitLab (`glab`) 
 | Ler uma issue | `gh issue view <n> --json number,title,body,labels` | `glab issue view <n> --output json` |
 | Comentar numa issue | `gh issue comment <n> --body-file <arquivo>` | `glab api --method POST projects/:fullpath/issues/<n>/notes -F body=@<arquivo>` |
 | Abrir o PR | `gh pr create --head <branch> --title <t> --body-file <arquivo>` | `glab mr create --source-branch <branch> --title <t> --description <texto> --yes` |
-| Achar o PR de uma branch | `gh pr view <branch> --json url,state` | `glab api "projects/:fullpath/merge_requests?source_branch=<branch>&order_by=created_at&sort=desc"` |
+| Achar o PR de uma branch | `gh pr view <branch> --json url,state` | `glab api --paginate "projects/:fullpath/merge_requests?source_branch=<branch>&order_by=created_at&sort=desc&per_page=100"` |
 
 - O `glab issue note` lê o texto do stdin, que o `ctx.exec` nunca alimenta: o comentário vai pelo `glab api`.
 - O `glab mr create` não tem flag de arquivo para o corpo: a descrição é um argumento só (o Linux limita um argumento a
   cerca de 128 KiB, então corte o texto antes), e o `-H` nomeia o repositório de origem, não a branch: use
   `--source-branch`.
 - O `glab mr view <branch>` falha quando a branch tem mais de um MR; o `gh pr view <branch>` pega o último. Peça a lista
-  ao `glab api` e fique com o aberto mais novo, ou com o mais novo. Os estados do MR são `opened`, `locked` (sendo
+  ao `glab api` (todas as páginas) e fique com o aberto mais novo, ou com o mais novo. Os estados do MR são `opened`, `locked` (sendo
   mesclado), `merged` e `closed`: `opened` e `locked` contam como aberto.
 - O GitLab executa como comando a linha de um corpo de MR ou de uma nota que começa com uma ação rápida (`/close`,
-  `/merge`, …), com a conta que publica: passe o texto de um modelo por uma neutralização antes de publicar (o
-  `implement-issue` faz isso).
+  `/merge`, …), com a conta que publica, e transforma `!12`, `~rótulo` e `%marco` em links e em notas nos outros
+  objetos: passe o texto de um modelo por uma neutralização antes de publicar (o `implement-issue` faz isso).
 - Uma etapa na nuvem num repositório do GitLab depende do suporte do próprio Cursor ao GitLab; o kit não valida esse
   caminho ([6.2](../reference/config.md)).
 

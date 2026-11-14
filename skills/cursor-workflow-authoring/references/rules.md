@@ -44,14 +44,15 @@ can make a decision, code **makes** it.
    (PR body, comment) scan it with the same text rules. A hit stops exactly the effect that would have carried the
    text out, and the run returns `status: "secret-blocked"` with a `reason` naming only the rule that fired, never the
    snippet. On GitLab, text a model wrote also acts: a line that starts with a quick action (`/close`, `/merge`, ...)
-   runs as that command under the account that posts it, so show such a line as code before it goes into a merge
-   request description or a note. A security review is a second layer, not the only one.
+   runs as that command under the account that posts it, and `!12`, `~label` and `%milestone` turn into links and
+   cross-reference notes on other objects, so show such a line as code and put a zero-width space after those sigils
+   before the text goes into a merge request description or a note. A security review is a second layer, not the only one.
 7. **Cuts and failures are always explicit.** When limiting coverage (top-N, sampling), record with `ctx.log` what was
    left out. `ctx.parallel` and `ctx.pipeline` turn failures into `null`: when the result is required (a mandatory
    review, for example), check the `null`s and end the run with an explicit failure `status`.
 8. **Idempotent effects.** A resume re-executes the code outside the agent steps, and the journal returns a step's
-   result, not its effect on disk. Protect commit (`git diff --cached --quiet`), push and PR creation (`gh pr view`
-   before `gh pr create`; `glab mr list --source-branch <branch>` before `glab mr create`). If the code checks the disk
+   result, not its effect on disk. Protect commit (`git diff --cached --quiet`), push and PR creation (look the branch's
+   PR up before `gh pr create` or `glab mr create`: runtime-api.md, "Forge commands"). If the code checks the disk
    between steps, keep the progress per item (recipes.md, "Resume with invariants").
 9. **Compose with shared TypeScript functions**, called from `run`.
 

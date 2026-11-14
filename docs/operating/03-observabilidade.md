@@ -468,19 +468,17 @@ um cartão não é confiável: o dashboard só mostra links `http:` e `https:`, 
 textos (título e subtítulo em 200 caracteres, no máximo 8 links e 8 rótulos).
 
 O `implement-issue` põe o cartão no ar depois da triagem (`#<n> <título da issue>` e o tier) e o atualiza na entrega, com
-a branch e o link da PR.
+a branch e o link da PR (`PR #9` no GitHub, `MR !9` no GitLab). O forge do run vem do host do `origin`, ou da chave
+`forges` da configuração quando o host é um que o kit não conhece ([6.2](../reference/config.md)), e o run fala com ele
+pelo `gh` ou pelo `glab`.
 
-**Estado da PR.** Um link de cartão para uma pull request do GitHub (`https://github.com/<dono>/<repo>/pull/<n>`) ou
-para um merge request do GitLab (`https://<host>/<caminho do projeto>/-/merge_requests/<n>`, com os subgrupos no
-caminho), exatamente nesse formato, mostra se ela está `open`, `merged` ou `closed`. O servidor pergunta ao CLI do forge,
-com o login do próprio usuário: o `gh` para o github.com e o `glab` para o gitlab.com e para todo host em que o usuário
-fez `glab auth login --hostname <host>`. Um link de outro host, com caminho a mais, query, fragmento ou `http` não recebe
-consulta nem estado. Da configuração do `glab` o servidor lê só os nomes de host, nunca os tokens, e não grava o arquivo no
-log. O mapa `forges` da configuração ([6.2](../reference/config.md)) não vale aqui: ele decide o forge de um run, e o
-quadro só consulta hosts que o `glab` já conhece. As consultas rodam em segundo plano, no máximo quatro por vez, e **o
-quadro nunca espera por elas**: a primeira resposta traz o link sem o estado, e a seguinte, o estado. A resposta é
-guardada por 30 segundos enquanto a PR está aberta, 1 hora depois de mesclada ou fechada, e 5 minutos quando o CLI não
-consegue responder (sem login, sem rede, sem o CLI); uma consulta que falha mantém o último estado conhecido.
+**Estado da PR.** Um link de cartão para uma pull request do GitHub (`https://github.com/<dono>/<repo>/pull/<n>`, exatamente
+esse formato) mostra se ela está `open`, `merged` ou `closed`. O servidor pergunta ao `gh pr view <url> --json state` (a
+sessão do `gh` é a do usuário) em segundo plano, no máximo quatro por vez, e **o quadro nunca espera por isso**: a primeira
+resposta traz o link sem o estado, e a seguinte, o estado. A resposta é guardada por 30 segundos enquanto a PR está
+aberta, 1 hora depois de mesclada ou fechada, e 5 minutos quando o `gh` não consegue responder (sem login, sem rede, sem
+`gh`); uma consulta que falha mantém o último estado conhecido. Só a URL exata de uma PR do github.com vai ao `gh`; o
+`glab` não é consultado, e o link de um MR do GitLab aparece no cartão, sem estado.
 
 ### Segurança do dashboard
 

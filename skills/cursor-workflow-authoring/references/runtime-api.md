@@ -54,7 +54,7 @@ export default defineWorkflow<{ target: string }>({
 | `ctx.exec(command, args, opts)` | Runs a command (tests, `git`, `gh` or `glab`) and returns `{ ok, exitCode, timedOut, tail, error? }`. Asynchronous, killed at its timeout, logged. See "`exec()` options" below. |
 | `ctx.phase(title)` / `ctx.log(message)` | Progress, shown by `wait_workflow` and on the CLI. |
 | `ctx.metric(name, value)` | An outcome or difficulty signal of the run, written to the `metrics` table (observability.md). |
-| `ctx.card({ title, subtitle?, links?, badges? })` | What the run's card shows on the dashboard's Board. `links` is `[{ label, url }]` and `badges` is a list of short strings. Call it again to update the card: the Board shows the latest one. A link to a GitHub pull request or a GitLab merge request also shows whether it is open, merged or closed (a GitLab host only when the user is logged in to it with `glab`). A run that never calls it still has a card, titled with the run id. |
+| `ctx.card({ title, subtitle?, links?, badges? })` | What the run's card shows on the dashboard's Board. `links` is `[{ label, url }]` and `badges` is a list of short strings. Call it again to update the card: the Board shows the latest one. A link to a GitHub pull request also shows whether the pull request is open, merged or closed. A run that never calls it still has a card, titled with the run id. |
 | `ctx.args`, `ctx.cwd`, `ctx.runId` | Input, repository and run id (the same on resume). |
 | `ctx.settings` | The workflow's own tunable settings (`meta.settings`) as the config resolved them for this run: the code default, or what the global or repo file set under `workflows.<name>.settings`. A copy; read fresh at every run start. |
 | `ctx.forges` | The forge of each host the kit does not know, as the config's `forges` map declares it (`{ "git.example.com": "gitlab" }`): empty when no file declares one; `github.com` and `gitlab.com` need no entry. A copy; read fresh at every run start. |
@@ -126,13 +126,13 @@ own commands take `--repo <path>`; `glab api` takes `--hostname <host>` and the 
 | Read an issue | `gh issue view <n> --json number,title,body,labels` | `glab issue view <n> --output json` |
 | Comment on an issue | `gh issue comment <n> --body-file <file>` | `glab api --method POST projects/:fullpath/issues/<n>/notes -F body=@<file>` |
 | Open a PR | `gh pr create --head <branch> --title <t> --body-file <file>` | `glab mr create --source-branch <branch> --title <t> --description <text> --yes` |
-| Find the PR of a branch | `gh pr view <branch> --json url,state` | `glab api "projects/:fullpath/merge_requests?source_branch=<branch>&order_by=created_at&sort=desc"` |
+| Find the PR of a branch | `gh pr view <branch> --json url,state` | `glab api --paginate "projects/:fullpath/merge_requests?source_branch=<branch>&order_by=created_at&sort=desc&per_page=100"` |
 
 - `glab issue note` reads its text from stdin, which `ctx.exec` never feeds, so a comment goes through `glab api`.
 - `glab mr create` has no body-file flag: the description is one argument (Linux caps one argument near 128 KiB, so cut the
   text first). `-H` names the head repository, not the branch: use `--source-branch`.
 - `glab mr view <branch>` fails when the branch has several MRs; `gh pr view <branch>` takes the latest. Ask `glab api`
-  for the list, take the newest open one, else the newest. GitLab's MR states are `opened`, `locked` (being merged),
+  for the list (every page), take the newest open one, else the newest. GitLab's MR states are `opened`, `locked` (being merged),
   `merged` and `closed`: `opened` and `locked` are both open.
 
 ## Definition fields

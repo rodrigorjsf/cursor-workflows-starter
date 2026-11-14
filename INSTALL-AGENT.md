@@ -86,8 +86,8 @@ hint says if you can, hand the user what needs them (the login, a newer Node, `g
 `glab auth login --hostname <host>`), and run the doctor again. The checks, in this order: `node`, `dependencies`, `login`, `models`, `forge`, `mcp-server`,
 `config`, `kit-version`. `forge` asks the CLI of the repository's forge (`gh` for GitHub, `glab` for GitLab) and passes
 outside a git repository. The host of `origin` picks the forge: `github.com` and `gitlab.com` are known, and any other
-host (a self-managed GitLab) fails the check with a message that names the `forges` config key. Declaring the host there
-is the user's call.
+host (a self-managed GitLab) must be declared under the `forges` config key: until it is, the check fails with a message
+that names the key. Declaring the host is the user's call.
 
 Run the doctor from a terminal the IDE opened when you can: `node` and `mcp-server` follow the environment the IDE
 starts.

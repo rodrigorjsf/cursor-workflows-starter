@@ -51,7 +51,8 @@ test("the rules of the authoring references name glab where they name gh, and th
     const rule = (n: number) => rules.split("\n").find((line) => line.startsWith(`${n}. `)) ?? "";
     assert.match(rule(6), /`glab`/, `${skill}: rule 6 names no glab`);
     assert.match(rule(6), /quick action/i, `${skill}: rule 6 says nothing of the GitLab quick actions in model text`);
-    assert.match(rule(8), /glab mr list[^.]*glab mr create/, `${skill}: rule 8 shows no glab check before glab mr create`);
+    assert.match(rule(8), /`glab mr create`/, `${skill}: rule 8 never names glab mr create`);
+    assert.match(rule(8), /Forge commands/, `${skill}: rule 8 gives its own recipe for the branch's PR instead of the forge table`);
   }
 });
 
@@ -130,13 +131,15 @@ function guidance(): string[] {
   );
 }
 
+/** The blocks that are about GitHub on purpose: the validation wizard creates its sandbox repository there (`scripts/verify/validate-cursor-ide.sh`). */
+const GITHUB_ONLY: ReadonlyArray<readonly [file: string, text: string]> = [["docs/usage/03-invocacao-no-cursor-ide.md", "`gh` logado no GitHub"]];
+
 test("no guidance names gh as the forge CLI without glab beside it", () => {
   // The ADRs, the research reports and the contributor chapters keep their history or talk about this repo's own GitHub hosting: they are not scanned.
-  // A block that says GitHub (the validation wizard creates its sandbox there) is scoped to it on purpose and needs no `glab`.
   const ghAsForgeCli = /`gh(?=[ `])/;
   const lonely = guidance().flatMap((file) =>
     blocks(read(file))
-      .filter((block) => ghAsForgeCli.test(block) && !/`glab/.test(block) && !/\bGitHub\b/.test(block))
+      .filter((block) => ghAsForgeCli.test(block) && !/`glab/.test(block) && !GITHUB_ONLY.some(([path, text]) => path === file && block.includes(text)))
       .map((block) => `${file}: ${block.slice(0, 140)}`),
   );
   assert.deepEqual(lonely, [], "name `glab` next to `gh`, or say \"the forge's CLI\"");
