@@ -24,7 +24,8 @@ Para as práticas de implementação (cache, contexto, prompts, memo), veja
 1. **Teto por run:** `--max-cents`, `--max-tokens`, `WF_MAX_CENTS` ou `WF_MAX_TOKENS`. Não é garantia de gasto
    máximo. O teto de tokens do run e o da etapa (`maxTokensPerStep`) são checados a cada turno, durante a etapa: passar
    de um deles cancela o run do agente na hora (a tentativa falha como `budget`, sem nova tentativa), e a
-   ultrapassagem é de no máximo um turno por etapa ativa. Um turno do SDK pode ser o laço inteiro do agente, então
+   ultrapassagem é de no máximo um envio por etapa ativa. O turno do SDK é o envio inteiro (medido em 2026-11-14: 1
+   `turn-ended` numa etapa com 31 tool calls, [8.2 §15](../research/verificacoes-locais.md)), então
    `timeoutMs` curto nas etapas que escrevem continua valendo. Medido em 2026-11-11, antes do teto ao vivo: 344 mil
    tokens com `--max-tokens 300000` ([8.2 §9](../research/verificacoes-locais.md); ver
    [2.2 §3](../usage/02-configuracao-inicial.md#3-teto-de-custo)). O teto em centavos é checado antes de cada tentativa e compara `maxCents` com `spentCents`: a soma, por tentativa, do maior entre `rawCostCents` (custo bruto)

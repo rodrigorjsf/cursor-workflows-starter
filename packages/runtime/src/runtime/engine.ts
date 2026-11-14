@@ -982,7 +982,7 @@ async function executeRun<A, R>(
             emit({ type: "turn", ...ref, attemptId, idx: c.turns, steps: c.stepsInTurn, usage: t });
             addUsage(turnUsage, turnTokens(t));
             if (t.reasoningTokens) turnUsage.reasoningTokens = (turnUsage.reasoningTokens ?? 0) + t.reasoningTokens;
-            // The real SDK may report one turn per send, so this can fire only when a send ends (see #37).
+            // The real SDK reports one turn per send, however long (measured with a 31-tool-call write step, #37): this fires only when a send ends.
             const breach = tokenBreach(step, turnUsage.totalTokens);
             if (breach instanceof BudgetExceededError) for (const active of cutters) active.cut(breach); // the run's cap: every active attempt
             else if (breach) abort.cut(breach);

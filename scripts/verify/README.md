@@ -5,7 +5,8 @@ Reproduzem contra a API real as verificações registradas em
 nova, por exemplo a Enterprise do seu time, antes de adotar.
 
 **Custam tokens.** Na medição de 2026-11-11, com `composer-2.5`: `verify-structured` usou cerca de 110 mil tokens,
-`verify-context` cerca de 60 mil e `verify-cache` cerca de 46 mil. Rode sempre com `--max-tokens` e `--max-cents`. Prefira os modelos
+`verify-context` cerca de 60 mil e `verify-cache` cerca de 46 mil; o `verify-turn-granularity` e o `verify-cloud` têm a sua
+seção, abaixo. Rode sempre com `--max-tokens` e `--max-cents`. Prefira os modelos
 incluídos no plano; modelos que consomem cota paga são permitidos quando o teste precisar deles
 ([política de custo](../../docs/contributing/01-contribuindo.md#testes-contra-a-api-real-política-de-custo)).
 
@@ -24,6 +25,42 @@ npm run wf -- run verify-cache      --cwd ~/tmp/wf-probe-repo --args '{}' --max-
 | `verify-structured` | `a` e `b` válidos; no stderr, o `step-end` de `b` com `mcp: 2` (JSON recusado e corrigido) | as três etapas entregaram; `b` corrigiu no mesmo turno |
 | `verify-context` | `project.marker`, `project.mcpTools`, `project.blockedCommand`, `insideEnv`; os arquivos em `.probe/` | com `project`: marcador lido, hooks do Cursor e do Claude Code disparam (o deny bloqueia), sem tools do `workflows`, `inside=1`; sem settings: nada disso |
 | `verify-cache` | `cacheReadTokens` de cada etapa nos eventos `turn` | só o prefixo fixo (~4 mil tokens) é reaproveitado com garantia |
+
+## `verify-turn-granularity`: uma etapa local longa
+
+Mede até onde os tetos de tokens ao vivo alcançam ([2.2 §3](../../docs/usage/02-configuracao-inicial.md#3-teto-de-custo)): eles só
+olham o uso quando o SDK entrega um `turn-ended`, então o que importa é quantos `turn-ended` um envio longo que escreve gera. O
+workflow faz **três envios** do mesmo pedido (uma biblioteca de seis módulos com testes, escrita um módulo por vez, com
+`node --test` entre eles):
+
+1. a etapa `long-write`, pelo motor (`ctx.agent`): os eventos `turn` do `events.jsonl` contra o `step-end` (`turns`, `usage.totalTokens`);
+2. um envio direto pelo SDK, vendo cada update: quantos `turn-ended` chegam e se a soma dos `token-delta` bate com `RunResult.usage`
+   (o motor não repassa `token-delta`, por isso a via direta);
+3. um segundo envio direto, cancelado com `Run.cancel()` no meio do turno (quando a soma dos `token-delta` chega a 3 mil ou na
+   terceira tool call, o que vier primeiro): quanto `cancel()` e `wait()` levam para assentar. É um cancelamento direto no SDK,
+   não um corte do motor: uma etapa com `maxTokensPerStep` baixo só seria cortada no fim do envio.
+
+**Custa:** na medição de 2026-11-14, com `composer-2.5`, o run inteiro gastou de 134 mil a 268 mil tokens na etapa do motor e
+cerca de 128 mil no envio direto longo, o que dá **cerca de 10 centavos por run no preço de lista** (a tabela `pricing`), com 0
+cobrado (uso incluído no plano). Só o `--max-tokens` limita a etapa `long-write` (o workflow recusa rodar sem os dois tetos): os dois envios diretos não passam
+pelo motor, e cada um tem como freio um limite de 8 minutos. Numa conta em que o `getUsage()` de agente local não vem (`feature_unavailable`), o
+`--max-cents` também não dispara.
+
+```bash
+scripts/verify/setup-probe-repo.sh ~/tmp/wf-turn-repo        # um repositório NOVO: o workflow recusa um que já tem lib/
+export WORKFLOWS_DIR=scripts/verify WF_METRICS_DB=~/tmp/wf-verify.db
+npm run wf -- run verify-turn-granularity --cwd ~/tmp/wf-turn-repo --args '{}' --max-tokens 400000 --max-cents 40
+```
+
+| O que olhar | Onde | Resultado medido em 2026-11-14 |
+|---|---|---|
+| `engine.turnEvents` e `engine.stepEndTurns`, com `engine.stepEndTotalTokens` | o resultado do run | 1 e 1; 267.526 e 133.969 tokens (dois runs) |
+| `deltas.turnEnded` e `deltas.updates` | o resultado do run | 1 `turn-ended` e 1 `step-completed` para 21 tool calls e 14 `tool-requests-listed` |
+| `deltas.tokenDeltas.total` e `deltas.sum.ratios` | o resultado do run | a soma passa do `outputTokens` (1,41 a 1,53 vezes) e vale 4,4% do `totalTokens`: não soma ao uso |
+| `cancel.cancel.waitSettledMs`, `cancel.result.status` e `cancel.turnEnded` | o resultado do run | `wait()` assenta 3 ms depois do `cancel()`, `status: "cancelled"`, nenhum `turn-ended` |
+| `rule` | o resultado do run | `3`: a regra do [#37](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/37) (1: vários `turn-ended`; 2: um, com `token-delta` somável; 3: nenhum dos dois) |
+
+O resultado dessas medições, com as contagens de cada run, está em [8.2 §15](../../docs/research/verificacoes-locais.md).
 
 ## `verify-cloud`: uma etapa na nuvem
 

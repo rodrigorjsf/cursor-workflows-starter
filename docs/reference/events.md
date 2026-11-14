@@ -147,7 +147,7 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 
 ### `turn`
 
-Um turno do agente terminou (pode ter vários passos/chamadas ao modelo).
+Um turno do agente terminou. No SDK real o turno é o envio inteiro: um envio longo, com dezenas de tool calls, dá um só (medido em 2026-11-14, #37).
 
 Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 

@@ -46,8 +46,8 @@ documento explica o *porquê* das regras e traz as receitas, que a skill aponta.
   elas disparam (escrita no cwd, em temporários e nos caminhos do `sandbox.json`; leitura livre; rede só pela
   allowlist) e não diz que restringe `edit` e `write` ([2.2 §5](../usage/02-configuracao-inicial.md#5-contexto-do-projeto-nos-agentes)).
 - **`timeoutMs` curto nas etapas que escrevem, e um `maxTokensPerStep` no papel delas.** O teto de tokens da etapa e o do
-  run cancelam a etapa no turno que os ultrapassa, mas o SDK só reporta o uso ao fim de cada turno, e um turno pode ser o
-  laço inteiro do agente. Por isso o `timeoutMs`, que cada envio (o pedido e cada re-prompt de schema) tem, continua
+  run cancelam a etapa no turno que os ultrapassa, mas o SDK só reporta o uso ao fim de cada turno, e o turno é o envio
+  inteiro (medido: 1 `turn-ended` numa etapa com 31 tool calls). Por isso o `timeoutMs`, que cada envio (o pedido e cada re-prompt de schema) tem, continua
   sendo o freio do que acontece dentro de um turno ([2.2 §3](../usage/02-configuracao-inicial.md#3-teto-de-custo)).
 
 ### Comandos: `ctx.exec`

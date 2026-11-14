@@ -15,11 +15,25 @@
   `listRepoWorkflows`, sem carregar o SDK da Cursor no processo do dashboard. Veja
   [5.3 §Iniciar um workflow](docs/operating/03-observabilidade.md#iniciar-um-workflow).
 
+- **O workflow `verify-turn-granularity` mede, contra o SDK real, quantos `turn-ended` e `token-delta` uma etapa local longa
+  gera e quanto o `Run.cancel()` leva para assentar no meio do turno.** Ele roda uma etapa que escreve (pelo motor) e dois
+  envios diretos pelo SDK, num repositório novo de `scripts/verify/setup-probe-repo.sh`, com `--max-tokens` e `--max-cents`
+  (custo e comando em `scripts/verify/README.md`). O resultado de 2026-11-14 está em `docs/research/verificacoes-locais.md` §15.
+
 ### Mudado
 
 - **O erro `invalid args` nomeia o campo que o schema não declara.** Antes, um campo a mais dava só
   `must NOT have additional properties`; agora a mensagem termina com o nome do campo
   (`must NOT have additional properties: isue`), no `wf run`, no `start_workflow` e no dashboard.
+
+- **Os tetos de tokens ao vivo agem entre envios, não dentro de um: é o limite medido.** Uma etapa local que escreve, com 31
+  tool calls, deu **1** `turn-ended`, no fim, depois de 267.526 tokens, e o `token-delta` do SDK não soma ao uso (passa do
+  `outputTokens` e cobre menos de 5% do total), então nenhum sinal de uso chega no meio do envio. O motor não ganhou
+  estimativa no meio do turno: dentro de um envio só o `timeoutMs` da tentativa freia, e a ultrapassagem do teto é de no
+  máximo um envio por etapa ativa. O `Run.cancel()` chamado direto no SDK parou um envio no meio em 3 ms, e o teto do run o chama
+  nos envios das outras etapas quando o de uma termina; um envio cortado no meio não reporta uso, então numa conta sem
+  `getUsage()` os tokens dele ficam fora do total. Os textos do livro (2.2, 3.1, 4.1, 5.1, 5.3 e 6.2), o comentário do evento
+  `turn` e as skills `cursor-workflow-authoring` e `skill-to-workflow` dizem isso agora.
 
 ## 0.4.0 (pré-release, 2026-11-13)
 
