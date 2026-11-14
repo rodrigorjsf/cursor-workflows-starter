@@ -1,5 +1,6 @@
 // WHAT: Runs the real `glab` against a running GitLab for every command and API route the runtime uses (the forge module,
-//   packages/runtime/workflows/implement-issue/forge.ts, and the `wf doctor` login check), and writes what glab printed,
+//   packages/runtime/workflows/implement-issue/forge.ts, with and without a `repo` argument; the `wf doctor` login check; and the
+//   dashboard's merge request by URL, packages/runtime/src/runtime/pr-by-url.ts), and writes what glab printed,
 //   scrubbed of the token, the root password and the local host, to packages/runtime/test/fixtures/glab/recordings.json.
 //   The fake `glab` of the offline tests reads that file. It makes its own group, project, issues and merge request.
 // WHY: the GitLab code paths are tested offline against a fake `glab`; the outputs of that fake must be what a real glab
@@ -12,6 +13,7 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
+import { prStateOfUrl } from "../../packages/runtime/src/runtime/pr-by-url.js";
 import { loginOf } from "../../packages/runtime/workflows/implement-issue/forge.js";
 import { isEntryPoint } from "../lib/cli.js";
 import {
@@ -51,9 +53,10 @@ export interface Subjects {
   mr: number;
 }
 
-/** One run of glab: its arguments, how it ended, and what it printed. */
+/** One run of glab: its arguments, the host it was pointed at through `GITLAB_HOST` when it was, how it ended, and what it printed. */
 export interface Recording {
   args: string[];
+  env?: { GITLAB_HOST: string };
   exitCode: number;
   stdout: string;
   stderr: string;
@@ -75,6 +78,8 @@ const ISSUE_TITLE = "Recorded issue";
 const ISSUE_BODY = "Export `subtract(a, b)` from src/math.js, which returns a - b.";
 const MR_TITLE = "Recorded merge request (#1)";
 const MR_BRANCH = "wf/issue-1-recorded";
+/** The branch of the merge request opened with a `repo` argument: one branch has one open merge request. */
+const MR_REPO_BRANCH = "wf/issue-1-recorded-repo";
 /** A second issue with more comments than one page of GitLab's notes API holds (20), to record how glab joins the pages. */
 const MANY_COMMENTS = 25;
 
@@ -86,13 +91,14 @@ const dir = process.env.WF_RECORD_DIR;
 const args = process.argv.slice(2);
 const r = spawnSync(process.env.WF_REAL_GLAB, args, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["inherit", "pipe", "pipe"] });
 const n = readdirSync(dir).length;
-writeFileSync(dir + "/" + String(n).padStart(4, "0") + ".json", JSON.stringify({ args, exitCode: r.status ?? 1, stdout: r.stdout, stderr: r.stderr }));
+const env = process.env.GITLAB_HOST === undefined ? undefined : { GITLAB_HOST: process.env.GITLAB_HOST };
+writeFileSync(dir + "/" + String(n).padStart(4, "0") + ".json", JSON.stringify({ args, env, exitCode: r.status ?? 1, stdout: r.stdout, stderr: r.stderr }));
 process.stdout.write(r.stdout);
 process.stderr.write(r.stderr);
 process.exitCode = r.status ?? 1;
 `;
 
-/** The recorder: it makes the GitLab side, then runs the forge module and the doctor's login check through the wrapper glab. */
+/** The recorder: it makes the GitLab side, then runs the forge module, the doctor's login check and the dashboard's PR-state source through the wrapper glab. */
 class Recorder {
   private readonly recordDir: string;
   private readonly api: GitLabApi;
@@ -165,6 +171,7 @@ class Recorder {
     git(this.repo, auth, "add", "-A");
     git(this.repo, auth, "commit", "--quiet", "-m", "Add subtract");
     git(this.repo, auth, "push", "--quiet", "origin", MR_BRANCH);
+    git(this.repo, auth, "push", "--quiet", "origin", `${MR_BRANCH}:${MR_REPO_BRANCH}`);
     // The branch checked out on main again: the run of the workflow starts from there.
     git(this.repo, auth, "checkout", "--quiet", "main");
     loginGlab(this.realGlab, this.glabEnv, this.host, this.env.token);
@@ -173,7 +180,7 @@ class Recorder {
     mkdirSync(this.recordDir);
   }
 
-  /** Every glab call the forge module and the doctor make, once. */
+  /** Every glab call the forge module, the doctor and the dashboard's PR-state source make, once. */
   async recordAll(): Promise<Subjects> {
     const forge = gitlabForge(this.glabEnv);
     const cwd = this.repo;
@@ -198,7 +205,38 @@ class Recorder {
 
     const mr = mergeRequestNumber(url);
     if (mr === undefined) throw new Error(`mr-create: no merge request number in ${url}`);
+    // The dashboard's question, which the runtime answers through `observe`: the state of a merge request named by its URL, from
+    // no checkout. The URL is https, as GitLab links are; glab asks this host over http, as its configuration says. The host has a
+    // port, so glab is pointed at it through GITLAB_HOST (glab-host.ts).
+    const mrUrl = `https://${this.host}/${GROUP}/${PROJECT}/-/merge_requests/${mr}`;
+    const state = await this.record("mr-api", () => this.inGlabEnv(() => prStateOfUrl(mrUrl)));
+    if (state !== "OPEN") throw new Error(`mr-api: the dashboard read ${state ?? "no state"} for ${mrUrl}, not OPEN`);
+
+    // The forge module with a `repo` argument, as a cross-repository run calls it: the project's URL.
+    const named = `${this.env.url}/${GROUP}/${PROJECT}`;
+    await this.record("issue-view-repo", () => forge.issue(cwd, 1, named));
+    await this.record("repo-view-repo", () => forge.repoUrl(cwd, named));
+    // Last, so that the notes recorded above hold one merge request: this one mentions no issue.
+    writeFileSync(bodyFile, "Opened with a repo argument while recording the fixtures of the fake glab.\n");
+    await this.record("mr-create-repo", () => forge.openPr(cwd, { branch: MR_REPO_BRANCH, title: MR_TITLE, bodyFile, repo: named }));
     return { project: `${GROUP}/${PROJECT}`, issue: 1, branch: MR_BRANCH, title: MR_TITLE, mr };
+  }
+
+  /**
+   * Runs `read` with glab's environment in this process's own: the dashboard's PR-state source runs glab with the process's
+   * environment and reads glab's configuration from `GLAB_CONFIG_DIR`, so the wrapper and the scratch configuration go there.
+   */
+  private async inGlabEnv<T>(read: () => Promise<T>): Promise<T> {
+    const previous = Object.fromEntries(Object.keys(this.glabEnv).map((key) => [key, process.env[key]]));
+    Object.assign(process.env, this.glabEnv);
+    try {
+      return await read();
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
   }
 
   /** Waits until the issue has a note GitLab wrote itself, or fails: the recording of the notes has to hold one. */
@@ -217,7 +255,10 @@ class Recorder {
 export function scrubRecordings(file: RecordingsFile, secrets: Secrets): RecordingsFile {
   const scrub = (text: string): string => scrubText(text, secrets);
   const recordings = Object.fromEntries(
-    Object.entries(file.recordings).map(([name, r]) => [name, { args: r.args.map(scrub), exitCode: r.exitCode, stdout: scrub(r.stdout), stderr: scrub(r.stderr) }]),
+    Object.entries(file.recordings).map(([name, r]) => [
+      name,
+      { args: r.args.map(scrub), ...(r.env ? { env: { GITLAB_HOST: scrub(r.env.GITLAB_HOST) } } : {}), exitCode: r.exitCode, stdout: scrub(r.stdout), stderr: scrub(r.stderr) },
+    ]),
   );
   const scrubbed: RecordingsFile = { recordedWith: file.recordedWith, placeholders: file.placeholders, subjects: file.subjects, recordings };
   refuseLeaks(JSON.stringify(scrubbed), secrets, "the recording file", "written");

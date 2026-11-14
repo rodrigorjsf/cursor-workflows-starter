@@ -133,17 +133,20 @@ test("the dashboard's merge request by URL and the forge's calls with a repo arg
 
   // What the dashboard's PR-state source runs (packages/runtime/src/runtime/pr-by-url.ts), from no checkout.
   const byUrl = ran("mr-api");
-  assert.deepEqual(byUrl.args, ["api", "--hostname", HOST_PLACEHOLDER, `projects/${encodeURIComponent(subjects.project)}/merge_requests/${subjects.mr}`]);
+  // The recorded GitLab has a port, which glab's --hostname refuses: the host goes in GITLAB_HOST (packages/runtime/src/runtime/glab-host.ts).
+  assert.deepEqual(byUrl.args, ["api", `projects/${encodeURIComponent(subjects.project)}/merge_requests/${subjects.mr}`]);
+  assert.deepEqual(byUrl.env, { GITLAB_HOST: HOST_PLACEHOLDER });
   const mr = JSON.parse(byUrl.stdout);
   assert.equal(mr.iid, subjects.mr);
   assert.equal(mr.state, "opened");
 
-  // The forge module with a `repo` argument: `--repo <url>` for glab's own commands, `--hostname` and the project's path for `glab api`.
+  // The forge module with a `repo` argument: `--repo <url>` for glab's own commands, the host and the project's path for `glab api`.
   const issue = ran("issue-view-repo");
   assert.deepEqual(issue.args.slice(0, 5), ["issue", "view", String(subjects.issue), "--repo", named]);
   assert.equal(JSON.parse(issue.stdout).iid, subjects.issue);
   const project = ran("repo-view-repo");
-  assert.deepEqual(project.args, ["api", "--hostname", HOST_PLACEHOLDER, `projects/${encodeURIComponent(subjects.project)}`]);
+  assert.deepEqual(project.args, ["api", `projects/${encodeURIComponent(subjects.project)}`]);
+  assert.deepEqual(project.env, { GITLAB_HOST: HOST_PLACEHOLDER });
   assert.equal(JSON.parse(project.stdout).path_with_namespace, subjects.project);
   const created = ran("mr-create-repo");
   assert.deepEqual(created.args.slice(-2), ["--repo", named]);

@@ -164,6 +164,11 @@ export class Commands {
     return this.succeedRead(cli, args, cwd, this.timeouts.networkMs, FORGE_LABEL_WORDS);
   }
 
+  /** `forgeRead` with variables added to the CLI's environment (`undefined` removes one): a host the CLI takes from there. */
+  async forgeReadWith(cli: string, cwd: string, env: Record<string, string | undefined>, ...args: string[]): Promise<string> {
+    return this.succeedRead(cli, args, cwd, this.timeouts.networkMs, FORGE_LABEL_WORDS, env);
+  }
+
   /**
    * A forge CLI query that fails with a known message when there is nothing to find (a PR lookup on a branch that has none).
    * Returns its stdout, or undefined for "nothing found". Any other failure (an auth error, a network stall) is an error.
@@ -184,14 +189,14 @@ export class Commands {
     if (!r.ok) throw new CommandError(command, args, r, timeoutMs);
   }
 
-  private async succeedRead(command: string, args: string[], cwd: string, timeoutMs: number | undefined, labelWords?: number): Promise<string> {
-    const r = await this.read(command, args, cwd, timeoutMs, labelWords);
+  private async succeedRead(command: string, args: string[], cwd: string, timeoutMs: number | undefined, labelWords?: number, env?: Record<string, string | undefined>): Promise<string> {
+    const r = await this.read(command, args, cwd, timeoutMs, labelWords, env);
     if (!r.ok) throw new CommandError(command, args, r, timeoutMs);
     return r.stdout;
   }
 
   /** Runs the command with its stdout going to a file, and returns the result with the whole stdout. */
-  private async read(command: string, args: string[], cwd: string, timeoutMs: number | undefined, labelWords?: number): Promise<ExecResult & { stdout: string }> {
+  private async read(command: string, args: string[], cwd: string, timeoutMs: number | undefined, labelWords?: number, env: Record<string, string | undefined> = {}): Promise<ExecResult & { stdout: string }> {
     const dir = mkdtempSync(join(tmpdir(), "wf-stdout-"));
     const file = join(dir, "stdout");
     try {
@@ -199,7 +204,7 @@ export class Commands {
       // a temp path would give the same call another id every time.
       const result = await this.exec("bash", ["-c", 'exec "$@" >"$WF_STDOUT"', "read", command, ...args], {
         ...this.options(command, args, cwd, timeoutMs, labelWords),
-        env: { WF_STDOUT: file },
+        env: { ...env, WF_STDOUT: file },
       });
       if (existsSync(file) && statSync(file).size > MAX_STDOUT_BYTES) throw new Error(`${command} ${args[0] ?? ""}: the output is larger than ${MAX_STDOUT_BYTES / 1024 / 1024} MiB`);
       return { ...result, stdout: existsSync(file) ? readFileSync(file, "utf8") : "" };

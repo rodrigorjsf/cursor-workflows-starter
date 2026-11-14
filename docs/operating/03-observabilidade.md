@@ -476,8 +476,8 @@ pelo `gh` ou pelo `glab`.
 um merge request do GitLab (`https://<host>/<grupo>/<projeto>/-/merge_requests/<n>`), exatamente nesse formato, mostra se
 ela está `open`, `merged` ou `closed` (um MR `locked`, que está sendo mesclado, aparece como `open`). O servidor pergunta
 pelo ponto de entrada `observe` do runtime, em segundo plano e no máximo quatro por vez, ao `gh pr view <url> --json state`
-ou ao `glab api --hostname <host>` do MR do projeto (nunca ao `glab mr view <url>`, que exige um checkout do GitLab na
-pasta atual); a sessão do `gh` e a do `glab` são as do usuário. **O quadro nunca espera por isso**: a primeira resposta
+ou ao `glab api --hostname <host>` do MR do projeto (num host com porta, `GITLAB_HOST=<host:porta>`, porque o `--hostname`
+do `glab` recusa porta; nunca ao `glab mr view <url>`, que exige um checkout do GitLab na pasta atual); a sessão do `gh` e a do `glab` são as do usuário. **O quadro nunca espera por isso**: a primeira resposta
 traz o link sem o estado, e a seguinte, o estado. A resposta é guardada por 30 segundos enquanto a PR está aberta, 1 hora
 depois de mesclada ou fechada, e 5 minutos quando o CLI não consegue responder (sem login, sem rede, sem o CLI); uma
 consulta que falha mantém o último estado conhecido.

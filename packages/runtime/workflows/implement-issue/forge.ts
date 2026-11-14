@@ -14,6 +14,7 @@
 import { readFileSync } from "node:fs";
 import { FORGE_TITLES, knownForgeOf } from "../../src/config/file.js";
 import { type PrState, prStateOfMr } from "../../src/runtime/forge-pr-state.js";
+import { type GlabHost, glabApiHost } from "../../src/runtime/glab-host.js";
 import type { ForgeName } from "../../src/runtime/workflow.js";
 import type { Commands } from "./commands.js";
 
@@ -330,11 +331,10 @@ export function neutralizeGitlabText(text: string): string {
 
 /** The path of a repository as the REST API takes it, from what the `repo` argument holds: `group/sub/project`, or a URL of it. */
 const repoPathOf = (repo: string): string => parseRemote(repo)?.path ?? trimmedPath(repo.trim());
-/** `glab api` takes the host of a request apart from its path: the one a URL `repo` names (with its port, when the URL is a web one), else the cwd's own. */
-function hostFlag(repo: string | undefined): string[] {
+/** `glab api` takes the host of a request apart from its path: the one a URL `repo` names (with its port, when the URL is a web one; `glabApiHost`), else the cwd's own. */
+function apiHost(repo: string | undefined): GlabHost {
   const named = repo === undefined ? undefined : parseRemote(repo);
-  if (!named) return [];
-  return ["--hostname", webHost(named)];
+  return named ? glabApiHost(webHost(named)) : { args: [], env: {} };
 }
 /** `projects/<repository>` in the REST API: `repo`'s path, or glab's placeholder for the repository of the cwd. */
 const projectOf = (repo: string | undefined): string => `projects/${repo ? encodeURIComponent(repoPathOf(repo)) : ":fullpath"}`;
@@ -441,6 +441,7 @@ class GitlabForge implements Forge {
 
   /** `glab api`, on the host of `repo` when it names one. */
   private api(cwd: string, repo: string | undefined, ...args: string[]): Promise<string> {
-    return this.glab(cwd, "api", ...hostFlag(repo), ...args);
+    const host = apiHost(repo);
+    return this.commands.forgeReadWith("glab", cwd, host.env, "api", ...host.args, ...args);
   }
 }

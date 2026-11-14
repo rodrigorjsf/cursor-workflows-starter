@@ -27,8 +27,8 @@
 - **O Board do dashboard mostra o estado do MR do GitLab.** Um link de cartão para um merge request
   (`https://<host>/<grupo>/<projeto>/-/merge_requests/<n>`) mostra `open`, `merged` ou `closed`, como a PR do GitHub, no
   `gitlab.com` e em qualquer host do `config.yml` do `glab` (só os nomes dos hosts são lidos, nunca os tokens). O dashboard
-  pergunta pelo ponto de entrada `observe` do runtime, que roda `glab api --hostname <host>` (nunca `glab mr view <url>`,
-  que exige um checkout do GitLab); a PR do GitHub passa pelo mesmo ponto, com o mesmo `gh pr view`. Um link de outro host,
+  pergunta pelo ponto de entrada `observe` do runtime, que roda `glab api --hostname <host>` (num host com porta,
+  `GITLAB_HOST=<host:porta>`, que o `--hostname` recusa; nunca `glab mr view <url>`, que exige um checkout do GitLab); a PR do GitHub passa pelo mesmo ponto, com o mesmo `gh pr view`. Um link de outro host,
   com caminho a mais, `?query`, `#fragmento`, `http:` ou número malformado continua sem estado, e o cache curto e o quadro
   que nunca espera valem para os dois forges.
 

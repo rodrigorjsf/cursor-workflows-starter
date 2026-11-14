@@ -119,7 +119,8 @@ the `origin` host: `github.com` is GitHub (`gh`), `gitlab.com` is GitLab (`glab`
 config's `forges` map declares (`{ "git.example.com": "gitlab" }`, read from `ctx.forges`). Both CLIs use the login the
 user made with `gh auth login` or `glab auth login --hostname <host>`. For another repository than the cwd's, the CLIs'
 own commands take `--repo <path>`; `glab api` takes `--hostname <host>` and the URL-encoded path in place of `:fullpath`
-(glab's placeholder for the cwd's repository).
+(glab's placeholder for the cwd's repository). glab 1.130.0 refuses a port in `--hostname`: for `host:port`, set
+`GITLAB_HOST=<host:port>` in the command's environment instead.
 
 | Effect | GitHub (`gh`) | GitLab (`glab`) |
 |---|---|---|

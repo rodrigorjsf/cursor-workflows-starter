@@ -1,7 +1,8 @@
 // The state of a pull request or merge request named by its URL: what a tool beside the runtime (the dashboard's Board, through
 // `observe`) asks of the forge CLIs, which hold the user's logins (ADR-0009). There is no run and no checkout here, so it does not use
-// the forge seam of `implement-issue`: `gh pr view <url>` takes the URL, and GitLab goes through `glab api --hostname <host>`, never
-// `glab mr view <url>`, which needs a GitLab checkout as the cwd.
+// the forge seam of `implement-issue`: `gh pr view <url>` takes the URL, and GitLab goes through `glab api --hostname <host>`
+// (`GITLAB_HOST=<host>` for a host with a port, which `--hostname` refuses: `glab-host.ts`), never `glab mr view <url>`, which needs a
+// GitLab checkout as the cwd.
 //
 // - A URL comes from a workflow's log, so it is never trusted: only the exact address of a PR on github.com or of an MR on an
 //   allowed host (`parsePrUrl`) reaches a CLI, as arguments of a fixed command line with no shell. An address with an extra path, a
@@ -16,6 +17,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { knownForgeOf } from "../config/file.js";
 import { type PrState, prStateOfMr } from "./forge-pr-state.js";
+import { glabApiHost } from "./glab-host.js";
 
 export type { PrState };
 
@@ -114,7 +116,7 @@ async function allowedGitlabHosts(): Promise<ReadonlySet<string>> {
 }
 
 /** `cli args`, with prompts, colour and update checks off; its standard output, or undefined when it could not answer. */
-function ask(cli: string, args: string[], env: Record<string, string>, signal: AbortSignal | undefined): Promise<string | undefined> {
+function ask(cli: string, args: string[], env: Record<string, string | undefined>, signal: AbortSignal | undefined): Promise<string | undefined> {
   return new Promise((resolve) => {
     execFile(cli, args, { timeout: ASK_TIMEOUT_MS, signal, maxBuffer: MAX_OUTPUT_BYTES, env: { ...process.env, ...env, NO_COLOR: "1" } }, (err, stdout) =>
       resolve(err ? undefined : stdout),
@@ -128,10 +130,11 @@ async function githubState(url: string, signal: AbortSignal | undefined): Promis
   return out !== undefined && GITHUB_STATES.has(out) ? (out as PrState) : undefined;
 }
 
-/** `glab api --hostname <host> projects/<project>/merge_requests/<n>`: the merge request as GitLab's REST API gives it, of which only the state is read. */
+/** `glab api --hostname <host> projects/<project>/merge_requests/<n>` (`glabApiHost`): the merge request as GitLab's REST API gives it, of which only the state is read. */
 async function gitlabState(mr: Extract<PrUrl, { forge: "gitlab" }>, signal: AbortSignal | undefined): Promise<PrState | undefined> {
   if (!(await allowedGitlabHosts()).has(mr.host)) return undefined;
-  const out = await ask("glab", ["api", "--hostname", mr.host, `projects/${encodeURIComponent(mr.project)}/merge_requests/${mr.number}`], { NO_PROMPT: "1", GLAB_CHECK_UPDATE: "false" }, signal);
+  const host = glabApiHost(mr.host);
+  const out = await ask("glab", ["api", ...host.args, `projects/${encodeURIComponent(mr.project)}/merge_requests/${mr.number}`], { ...host.env, GLAB_NO_PROMPT: "1", GLAB_CHECK_UPDATE: "false" }, signal);
   if (out === undefined) return undefined;
   try {
     const { state } = JSON.parse(out) as { state?: unknown };
