@@ -13,6 +13,7 @@ import { homedir } from "node:os";
 import { errorText } from "../../packages/runtime/src/runtime/error-text.js";
 import type { ExecResult } from "../../packages/runtime/src/runtime/workflow.js";
 import { MR_NUMBER } from "../../packages/runtime/workflows/implement-issue/forge.js";
+import type { Versions } from "./gitlab-proofs.js";
 import type { Secrets } from "./scrub-recording.js";
 
 /** The value of the environment variable `key`: the scripts are run by scripts/verify/gitlab-e2e.sh, which sets it. */
@@ -50,7 +51,7 @@ export function e2eEnv(): E2eEnv {
 export const secretsOf = (env: E2eEnv): Secrets => ({ token: env.token, password: env.password, scratch: env.scratch, home: homedir() });
 
 /** The version of the `glab` on the PATH, of the GitLab behind `api`, and the image it runs: what a recording or a proof ran against. */
-export async function versionsOf(api: GitLabApi, image: string): Promise<{ glab: string; gitlab: string; image: string }> {
+export async function versionsOf(api: GitLabApi, image: string): Promise<Versions> {
   const glab = /^glab (\S+)/.exec(execFileSync("glab", ["--version"], { encoding: "utf8" }))?.[1] ?? "";
   const gitlab = (await api.call<{ version: string }>("GET", "/version")).version;
   return { glab, gitlab, image };

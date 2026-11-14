@@ -16,6 +16,7 @@ import { Commands } from "../../packages/runtime/workflows/implement-issue/comma
 import { createForge, loginOf, type Forge } from "../../packages/runtime/workflows/implement-issue/forge.js";
 import { isEntryPoint } from "../lib/cli.js";
 import { GitLabApi, basicAuthOf, e2eEnv, execOf, git, loginGlab, mergeRequestNumber, runMain, secretsOf, versionsOf, type E2eEnv } from "../lib/gitlab-e2e.js";
+import type { Versions } from "../lib/gitlab-proofs.js";
 import { HOST_PLACEHOLDER, leaksIn, scrubText, type Secrets } from "../lib/scrub-recording.js";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
@@ -45,7 +46,7 @@ export interface Recording {
 /** The file the fake `glab` reads. */
 export interface RecordingsFile {
   /** What the recordings came from: the glab, the GitLab and the image. */
-  recordedWith: { glab: string; gitlab: string; image: string };
+  recordedWith: Versions;
   /** What stands for the local host in the outputs: the fake `glab` swaps it for the host of the test. */
   placeholders: { host: string };
   subjects: Subjects;
@@ -201,7 +202,7 @@ class Recorder {
     }
   }
 
-  versions(): Promise<RecordingsFile["recordedWith"]> {
+  versions(): Promise<Versions> {
     return versionsOf(this.api, this.env.image);
   }
 }

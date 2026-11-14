@@ -100,10 +100,15 @@ export interface QuickActionResult {
   sanitized: boolean;
 }
 
+/** The links `<a>` GitLab rendered from one text, and whether it wrote a "mentioned in" note on the merge request `!1`. */
+export interface SigilOutcome {
+  links: number;
+  crossReferenced: boolean;
+}
+
 export interface SigilResult {
-  /** The links `<a>` GitLab rendered from the text, and whether it wrote a "mentioned in" note on the merge request `!1`. */
-  raw: { links: number; crossReferenced: boolean };
-  sanitized: { links: number; crossReferenced: boolean };
+  raw: SigilOutcome;
+  sanitized: SigilOutcome;
 }
 
 export interface WorkflowResult {
@@ -125,7 +130,7 @@ export interface WorkflowResult {
   caps: { maxTokens: number; maxCents: number };
 }
 
-/** The versions behind the results. */
+/** The versions behind the results, and behind a recording of the fixtures: the glab, the GitLab and the image it ran. */
 export interface Versions {
   glab: string;
   gitlab: string;

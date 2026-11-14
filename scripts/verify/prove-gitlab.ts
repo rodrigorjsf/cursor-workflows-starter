@@ -41,6 +41,7 @@ import {
   type SigilResult,
   type Stage,
   type Surface,
+  type Versions,
   type WorkflowResult,
 } from "../lib/gitlab-proofs.js";
 import { HOST_PLACEHOLDER, leaksIn, scrubText, type Secrets } from "../lib/scrub-recording.js";
@@ -442,7 +443,7 @@ class Prover {
     return report;
   }
 
-  versions(): Promise<ProofReport["versions"]> {
+  versions(): Promise<Versions> {
     return versionsOf(this.api, this.env.image);
   }
 }
