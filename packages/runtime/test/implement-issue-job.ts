@@ -4,7 +4,7 @@
 // when the parent freezes it (SIGSTOP) or kills it (SIGKILL).
 // Usage: implement-issue-job.ts <repo> <jobId> <runId>
 process.env.WF_METRICS = "off";
-import { script } from "@cursor/sdk";
+import { script } from "./fake-sdk.js";
 import { createJob, installCrashHandlers, startJob } from "../src/runtime/jobs.js";
 import implementIssue from "../workflows/implement-issue.js";
 import { PLAN, labelOf, submit, write } from "./implement-issue.fixture.js";

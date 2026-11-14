@@ -77,7 +77,7 @@ test("what a log says about a card is not trusted: only http and https links are
       }),
       card({ title: "", badges: ["no title"] }),
       card({ subtitle: "no title either" }),
-      card("not an object"),
+      card({ title: 7 }),
     ],
   });
   const run = (await runsById())["smoke-aaaa0001"];

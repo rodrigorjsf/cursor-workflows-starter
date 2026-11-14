@@ -1,5 +1,6 @@
-// Used only by tsx in `npm test` (swaps @cursor/sdk for the fake at run time). The package's typecheck is
-// `npm run typecheck` (tsconfig.json), against the real SDK.
+// Used only by tsx in `npm test` (swaps @cursor/sdk for the fake at run time); never by tsc. `npm run typecheck`
+// checks the sources against the real SDK (tsconfig.json) and the tests through test/tsconfig.json, where tests reach
+// the fake's controls through `./fake-sdk.js`.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "baseUrl": ".", "paths": { "@cursor/sdk": ["./test/fake-sdk.ts"] } },

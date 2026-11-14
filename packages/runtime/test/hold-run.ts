@@ -1,7 +1,7 @@
 // Child process of run-lock.test.ts: starts a run whose only step never ends, says so on stdout, and stays until killed.
 // Usage: hold-run.ts <cwd> <runId>
 process.env.WF_METRICS = "off";
-import { script } from "@cursor/sdk";
+import { script } from "./fake-sdk.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import { defineWorkflow } from "../src/runtime/workflow.js";
 

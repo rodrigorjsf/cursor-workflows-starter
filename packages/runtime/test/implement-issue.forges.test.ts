@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { calls } from "@cursor/sdk";
+import { calls } from "./fake-sdk.js";
 import { writeGlobalConfig, writeRepoConfig } from "./config-fixtures.js";
 import { SUB_CODE, branchOf, changeForgeState, failForge, forgeState, forgeTest, fx, git, issue, progressFileOf, run, setOrigin, submit, write, type TestForge } from "./implement-issue.fixture.js";
 

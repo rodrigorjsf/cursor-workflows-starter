@@ -16,7 +16,7 @@ export type GcOutput = GcPlan & { dryRun: boolean };
 
 /** `wf gc <args>` in the temp repo. The child inherits the PATH with the fake forge CLIs and the throwaway home. */
 export function gc(...args: string[]): { status: number | null; stderr: string; out: GcOutput } {
-  const env = { ...process.env, TSX_TSCONFIG_PATH: join(PACKAGE, "tsconfig.test.json"), WF_METRICS: "off" };
+  const env: NodeJS.ProcessEnv = { ...process.env, TSX_TSCONFIG_PATH: join(PACKAGE, "tsconfig.test.json"), WF_METRICS: "off" };
   delete env.NODE_TEST_CONTEXT;
   const r = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), join(PACKAGE, "src", "cli.ts"), "gc", "--cwd", fx.repo, ...args], { encoding: "utf8", env });
   assert.notEqual(r.stdout, "", `wf gc printed no result (exit ${r.status}): ${r.stderr}`);

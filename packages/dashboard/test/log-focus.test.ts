@@ -13,17 +13,17 @@ function page(nodeIds: string[]) {
     body: { name: "body" } as unknown,
     querySelector: (selector: string) => nodes.find((n) => selector.includes(`data-id="${n.id}"`)) ?? null,
   };
-  const focusable = (name: string, extra: Record<string, unknown> = {}) => {
+  const focusable = (name: string, id?: string) => {
     const el = {
       name,
-      ...extra,
+      id,
       focus() {
         doc.activeElement = el;
       },
     };
     return el;
   };
-  const nodes = nodeIds.map((id) => focusable(`node ${id}`, { id }));
+  const nodes = nodeIds.map((id) => focusable(`node ${id}`, id));
   const close = focusable("close");
   const panel = { name: "panel" };
   doc.activeElement = doc.body;

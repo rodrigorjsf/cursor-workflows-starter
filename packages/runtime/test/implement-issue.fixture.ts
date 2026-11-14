@@ -10,7 +10,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { calls, script } from "@cursor/sdk";
+import { calls, script } from "./fake-sdk.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import implementIssue from "../workflows/implement-issue.js";
 import { RECORDINGS_PATH, TEST_HOST } from "./glab-recordings.js";

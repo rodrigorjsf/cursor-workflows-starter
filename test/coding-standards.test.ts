@@ -325,9 +325,21 @@ const TSCONFIG = "packages/runtime/tsconfig.json";
 test("the shared tsconfig keeps verbatimModuleSyntax on, so tsc rejects a type imported without `type`", () => {
   // tsc proves the flag: with it on, `import { WorkflowEvent } from ".../events.js"` used only as a type fails with TS1484.
   assert.equal(JSON.parse(read(TSCONFIG)).compilerOptions.verbatimModuleSyntax, true);
-  for (const config of ["tsconfig.json", "packages/dashboard/tsconfig.json", "packages/dashboard/app/tsconfig.json", "packages/dashboard/run-view/tsconfig.json"]) {
+  for (const config of ["tsconfig.json", "packages/dashboard/tsconfig.json", "packages/dashboard/app/tsconfig.json", "packages/dashboard/run-view/tsconfig.json", "test/tsconfig.json", "packages/runtime/test/tsconfig.json", "packages/dashboard/test/tsconfig.json"]) {
     const options = JSON.parse(read(config)).compilerOptions ?? {};
     assert.notEqual(options.verbatimModuleSyntax, false, `${config} turns verbatimModuleSyntax off`);
+  }
+});
+
+test("`npm run typecheck` checks every test: each directory that holds tests has a tsconfig.json for all its files, and the script runs it", () => {
+  const typecheck: string = JSON.parse(read("package.json")).scripts.typecheck;
+  const dirs = ["test", ...PACKAGES.map((p) => `${p}/test`)].filter((dir) => existsSync(join(ROOT, dir)) && readdirSync(join(ROOT, dir)).some((f) => f.endsWith(".test.ts")));
+  assert.ok(dirs.length >= 3, `test directories found: ${dirs.join(", ")}`);
+  for (const dir of dirs) {
+    const config = `${dir}/tsconfig.json`;
+    assert.ok(existsSync(join(ROOT, config)), `${dir} has no tsconfig.json: its tests are never typechecked`);
+    assert.deepEqual(JSON.parse(read(config)).include, ["./**/*.ts"], `${config} includes every file of ${dir}`);
+    assert.ok(typecheck.split("&&").some((command) => command.trim() === `tsc --noEmit -p ${dir}`), `npm run typecheck does not run tsc --noEmit -p ${dir}`);
   }
 });
 

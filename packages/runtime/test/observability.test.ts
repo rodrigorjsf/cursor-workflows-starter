@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { calls, costConfig, script } from "@cursor/sdk";
+import { calls, costConfig, script } from "./fake-sdk.js";
 import { openDb } from "../src/observability/db.js";
 import { exportRows, markRun, reconcile, summary, toCsv } from "../src/observability/queries.js";
 import { outcomeClass } from "../src/runtime/outcome.js";

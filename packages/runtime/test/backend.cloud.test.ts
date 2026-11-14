@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { calls, costConfig, finishCloudRun, lookups, resetCloud, script, seedCloudAgent, stats } from "@cursor/sdk";
+import { calls, costConfig, finishCloudRun, lookups, resetCloud, script, seedCloudAgent, stats } from "./fake-sdk.js";
 import type { AttemptEvent, AttemptResult, StepOptions } from "../src/runtime/backend.js";
 import { createCloudBackend } from "../src/runtime/backend-cloud.js";
 import { cloudRepoUrl, snapshotBranch, snapshotBranchSegment, snapshotRunSegment } from "../src/runtime/cloud-snapshot.js";

@@ -386,7 +386,7 @@ test("the origin is never asked to delete a branch outside the workflow's prefix
   };
   const commands = new Commands(exec, { localMs: 1000, networkMs: 1000 });
   await assert.rejects(commands.deleteOwned(fx.repo, "main", "0".repeat(40)), /only deletes branches under wf\//);
-  assert.deepEqual(run, [], "no command ran");
+  assert.equal(run.length, 0, "no command ran");
   await commands.deleteOwned(fx.repo, "wf/issue-7-x", "a".repeat(40));
   assert.deepEqual(run.at(-1)?.slice(0, 5), ["git", "push", `--force-with-lease=wf/issue-7-x:${"a".repeat(40)}`, "origin", ":refs/heads/wf/issue-7-x"]);
 });

@@ -8,7 +8,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { readFileSync, rmSync, statSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { calls, costConfig, script, stats } from "@cursor/sdk";
+import { calls, costConfig, script, stats } from "./fake-sdk.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import type { ContentEvent, WorkflowEvent } from "../src/runtime/events.js";
 import { DEFAULT_RETENTION } from "../src/runtime/retention.js";
