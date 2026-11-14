@@ -87,7 +87,7 @@ export interface RemoteName {
 /** The host to name to a forge's CLI: the web host, with its port when the URL is an http one that has it (an ssh remote's port is not the web port). */
 const webHost = (remote: RemoteName): string => (remote.web && remote.port ? `${remote.host}:${remote.port}` : remote.host);
 
-const trimmedPath = (path: string): string => path.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/, "");
+export const trimmedPath = (path: string): string => path.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/, "");
 
 /** The host and path of a git remote URL (`https://…`, `ssh://…` or scp-like `git@host:path`); undefined for text that names no host: a local path, `owner/repo`, `group/sub/project`. */
 export function parseRemote(text: string): RemoteName | undefined {

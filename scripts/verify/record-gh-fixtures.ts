@@ -13,6 +13,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
+import { errorText } from "../../packages/runtime/src/runtime/error-text.js";
 import { createRedactor } from "../../packages/runtime/src/runtime/redaction.js";
 import { directCommands } from "../../packages/runtime/workflows/implement-issue/gc.js";
 import { createForge } from "../../packages/runtime/workflows/implement-issue/forge.js";
@@ -121,7 +122,7 @@ if (isEntryPoint(import.meta.url)) {
       process.exitCode = code;
     },
     (err: unknown) => {
-      process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(`${errorText(err)}\n`);
       process.exitCode = 1;
     },
   );

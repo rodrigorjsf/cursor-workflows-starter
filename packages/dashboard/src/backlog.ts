@@ -4,7 +4,8 @@
 // into the reply, and keeps each repository's answer for a while so that a board that polls does not call `gh` or `glab` on every poll.
 //
 // - `Backlogs` keeps the forge's answer, a list or an error, for `cacheMs` per repository, and asks a repository once at a time: a
-//   request that comes while the forge is being asked waits for that answer. The runs are not kept: `backlogReply` takes the issues
+//   request that comes while the forge is being asked waits for that answer. At most `MAX_PARALLEL` repositories are asked at once, so
+//   a machine with many repositories never starts a `gh` or a `glab` for each of them together. The runs are not kept: `backlogReply` takes the issues
 //   that have a run off the list on every request, so a run started a moment ago drops its card at once.
 // - `backlogReply` is pure. A repository the forge could not answer is an entry of `errors` with the reason; the others still list.
 import { type BacklogRead, BACKLOG_WORKFLOW, readBacklog } from "@cursor-workflows/runtime/observe";
@@ -61,6 +62,9 @@ export function backlogReply(readings: readonly BacklogReading[]): BacklogReply 
   return { workflow: BACKLOG_WORKFLOW, cards, errors };
 }
 
+/** How many forge CLI processes run at once (as in pr-state.ts). */
+const MAX_PARALLEL = 4;
+
 interface Entry {
   read: BacklogRead;
   at: number;
@@ -70,6 +74,9 @@ export class Backlogs {
   private readonly entries = new Map<string, Entry>();
   /** The repositories being asked now, each with the answer on its way. */
   private readonly asking = new Map<string, Promise<BacklogRead>>();
+  /** How many repositories are being asked, and who waits for a place among them. */
+  private running = 0;
+  private readonly waiting: Array<() => void> = [];
   private closed = false;
 
   /** `cacheMs`: how long an answer, a list or an error, is kept before the forge is asked again. */
@@ -81,7 +88,7 @@ export class Backlogs {
     if (entry && Date.now() - entry.at < this.cacheMs) return Promise.resolve(entry.read);
     let asking = this.asking.get(repo);
     if (!asking) {
-      asking = readBacklog(repo)
+      asking = this.limited(() => readBacklog(repo))
         .then((read) => {
           if (!this.closed) this.entries.set(repo, { read, at: Date.now() });
           return read;
@@ -90,6 +97,19 @@ export class Backlogs {
       this.asking.set(repo, asking);
     }
     return asking;
+  }
+
+  /** Runs `ask` when fewer than `MAX_PARALLEL` are running: a finished one hands its place to the next in line, so the count never goes over. */
+  private async limited<T>(ask: () => Promise<T>): Promise<T> {
+    if (this.running < MAX_PARALLEL) this.running++;
+    else await new Promise<void>((place) => this.waiting.push(place));
+    try {
+      return await ask();
+    } finally {
+      const next = this.waiting.shift();
+      if (next) next();
+      else this.running--;
+    }
   }
 
   /** Stops keeping answers: one that arrives after this is handed to those waiting for it and forgotten. */

@@ -277,6 +277,23 @@ export function openStream(url: string, path: string, opts: { host?: string; hea
   });
 }
 
+/** What a fake CLI's test controls for `issue list` are: the issues it lists per label, and a failure it answers with instead. Kept in files in `dir`, which the fake's own process reads. */
+function issueListControls(dir: string) {
+  const issues = join(dir, "issues.json");
+  const failure = join(dir, "issue-list-failure.txt");
+  writeFileSync(issues, "{}");
+  return {
+    issues,
+    failure,
+    setIssues(label: string, list: Array<{ number: number; title: string }>): void {
+      writeFileSync(issues, JSON.stringify({ ...(JSON.parse(readFileSync(issues, "utf8")) as Record<string, unknown>), [label]: list }));
+    },
+    setFailure(message: string): void {
+      writeFileSync(failure, message);
+    },
+  };
+}
+
 export interface FakeGh {
   /** Pull requests the fake knows: `gh pr view <url>` answers with the state. A url not set answers "no pull requests found" and exits 1. */
   set(url: string, state: "OPEN" | "MERGED" | "CLOSED"): void;
@@ -287,6 +304,9 @@ export interface FakeGh {
   issues(label: string, list: Array<{ number: number; title: string }>): void;
   /** Makes every `gh issue list` fail: `message` on stderr, exit code 1. */
   failIssueList(message: string): void;
+  /** Makes every `gh issue list` wait, once started (and logged), until `releaseIssueList`: a gate, for asserting how many run at once. */
+  holdIssueList(): void;
+  releaseIssueList(): void;
   /** Every argument list `gh` was started with, in order. */
   calls(): string[][];
   /** Puts PATH back and removes the fake. */
@@ -307,11 +327,10 @@ const GH_RECORDINGS = join(import.meta.dirname, "..", "..", "runtime", "test", "
 export function fakeGh(box: Sandbox): FakeGh {
   const dir = box.repo("fake-gh-bin");
   const states = join(dir, "states.txt");
-  const issues = join(dir, "issues.json");
-  const failure = join(dir, "issue-list-failure.txt");
+  const { issues, failure, setIssues, setFailure } = issueListControls(dir);
+  const hold = join(dir, "issue-list-hold");
   const log = join(dir, "calls.jsonl");
   writeFileSync(states, "");
-  writeFileSync(issues, "{}");
   writeFileSync(log, "");
   writeFileSync(
     join(dir, "gh"),
@@ -323,6 +342,8 @@ if (args[0] === "issue" && args[1] === "list") {
   const REC = JSON.parse(fs.readFileSync(${JSON.stringify(GH_RECORDINGS)}, "utf8")).recordings;
   const form = (list) => list.map((a) => (a.startsWith("--label=") ? "--label=*" : a)).join(" ");
   if (form(args) !== form(REC["issue-list"].args)) { process.stderr.write("unexpected gh command line: " + args.join(" ")); process.exit(2); }
+  // held by the test: a gate that opens when the test says so, not a delay
+  while (fs.existsSync(${JSON.stringify(hold)})) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
   if (fs.existsSync(${JSON.stringify(failure)})) { process.stderr.write(fs.readFileSync(${JSON.stringify(failure)}, "utf8")); process.exit(1); }
   const label = args.find((a) => a.startsWith("--label=")).slice("--label=".length);
   const listed = JSON.parse(fs.readFileSync(${JSON.stringify(issues)}, "utf8"))[label] || [];
@@ -345,12 +366,10 @@ process.stdout.write(line.split(" ")[1] + "\\n");
       const kept = readFileSync(states, "utf8").split("\n").filter((l) => l && !l.startsWith(`${url} `));
       writeFileSync(states, [...kept, `${url} ${state}`].join("\n") + "\n");
     },
-    issues(label, list) {
-      writeFileSync(issues, JSON.stringify({ ...(JSON.parse(readFileSync(issues, "utf8")) as Record<string, unknown>), [label]: list }));
-    },
-    failIssueList(message) {
-      writeFileSync(failure, message);
-    },
+    issues: setIssues,
+    failIssueList: setFailure,
+    holdIssueList: () => writeFileSync(hold, ""),
+    releaseIssueList: () => rmSync(hold, { force: true }),
     calls: () => readFileSync(log, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as string[]),
     restore() {
       process.env.PATH = previous;
@@ -405,11 +424,9 @@ export function fakeGlab(box: Sandbox): FakeGlab {
   const dir = box.repo("fake-glab-bin");
   const configDir = box.repo("glab-config");
   const states = join(dir, "states.txt");
-  const issues = join(dir, "issues.json");
-  const failure = join(dir, "issue-list-failure.txt");
+  const { issues, failure, setIssues, setFailure } = issueListControls(dir);
   const log = join(dir, "calls.jsonl");
   writeFileSync(states, "");
-  writeFileSync(issues, "{}");
   writeFileSync(log, "");
   writeFileSync(
     join(dir, "glab"),
@@ -464,12 +481,8 @@ process.stdout.write(JSON.stringify({ ...JSON.parse(onThisHost(recorded.stdout))
       const kept = readFileSync(states, "utf8").split("\n").filter((l) => l && !l.startsWith(`${url} `));
       writeFileSync(states, [...kept, `${url} ${state}`].join("\n") + "\n");
     },
-    issues(label, list) {
-      writeFileSync(issues, JSON.stringify({ ...(JSON.parse(readFileSync(issues, "utf8")) as Record<string, unknown>), [label]: list }));
-    },
-    failIssueList(message) {
-      writeFileSync(failure, message);
-    },
+    issues: setIssues,
+    failIssueList: setFailure,
     calls: () => readFileSync(log, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as string[]),
     config(yaml) {
       writeFileSync(join(configDir, "config.yml"), yaml);

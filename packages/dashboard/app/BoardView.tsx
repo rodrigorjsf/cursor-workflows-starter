@@ -39,17 +39,9 @@ export function Boards({ data, backlog, onRun }: { data: BoardResponse; backlog:
   const boards = shown ? withBacklogBoard(data.boards, shown.workflow) : data.boards;
   return (
     <>
-      {backlog.data === undefined && backlog.error === undefined && (
-        <p className="loading" role="status">
-          Loading the Backlog…
-        </p>
-      )}
-      {backlog.error !== undefined && (
-        <p className="banner error" role="alert">
-          Could not load the Backlog: {backlog.error}
-          {backlog.data ? ". Showing the last answer." : ""}
-        </p>
-      )}
+      <Loaded poll={backlog} what="the Backlog">
+        {() => null /* the Backlog's own state is the column in front of its board: `Loaded` says only that it is loading, or why it failed */}
+      </Loaded>
       {boards.length === 0 ? (
         <Empty title="No runs yet">
           Start a workflow from the chat or with <code>npm run wf -- start &lt;workflow&gt;</code>, and its card appears here.

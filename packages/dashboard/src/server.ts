@@ -253,7 +253,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
     const readings = await Promise.all(
       knownRepos().map(async (repo) => {
         const read = await backlogs.read(repo);
-        return { repo, read, taken: read.kind === "listed" ? issuesWithRuns(repo) : new Set<number>() };
+        return { repo, read, taken: read.kind === "listed" ? issuesWithRuns(repo, read.repository) : new Set<number>() };
       }),
     );
     send(res, 200, backlogReply(readings));

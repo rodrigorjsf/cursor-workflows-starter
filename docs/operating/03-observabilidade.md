@@ -489,7 +489,9 @@ comando que o botão [Copy resume command](#cancelar-um-run-e-copiar-o-comando-d
 
 O Board é um kanban com **um quadro por workflow** (o do run mais novo primeiro) e um cartão por run. As colunas de um
 quadro são as fases do workflow, na ordem em que ele as declara em `meta.phases` (o `run-start` do log as traz em
-`phases`; um log de uma versão antiga, sem isso, usa as fases que os runs percorreram), e depois quatro colunas fixas. Um
+`phases`; um log de uma versão antiga, sem isso, usa as fases que os runs percorreram), e depois quatro colunas fixas. O
+quadro do `implement-issue` tem ainda uma coluna na frente, o [Backlog](#o-backlog), que a página acrescenta: as issues
+prontas que ainda não têm run (um workflow sem run algum ganha, por isso, um quadro só com essa coluna). Um
 workflow que não declara nem percorre fase alguma tem uma coluna só, `Running`. Cada run fica na coluna do seu estado:
 
 | Estado do run | Coluna |
@@ -544,12 +546,16 @@ que estão prontas e ninguém começou, e um botão **run** em cada card:
   forge leria duas. Uma issue tem run quando um run do `implement-issue` foi iniciado para ela, qualquer que tenha sido o fim
   do run: o `issue` dos args do job (que está no registro do job desde o primeiro instante, então a issue sai do Backlog
   antes de o run escolher o tier) ou, num run sem job (`wf run` num terminal), o `#<n>` do cartão dele. Um run com `repo` nos
-  args é de uma issue de outro repositório e não tira do Backlog a de mesmo número deste. Os cards ficam em ordem de número.
+  args, quando o `repo` não é este repositório (a URL, `dono/repo` ou `host/dono/repo`, em qualquer caixa), é de uma issue de
+  outro e não tira do Backlog a de mesmo número deste; um que nomeia este repositório tira, como o lock da issue já trata. O
+  cartão de um run sem job não diz de que repositório é a issue, então um `wf run` numa issue de outro repositório tira do
+  Backlog a de mesmo número. Os cards ficam em ordem de número.
 - **Quais repositórios:** os que o índice global de runs conhece e cuja pasta ainda existe, como os runs do quadro.
 - **Como são lidas:** pelo forge seam do runtime ([ADR-0009](../adr/0009-forge-seam-github-and-gitlab.md)), então GitHub e
   GitLab valem igual: `gh issue list --state open --label=<label> --limit 100 --json number,title,url` ou
   `glab issue list --label=<label> --per-page 100 --output json`, rodados na pasta do repositório, com o forge do `origin` (ou
-  o que a chave `forges` declara) e o login do usuário. São as primeiras 100. A resposta de cada repositório, a lista ou o erro,
+  o que a chave `forges` declara) e o login do usuário. São as primeiras 100, e no máximo quatro repositórios são perguntados ao mesmo tempo. Um repositório sem remote `origin`
+  não tem forge a perguntar: não lista nada, e isso não é erro. A resposta de cada repositório, a lista ou o erro,
   é guardada por **60 segundos**: um segundo pedido nesse tempo não chama o forge de novo. As issues que têm run, não: elas
   são vistas a cada pedido, e um run recém-iniciado tira a issue da coluna na hora.
 - **Quando o forge falha:** a coluna mostra o motivo daquele repositório (sem o CLI, sem login, sem rede, host sem forge

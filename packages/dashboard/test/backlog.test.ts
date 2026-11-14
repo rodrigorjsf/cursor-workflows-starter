@@ -4,8 +4,9 @@
 // loopback port, against a throwaway per-user home and throwaway git repositories whose `origin` names the forge.
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
+import { waitFor } from "../../runtime/test/wait-for.js";
 import { type DashboardServer, startDashboard } from "../src/server.js";
-import { type FakeGh, type FakeGlab, type Sandbox, fakeGh, fakeGlab, http, repoWithOrigin, sandbox, writeJobRecord, writeRepoConfig, writeRun } from "./support.js";
+import { type FakeGh, type FakeGlab, type Sandbox, fakeGh, fakeGlab, http, repoWithOrigin, repoWithWorkflows, sandbox, writeJobRecord, writeRepoConfig, writeRun } from "./support.js";
 
 let box: Sandbox;
 let gh: FakeGh;
@@ -81,6 +82,27 @@ test("a run of another workflow, or a run that works on an issue of another repo
   assert.deepEqual(numbers(await backlog()), [5, 6, 8]);
 });
 
+test("a run whose repo arg names this repository, in any form the forge's CLI takes, takes its issue off the Backlog like a run without one", async () => {
+  const repo = repoWithOrigin(box, "web", GITHUB);
+  gh.issues("ready-for-agent", [1, 2, 3, 4, 5].map((number) => ({ number, title: `Issue ${number}` })));
+  const jobFor = (n: number, args: Record<string, unknown>) => {
+    writeRun(box.home, repo, { runId: `implement-issue-aaaa000${n}`, workflow: "implement-issue", startedAt: at(n), jobId: `job0000${n}` });
+    writeJobRecord(repo, { jobId: `job0000${n}`, runId: `implement-issue-aaaa000${n}`, start: { args } });
+  };
+  jobFor(1, { issue: 1, repo: "owner/repo" });
+  jobFor(2, { issue: 2, repo: "Owner/Repo" });
+  jobFor(3, { issue: 3, repo: "https://github.com/owner/repo" });
+  jobFor(4, { issue: 4, repo: "git@github.com:owner/repo.git" });
+
+  assert.deepEqual(numbers(await backlog()), [5], "issues 1 to 4 each have a run on this repository's own issue");
+});
+
+test("a known repository with no origin remote has no forge to ask: it lists nothing, and that is no error", async () => {
+  repoWithWorkflows(box, "scratch", {}); // a folder the runs index knows, with no git repository in it
+  assert.deepEqual(await backlog(), { workflow: "implement-issue", cards: [], errors: [] });
+  assert.deepEqual(gh.calls(), []);
+});
+
 test("a GitLab repository's Backlog is read through glab, and drops an issue once a run for it exists", async () => {
   const repo = repoWithOrigin(box, "api", GITLAB);
   glab.issues("ready-for-agent", [
@@ -136,6 +158,21 @@ test("a second request within the cache time does not call the forge again, and 
   await backlog();
   await backlog();
   assert.equal(issueCalls(gh).length, 3);
+});
+
+test("many repositories are asked a few at a time: the Backlog never starts a gh for each of them together", async () => {
+  for (let i = 1; i <= 6; i++) repoWithOrigin(box, `web-${i}`, GITHUB);
+  gh.issues("ready-for-agent", [{ number: 1, title: "One" }]);
+  gh.holdIssueList(); // each gh waits, once started, until the test opens the gate
+
+  const pending = backlog();
+  await waitFor("the first gh processes to start", () => (issueCalls(gh).length >= 4 ? true : undefined));
+  for (let i = 0; i < 5; i++) await http(dash.url, "/api/repos"); // the server has its turns: whatever it would start beyond the cap has started
+  assert.equal(issueCalls(gh).length, 4, "four at once, and the other two wait for a place");
+
+  gh.releaseIssueList();
+  assert.equal((await pending).cards.length, 6, "all six repositories are listed in the end");
+  assert.equal(issueCalls(gh).length, 6);
 });
 
 test("a forge that fails shows as an error for that repository, the other repositories still list, and the runs still render", async () => {

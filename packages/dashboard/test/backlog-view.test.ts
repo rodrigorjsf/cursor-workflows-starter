@@ -48,8 +48,7 @@ test("a Backlog with only errors is not folded into a strip: its errors are ther
 
 test("a board with no Backlog is the board it was: no Backlog column", () => {
   const html = textOf(render(WorkflowBoard, { board: BOARD, onRun: noop }));
-  assert.doesNotMatch(html, /Backlog/);
-  assert.match(html, /^implement-issue 0 Plan: 0 Plan 0 Done: 0 Done 0$|Plan 0.*Done 0/);
+  assert.equal(html, "implement-issue 0 Plan 0 Done 0");
 });
 
 test("the Backlog of a workflow with no run yet gets a board of its own, and a workflow that has boards keeps them", () => {

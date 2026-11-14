@@ -25,6 +25,7 @@ export function App() {
   // The Start panel is open when this is set; `preset` is what a Backlog card's run button asked it to open with, and `opened` makes a
   // second press of a run button a new panel (the form starts over) instead of the one that is already there.
   const [starting, setStarting] = useState<{ preset?: StartPreset; opened: number }>();
+  const panelsOpened = useRef(0);
   const startButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const follow = () => setMenu(menuOf(window.location.hash));
@@ -49,7 +50,7 @@ export function App() {
             </a>
           ))}
         </nav>
-        <button ref={startButton} type="button" className="btn start-toggle" aria-expanded={starting !== undefined} aria-controls="start-panel" aria-label="Start a workflow" onClick={() => setStarting((open) => (open ? undefined : { opened: Date.now() }))}>
+        <button ref={startButton} type="button" className="btn start-toggle" aria-expanded={starting !== undefined} aria-controls="start-panel" aria-label="Start a workflow" onClick={() => setStarting(starting ? undefined : { opened: ++panelsOpened.current })}>
           Start
         </button>
       </header>
@@ -63,7 +64,7 @@ export function App() {
           }}
         />
       )}
-      <main className={`view view-${menu}`}>{menu === "runs" ? <RunsView /> : menu === "board" ? <BoardView onRun={(preset) => setStarting({ preset, opened: Date.now() })} /> : <MetricsView />}</main>
+      <main className={`view view-${menu}`}>{menu === "runs" ? <RunsView /> : menu === "board" ? <BoardView onRun={(preset) => setStarting({ preset, opened: ++panelsOpened.current })} /> : <MetricsView />}</main>
     </>
   );
 }

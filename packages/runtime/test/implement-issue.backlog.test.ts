@@ -72,3 +72,30 @@ test("an issue has a run when a job was started for it with a whole-number issue
 
   assert.deepEqual([...issuesWithRuns(repo)].sort((a, b) => a - b), [4, 8, 9, 12]);
 });
+
+test("a run's repo arg names the repository when it is the origin's in any spelling the forge's CLI takes, and another repository otherwise", () => {
+  const repo = repoFolder();
+  const spellings: Array<[spelling: string, issue: number]> = [
+    ["owner/repo", 21],
+    ["OWNER/Repo", 22],
+    ["github.com/owner/repo", 23],
+    ["https://github.com/owner/repo", 24],
+    ["https://GitHub.com/owner/repo.git", 25],
+    ["git@github.com:owner/repo.git", 26],
+    ["ssh://git@github.com/owner/repo", 27],
+  ];
+  for (const [spelling, issue] of spellings) run(repo, { start: { args: { issue, repo: spelling } } });
+  const others: Array<[spelling: string, issue: number]> = [
+    ["owner/other", 31],
+    ["other/repo", 32],
+    ["https://github.com/owner/other", 33],
+    ["https://gitlab.com/owner/repo", 34], // the same path on another host is another repository
+    ["gitlab.com/owner/repo", 35],
+    ["repo", 36],
+    ["", 37],
+  ];
+  for (const [spelling, issue] of others) run(repo, { start: { args: { issue, repo: spelling } } });
+
+  assert.deepEqual([...issuesWithRuns(repo, "github.com/owner/repo")].sort((a, b) => a - b), spellings.map(([, issue]) => issue));
+  assert.deepEqual([...issuesWithRuns(repo)], [], "when the origin names no repository, no repo arg names this one");
+});
