@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { type Recording, recorded } from "./glab-recordings.js";
 import { copyKit } from "./kit-copy.js";
 
 const PACKAGE = join(import.meta.dirname, "..");
@@ -98,10 +99,15 @@ function homeWithConfig(config: unknown): string {
   return userHome;
 }
 
-/** A forge CLI that logs its arguments, then answers `auth status` as a logged-in user (or, with `said`, a logged-out one) would. */
-function fakeForgeCli(name: "gh" | "glab", said?: string): { dir: string; calls: () => string[] } {
+/**
+ * A forge CLI that logs its arguments, then answers `auth status` as a logged-in user would. `said` makes it a logged-out one: a string
+ * is what it prints on stderr before it exits 1, and a recording is the real glab's answer (its stderr and its exit code).
+ */
+function fakeForgeCli(name: "gh" | "glab", said?: string | Recording): { dir: string; calls: () => string[] } {
   const log = join(sandbox, `${name}-${++counter}.log`);
-  const dir = fakeBin(name, `echo "$*" >> "${log}"\n${said === undefined ? "exit 0" : `echo "${said}" >&2\nexit 1`}`);
+  const answer = typeof said === "string" ? { exitCode: 1, stderr: `${said}\n` } : (said ?? { exitCode: 0, stderr: "" });
+  const quoted = `'${answer.stderr.replaceAll("'", `'\\''`)}'`; // printf is a builtin: the PATH of a doctor run holds no `cat`
+  const dir = fakeBin(name, `echo "$*" >> "${log}"\nprintf '%s' ${quoted} >&2\nexit ${answer.exitCode}`);
   return { dir, calls: () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []) };
 }
 
@@ -336,17 +342,19 @@ test("the forge check of a GitHub repository runs `gh auth status` for the origi
 
 test("the forge check of a gitlab.com repository runs `glab auth status --hostname gitlab.com` and needs no gh: a logged-out glab fails with `glab auth login`, a missing one with where to get it", () => {
   const repo = gitRepoCopy("https://gitlab.com/acme/sub/widgets.git");
-  const glab = fakeForgeCli("glab");
+  const loggedIn = recorded("auth-status-logged-in");
+  const glab = fakeForgeCli("glab", loggedIn);
   const gh = fakeForgeCli("gh");
   const ok = checkOf(reportOf(doctor(repo, { bins: [glab.dir] })), "forge");
   assert.equal(ok.status, "pass", ok.message);
+  assert.deepEqual(glab.calls(), [loggedIn.args.join(" ")], "the call the doctor makes is the one recorded from the real glab");
   assert.deepEqual(glab.calls(), ["auth status --hostname gitlab.com"]);
   assert.deepEqual(gh.calls(), [], "gh is never asked about a GitLab repository");
 
-  const loggedOutGlab = fakeForgeCli("glab", "x gitlab.com: No token provided");
+  const loggedOutGlab = fakeForgeCli("glab", recorded("auth-status-logged-out"));
   const loggedOut = checkOf(reportOf(doctor(repo, { bins: [loggedOutGlab.dir, gh.dir] })), "forge");
   assert.equal(loggedOut.status, "fail");
-  assert.match(loggedOut.message, /No token provided/);
+  assert.match(loggedOut.message, /gitlab\.com has not been authenticated with glab/, "what the real glab says is what the report shows");
   assert.match(loggedOut.hint ?? "", /glab auth login --hostname gitlab\.com/);
 
   const missing = checkOf(reportOf(doctor(repo, { bins: [gh.dir] })), "forge");

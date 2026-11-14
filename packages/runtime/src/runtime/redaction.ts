@@ -54,6 +54,9 @@ export const CREDENTIAL_FORMATS: readonly CredentialFormat[] = [
   { rule: "GitHub fine-grained token (github_pat_)", pattern: /github_pat_[A-Za-z0-9_]{22,}/g },
   { rule: "GitHub token (ghp_, gho_, ghu_, ghs_, ghr_)", pattern: /gh[pousr]_[A-Za-z0-9]{36,}/g }, // personal, OAuth, user-to-server, server-to-server, refresh
   { rule: `GitLab token (${GITLAB_TOKEN_PREFIXES.map((prefix) => `${prefix}-`).join(", ")})`, pattern: new RegExp(`(?:${GITLAB_TOKEN_PREFIXES.join("|")})-[A-Za-z0-9_-]{20,}(?:\\.[A-Za-z0-9_-]+)*`, "g") },
+  // The runner registration token a project carries in `runners_token` (GitLab's REST API, `glab api projects/:fullpath`): the fixed prefix
+  // `GR1348941`, no hyphen, then 20 characters. Found in a real response recorded for the fake glab (scripts/verify/gitlab-e2e.sh).
+  { rule: "GitLab runner registration token (GR1348941)", pattern: /GR1348941[A-Za-z0-9_-]{20,}/g },
   { rule: "AWS access key id", pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g },
   { rule: "sk- key", pattern: /\bsk-[A-Za-z0-9_-]{20,}/g }, // OpenAI, Anthropic and compatible secret keys
   { rule: "Cursor key (crsr_)", pattern: /crsr_[A-Za-z0-9_-]{16,}/g }, // a key read from a file is in no env var

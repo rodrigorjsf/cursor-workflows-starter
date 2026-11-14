@@ -233,7 +233,7 @@ class GithubForge implements Forge {
   }
 }
 
-/** The URL of a merge request in the output of `glab mr create`, which prints a line of text around it. */
+/** The URL of a merge request in the output of `glab mr create`: glab 1.130.0 prints it alone on stdout and the text around it on stderr (recorded from a real GitLab), and the pattern finds it among text too. */
 const MR_URL = /https?:\/\/\S+\/-\/merge_requests\/\d+/;
 /** The number in the URL of a GitLab merge request, and in the URL of a GitHub pull request. */
 const MR_NUMBER = /\/-\/merge_requests\/(\d+)/;
@@ -340,8 +340,9 @@ function hostFlag(repo: string | undefined): string[] {
 const projectOf = (repo: string | undefined): string => `projects/${repo ? encodeURIComponent(repoPathOf(repo)) : ":fullpath"}`;
 
 /**
- * The JSON arrays and objects `text` holds, one after the other: `glab api --paginate` prints one array per page, or one array
- * for all of them, and this reads both. Output that stops in the middle of a value is an error, never a shorter list.
+ * The JSON arrays and objects `text` holds, one after the other: `glab api --paginate` 1.130.0 prints one array for all the pages
+ * (recorded from a real GitLab), and this reads one array per page too, as another version may print. Output that stops in the
+ * middle of a value is an error, never a shorter list.
  */
 function jsonValues(text: string): unknown[] {
   const values: unknown[] = [];

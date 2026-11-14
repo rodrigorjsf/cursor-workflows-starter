@@ -24,6 +24,15 @@
   com caminho a mais, `?query`, `#fragmento`, `http:` ou número malformado continua sem estado, e o cache curto e o quadro
   que nunca espera valem para os dois forges.
 
+- **O `glab` falso dos testes repete o que um GitLab de verdade imprimiu, e o `glab` 1.130.0 está fixado no `mise.toml`.** O
+  `scripts/verify/gitlab-e2e.sh` (opt-in, fora do `npm run check` e do CI) sobe um GitLab CE no Docker em modo de pouca
+  memória, roda o `glab` de verdade contra cada comando e rota de API do runtime e grava as saídas, sem token, senha nem host
+  local, em `packages/runtime/test/fixtures/glab/recordings.json`; ele nunca reinicia o Docker e apaga seu container e seus
+  volumes no fim, também quando falha. As gravações corrigiram o falso: `glab mr create` imprime só a URL no stdout, `--paginate`
+  junta as páginas num array só e o GitLab lista as notas da mais nova para a mais antiga. Uma gravação também mostrou que o JSON
+  de um projeto traz o token de registro de runner (`GR1348941…`, em `runners_token`): ele agora é redigido dos logs e barrado
+  pela guarda de saída do `implement-issue`, como os outros tokens do GitLab.
+
 ### Mudado
 
 - **`wf doctor`: o check `gh` virou `forge`.** Ele lê o `origin` do repositório, acha o forge como um run acha (com o

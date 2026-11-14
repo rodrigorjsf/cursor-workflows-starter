@@ -31,6 +31,8 @@ const BLOCKED: Array<[string, string]> = [
  * feed, incoming mail, agent for Kubernetes, workspace, SCIM and feature flags client. */
 const GITLAB_PREFIXES = ["glpat-", "gloas-", "gldt-", "glrt-", "glrtr-", "glcbt-", "glptt-", "glft-", "glimt-", "glagent-", "glwt-", "glsoat-", "glffct-"];
 for (const prefix of GITLAB_PREFIXES) BLOCKED.push([`GitLab ${prefix}`, `${prefix}${x(20)}`]);
+/** The runner registration token has no hyphen: `GR1348941` and 20 characters (a project's `runners_token` in the REST API). */
+BLOCKED.push(["GitLab runner registration token (GR1348941)", `GR1348941${x(20)}`]);
 
 for (const [name, sample] of BLOCKED) {
   test(`the outbound guard blocks a ${name} credential and names only the rule`, () => {
