@@ -8,7 +8,7 @@ import { z } from "zod";
 import { errorText } from "../../src/runtime/error-text.js";
 import { isRecord, parseJson } from "../../src/runtime/parse-json.js";
 import { runDirIn } from "../../src/runtime/run-store.js";
-import { writeFileAtomic } from "../../src/runtime/state-files.js";
+import { PRIVATE_DIR, writeFileAtomic } from "../../src/runtime/state-files.js";
 import { CommandError, type Commands } from "./commands.js";
 
 /** O que conta como arquivo de teste quando o run não informa `testGlobs`. */
@@ -322,7 +322,7 @@ export class ProgressStore {
     this.save();
   }
   save(): void {
-    mkdirSync(dirname(this.file), { recursive: true });
+    mkdirSync(dirname(this.file), { recursive: true, mode: PRIVATE_DIR });
     writeFileAtomic(this.file, JSON.stringify(this.data, null, 2));
   }
 }

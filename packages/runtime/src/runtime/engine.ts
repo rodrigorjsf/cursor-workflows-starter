@@ -29,7 +29,7 @@ import { recordExecGroup } from "./job-children.js";
 import { jobsDirIn } from "./job-state.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
 import { type InterruptedCloudStep, addUsage, emptyUsage, resumeHint, subtractUsage, turnTokens, withRatio } from "./projection.js";
-import { CONTENT_MAX_CHARS, RunLockedError, RunStore } from "./run-store.js";
+import { CONTENT_MAX_CHARS, RunLockedError, RunPrunedError, RunStore } from "./run-store.js";
 import { DEFAULT_SETTING_SOURCES, loadsProjectSettings, repoCodeWarning, repoCommandsIn } from "./repo-code.js";
 import { savedSecrets } from "./secret-guard.js";
 import type { RetentionPolicy } from "./retention.js";
@@ -148,9 +148,10 @@ export interface RunOptions {
   /** Onde ficam journal e estado. Default <cwd>/.workflows/runs. */
   stateDir?: string;
   /**
-   * How long step content stays in the repo's event logs (default: the last 30 runs or 14 days). When the run starts, the
-   * `text` of the `content` events of runs outside the retention is deleted; the rest of the log stays. A `null` limit
-   * turns that limit off.
+   * How long what a run holds that is private stays (default: the last 30 runs or 14 days). When the run starts, for the runs
+   * outside the retention, the `text` of the `content` events of their logs and the `result` of their journal lines are deleted
+   * (such a run can no longer be resumed), and the memo entries older than `days` are deleted; the rest of the log stays. A
+   * `null` limit turns that limit off.
    */
   retention?: RetentionPolicy;
   /**
@@ -205,7 +206,7 @@ const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 /**
  * Opens an execution of the run in its log: the run-start event with the effective config, then the warnings an
  * execution starts with (config violations, metrics off, workflow code changed since the last execution, old content
- * that could not be pruned, a torn last line). Registers a first execution in the global runs index.
+ * or memo entries that could not be pruned, a torn last line). Registers a first execution in the global runs index.
  */
 function announceRun<A>(o: {
   def: WorkflowDefinition<A, unknown>;
@@ -213,17 +214,19 @@ function announceRun<A>(o: {
   opts: RunOptions;
   runId: string;
   store: RunStore;
+  memo: MemoStore;
   resolved: ResolvedConfig;
   emit: (e: NewEvent) => void;
   recorderWarning: string | undefined;
   /** The repository the run is in (`repoIdentity`). */
   repo: { name: string; hash: string };
 }): void {
-  const { def, args, opts, runId, store, resolved, emit, recorderWarning } = o;
+  const { def, args, opts, runId, store, memo, resolved, emit, recorderWarning } = o;
   // The source fingerprint covers the modules the workflow imports (prompts, helpers); `run.toString()` alone does not.
   const workflowHash = sha(JSON.stringify(def.meta) + JSON.stringify(def.defaults ?? {}) + def.run.toString() + (workflowSourceHash(def) ?? "")).slice(0, 16);
   const startedAt = new Date().toISOString();
-  const pruned = store.pruneOldContent(opts.retention);
+  const pruned = store.pruneOldRuns(opts.retention);
+  const memoPruned = memo.pruneOld(opts.retention);
   emit({
     type: "run-start",
     workflow: def.meta.name,
@@ -256,7 +259,10 @@ function announceRun<A>(o: {
     }
   }
   for (const { runId: prunedRun, error } of pruned.failed) {
-    emit({ type: "warning", message: `could not delete the old content of run ${prunedRun}: ${error}` });
+    emit({ type: "warning", message: `could not delete the old content and step results of run ${prunedRun}: ${error}` });
+  }
+  for (const { key, error } of memoPruned.failed) {
+    emit({ type: "warning", message: `could not delete the old memo entry ${key}: ${error}` });
   }
   if (store.tornTail.events) emit({ type: "warning", message: "the last line of the event log was incomplete (a crash in the middle of a write): ignored" });
   if (store.tornTail.journal) emit({ type: "warning", message: "the last line of the journal was incomplete (a crash in the middle of a write): its step runs again" });
@@ -547,6 +553,7 @@ export async function runWorkflow<A, R>(
     store = RunStore.open(join(opts.stateDir ?? runtimeStateDir(opts.cwd, "runs"), runId), runId, { secrets: [opts.apiKey, ...savedSecrets()] });
   } catch (err) {
     if (err instanceof RunLockedError) return refused(err.message); // nothing is written: the run belongs to the other execution
+    if (err instanceof RunPrunedError) return refused(err.message); // nothing is written: retention emptied its journal, so it has nothing to resume from
     throw err;
   }
   try {
@@ -584,11 +591,11 @@ async function executeRun<A, R>(
   });
 
   const { emit, attemptContent, recorderWarning, close: closeEvents } = await openEventChannel(store, runId, opts);
-  announceRun({ def, args, opts, runId, store, resolved, emit, recorderWarning, repo: await repoIdentity(opts.cwd) });
+  const memo = new MemoStore(opts.cwd);
+  announceRun({ def, args, opts, runId, store, memo, resolved, emit, recorderWarning, repo: await repoIdentity(opts.cwd) });
 
   process.env[INSIDE_WORKFLOW_ENV] = "1";
   const journal = store.journal;
-  const memo = new MemoStore(opts.cwd);
   const sem = new Semaphore(limits.concurrency);
   const settingSources = opts.settingSources ?? DEFAULT_SETTING_SOURCES;
   const roles = new Map((def.meta.roles ?? []).map((r) => [r.name, r]));

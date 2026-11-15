@@ -102,7 +102,9 @@ contexto que as etapas carregam (`settingSources`):
   cobrada na conta da chave usada.
 - **O estado fica em `.workflows/`** (journal, log de eventos, jobs, logs, worktrees) do repositório onde o workflow roda.
   O runtime o adiciona ao `info/exclude` do git (`.git/info/exclude`, ou o caminho que o git indicar quando `.git` é um
-  arquivo, como num worktree ligado), sem mexer no `.gitignore` do repositório.
+  arquivo, como num worktree ligado), sem mexer no `.gitignore` do repositório. Ele guarda código privado (prompts, saída de
+  comandos, resultados de etapas): as pastas nascem `0700` e os arquivos `0600`, e a retenção apaga o texto dos logs, os
+  resultados do journal e as entradas do memo dos runs velhos ([5.3 §7](03-observabilidade.md)).
 - **Cada run grava métricas** (tokens, custo, modelo, passos, resultado) em `~/.cursor-workflows/metrics.db`. Os prompts
   ficam só como hash. Desligue com `WF_METRICS=off` (ver [5.3](03-observabilidade.md)).
 - **Commit, push, PR e comentário na issue são feitos pelo código do workflow**, com `git` e o CLI do forge (`gh` ou `glab`). O `implement-issue`

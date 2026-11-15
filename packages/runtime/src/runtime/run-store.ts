@@ -3,7 +3,7 @@
 //
 // Layout, under `<cwd>/.workflows/runs/<runId>/`:
 //   events.jsonl   every event of every execution of the run, one JSON object per line
-//   journal.jsonl  the results of the finished steps, for resume
+//   journal.jsonl  the results of the finished steps, for resume (retention empties it for a run outside it: `RunPrunedError`)
 //   run.lock       present while a process executes the run: who holds it
 //
 // Under `<cwd>/.workflows/locks/<name>.lock` live the repo-wide named locks a run can hold (`acquireNamedLock`): the
@@ -18,9 +18,9 @@ import { tryParseJson } from "./parse-json.js";
 import { isAlive } from "./pid.js";
 import { type InterruptedCloudStep, type Ledger, interruptedCloudSteps, replayLedger } from "./projection.js";
 import { CREDENTIAL_FORMATS, type Redactor, createRedactor } from "./redaction.js";
-import { type RetentionPolicy, pruneContent } from "./retention.js";
+import { type RetentionPolicy, pruneRuns } from "./retention.js";
 import { plainName, stateDir } from "./state.js";
-import { appendJsonl, hasTornTail, readJsonl } from "./state-files.js";
+import { PRIVATE_DIR, PRIVATE_FILE, appendJsonl, hasTornTail, readJsonl } from "./state-files.js";
 
 export const EVENTS_FILE = "events.jsonl";
 export const JOURNAL_FILE = "journal.jsonl";
@@ -30,6 +30,9 @@ export const CONTENT_MAX_CHARS = 32_768;
 
 /** Another process (or another execution in this one) is already executing the run. */
 export class RunLockedError extends Error {}
+
+/** The run's journal was pruned by the retention policy: its step results are gone, so it cannot be resumed. */
+export class RunPrunedError extends Error {}
 
 /** Another run holds the named lock (`acquireNamedLock`). `holderRunId` is that run's id; absent for a lock written without one. */
 export class NamedLockedError extends Error {
@@ -114,7 +117,7 @@ function readLock(file: string): LockContent | undefined {
 function takeLock(file: string, runId: string, refuse: (holder: LockContent | undefined) => Error): () => void {
   const content: LockContent = { pid: process.pid, token: randomUUID(), startedAt: new Date().toISOString(), runId, identity: processIdentity(process.pid) };
   const aside = `${file}.${process.pid}.${content.token.slice(0, 8)}.tmp`;
-  writeFileSync(aside, JSON.stringify(content));
+  writeFileSync(aside, JSON.stringify(content), { mode: PRIVATE_FILE });
   try {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -275,7 +278,7 @@ export class RunStore {
   private ended = false;
 
   private constructor(dir: string, runId: string, options: RunStoreOptions) {
-    mkdirSync(dir, { recursive: true });
+    mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR });
     this.releaseLock = acquireLock(dir, runId);
     this.dir = dir;
     this.runId = runId;
@@ -284,6 +287,11 @@ export class RunStore {
     this.eventsFile = join(dir, EVENTS_FILE);
     try {
       this.journal = new Journal(join(dir, JOURNAL_FILE));
+      if (this.journal.pruned) {
+        throw new RunPrunedError(
+          `run ${runId} cannot be resumed: the retention policy deleted the step results its journal held, so its finished steps would all run again (the run's history in its event log is kept). Start a new run instead`,
+        );
+      }
       this.tornTail = { events: hasTornTail(this.eventsFile), journal: hasTornTail(join(dir, JOURNAL_FILE)) };
       const { events } = readEventLog(this.eventsFile, { content: false });
       this.previousStart = events.findLast((e): e is RunStartEvent => e.type === "run-start");
@@ -298,7 +306,7 @@ export class RunStore {
 
   /**
    * Opens the state of the run in `dir` (created when new) and locks it. Throws `RunLockedError` when another execution holds
-   * it, and an `invalid runId` error, before anything is created, when the run id is not a plain name (`isPlainName`): a run
+   * it, `RunPrunedError` when retention emptied the run's journal (it cannot be resumed), and an `invalid runId` error, before anything is created, when the run id is not a plain name (`isPlainName`): a run
    * id to resume comes from the chat or the command line, and the run's folder is named after it.
    */
   static open(dir: string, runId: string, options: RunStoreOptions = {}): RunStore {
@@ -356,13 +364,15 @@ export class RunStore {
   }
 
   /**
-   * Prunes the content of the repo's other runs that fall outside `policy` (see retention.ts). Call it when the run starts.
-   * A run another process is executing is skipped. Never throws.
+   * Prunes what the repo's other runs that fall outside `policy` hold that is private: the content of their event logs and the
+   * results of their journals (see retention.ts). Call it when the run starts. A run another process is executing is skipped.
+   * Never throws.
    */
-  pruneOldContent(policy?: RetentionPolicy): ReturnType<typeof pruneContent> {
-    return pruneContent({
+  pruneOldRuns(policy?: RetentionPolicy): ReturnType<typeof pruneRuns> {
+    return pruneRuns({
       runsDir: dirname(this.dir),
       logFile: EVENTS_FILE,
+      journalFile: JOURNAL_FILE,
       current: this.runId,
       policy,
       tryLock: (dir, runId) => {

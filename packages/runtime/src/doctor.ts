@@ -3,7 +3,7 @@
 // fixed order. The checks follow what the IDE does: they read the MCP config it reads and start the server it starts.
 
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, lstatSync, readFileSync, readlinkSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -25,7 +25,7 @@ import { createRedactor } from "./runtime/redaction.js";
 import { REPO_CODE_INTRO, loadsProjectSettings, repoCommandLines, repoCommandsIn } from "./runtime/repo-code.js";
 import { loadWorkflows } from "./runtime/registry.js";
 import { isRecord } from "./runtime/parse-json.js";
-import { userDir } from "./runtime/state.js";
+import { stateRootIn, userDir } from "./runtime/state.js";
 import type { WorkflowDefinition } from "./runtime/workflow.js";
 import { type ForgeLogin, type ForgeToken, type OriginForge, forgeOfOrigin, loginOf } from "../workflows/implement-issue/forge.js";
 
@@ -501,6 +501,31 @@ function checkKit(): CheckResult {
   return problems.length ? fail("kit", problems.join("\n"), hint) : pass("kit", `${kit} is at v${version} with a clean tree`);
 }
 
+/**
+ * The repo's run state (`.workflows/`): the event logs, journals and memo hold the private source and the step results of the repo,
+ * so no other user of the machine should be able to enter the folder. A kit older than this check, or a loose umask, made it
+ * readable; a folder that exists keeps its mode, so the doctor says so (a warning) and how to close it. Only reads: it never makes
+ * the folder. A folder is private when group and others have no permission on it at all: without the execute bit they could not
+ * read its files, and with it a file whose name they know is theirs to read.
+ */
+function checkState(cwd: string): CheckResult {
+  const folder = stateRootIn(cwd);
+  if (process.platform === "win32") return pass("state", "Windows has no Unix modes: nothing to check");
+  let mode: number;
+  try {
+    mode = statSync(folder).mode & 0o777;
+  } catch (err) {
+    if ((err as { code?: unknown }).code === "ENOENT") return pass("state", `no run state in this repository yet (${folder} does not exist): nothing to check`);
+    throw err;
+  }
+  if ((mode & 0o077) === 0) return pass("state", `${folder} is mode ${mode.toString(8)}: only its user can enter it`);
+  return warn(
+    "state",
+    `${folder} is mode ${mode.toString(8)}: other users of this machine can enter it, and what is inside (event logs with prompts and command output, journals and memo with step results) is private source`,
+    `Run \`chmod 700 ${folder}\`: nobody else can then reach what is inside, whatever the files' own modes (this kit makes new state \`0600\` in a \`0700\` folder). On a drive that has no Unix modes (WSL's /mnt/c) the mode cannot be changed: keep the repository in the Linux file system.`,
+  );
+}
+
 /** A check that throws is a failed check: the doctor exists to say what is wrong, not to crash on it. */
 function guarded(id: CheckId, run: () => CheckResult | Promise<CheckResult>): Promise<CheckResult> {
   return Promise.resolve()
@@ -526,6 +551,7 @@ export async function runDoctor({ cwd }: { cwd: string }): Promise<DoctorReport>
     guarded("kit-version", async () => checkKitVersion(cwd, await servers)),
     guarded("sandbox", async () => checkSandbox(cwd, await resolution)),
     guarded("kit", checkKit),
+    guarded("state", () => checkState(cwd)),
   ]);
   return createRedactor().value(reportOf(checks));
 }

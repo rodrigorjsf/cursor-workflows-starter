@@ -8,7 +8,7 @@
 // repository (`url.<path>.insteadOf`, in the environment): the kit's origin is then the official URL, as on a user's machine.
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -179,6 +179,31 @@ test("the installer writes the default global config with the agreed caps, which
   const shown = spawnSync(shimOf(home), ["config", "show", "implement-issue", "--cwd", repo], { env: env(home), encoding: "utf8" });
   assert.equal(shown.status, 0, shown.stderr);
   assert.deepEqual((JSON.parse(shown.stdout) as { files: { global: unknown } }).files.global, { path: globalConfigOf(home), found: true });
+});
+
+test("the installer makes ~/.cursor-workflows and what it writes there for its user alone, whatever the umask of the shell", () => {
+  const home = newHome();
+  const umaskBefore = process.umask(0o022); // a user's usual umask: the installer inherits it
+  try {
+    assert.equal(install(home, ["--tag", "v0.3.0", "--repo", origin]).status, 0);
+  } finally {
+    process.umask(umaskBefore);
+  }
+
+  const modeOf = (path: string) => statSync(path).mode & 0o777;
+  assert.equal(modeOf(join(home, ".cursor-workflows")), 0o700, "the folder that will hold the config, the runs index and the metrics");
+  assert.equal(modeOf(globalConfigOf(home)), 0o600, "the global config, the caps of the user");
+  assert.ok((modeOf(shimOf(home)) & 0o100) !== 0, "the user can still run the wf shim");
+});
+
+test("install.sh sets umask 077 at the top of main, before it creates anything", () => {
+  const script = readFileSync(join(KIT_ROOT, "scripts", "install.sh"), "utf8");
+  const mainAt = script.indexOf("main() {");
+  const umaskAt = script.search(/^ {2}umask 077$/m);
+  const firstMkdirAt = script.indexOf("mkdir -p");
+  assert.ok(mainAt !== -1 && umaskAt > mainAt, "umask 077 is a command inside main");
+  assert.ok(umaskAt < firstMkdirAt, "and it runs before the first mkdir of main");
+  assert.ok(script.indexOf("\n  while [ $# -gt 0 ]") > umaskAt, "and before main reads its arguments");
 });
 
 test("the installer leaves an existing global config as it is", () => {

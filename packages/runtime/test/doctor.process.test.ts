@@ -224,7 +224,7 @@ test("on a healthy setup every check passes: exit 0, and --json lists the eleven
   assert.equal(report.ok, true);
   assert.deepEqual(
     report.checks.map((c) => c.id),
-    ["node", "dependencies", "endpoints", "login", "models", "forge", "mcp-server", "config", "kit-version", "sandbox", "kit"],
+    ["node", "dependencies", "endpoints", "login", "models", "forge", "mcp-server", "config", "kit-version", "sandbox", "kit", "state"],
   );
   for (const c of report.checks) assert.ok(c.status === "pass" && c.hint === undefined, `${c.id}: ${c.message}`);
   assert.equal(r.stderr, "", "the doctor writes its report to stdout and nothing to stderr");
@@ -234,7 +234,7 @@ test("without --json the report is text, one block per check with the fix hint u
   const healthy = doctor(repoCopy(), { args: [] });
   assert.equal(healthy.status, 0, healthy.stdout + healthy.stderr);
   assert.match(healthy.stdout, /\[ok\]\s+Node\.js: v\d+/);
-  assert.match(healthy.stdout, /All good: 11 checks passed\./);
+  assert.match(healthy.stdout, /All good: 12 checks passed\./);
 
   // Logged out and no gh in a GitHub repository: login, models (no catalog without a login) and forge fail.
   const r = doctor(gitRepoCopy("https://github.com/acme/widgets.git"), { args: [], bins: [], env: { FAKE_SDK_LOGGED_OUT: "1" } });
@@ -244,7 +244,41 @@ test("without --json the report is text, one block per check with the fix hint u
   assert.match(r.stdout, /\[FAIL\]\s+Cursor SDK login: /);
   assert.match(r.stdout, /how to fix: Log in with `wf login`/);
   assert.match(r.stdout, /\[FAIL\]\s+Forge CLI: /);
-  assert.match(r.stdout, /3 of 11 checks failed\./);
+  assert.match(r.stdout, /3 of 12 checks failed\./);
+});
+
+/** A repo with a `.workflows/` folder of mode `mode`, as an older kit (or a loose umask) leaves it. */
+function repoWithStateFolder(mode: number): string {
+  const repo = repoCopy();
+  mkdirSync(join(repo, ".workflows", "runs"), { recursive: true });
+  chmodSync(join(repo, ".workflows"), mode); // `mkdirSync`'s own mode is narrowed by the umask: set it
+  return repo;
+}
+
+test("a .workflows folder that other users can reach makes the state check warn, naming its mode and the fix; the doctor still passes", () => {
+  for (const mode of [0o755, 0o750, 0o711]) {
+    const repo = repoWithStateFolder(mode);
+    const r = doctor(repo);
+    assert.equal(r.status, 0, `${mode.toString(8)}: ${r.stdout}${r.stderr}`);
+    const state = checkOf(reportOf(r), "state");
+    assert.equal(state.status, "warn", mode.toString(8));
+    assert.ok(state.message.includes(join(repo, ".workflows")), state.message);
+    assert.ok(state.message.includes(mode.toString(8)), `the message names the mode ${mode.toString(8)}: ${state.message}`);
+    assert.match(state.hint ?? "", /chmod 700 /);
+    assert.ok(state.hint?.includes(join(repo, ".workflows")), "the hint names the folder to fix");
+  }
+});
+
+test("a private .workflows folder, and a repo that has none yet, pass the state check; the check creates nothing", () => {
+  const private0700 = checkOf(reportOf(doctor(repoWithStateFolder(0o700))), "state");
+  assert.equal(private0700.status, "pass");
+  assert.equal(private0700.hint, undefined);
+
+  const fresh = repoCopy();
+  const none = checkOf(reportOf(doctor(fresh)), "state");
+  assert.equal(none.status, "pass");
+  assert.match(none.message, /no run state/);
+  assert.equal(existsSync(join(fresh, ".workflows")), false, "a read-only check does not make the folder it looks for");
 });
 
 /** The hooks and MCP servers a cloned repository can bring: the three files a step that loads the project's settings runs code from. */
@@ -685,7 +719,7 @@ test("--json shows a warning as `status: warn` with its hint and `ok: true`, and
   assert.equal(report.ok, true);
   assert.deepEqual(
     report.checks.map((c) => [c.id, c.status]),
-    [["node", "pass"], ["dependencies", "pass"], ["endpoints", "pass"], ["login", "pass"], ["models", "pass"], ["forge", "warn"], ["mcp-server", "pass"], ["config", "pass"], ["kit-version", "pass"], ["sandbox", "pass"], ["kit", "pass"]],
+    [["node", "pass"], ["dependencies", "pass"], ["endpoints", "pass"], ["login", "pass"], ["models", "pass"], ["forge", "warn"], ["mcp-server", "pass"], ["config", "pass"], ["kit-version", "pass"], ["sandbox", "pass"], ["kit", "pass"], ["state", "pass"]],
   );
   assert.deepEqual(Object.keys(checkOf(report, "forge")), ["id", "title", "status", "message", "hint"]);
   assert.deepEqual(Object.keys(checkOf(report, "node")), ["id", "title", "status", "message"]);
@@ -699,13 +733,13 @@ test("without --json a warning prints as `[warn]` with its fix hint, and the las
   assert.match(warned.stdout, /\[warn\]\s+Forge CLI: GitHub at github\.com: .*admin:public_key/);
   assert.match(warned.stdout, /how to fix: Remove them with `gh auth refresh --remove-scopes admin:public_key --hostname github\.com`/);
   assert.match(warned.stdout, /\[ok\]\s+Node\.js/);
-  assert.match(warned.stdout, /All 11 checks passed, 1 with a warning\./);
+  assert.match(warned.stdout, /All 12 checks passed, 1 with a warning\./);
 
   const both = doctor(repo, { bins: [gh.dir], args: [], env: { FAKE_SDK_LOGGED_OUT: "1" } });
   assert.equal(both.status, 1, "a failure still fails the doctor");
   assert.match(both.stdout, /\[warn\]\s+Forge CLI/);
   assert.match(both.stdout, /\[FAIL\]\s+Cursor SDK login/);
-  assert.match(both.stdout, /2 of 11 checks failed, 1 with a warning\./);
+  assert.match(both.stdout, /2 of 12 checks failed, 1 with a warning\./);
 });
 
 test("an origin on a host nobody declared fails the forge check naming the host and the `forges` key, and a hint to declare it", () => {

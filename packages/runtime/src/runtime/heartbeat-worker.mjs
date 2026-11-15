@@ -13,7 +13,7 @@ function beat() {
   // Atomic, like every state file (see state-files.ts): temp file next to the target, then rename over it.
   const tmp = join(dirname(file), `.${basename(file)}.${process.pid}.heartbeat.tmp`);
   try {
-    writeFileSync(tmp, JSON.stringify({ ...record, heartbeat: new Date().toISOString() }, null, 2));
+    writeFileSync(tmp, JSON.stringify({ ...record, heartbeat: new Date().toISOString() }, null, 2), { mode: 0o600 }); // PRIVATE_FILE of state-files.ts: a worker imports nothing of the runtime
     renameSync(tmp, file);
   } catch {
     rmSync(tmp, { force: true }); // the next beat tries again

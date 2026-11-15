@@ -61,6 +61,9 @@ previsível em `/tmp` pode ser criado de antemão por outro usuário da máquina
 | Skills | Liga cada skill do kit (`run-workflow`, `cursor-workflow-authoring`, `skill-to-workflow`, `cursor-workflows-setup`) em `~/.claude/skills/`, com links simbólicos para `~/.cursor-workflows/kit/skills/`. O Claude Code lê essa pasta, e o Cursor também (compatibilidade). Uma pasta ou um link de mesmo nome que seja seu fica como está, com aviso |
 | Configuração global | Escreve `~/.cursor-workflows/config.json` com os tetos padrão **se o arquivo não existir**: 3.000.000 de tokens e 500 centavos por run, 600.000 tokens por etapa, simultaneidade 4, todos os modelos, todas as camadas de configuração menos `all`, só etapas locais ([6.2](../reference/config.md)). Um arquivo seu nunca é reescrito |
 
+O instalador roda com `umask 077`: o que ele cria (`~/.cursor-workflows/`, a configuração global, o kit) é só seu, e uma pasta ou um arquivo que já
+existe mantém o modo que tinha.
+
 Rodar de novo é seguro: o instalador refaz o que falta e não muda o que já está certo. Cada skill ligada passa pelo local
 fixo do kit, então o link continua valendo quando o kit troca de uma tag para outra.
 

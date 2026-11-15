@@ -18,6 +18,9 @@
 # half-downloaded script (curl | bash) does nothing, and `wf upgrade` can check out a new install.sh under a running one.
 main() {
   set -euo pipefail
+  # What the installer creates (~/.cursor-workflows, its config, the kit) is for this user alone: the usual umask would let every local user
+  # read it. A file or folder that already exists keeps its mode.
+  umask 077
 
   # Same repository as KIT_REPO in packages/runtime/src/kit-version.ts; test/install-guide.test.ts keeps them equal.
   local default_repo="https://github.com/rodrigorjsf/cursor-workflows-starter.git"

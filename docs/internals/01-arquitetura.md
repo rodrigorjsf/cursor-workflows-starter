@@ -137,7 +137,9 @@ são o que o backend local faz numa tentativa.
     de `onEvent`, nem o estado do job os recebem. Antes de gravar, o engine troca por `[REDACTED]` os formatos
     conhecidos de segredo e o valor de toda variável de ambiente com KEY, TOKEN, SECRET ou PASSWORD no nome; depois corta
     cada texto em 32768 caracteres. Ao iniciar um run, o `text` dos runs do repositório fora da retenção (os últimos 30
-    runs ou 14 dias) é apagado; o resto do log fica.
+    runs ou 14 dias) é apagado; o resto do log fica. O mesmo vale para o `result` das linhas do journal desses runs (o run
+    fica marcado e um resume dele é recusado) e para as entradas do memo com mais de 14 dias (`retention.ts`). Tudo que o
+    run grava em `.workflows/` nasce `0700` (pastas) e `0600` (arquivos).
 
 ## Comandos do workflow (`ctx.exec`)
 
