@@ -4,7 +4,7 @@
 // into the reply, and keeps each repository's answer for a while so that a board that polls does not call `gh` or `glab` on every poll.
 //
 // - `Backlogs` keeps the forge's answer, a list or an error, for `cacheMs` per repository, and asks a repository once at a time: a
-//   request that comes while the forge is being asked waits for that answer. At most `MAX_PARALLEL` repositories are asked at once, so
+//   request that comes while the forge is being asked waits for that answer. At most `FORGE_CLI_PARALLEL` repositories are asked at once (`limiter.ts`), so
 //   a machine with many repositories never starts a `gh` or a `glab` for each of them together. The runs are not kept: `backlogReply` takes the issues
 //   that have a run off the list on every request, so a run started a moment ago drops its card at once.
 // - `backlogReply` is pure. A repository the forge could not answer is an entry of `errors` with the reason; the others still list.
