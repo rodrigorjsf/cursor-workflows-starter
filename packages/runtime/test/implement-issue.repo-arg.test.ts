@@ -5,6 +5,8 @@
 // lists in `workflows.implement-issue.settings.repoHosts`: anything else ends the run before the first forge call. What each case
 // asserts is what the fake CLIs were asked (nothing), not how the refusal is worded inside.
 import assert from "node:assert/strict";
+import { test } from "node:test";
+import { repoHostOf } from "../workflows/implement-issue/repo-arg.js";
 import { writeGlobalConfig, writeRepoConfig } from "./config-fixtures.js";
 import { forgeState, forgeTest, fx, issue, names, run, setOrigin } from "./implement-issue.fixture.js";
 
@@ -103,12 +105,46 @@ forgeTest("on GitLab, group/sub/project is a path and keeps working, gitlab.com 
   assert.equal(res(listed).status, "seams-proposed", JSON.stringify(listed));
 }, ["gitlab"]);
 
-// glab reads four segments as HOST/GROUP/NAMESPACE/REPO as far as the kit knows (it could not be checked against a pinned glab): the first one
-// may be a host whatever it looks like, so a nested group is named by its URL, which carries its host.
-forgeTest("on GitLab a path of four segments or more may start with a host, so it is refused until that name is allowed, and a nested group is named by its URL", async () => {
-  issue(["complexity:medium"]);
-  await refused("corp/group/sub/project", /\bcorp\b.*repoHosts/s);
-  await refused("https://evil.example:99999/group/project", /not a valid URL/);
-  const url = await run({ repo: "https://gitlab.com/group/sub/deeper/project" });
-  assert.equal(res(url).status, "seams-proposed", JSON.stringify(url));
+// glab 1.130.0 (`glrepo.FromFullName`) takes the last segment of a scheme-less value as the repository and splits the rest at its first
+// slash, whatever the segment count: that first part is a host only when it has a `.` or a `:` (and is a host glab is logged in to), else
+// the whole prefix is a nested group on the default host. The kit cannot read glab's logins, so every dotted or colon first segment of three
+// or more segments counts as a host, and a plain nested group of any depth names none.
+forgeTest("on GitLab a nested group of any depth is a path and keeps working, with no repoHosts", async () => {
+  for (const repo of ["group/sub/deeper/project", "g/s/n/m/p", "https://gitlab.com/group/sub/deeper/project"]) {
+    issue(["complexity:medium"]);
+    const r = await run({ repo });
+    assert.equal(res(r).status, "seams-proposed", `${repo}: ${JSON.stringify(r)}`);
+  }
 }, ["gitlab"]);
+
+forgeTest("on GitLab a dotted first segment is still a host at four segments or more, so it is refused until that name is allowed", async () => {
+  issue(["complexity:medium"]);
+  await refused("evil.example/g/s/p", /evil\.example.*repoHosts/s);
+  await refused("evil.example/g/s/n/p", /evil\.example.*repoHosts/s);
+  await refused("host:3000/g/p", /\bhost\b/); // a port: the kit reads it as an scp-like remote, which names its host (refused by the forge detection)
+  await refused("https://evil.example:99999/group/project", /not a valid URL/);
+
+  settings({ repoHosts: ["evil.example"] });
+  issue(["complexity:medium"]);
+  const listed = await run({ repo: "evil.example/g/s/p" });
+  assert.equal(res(listed).status, "seams-proposed", JSON.stringify(listed));
+}, ["gitlab"]);
+
+// The host `repoHostOf` finds in a scheme-less `repo`, on the forge each CLI reads it for: what `repoRefusal` then checks against the policy.
+test("repoHostOf: on GitLab only a dotted or colon first segment of three segments or more is a host, whatever the depth", () => {
+  for (const repo of ["g/p", "g/s/p", "g/s/n/p", "g/s/n/m/p", "group/sub/deeper/project/x", "Corp/g/s/p"]) assert.equal(repoHostOf(repo, "gitlab"), undefined, repo);
+  assert.equal(repoHostOf("h.x/g/p", "gitlab"), "h.x");
+  assert.equal(repoHostOf("H.X/g/s/p", "gitlab"), "h.x", "in lower case");
+  assert.equal(repoHostOf("h.x/g/s/n/p", "gitlab"), "h.x");
+  assert.equal(repoHostOf("h.x/p", "gitlab"), undefined, "two segments are OWNER/REPO whatever the owner looks like");
+  assert.equal(repoHostOf("host:3000/g/p", "gitlab"), "host", "a port is read as an scp-like remote, which names its host");
+  assert.notEqual(repoHostOf("h:/g/p", "gitlab"), undefined, "a colon in the first segment never passes as a path, whatever else reads it");
+  assert.equal(repoHostOf("https://evil.example/g/s/n/p", "gitlab"), "evil.example", "a URL names its host");
+});
+
+test("repoHostOf: on GitHub the first of three segments is a host, dot or not, and two segments are OWNER/REPO", () => {
+  assert.equal(repoHostOf("o/r", "github"), undefined);
+  assert.equal(repoHostOf("ghe/o/r", "github"), "ghe");
+  assert.equal(repoHostOf("GHE.corp.example/o/r", "github"), "ghe.corp.example");
+  assert.equal(repoHostOf("https://github.com/o/r", "github"), "github.com");
+});
