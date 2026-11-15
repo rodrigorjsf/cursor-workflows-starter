@@ -47,7 +47,7 @@ curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/rodrigor
 bash "$installer" --tag v0.4.0   # the kit at the tag, the wf command and the global skills
 wf login                               # browser login; usage bills YOUR account
 wf init                                # in your repo: writes the kit's files, shows the diff, never commits
-wf doctor                              # checks Node, login, models, the forge CLI (gh or glab), the MCP server, the config, the SDK sandbox and the installed kit
+wf doctor                              # checks Node, login, models, the forge CLI (gh or glab), the MCP server, the config, the SDK sandbox, the installed kit and WSL interop
 ```
 
 The kit cannot read your account's Privacy Mode: confirm it is on in Cursor Settings → General before you run a workflow

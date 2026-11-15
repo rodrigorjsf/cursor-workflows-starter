@@ -5,7 +5,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Cursor } from "@cursor/sdk";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -26,6 +26,7 @@ import { REPO_CODE_INTRO, loadsProjectSettings, repoCommandLines, repoCommandsIn
 import { loadWorkflows } from "./runtime/registry.js";
 import { isRecord } from "./runtime/parse-json.js";
 import { stateRootIn, userDir } from "./runtime/state.js";
+import { WSL_INTEROP_FILES, WSL_INTEROP_FILES_ENV, readWslInterop } from "./wsl-interop.js";
 import type { WorkflowDefinition } from "./runtime/workflow.js";
 import { type ForgeLogin, type ForgeToken, type OriginForge, forgeOfOrigin, loginOf } from "../workflows/implement-issue/forge.js";
 
@@ -35,6 +36,12 @@ export { type CheckResult, type DoctorReport, formatReport } from "./doctor-repo
 function timeoutMs(): number {
   const fromEnv = Number(process.env.WF_DOCTOR_TIMEOUT_MS);
   return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 20_000;
+}
+
+/** The WSL interop files the host check reads: the kernel's own, or the ones `WF_DOCTOR_WSL_INTEROP_FILES` lists (as a PATH does), for the tests. */
+function interopFiles(): readonly string[] {
+  const fromEnv = (process.env[WSL_INTEROP_FILES_ENV] ?? "").split(delimiter).filter(Boolean);
+  return fromEnv.length ? fromEnv : WSL_INTEROP_FILES;
 }
 
 /** `promise`, or a rejection after `ms`: the SDK and the MCP server have no timeout of their own that a check can rely on. */
@@ -526,6 +533,33 @@ function checkState(cwd: string): CheckResult {
   );
 }
 
+/**
+ * The host the kit runs on, as far as the WSL trust boundary goes: on WSL2 with interop on, a Windows process reaches this Linux home
+ * through `\\wsl$` as the distribution's default user, so the 0600 mode of `~/.cursor/sdk/auth.json` does not keep it out, and a step that
+ * runs without the SDK sandbox can start Windows programs. That is a warning, since the boundary is the user's to choose per repository;
+ * the doctor reads the kernel's interop files and never changes `wsl.conf` or restarts WSL. A host with no interop file (not WSL, or
+ * interop off) passes. `WF_DOCTOR_WSL_INTEROP_FILES` replaces the files' paths, for the tests.
+ */
+function checkHost(): CheckResult {
+  const files = interopFiles();
+  const interop = readWslInterop(files);
+  const securityDoc = `See the paragraph on WSL in ${kitFileUrl("SECURITY.md", readKitPackage().version)}.`;
+  switch (interop.kind) {
+    case "absent":
+      return pass("host", `no WSL interop: ${files.join(" and ")} do not exist, so this host is not WSL, or its interop is off`);
+    case "disabled":
+      return pass("host", `WSL interop is off: ${interop.file} reads "${interop.reads}", so a step cannot start Windows programs from this distribution`);
+    case "unreadable":
+      return warn("host", `could not read ${interop.file}: ${interop.said}. The doctor cannot tell whether WSL interop is on, which decides whether a step can start Windows programs`, `Check the file's permissions, or ignore this on a host that is not WSL. ${securityDoc}`);
+    case "enabled":
+      return warn(
+        "host",
+        `WSL interop is on (${interop.file} reads "enabled"). A Windows process reaches this Linux home through \\\\wsl$ as the distribution's default user, so the 0600 mode of ~/.cursor/sdk/auth.json does not keep it out, and a step that runs without the SDK sandbox can start Windows programs`,
+        `For a repository you do not trust, work in a separate WSL distribution, or turn interop off in this one: put \`[interop]\` and \`enabled=false\` in its /etc/wsl.conf, then stop the distribution from Windows (\`wsl --terminate <distribution>\`) and start it again. The doctor never changes or restarts WSL. ${securityDoc}`,
+      );
+  }
+}
+
 /** A check that throws is a failed check: the doctor exists to say what is wrong, not to crash on it. */
 function guarded(id: CheckId, run: () => CheckResult | Promise<CheckResult>): Promise<CheckResult> {
   return Promise.resolve()
@@ -552,6 +586,7 @@ export async function runDoctor({ cwd }: { cwd: string }): Promise<DoctorReport>
     guarded("sandbox", async () => checkSandbox(cwd, await resolution)),
     guarded("kit", checkKit),
     guarded("state", () => checkState(cwd)),
+    guarded("host", checkHost),
   ]);
   return createRedactor().value(reportOf(checks));
 }

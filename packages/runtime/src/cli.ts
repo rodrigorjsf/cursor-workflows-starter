@@ -8,7 +8,7 @@
 //   wf init [--no-agents-md | --remove]   # writes the kit's files into the repo (MCP configs, repo config, .gitignore, AGENTS.md block); prints the diff, never commits
 //   wf config show [workflow]         # effective config of the current repo and where each value came from
 //   wf upgrade [--allow-mutable-tag]  # moves the installed kit (~/.cursor-workflows/kit) to the newest release tag and redoes its dependencies, shim and skill links; refuses a kit with local changes, a tag that moved upstream and a release that is not immutable (the flag skips the release check)
-//   wf doctor [--json]                # checks the environment the IDE uses (Node, dependencies, login, models, forge CLI, MCP server, config, kit version); exits 1 when a check fails (a warning does not)
+//   wf doctor [--json]                # checks the environment the IDE uses (Node, dependencies, login, models, forge CLI, MCP server, config, kit version, SDK sandbox, installed kit, WSL interop); exits 1 when a check fails (a warning does not)
 //   wf run <workflow> --args '<json>' [--max-cents N] [--resume <runId>]   # primeiro plano; imprime JSON no fim
 //   wf start <workflow> --args '<json>' [--resume <runId>]                 # segundo plano; imprime {jobId}
 //   wf status <jobId>

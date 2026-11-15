@@ -30,13 +30,34 @@
   - **Modos privados.** O runtime cria `.workflows/` e as pastas dentro dela com `0700` e os arquivos com `0600` (log de eventos,
     journal, trava do run, memo, registro e log de cada job, e o registro dos grupos de processo de um `ctx.exec`), qualquer que
     seja o `umask`; `.workflows/worktrees/` fica de fora. O modo vale só quando o arquivo nasce: o runtime nunca chama `chmod`, e uma pasta ou um log que já existe mantém o modo que tinha (um arquivo reescrito inteiro, como o registro de um job, é um arquivo novo e nasce `0600`). O
-    `wf doctor` ganhou a verificação `state` (a 12ª, no fim da lista), que avisa (`warn`) de uma `.workflows/` que o grupo ou os
+    `wf doctor` ganhou a verificação `state` (a 12ª, depois de `kit`), que avisa (`warn`) de uma `.workflows/` que o grupo ou os
     outros alcançam e dá o `chmod 700`. O instalador roda com `umask 077`, então `~/.cursor-workflows/` nasce `0700`.
   - **Retenção do journal e do memo.** Para os runs fora da retenção (30 runs, 14 dias), o `result` de cada linha do journal
     é apagado e a linha fica marcada `pruned`; o `--resume` desse run é recusado, antes de qualquer etapa, com `run <id> cannot be
     resumed: the retention policy deleted the step results its journal held…`. As entradas do memo com mais de 14 dias são
     apagadas. Antes só o texto do log de eventos era podado, e o journal e o memo ficavam para sempre. As funções
     `pruneContent` e `RunStore.pruneOldContent` passam a se chamar `pruneRuns` e `pruneOldRuns`.
+- **O SECURITY.md diz quem recebe os seus dados, onde fica a fronteira do WSL e como se cuida da conta do mantenedor** (issue #73).
+  - **"Quem recebe os seus dados".** Uma tabela com um destinatário por linha (a Cursor e os provedores de modelo, as VMs dos Cloud
+    Agents, o GitHub e a telemetria do próprio SDK), que diz o que cada um recebe, de qual etapa e o que governa a retenção e o
+    treino, com as páginas da Cursor e do GitHub que o dizem. A telemetria do `@cursor/sdk` 1.3.1 (eventos de uso para o backend da
+    Cursor, sem opção para desligar que o kit tenha achado) estava fora de todo texto do kit.
+  - **O ciclo de vida da chave do Cursor.** A seção "A chave do Cursor" diz como o `wf login` cria a chave e quando ela expira,
+    onde ficam as cópias (`~/.cursor/sdk/auth.json`, `CURSOR_API_KEY`), como rotacionar e como revogar, e que só o limite de gasto
+    do dashboard da Cursor vale também para uma chave vazada usada fora do kit, porque os tetos do `config.json` valem só para os
+    runs que o kit inicia.
+  - **A fronteira do WSL, e uma 13ª verificação do `wf doctor`, `host`.** No WSL, o Windows alcança a home do Linux por `\\wsl$` como
+    o usuário padrão da distribuição, então o `0600` do `~/.cursor/sdk/auth.json` não o segura, e, com a interoperabilidade ligada,
+    uma etapa sem sandbox inicia programas do Windows. O SECURITY.md sugere uma distribuição WSL separada ou `[interop]
+    enabled=false` no `/etc/wsl.conf` para repositórios em que você não confia. A verificação `host` lê
+    `/proc/sys/fs/binfmt_misc/WSLInterop` (e `WSLInterop-late`, o nome que uma distribuição com systemd pode ter no lugar dele) e
+    **avisa** (`warn`, sem falhar) quando um deles diz `enabled`, ou quando um existe e não se lê; sem os arquivos, passa. Só lê:
+    nunca muda o `wsl.conf` nem reinicia o WSL.
+  - **"Conta do mantenedor".** O capítulo [9.4](docs/contributing/04-scripts-do-mantenedor.md#conta-do-mantenedor) tem a lista do que se
+    mantém na conta dona dos releases: 2FA com passkey ou TOTP, assinatura SSH de commits e tags com vigilant mode, a auditoria
+    trimestral de chaves e apps e a exportação trimestral do log de segurança.
+  - **A chave nunca é impressa, e um teste de processo prova.** O `wf login` e o `wf doctor` (em texto e em `--json`, com login e
+    sem) rodam com uma chave conhecida salva e exportada, e nem o stdout nem o stderr a trazem.
 
 - **O runtime recusa mais cedo o que passa de um limite que ele quer manter.** Sete frentes do mesmo endurecimento (issue #70):
   - **Teto de jobs simultâneos.** O teto global `caps.maxRunningJobs` (padrão 3; `null` o tira) faz o `wf start`, o

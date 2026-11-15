@@ -1,9 +1,10 @@
 // Seam: the account commands of the `wf` command line (`login`, `models`), as a real child process on the fake SDK. `login`
 // says who is logged in and when the key expires and never prints the key; `models` lists the account's catalog with the
-// aliases and the parameters of each model. Asserts on the exit code and the JSON on stdout.
+// aliases and the parameters of each model. Asserts on the exit code and the JSON on stdout. The key `login` returns, saved where
+// `wf login` saves it and exported as `CURSOR_API_KEY`, never reaches the stdout or stderr of `wf login` or `wf doctor` either.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -39,6 +40,33 @@ test("wf login says who logged in and when the key expires, and prints neither t
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(JSON.parse(r.stdout), { loggedIn: true, email: "dev@example.com", expiresAt: "2026-12-31T00:00:00.000Z" });
   assert.ok(!r.stdout.includes(FAKE_LOGIN_API_KEY) && !r.stderr.includes(FAKE_LOGIN_API_KEY), "the API key must not reach the output");
+});
+
+test("the key wf login returns never reaches the output of wf login or wf doctor, text or JSON, logged in or out, saved in auth.json and exported in CURSOR_API_KEY", () => {
+  // `wf login` saves the key the way the SDK does (version 1, in ~/.cursor/sdk/auth.json); a user then often exports it too.
+  const home = join(sandbox, "user-home");
+  mkdirSync(join(home, ".cursor", "sdk"), { recursive: true });
+  writeFileSync(
+    join(home, ".cursor", "sdk", "auth.json"),
+    JSON.stringify({ version: 1, backendUrl: "https://api2.cursor.sh", apiKey: FAKE_LOGIN_API_KEY, createdAtMs: Date.parse("2026-10-01T00:00:00.000Z"), apiKeyExpiresAtMs: Date.parse("2026-12-31T00:00:00.000Z"), email: "dev@example.com" }, null, 2),
+  );
+  const userEnv = { HOME: home, CURSOR_API_KEY: FAKE_LOGIN_API_KEY };
+
+  const outputs = [
+    ["wf login", wf(["login"], userEnv)],
+    ["wf doctor --json", wf(["doctor", "--json"], userEnv)],
+    ["wf doctor", wf(["doctor"], userEnv)],
+    // The fake SDK fails the way a rejected key does, with the key it was given in the message: the doctor must redact it.
+    ["wf doctor --json, logged out", wf(["doctor", "--json"], { ...userEnv, FAKE_SDK_LOGGED_OUT: "1" })],
+    ["wf doctor, logged out", wf(["doctor"], { ...userEnv, FAKE_SDK_LOGGED_OUT: "1" })],
+  ] as const;
+  for (const [command, r] of outputs) {
+    assert.ok(r.stdout !== "", `${command} printed nothing, so there is nothing to check`);
+    assert.ok(!r.stdout.includes(FAKE_LOGIN_API_KEY), `the API key is in the stdout of ${command}`);
+    assert.ok(!r.stderr.includes(FAKE_LOGIN_API_KEY), `the API key is in the stderr of ${command}`);
+  }
+  const loggedOut = outputs[3][1].stdout;
+  assert.ok(loggedOut.includes("[REDACTED]") && loggedOut.includes("not logged in"), "the failed login check carries the SDK's message with the key redacted: the control that the key was there to leak");
 });
 
 test("wf models lists the account's models with their aliases and the parameters a model takes", () => {

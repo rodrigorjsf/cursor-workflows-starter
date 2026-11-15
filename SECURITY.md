@@ -37,6 +37,19 @@ falhas de segurança.
     mesmo com o `bwrap` fora do PATH, mas o `wf doctor` falha, nomeando o `bubblewrap`, quando o `bwrap` não está no PATH, porque
     não testa o Landlock. Uma etapa que baixa pacotes falha até você listar os hosts em `.cursor/sandbox.json`.
   - **Não medido:** macOS e Windows, e o `implement-issue` inteiro com o sandbox ligado (a sonda é uma etapa que escreve; veja [#99](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/99)).
+- **No WSL, a permissão `0600` não protege a chave de um processo do Windows.** O kit suporta Linux e WSL2
+  ([`INSTALL-AGENT.md`](INSTALL-AGENT.md)), mas o Windows alcança a home do Linux por `\\wsl$` como o usuário padrão da
+  distribuição ([permissões de arquivo no WSL](https://learn.microsoft.com/en-us/windows/wsl/file-permissions)): um programa do
+  Windows lê o `~/.cursor/sdk/auth.json` com as permissões desse usuário, e o `0600` não o segura. Com a interoperabilidade ligada
+  (o padrão: `[interop] enabled=true` no `/etc/wsl.conf` da distribuição), uma etapa sem sandbox também pode iniciar programas do
+  Windows, o que lhe dá esse caminho. Para um repositório em que você não confia, use uma distribuição WSL separada, com a sua
+  própria chave e sem as credenciais da distribuição principal, ou desligue a interoperabilidade nela: ponha `[interop]` e
+  `enabled=false` no `/etc/wsl.conf` dela e pare-a pelo Windows (`wsl --terminate <distribuição>`) para valer
+  ([configurações de interop](https://learn.microsoft.com/en-us/windows/wsl/wsl-config#interop-settings)). Isso fecha o caminho
+  de uma etapa iniciar um programa do Windows; não fecha o de um programa que já roda no seu Windows e lê `\\wsl$`. A verificação
+  `host` do `wf doctor` lê `/proc/sys/fs/binfmt_misc/WSLInterop` (e `WSLInterop-late`, o nome que uma distribuição com systemd pode
+  ter no lugar dele) e, com a interoperabilidade ligada, avisa (`warn`, sem falhar) e nomeia o `auth.json`; avisa também quando um
+  desses arquivos existe e não se lê. Ela nunca muda o `wsl.conf` nem reinicia o WSL.
 - **O kit instalado fica numa pasta que uma etapa sem sandbox pode editar.** O `~/.cursor-workflows/kit` tem o motor que aplica
   os tetos, a redação e as allowlists, e é o mesmo código em todo repositório. O `git checkout` de uma tag nova mantém um arquivo
   rastreado editado que as duas tags compartilham, e todo arquivo não rastreado (reproduzido num repositório de teste: saiu com 0),
@@ -128,11 +141,42 @@ falhas de segurança.
   hook como o gitleaks. Uma etapa que não escreve e que o run diz ter empurrado uma branch gera um `warning` que a nomeia.
   Detalhes em [6.2 §Etapas na nuvem](docs/reference/config.md#etapas-na-nuvem).
 
+## Quem recebe os seus dados
+
+O kit não tem telemetria própria: o log de eventos, o journal e as métricas ficam em `.workflows/` e em `~/.cursor-workflows/`, e o
+código do kit só abre uma conexão por conta própria no instalador e no `wf upgrade` (a API de releases do GitHub, sem token) e no
+dashboard local, para o próprio `127.0.0.1`. O resto sai pelo SDK da Cursor, pelo `git` e pelo `gh` ou `glab`, para quatro
+destinatários. A tabela diz o que cada um recebe, de qual etapa e o que governa a retenção e o treino.
+
+| Quem | O que recebe | De qual etapa | O que governa a retenção e o treino |
+|---|---|---|---|
+| A Cursor e os provedores de modelo para onde ela roteia | O prompt de cada etapa, o código do repositório que a etapa lê, a saída das tools e dos comandos que ela roda (os de teste inclusive) e o texto da issue que o `implement-issue` põe no prompt. Uma chave de API própria não tira o pedido do backend da Cursor | Toda etapa de agente, local ou na nuvem | O Privacy Mode da conta, que o kit não consegue ler e só pede que você confirme, e, para um modelo sem retenção zero (ZDR), o `caps.allowedModels`. Com o modo desligado, a Cursor pode guardar esses dados e treinar com eles. [cursor.com/data-use](https://cursor.com/data-use) e a seção [Privacy Mode](#privacy-mode) |
+| As VMs na nuvem da Cursor | Um snapshot do worktree, **com os arquivos não commitados**, numa branch `wf/cloud-snapshot/` do remote `cloud.remote`, de onde a Cursor clona o repositório na VM. A VM guarda o código no disco enquanto o agente está acessível, e a Cursor guarda o histórico da conversa (prompts, respostas e chamadas de tool). O agente tem acesso à internet por padrão | Só a etapa de um papel com `location: "cloud"`, que exige `cloud` no teto global `allowedLocations` (o instalador não o põe) | O Privacy Mode: o modo legado não vale para Cloud Agents e, com o modo desligado, a Cursor coleta os prompts e os ambientes para melhorar o produto. O histórico da conversa fica por tempo indeterminado, a menos que um admin do Enterprise o limite a 90 dias, e o snapshot do ambiente é apagado depois de 30 dias sem uso; a API de apagar um agente tira a conversa, não o snapshot. A saída de rede da VM se restringe no dashboard da Cursor. [Secrets & Network](https://cursor.com/docs/cloud-agent/security-network) |
+| O GitHub | A branch `wf/...` e os commits que o `implement-issue` empurra, o pull request, os comentários na issue (as seams, o resumo) e as branches de snapshot `wf/cloud-snapshot/`. Num repositório no GitLab, o servidor do GitLab recebe o mesmo, pelo `glab` | O `implement-issue`: o push e o pull request só com `openPr: true`, e só depois das verificações e da varredura de segredos; o comentário das seams; e o snapshot de uma etapa na nuvem | A visibilidade do repositório e a política do GitHub ([declaração de privacidade](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement)). Apagar uma branch não despublica os commits: o GitHub os mantém alcançáveis pelo SHA, e os forks também |
+| A telemetria do SDK da Cursor | Eventos de uso autenticados com a sua chave, enviados ao backend da Cursor (`https://api2.cursor.sh`, ou o `CURSOR_BACKEND_URL`): a criação e o fim de cada `Run` do SDK, a latência de um envio, a falha de uma operação (tipo e código do erro, id da requisição), o arranque do executor e, quando o SDK acha um PR aberto para a branch do worktree, o vínculo do PR com a sessão. Cada evento leva a versão do SDK, a plataforma e a arquitetura | Toda etapa de agente: o kit chama o SDK em todas | O kit não achou, no `@cursor/sdk` 1.3.1, uma opção que a desligue, e não mediu o que cada evento leva nem se o Privacy Mode muda isso (lido no pacote em 2026-11-15). Não conte com o contrário sem perguntar à Cursor |
+
 ## A chave do Cursor
 
 - `npm run wf -- login` cria uma chave de usuário válida por 90 dias e a grava em texto puro em
   `~/.cursor/sdk/auth.json` (permissão 0600). Qualquer etapa de workflow consegue ler esse arquivo, com o sandbox ligado
   também, a menos que um `sandbox.json` tenha `readBoundary: "workspace"` (medido em 2026-11-14, veja acima).
+- **Como a chave nasce e quando expira.** O `wf login` chama o `Cursor.auth.login()` do SDK: você entra no navegador, e a Cursor
+  cria uma chave de usuário com nome (o nome que o check `login` do `wf doctor` mostra e que a lista de chaves de API do dashboard
+  lista) que **expira em 90 dias** por padrão. O `wf login` imprime o `email` e o `expiresAt`, nunca a chave. Passado o `expiresAt`,
+  a chave deixa de valer: o check `login` do `wf doctor` falha, e a dica manda rodar `wf login`.
+- **Onde ficam as cópias.** O `~/.cursor/sdk/auth.json` guarda uma chave só, em texto puro (um `wf login` novo o sobrescreve), e a
+  `CURSOR_API_KEY` guarda a que você pôs no ambiente: o perfil do shell, o ambiente que abre o IDE, a interpolação do `mcp.json`, um
+  secret de CI. O kit mantém a chave só na memória do processo e a redige dos logs; não faz outra cópia.
+- **Como rotacionar.** Antes do `expiresAt`, rode `wf login` de novo: ele cria uma chave nova e a grava no `~/.cursor/sdk/auth.json`.
+  Troque o valor em cada cópia da `CURSOR_API_KEY` e revogue a chave velha (abaixo): ela continua valendo até expirar ou ser
+  revogada, mesmo depois que o arquivo guarda outra.
+- **Como revogar.** No dashboard da Cursor, apague a chave na lista de chaves de API (pelo nome que o `wf doctor` mostra); depois
+  apague o `~/.cursor/sdk/auth.json` e tire a `CURSOR_API_KEY` do ambiente. O kit não tem um `wf logout`, e apagar o arquivo não
+  revoga a chave: ela segue valendo na Cursor. Revogue a chave depois de testar o kit, e imediatamente em caso de suspeita.
+- **O teto de gasto.** Os tetos do `config.json` (`maxTokens`, `maxCents`) valem só para os runs que o kit inicia: uma chave
+  vazada, usada fora do kit, não passa por eles. O limite de gasto do dashboard da Cursor (*Spending* → limite mensal; um time
+  também define um por membro) é o teto que vale para ela, então defina um. A doc da Cursor não diz se o limite por membro conta o
+  uso do SDK ([5.1](docs/operating/01-governanca-e-custos.md#orçamento-por-usuário)): confirme com o admin.
 - O `implement-issue` bloqueia a entrega (`status: "secret-blocked"`, sem commit, push nem PR) se o diff staged tiver
   um arquivo `auth.json`, `.env` ou `.env.*`, uma credencial num dos formatos que o redator do log conhece (chaves
   `crsr_` e `sk-`, tokens do GitHub, GitLab, AWS, npm, Slack, Google e Stripe, blocos de chave privada), a própria chave salva
@@ -154,7 +198,6 @@ falhas de segurança.
   `wf whoami` saem com erro, e o `wf doctor` tem a verificação `endpoints`, que também lê o `env` das entradas do MCP e não deixa
   `login` e `models` rodarem enquanto falha. A mensagem mostra só o esquema e o host do valor. Um teste lê o bundle do SDK e
   reprova quando uma versão nova lê outra variável `CURSOR_*` que o kit não conferiu.
-- **Revogue a chave no dashboard do Cursor** depois de testar o kit, e imediatamente em caso de suspeita.
 
 ## Privacy Mode
 
