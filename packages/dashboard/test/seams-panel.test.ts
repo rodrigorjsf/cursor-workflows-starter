@@ -16,6 +16,7 @@ const PROPOSAL = {
   slices: [{ behavior: "subtract returns the difference", seam: "math.subtract", testIdea: "subtract(5, 3) is 2" }],
   testCommand: "node --test",
   digest: "0123456789abcdef",
+  decidable: true,
 };
 
 const panel = (props: Partial<SeamsPanelProps> = {}) => render(SeamsPanel, { runId: "implement-issue-aaaa0001", proposal: PROPOSAL, status: "finished", onChanged: noop, ...props });
@@ -32,6 +33,16 @@ test("a run at its seams proposal shows the seams, the slices and the test comma
   assert.match(text, /Replace seams/);
   assert.doesNotMatch(text, /Reject/);
   assert.match(html, /role="region"|<section/);
+});
+
+test("a proposal the dashboard cannot decide is shown, with no Approve and no Replace seams, and says where to decide it", () => {
+  const html = panel({ proposal: { ...PROPOSAL, decidable: false } });
+  const text = textOf(html);
+  assert.match(text, /math\.subtract/, "the plan is still shown");
+  assert.doesNotMatch(text, /Approve|Replace seams/);
+  assert.doesNotMatch(html, /<button/);
+  assert.match(text, /it was not started as a job/);
+  assert.match(text, /relaunch command of the seams comment on the issue/);
 });
 
 test("a proposal at the planner's test command says that nothing ran and shows the command, which is what Approve lets the run execute", () => {
@@ -78,6 +89,7 @@ test("only an object of the proposal's shape is a proposal: the page narrows wha
   assert.equal(isSeamsProposal(PROPOSAL), true);
   assert.equal(isSeamsProposal({ ...PROPOSAL, stop: "done" }), false);
   assert.equal(isSeamsProposal({ ...PROPOSAL, digest: 7 }), false);
+  assert.equal(isSeamsProposal({ ...PROPOSAL, decidable: "yes" }), false);
   assert.equal(isSeamsProposal({ ...PROPOSAL, seams: [{ name: "a" }] }), false);
   assert.equal(isSeamsProposal({ ...PROPOSAL, slices: "none" }), false);
   assert.equal(isSeamsProposal(null), false);

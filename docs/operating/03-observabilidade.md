@@ -464,6 +464,11 @@ O dashboard não comenta na issue: quem registra a decisão é o próprio workfl
 arquivo de progresso do run (`.workflows/runs/<runId>/tdd-progress.json`, o `proposedPlan` que o workflow guardou ao parar) e
 o painel só aparece quando o último resultado do run diz que ele espera uma decisão: um run que já seguiu não tem proposta.
 
+Um run que nenhum job iniciou (`wf run` num terminal) ou cujo registro do job não diz como começou (uma versão antiga do kit) não
+tem args para repetir: a página mostra a proposta (`decidable: false` no `seamsProposal`), sem os botões, e manda decidir pelo terminal, com a
+linha de relançamento do comentário da issue; o comando de teste que ela mostra é o do planejador, porque um `testCommand` digitado
+no terminal não é conhecido ali. A rota recusa essa decisão com `409`, como a tabela abaixo diz.
+
 O `digest` é o hash do que a página mostrou (o tipo de parada, as seams, as fatias e o comando de teste). O plano pode mudar entre
 a página e o clique (outro resume, um novo planejamento), e quem leu um plano não pode aprovar outro, cujo comando de teste roda
 por `bash -c`: um `digest` que não bate com a proposta de agora é recusado (`409`), e a página manda recarregar. A troca de seams não

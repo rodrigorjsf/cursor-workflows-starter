@@ -30,6 +30,7 @@ forgeTest("a run that stopped at its seams proposal offers the seams and the tes
   assert.deepEqual(proposal.seams, PLAN.seams);
   assert.equal(proposal.testCommand, PLAN.testCommand);
   assert.match(proposal.digest, /^[0-9a-f]{16}$/);
+  assert.equal(proposal.decidable, false, "no job started this run (`runWorkflow`, as `wf run` does), so a resume of it from a dashboard has no args to repeat");
 });
 
 forgeTest("the test command is the kit's `npm test` when the planner proposed none", async () => {

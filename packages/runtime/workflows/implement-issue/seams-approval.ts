@@ -20,7 +20,7 @@ import { createHash } from "node:crypto";
 import { isRecord } from "../../src/runtime/parse-json.js";
 import { type LaunchResumeOutcome, launchResume } from "../../src/runtime/run-resume.js";
 import { type RunDetail, readRun } from "../../src/runtime/run-view.js";
-import { BACKLOG_WORKFLOW as IMPLEMENT_ISSUE } from "./backlog.js";
+import { BACKLOG_WORKFLOW as IMPLEMENT_ISSUE } from "./backlog.js"; // the workflow's own name: the one workflow whose runs make these stops
 import { PLAN, type Plan, testCommandOf } from "./plan.js";
 import { ProgressStore } from "./tdd.js";
 
@@ -35,8 +35,10 @@ export interface SeamsProposal {
   slices: Plan["slices"];
   /** The command the run executes once the plan is approved: the one typed when the run started, else the planner's, else the kit's `npm test`. */
   testCommand: string;
-  /** Hash of everything above: what an approval names, so that it applies only to the proposal a person saw. */
+  /** Hash of the stop, the seams, the slices and the test command: what an approval names, so that it applies only to the proposal a person saw. */
   digest: string;
+  /** Whether a decision can be taken from outside: a job started the run and its record says how (its args), which a resume repeats. Otherwise (`wf run` in a terminal, an older kit) the proposal is for reading, and the decision is the terminal's. */
+  decidable: boolean;
 }
 
 const isStop = (value: unknown): value is SeamsStop => STOPS.some((stop) => stop === value);
@@ -61,7 +63,7 @@ export function seamsProposalOf(run: RunDetail): SeamsProposal | undefined {
   const { seams, slices } = plan;
   const testCommand = testCommandOf(plan, typed);
   const digest = createHash("sha256").update(JSON.stringify({ stop, seams, slices, testCommand })).digest("hex").slice(0, 16);
-  return { stop, seams, slices, testCommand, digest };
+  return { stop, seams, slices, testCommand, digest, decidable: run.start !== undefined };
 }
 
 /** What a decision on a run's seams came to: why nothing was started, or what starting the resume came to (`LaunchResumeOutcome`). */

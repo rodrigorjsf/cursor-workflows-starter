@@ -112,7 +112,14 @@ export function SeamsPanel({ runId, proposal, status, onChanged }: SeamsPanelPro
   return (
     <section className="seams-panel" aria-labelledby="seams-title">
       <h2 id="seams-title">{TITLE[proposal.stop]}</h2>
-      <p className="seams-intro">{INTRO[proposal.stop]}</p>
+      {proposal.decidable ? (
+        <p className="seams-intro">{INTRO[proposal.stop]}</p>
+      ) : (
+        <p className="seams-intro">
+          The run waits for a decision on this proposal, but it was not started as a job (wf run in a terminal, or by an older kit), so the dashboard does not know the args to resume it with. The test command shown is the planner&apos;s: a
+          command typed when the run started is not known here. Decide from the terminal, with the relaunch command of the seams comment on the issue.
+        </p>
+      )}
       <h3>Seams</h3>
       <ul className="seams-list">
         {proposal.seams.map((seam, index) => (
@@ -133,7 +140,7 @@ export function SeamsPanel({ runId, proposal, status, onChanged }: SeamsPanelPro
       <pre className="seams-command">
         <code>{proposal.testCommand}</code>
       </pre>
-      {deciding && (
+      {proposal.decidable && deciding && (
         <div className="seams-buttons">
           <button type="button" className="btn" onClick={() => void approve()}>
             Approve
@@ -157,6 +164,11 @@ export function SeamsPanel({ runId, proposal, status, onChanged }: SeamsPanelPro
           onSend={() => void sendReplacement(state.text ?? "")}
           onCancel={() => setState({ step: "idle" })}
         />
+      )}
+      {state.step === "sending" && state.text === undefined && (
+        <p className="seams-result" role="status">
+          Sending…
+        </p>
       )}
       {state.step === "started" && (
         <p className="seams-result" role="status">

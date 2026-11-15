@@ -24,6 +24,8 @@ export interface SeamsProposalInfo {
   /** The command the run executes once the plan is approved. */
   testCommand: string;
   digest: string;
+  /** Whether the dashboard can take a decision on this run (a job started it, and its record says how). When it cannot, the page shows the proposal and sends the person to the terminal. */
+  decidable: boolean;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -37,6 +39,7 @@ export function isSeamsProposal(value: unknown): value is SeamsProposalInfo {
     (value.stop === "seams-proposed" || value.stop === "test-command-proposed") &&
     typeof value.testCommand === "string" &&
     typeof value.digest === "string" &&
+    typeof value.decidable === "boolean" &&
     isListOf(value.seams, ["name", "interface", "why"]) &&
     isListOf(value.slices, ["behavior", "seam", "testIdea"])
   );

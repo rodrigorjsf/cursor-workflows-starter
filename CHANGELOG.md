@@ -17,7 +17,8 @@
   recusado com `409`, em vez de aprovar sem ser visto um comando de teste que roda por `bash -c`. O plano vem do arquivo de
   progresso do run, e o comentário na issue continua sendo do workflow (o dashboard não comenta). O `observe` do runtime ganhou
   `seamsProposalOf`, `approveSeams` e `replaceSeams`; o resume do botão **Resume run** e a decisão passaram a dividir o `launchResume`;
-  e o plano do `implement-issue` e a regra do comando de teste foram para `implement-issue/plan.ts`. Veja
+  e o plano do `implement-issue` e a regra do comando de teste foram para `implement-issue/plan.ts`. Um run que nenhum job iniciou
+  (`wf run` num terminal) mostra a proposta sem os botões, mandando decidir pelo terminal. Veja
   [5.3 §Decidir as seams](docs/operating/03-observabilidade.md#decidir-as-seams-de-um-run-do-implement-issue).
 - **O kit confere para onde vão a chave do Cursor, o token do forge e o script do instalador** (issue #71). Três entradas que ninguém
   conferia decidiam esses destinos:

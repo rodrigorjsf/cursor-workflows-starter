@@ -49,20 +49,17 @@ export function resumeResult(outcome: ResumeOutcome): { step: "started" } | { st
   return outcome.ok ? { step: "started" } : { step: "failed", message: sentence(outcome.error) };
 }
 
-/** Resumes the run as a job, with the args, caps and overrides of its latest start (the server reads them from the job's record), through the same POST-with-token path as every action. */
-export async function resumeRun(runId: string, origin?: string): Promise<ResumeOutcome> {
-  const reply = await postAction<{ jobId: string }>(`${runApiPath(runId)}/resume`, undefined, origin);
+/** What a POST that resumes the run came to: the job it started (`jobId`), or the server's sentence. */
+async function resumed(path: string, body: unknown, origin?: string): Promise<ResumeOutcome> {
+  const reply = await postAction<{ jobId: string }>(path, body, origin);
   return reply.ok ? { ok: true, jobId: reply.body.jobId } : { ok: false, error: reply.error };
 }
+
+/** Resumes the run as a job, with the args, caps and overrides of its latest start (the server reads them from the job's record), through the same POST-with-token path as every action. */
+export const resumeRun = (runId: string, origin?: string): Promise<ResumeOutcome> => resumed(`${runApiPath(runId)}/resume`, undefined, origin);
 
 /** Approves the proposal whose digest `digest` is, which the page showed: resumes the run with the args and caps of its latest start plus `approveSeams: true`. A proposal that changed since is refused by the server. */
-export async function approveSeams(runId: string, digest: string, origin?: string): Promise<ResumeOutcome> {
-  const reply = await postAction<{ jobId: string }>(`${runApiPath(runId)}/seams/approve`, { digest }, origin);
-  return reply.ok ? { ok: true, jobId: reply.body.jobId } : { ok: false, error: reply.error };
-}
+export const approveSeams = (runId: string, digest: string, origin?: string): Promise<ResumeOutcome> => resumed(`${runApiPath(runId)}/seams/approve`, { digest }, origin);
 
 /** Replaces the proposed seams with `seams`: resumes the run with the args and caps of its latest start plus `seams`, and the run plans again with them. */
-export async function replaceSeams(runId: string, seams: string[], origin?: string): Promise<ResumeOutcome> {
-  const reply = await postAction<{ jobId: string }>(`${runApiPath(runId)}/seams/replace`, { seams }, origin);
-  return reply.ok ? { ok: true, jobId: reply.body.jobId } : { ok: false, error: reply.error };
-}
+export const replaceSeams = (runId: string, seams: string[], origin?: string): Promise<ResumeOutcome> => resumed(`${runApiPath(runId)}/seams/replace`, { seams }, origin);

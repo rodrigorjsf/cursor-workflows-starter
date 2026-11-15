@@ -9,7 +9,7 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { type DashboardServer, startDashboard } from "../src/server.js";
-import { ECHO_WORKFLOW, type Reply, SEAMS_PLAN, type Sandbox, appendLog, eventLine, http, postWithToken, repoWithWorkflows, runDetail, sandbox, seamsProposedRun, writeRun } from "./support.js";
+import { ECHO_WORKFLOW, type Reply, SEAMS_PLAN, type Sandbox, appendLog, eventLine, http, postWithToken, repoWithWorkflows, runDetail, sandbox, seamsProposedRun, writeRun, writeSeamsProgress } from "./support.js";
 
 let box: Sandbox;
 let dash: DashboardServer;
@@ -51,7 +51,7 @@ test("a run that stopped at its seams proposal shows it in its detail: the seams
 
   assert.equal(detail.status, "finished");
   const { digest, ...proposal } = detail.seamsProposal;
-  assert.deepEqual(proposal, { stop: "seams-proposed", seams: SEAMS_PLAN.seams, slices: SEAMS_PLAN.slices, testCommand: SEAMS_PLAN.testCommand });
+  assert.deepEqual(proposal, { stop: "seams-proposed", seams: SEAMS_PLAN.seams, slices: SEAMS_PLAN.slices, testCommand: SEAMS_PLAN.testCommand, decidable: true });
   assert.match(digest, /^[0-9a-f]{16}$/);
 });
 
@@ -79,6 +79,19 @@ test("a test command the person typed when the run started is the one shown, bec
   const repo = knownRepo();
   seamsProposedRun(box, repo, RUN, { start: { workflow: "implement-issue", args: { issue: 7, testCommand: "npm run mine" }, maxTokens: 1, maxCents: 1 } });
   assert.equal((await runDetail(dash.url, RUN)).seamsProposal.testCommand, "npm run mine");
+});
+
+test("a run that no job started shows its proposal as one the dashboard cannot decide, whatever the record of an older kit says", async () => {
+  const repo = knownRepo();
+  seamsProposedRun(box, repo, RUN, { start: undefined }); // a job record with no `start`
+  writeRun(box.home, repo, { runId: "implement-issue-aaaa0009", workflow: "implement-issue", startedAt: START, events: [{ type: "run-end", status: "finished", outcomeStatus: "seams-proposed", result: { status: "seams-proposed" } }] }); // `wf run` in a terminal: no job at all
+  writeSeamsProgress(repo, "implement-issue-aaaa0009", SEAMS_PLAN);
+
+  for (const runId of [RUN, "implement-issue-aaaa0009"]) {
+    const { seamsProposal } = await runDetail(dash.url, runId);
+    assert.equal(seamsProposal.decidable, false, runId);
+    assert.equal(seamsProposal.seams[0].name, "math.subtract", `${runId}: the plan is still shown`);
+  }
 });
 
 test("approve and replace need the CSRF token and a same-origin request: without it, nothing is started", async () => {
