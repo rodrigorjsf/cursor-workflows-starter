@@ -55,7 +55,7 @@ documento explica o *porquê* das regras e traz as receitas, que a skill aponta.
 
 ### Comandos: `ctx.exec`
 
-Todo comando que o workflow roda (testes, `git`, `gh` ou `glab`) passa por `ctx.exec(comando, args, { label, timeoutMs, cwd, env })`,
+Todo comando que o workflow roda (testes, `git`, `gh` ou `glab`) passa por `ctx.exec(comando, args, { label, timeoutMs, cwd, env, scrubSecrets })`,
 nunca por `execFileSync`, `execSync` ou `spawnSync`: uma chamada síncrona congela o processo do job, então o
 cancelamento espera atrás dela e nada a interrompe. O `npm test` reprova um arquivo de workflow que faça uma delas.
 
@@ -68,6 +68,10 @@ if (!tests.ok) await ctx.agent(`${FIX_INSTRUCTIONS}\n\n${tests.tail}`, { label: 
   são **resultados**, não exceções: o código decide o que significam. Um run cancelado mata o comando e lança.
 - O comando morre no `timeoutMs` da chamada; sem ele, no `execTimeoutMs` da configuração do workflow
   ([6.2](../reference/config.md)), 10 minutos por padrão. Dê um prazo curto a um comando de rede (`git push`, `gh`, `glab`).
+- `scrubSecrets: true` roda o comando sem as variáveis do ambiente do processo cujo nome tem `KEY`, `TOKEN`, `SECRET` ou
+  `PASSWORD` (`CURSOR_API_KEY`, `GH_TOKEN`...). Use para um comando que roda código em que o run não confia, como a
+  suíte de testes do repositório alvo; o `env` da chamada ainda acrescenta o que você nomear. O padrão é `false`: um
+  `git` ou `gh` precisa do token.
 - A saída vai para o log de eventos enquanto o comando roda, com a redação e a retenção do conteúdo de um agente, e cada
   chamada é um nó do run, ao lado das etapas ([3.1](../internals/01-arquitetura.md#comandos-do-workflow-ctxexec)). `tail`
   é a saída real, sem redação: antes de levá-la a um texto que sai da máquina, passe pela trava de segredos.
@@ -223,7 +227,10 @@ Uma regra do processo que o modelo policiaria sozinho ("red antes de green", "s�
 - **Estado observável:** o código roda o comando e confere o resultado esperado com `runTests`, que roda por
   `ctx.exec` (um nó de comando no log do run), tem teto de tempo e devolve `kind` (`passed`, `failed`, `timeout`,
   `killed`; esta última é uma suíte morta por um sinal, como o OOM killer, que não é resultado de teste): só `failed`
-  vale como red. Ele tira `NODE_TEST_CONTEXT`, que faz um `node --test` aninhado sair com 0 mesmo falhando.
+  vale como red. Ele tira `NODE_TEST_CONTEXT`, que faz um `node --test` aninhado sair com 0 mesmo falhando, e roda o
+  comando sem as variáveis de ambiente com `KEY`, `TOKEN`, `SECRET` ou `PASSWORD` no nome (`scrubSecrets` do `ctx.exec`):
+  a suíte e o `setupCommand` rodam código do repositório alvo que o agente acabou de escrever, e esse código não herda
+  a `CURSOR_API_KEY` nem o `GH_TOKEN`. O `git` e o `gh` do workflow não passam por aí e continuam com os tokens.
 - **O que fica travado:** nas etapas de código (green, correção, refactor), os arquivos dos globs de teste e a
   configuração do runner (`protectedGlobs`, os scripts do `package.json` e os campos `jest`, `vitest`, `mocha`,
   `ava`, `c8` e `nyc` dele); no green e na correção, também o arquivo do teste da fatia (hash guardado no red). Sem
