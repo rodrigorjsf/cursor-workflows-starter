@@ -19,9 +19,10 @@ import { type RunOrigin, runOriginsOf } from "../../src/runtime/run-view.js";
 import { knownRepos } from "../../src/runtime/run-start.js";
 import { type RemoteName, createForge, detectForge, parseRemote, trimmedPath } from "./forge.js";
 import { directCommands } from "./gc.js";
+import { IMPLEMENT_ISSUE } from "./name.js";
 
 /** The workflow a Backlog card starts, and whose runs take an issue off the Backlog. */
-export const BACKLOG_WORKFLOW = "implement-issue";
+export const BACKLOG_WORKFLOW = IMPLEMENT_ISSUE;
 
 /** An open issue of the Backlog. */
 export interface BacklogIssue {

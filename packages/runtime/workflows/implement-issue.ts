@@ -116,6 +116,7 @@ import { CommandError, Commands, NETWORK_TIMEOUT_SEC, SNAPSHOT_GRACE_HOURS, WORK
 import { type Forge, createForge, detectForge, forgeNameOf, prLabel } from "./implement-issue/forge.js";
 import * as P from "./implement-issue/prompts.js";
 import { DEFAULT_TEST_COMMAND, type Plan, type Slice, proposedCommand, testCommandOf } from "./implement-issue/plan.js";
+import { IMPLEMENT_ISSUE } from "./implement-issue/name.js";
 import { REPO_ARG_PATTERN, repoRefusal } from "./implement-issue/repo-arg.js";
 import { untrusted } from "./implement-issue/untrusted.js";
 import { AXES, AXIS_SCHEMAS, blockingAxes, blockingOf, type Axis, type ReviewReports } from "./implement-issue/review.js";
@@ -461,7 +462,7 @@ async function diffSinceBase(cmd: Commands, cwd: string, base: string, maxChars:
 
 export default defineWorkflow<Args>({
   meta: {
-    name: "implement-issue",
+    name: IMPLEMENT_ISSUE,
     description:
       "Implements an issue of the repository's forge (GitHub or GitLab) with slice-by-slice TDD (red → green checked by the code), a three-axis review (Standards, Spec, Security) and a PR in the Summary/Evidence/Merge Danger template.",
     whenToUse: "When the user asks to implement or resolve a specific issue by number.",

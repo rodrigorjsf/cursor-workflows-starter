@@ -20,7 +20,7 @@ import { createHash } from "node:crypto";
 import { isRecord } from "../../src/runtime/parse-json.js";
 import { type LaunchResumeOutcome, launchResume } from "../../src/runtime/run-resume.js";
 import { type RunDetail, readRun } from "../../src/runtime/run-view.js";
-import { BACKLOG_WORKFLOW as IMPLEMENT_ISSUE } from "./backlog.js"; // the workflow's own name: the one workflow whose runs make these stops
+import { IMPLEMENT_ISSUE } from "./name.js"; // the one workflow whose runs make these stops
 import { PLAN, type Plan, testCommandOf } from "./plan.js";
 import { ProgressStore } from "./tdd.js";
 
