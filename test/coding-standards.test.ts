@@ -712,6 +712,34 @@ test("the app page has no style= attribute: its CSP has no style-src-attr", () =
   assert.deepEqual(scan(files("packages/dashboard/app", /\.tsx$/), inlineStyles), [], "style the element with a class in styles.css");
 });
 
+/** Lines of `new EventSource(...)` in a file that does not import `batcher` from `batch.js`, which is what makes a burst of events one render. */
+function unbatchedStreams(path: string, text: string): number[] {
+  const sf = parse(path, text);
+  const batches = importsOf(path, text).some((i) => /(^|\/)batch\.js$/.test(i.spec) && !i.typeOnly && i.names.includes("batcher"));
+  const found: number[] = [];
+  if (!batches) {
+    walk(sf, (node) => {
+      if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "EventSource") found.push(lineOf(sf, node));
+    });
+  }
+  return found;
+}
+
+test("the SSE check fires on a module that opens an EventSource without importing batcher, and passes one that does and one that opens none", () => {
+  const open = "const source = new EventSource(url);\nsource.onmessage = (e) => setState(e.data);\n";
+  assert.deepEqual(unbatchedStreams("run-view/a.ts", open), [1]);
+  assert.deepEqual(unbatchedStreams("run-view/a.ts", 'import type { batcher } from "./batch.js";\n' + open), [2], "a type-only import loads nothing");
+  assert.deepEqual(unbatchedStreams("run-view/a.ts", 'import { BATCH_MS } from "./batch.js";\n' + open), [2], "batch.js, but not batcher");
+  assert.deepEqual(unbatchedStreams("run-view/a.ts", 'import { batcher } from "./batch.js";\n' + open), []);
+  assert.deepEqual(unbatchedStreams("app/a.ts", 'import { batcher } from "../run-view/batch.js";\n' + open), []);
+  assert.deepEqual(unbatchedStreams("run-view/a.ts", "// new EventSource(url) is opened in use-run-events.ts\nlet source: EventSource | undefined;\n"), []);
+});
+
+test("every browser module that opens an EventSource applies its messages through batcher, so a burst of events is one render", () => {
+  assert.ok(BROWSER_CODE.some((f) => readFileSync(join(ROOT, f), "utf8").includes("new EventSource")), "the check reads the modules that open a stream");
+  assert.deepEqual(scan(BROWSER_CODE, unbatchedStreams), [], 'import { batcher } from "./batch.js" (packages/dashboard/run-view/batch.ts) and deliver the stream\'s messages through it');
+});
+
 // --- Security ---------------------------------------------------------------------------------------------------------
 
 const HTML_SINKS = new Set(["innerHTML", "outerHTML", "insertAdjacentHTML", "dangerouslySetInnerHTML"]);
