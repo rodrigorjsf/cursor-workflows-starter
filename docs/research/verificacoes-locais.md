@@ -474,6 +474,53 @@ arquivo do repositório prevalecendo, **não foi medido**, e o `wf doctor` diz i
 precisa dos hosts no `sandbox.json`; se o `git` dentro de um worktree, que escreve no `.git` do repositório principal, funciona
 no sandbox, é suspeita, no [#99](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/99)); um kernel sem Landlock.
 
+> **Nota (2026-11-15, [#99](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/99)):** o `implement-issue` inteiro com o
+> sandbox ligado foi medido na §17: o exemplo LOW terminou `done`, e o `git` dentro do worktree funcionou. As linhas da §16 ficam como
+> foram medidas.
+
+## 17. Fase 10: o `implement-issue` inteiro com o sandbox ligado (2026-11-15)
+
+A §16 mediu **uma** etapa que escreve. O [#99](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/99) perguntava se o
+padrão que ela abriu (`caps.requireSandbox: true` no `templates/global-config.json`) deixa um `implement-issue` chegar a `done`: as
+etapas de escrita dele rodam num worktree em `<repo>/.workflows/worktrees/<branch>`, cujo `.git` aponta para fora do `cwd` da etapa, e
+o sandbox nega a rede e a escrita fora do `cwd`. Nenhum run dele tinha rodado assim.
+
+**Ambiente (runs de 2026-11-15):** Premium da The X Subscription · `@cursor/sdk@1.3.1` · modelos do `implement-issue` sem troca, porque o exemplo LOW
+documentado usa o modelo padrão de cada papel (`composer-2.5` em `implement.low`, as etapas que escrevem e que o sandbox limita;
+`grok-4.7` com `reasoning_effort=high` nos três revisores, que só leem) · Linux x64 (WSL2, kernel 6.18) · kit no commit
+`6890441`. O `WF_HOME` era uma pasta descartável cujo `config.json` é cópia do `templates/global-config.json`
+(`caps.requireSandbox: true`); a configuração global do dono (`~/.cursor-workflows/config.json`) não existe e continuou sem existir.
+O repositório alvo foi um clone novo (`git clone -c core.autocrlf=false`) de
+[rodrigorjsf/wf-sandbox](https://github.com/rodrigorjsf/wf-sandbox), **sem** `.cursor/sandbox.json`, como o de quem acabou de
+instalar, com uma issue nova `complexity:low` ("Add min(a, b) to src/math.js", `wf-sandbox#13`). Nenhum repositório foi criado
+(o token do `gh` não tem `delete_repo`).
+
+```bash
+WF_HOME=<pasta descartável> npm run wf -- run implement-issue --cwd <clone do wf-sandbox> \
+  --args '{"issue":13,"testCommand":"npm test","openPr":false}' --max-tokens 400000 --max-cents 30
+```
+
+| Item | Método | Resultado | Evidência | Ação tomada |
+|---|---|---|---|---|
+| `implement-issue`, exemplo LOW, com `caps.requireSandbox: true` | o comando acima | ✅ `status: "done"` | `implement-issue-acfe2c7e`: tier LOW pelo rótulo, 1 fatia, 5 agentes (`test-1` 87.312 tokens e `code-1` 76.556, `composer-2.5`; revisores de segurança, padrões e spec 27.331, 46.552 e 61.354, `grok-4.7`), 0 achados nos três eixos, `tdd_retries 0`, `red_discarded_files 0`, suíte final verde e o commit `15b4d8c` no worktree (`openPr: false`: nada foi empurrado). **299.105 tokens** (cache 79,4%), cerca de 80 segundos, 21,07 centavos no preço de lista; `spentCents` e `chargedCents` 0 (o `getUsage()` segue `feature_unavailable`) | Regra de decisão do #99, caso 1: o padrão fica, e só este registro muda |
+| O `npm test` do shell do agente | as duas etapas de escrita rodaram `npm test` e depois `node --test` | ◐ falha de **ambiente**, não do sandbox | `Cannot find module '/home/rodrigo/.local/lib/node_modules/npm/bin/npm-cli.js'`: o `npm` do PATH de login é o do Node 22.11 do mise, quebrado, e o arquivo não existe nesta máquina (o defeito que a §9 já registrou, sem sandbox). O agente não mexeu fora do repositório e rodou `node --test` (vermelho na etapa de teste, como devia, e verde na de código) | O comando de teste do workflow (`bash -c "npm test"` pelo `ctx.exec`, fora do sandbox) passou |
+| Revisores sem shell | `grep` e `read` fora do worktree | ◐ leitura livre | os revisores leram e procuraram em pastas fora do `cwd`: sem `readBoundary` o sandbox não limita a leitura (§16, base de comparação) | O `readBoundary` continua um pedido ao dono do repositório (SECURITY.md) |
+| Qual mecanismo impôs as regras | uma etapa só com `cwd` num worktree do mesmo clone, o mesmo `WF_HOME`, e o código dela **sem** `sandbox`: só o teto o ligou | ✅ `CURSOR_SANDBOX=native`, `CURSOR_SANDBOX_LANDLOCK_STATUS=fully_enforced` | `env` dentro da etapa; 82.503 tokens (cerca de 2,65 centavos). O log do run LOW não tem marcador do sandbox (a etapa não imprimiu o ambiente): que ele rodou sandboxado vem da regra do motor (`sandbox: caps.requireSandbox === true || …`, em `packages/runtime/src/runtime/engine.ts`, fixada por `config.test.ts`) e desta etapa, com a mesma configuração | Landlock, como na §16 |
+| Suspeita 1: rede para baixar pacotes | `curl` e `npm view`/`npm install is-odd` na etapa | ✅ negada, **inclusive o registro do npm** | sem `.cursor/sandbox.json`, `curl: (6) Could not resolve host` para `registry.npmjs.org` e para `example.com`; o `npm` do Node 22.23.4 terminou com `EAI_AGAIN` depois de cerca de 70 segundos de tentativas (a saída do `npm` está nos `terminals/*.txt` que o SDK grava em `~/.cursor/projects/<repositório>/`; o `events.jsonl` só tem o `exit=1`) | Já dito no SECURITY.md: um passo do agente que baixa pacotes precisa dos hosts no `.cursor/sandbox.json` (a §16 mediu o host da allowlist respondendo 200). O `setupCommand` do repositório roda pelo `ctx.exec`, fora do sandbox |
+| Suspeita 2: cache fora do `cwd` | `mkdir -p ~/.cache/…` e o `npm` da etapa | ◐ negada, e o `npm` se ajeita | `mkdir: cannot create directory '/home/rodrigo/.cache/…': Permission denied`; o cache e os logs do `npm` foram para `/tmp/cursor-sandbox-cache/<hash>/npm/`, que o sandbox deixou escrever (mesma fonte, os `terminals/*.txt`) | Uma ferramenta que respeita a variável de cache do ambiente funciona; uma que grava um caminho fixo na home falha |
+| Suspeita 3: `git` dentro do worktree | `git status`, `git add`, `git commit`, `git log` na etapa, num worktree cujo `.git` aponta para `<clone>/.git/worktrees/<nome>` | ✅ funciona | `status`, `add` e `log` saíram com 0, e o `commit` também na segunda rodada (na primeira saiu com 1, "nothing to commit": o agente chamou os comandos em paralelo e o `commit` correu antes do `add`); o commit (`7ee1d00`) apareceu no `git log` do worktree, lido de fora do sandbox depois da etapa (o `git log` da própria etapa correu em paralelo e ainda não o mostrava; o worktree descartável foi removido no fim). A suspeita de que escrever fora do `cwd` o quebraria não se confirmou | Nada: os prompts das etapas de escrita proíbem o `git`, e o código do workflow roda o `git` pelo `ctx.exec` |
+| Arquivos fora do repositório | marcador antes do run e `find "$HOME" -newer <marcador>`, sem as pastas de trabalho e de estado das ferramentas desta sessão e do Cursor | ✅ nenhum | só duas mudanças alheias aos runs (uma entrada do cache do npm do `ccstatusline` e o log do Docker Desktop); nada em `~/.cursor/sdk/`, `~/.local/share/mise` nem `~/.cursor-workflows/` | — |
+| Limpeza | `gh issue close`, `gh api repos/rodrigorjsf/wf-sandbox/branches` | ✅ | a issue `wf-sandbox#13` ficou fechada; o remoto só tem `main` (com `openPr: false` o run não empurra branch); nenhum repositório foi criado | — |
+| Custo | `wf stats` do `WF_HOME` descartável | ◐ | os dois runs somam 381.608 tokens e 23,72 centavos no preço de lista, 0 cobrado. Com cerca de 11 centavos do #62 e 20 do #37, os 100 centavos do orçamento local do spec #95 já gastaram cerca de 55 e sobram cerca de 45 | — |
+
+**Decisão (#99):** o run terminou `done` com o padrão do instalador, então a regra de decisão manda registrar o resultado só aqui: o
+`requireSandbox` continua `true` no `templates/global-config.json`, e o SECURITY.md e o CHANGELOG só trocam a frase "não medido"
+pelo que a §17 mediu. O MED não rodou: o LOW já decidiu, e um MED com os modelos padrão (o planejador e os revisores em `grok-4.7`) custou
+cerca de 825 mil tokens na §13, bem acima do que sobra dos 100 centavos.
+
+**Não medido:** o MED e o HIGH com o sandbox ligado (mais fatias, rodadas de correção e o refactor, que usam as mesmas etapas de
+escrita no mesmo worktree); um `setupCommand` real (ele roda fora do sandbox, pelo código); macOS e Windows; um kernel sem Landlock.
+
 
 ---
 

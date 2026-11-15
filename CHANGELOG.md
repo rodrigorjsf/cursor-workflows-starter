@@ -297,8 +297,8 @@
   não muda (o instalador só grava o arquivo quando ele não existe). Uma etapa que baixa pacotes falha até os hosts entrarem no
   `.cursor/sandbox.json`. No Linux o SDK exige `bubblewrap` (ou um kernel com Landlock: nesta máquina o Landlock impôs as regras); o
   `wf doctor` falha sem o `bwrap` no PATH. O SECURITY.md, o 5.1, o 2.2, o 4.1 e as skills deixam de dizer que o sandbox não foi
-  testado. Não medidos: macOS, Windows e o `implement-issue` inteiro com o sandbox ligado
-  ([#99](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/99)).
+  testado. O exemplo LOW do `implement-issue` rodou inteiro com esse padrão e terminou `done` (8.2 §17,
+  [#99](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/99)). Não medidos: macOS, Windows e o MED e o HIGH com o sandbox ligado.
 
 - **Um comando de teste que o planejador escolheu só roda depois de uma pessoa o ver.** O planejador (MED) e o juiz (HIGH) leem o
   corpo da issue e devolvem um `testCommand`, que o `implement-issue` roda por `bash -c`, fora do sandbox, com o ambiente de quem

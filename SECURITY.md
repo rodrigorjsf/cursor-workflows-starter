@@ -36,7 +36,10 @@ falhas de segurança.
     kernel com Landlock: nesta máquina o sandbox impôs as regras pelo Landlock (`CURSOR_SANDBOX_LANDLOCK_STATUS=fully_enforced`),
     mesmo com o `bwrap` fora do PATH, mas o `wf doctor` falha, nomeando o `bubblewrap`, quando o `bwrap` não está no PATH, porque
     não testa o Landlock. Uma etapa que baixa pacotes falha até você listar os hosts em `.cursor/sandbox.json`.
-  - **Não medido:** macOS e Windows, e o `implement-issue` inteiro com o sandbox ligado (a sonda é uma etapa que escreve; veja [#99](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/99)).
+  - **O `implement-issue` inteiro foi medido no exemplo LOW.** Em 2026-11-15, com o padrão do instalador e um repositório sem
+    `.cursor/sandbox.json`, o exemplo LOW do `implement-issue` rodou inteiro com o sandbox ligado e terminou `done`
+    ([8.2 §17](docs/research/verificacoes-locais.md), [#99](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/99)).
+  - **Não medido:** macOS e Windows, e o MED e o HIGH do `implement-issue` com o sandbox ligado.
 - **No WSL, a permissão `0600` não protege a chave de um processo do Windows.** O kit suporta Linux e WSL2
   ([`INSTALL-AGENT.md`](INSTALL-AGENT.md)), mas o Windows alcança a home do Linux por `\\wsl$` como o usuário padrão da
   distribuição ([permissões de arquivo no WSL](https://learn.microsoft.com/en-us/windows/wsl/file-permissions)): um programa do
