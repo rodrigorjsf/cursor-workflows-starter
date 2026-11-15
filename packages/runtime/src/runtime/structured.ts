@@ -92,7 +92,10 @@ function lastJsonBlock(text: string): string | undefined {
 }
 
 /** A structured result that passed its schema: the success arm of every result a step reads. */
-export type Validated = { ok: true; value: unknown };
+export interface Validated {
+  ok: true;
+  value: unknown;
+}
 
 /** A structured result read from an answer: the validated value, or why there is none. */
 export type Parsed = Validated | { ok: false; error: string };

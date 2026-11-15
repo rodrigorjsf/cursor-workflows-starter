@@ -1044,7 +1044,7 @@ export default defineWorkflow<Args>({
           round === 1 ? "## Round 1" : `## Round ${round}, after the fix\n${progress.data.refactorSummary ?? "Extra slices only: see the diff."}`;
         const results = await ctx.parallel(
           axes.map((axis) => () =>
-            ctx.agent<any>(`${AXIS_INSTRUCTIONS[axis]}\n\n${extra[axis]}\n\n${issueBlock(issue)}\n\n${roundBlock}\n\n## Diff since the base\n${diff}`, {
+            ctx.agent<unknown>(`${AXIS_INSTRUCTIONS[axis]}\n\n${extra[axis]}\n\n${issueBlock(issue)}\n\n${roundBlock}\n\n## Diff since the base\n${diff}`, {
               label: `review:${axis}:${round}`,
               phase: "Review",
               role: "review",

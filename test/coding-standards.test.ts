@@ -365,6 +365,65 @@ test("`npm run typecheck` checks every test: each directory that holds tests has
   }
 });
 
+/** The `type X = { ... }` the code keeps because only an alias will do: the file, the name, and why an interface does not. */
+interface AllowedTypeLiteral {
+  file: string;
+  name: string;
+  why: string;
+}
+
+/** Each `type X = { ... }` of a file: an object shape written as an alias of a type literal. A union, an intersection, a mapped or a utility type is no type literal. */
+function typeLiteralAliases(path: string, text: string): Array<{ name: string; line: number }> {
+  const sf = parse(path, text);
+  const found: Array<{ name: string; line: number }> = [];
+  walk(sf, (node) => {
+    if (ts.isTypeAliasDeclaration(node) && ts.isTypeLiteralNode(node.type)) found.push({ name: node.name.text, line: lineOf(sf, node) });
+  });
+  return found;
+}
+
+/** The lines of a file's type-literal aliases that no allowlist entry names. */
+const unallowedTypeLiterals = (path: string, text: string, allowed: AllowedTypeLiteral[]): number[] =>
+  typeLiteralAliases(path, text)
+    .filter((alias) => !allowed.some((a) => a.file === path && a.name === alias.name))
+    .map((alias) => alias.line);
+
+test("the object shape check fires on an alias of a type literal, generic or exported or declared inside a function, and passes an interface, the aliases that compute a type and an allowlisted name", () => {
+  const offender = "type A = { a: string };\nexport type B<T> = { b: T };\nfunction f() {\n  type C = { c: 1 };\n}\n";
+  assert.deepEqual(unallowedTypeLiterals("a.ts", offender, []), [1, 2, 4]);
+  const legit = [
+    "interface A { a: string }",
+    'type Mode = "a" | "b";',
+    "type Reply = Ok | Failed;",
+    "type Both = A & { extra: string };",
+    "type Keys = { [K in keyof A]: boolean };",
+    "type Partial2 = Partial<{ a: string }>;",
+    "type Fn = (a: string) => void;",
+  ].join("\n");
+  assert.deepEqual(unallowedTypeLiterals("a.ts", legit, []), []);
+  assert.deepEqual(unallowedTypeLiterals("a.ts", offender, [{ file: "a.ts", name: "B", why: "needs the alias" }]), [1, 4]);
+  assert.deepEqual(unallowedTypeLiterals("b.ts", offender, [{ file: "a.ts", name: "B", why: "needs the alias" }]), [1, 2, 4], "an entry names its own file only");
+});
+
+/** The aliases of a type literal that stay. An interface has no implicit index signature, so it is not assignable to a `Record<string, unknown>`; a type literal is. */
+const ALLOWED_TYPE_LITERALS: AllowedTypeLiteral[] = [
+  {
+    file: "packages/runtime/workflows/implement-issue.ts",
+    name: "Settings",
+    why: "the workflow's `meta.settings` is a `Record<string, unknown>`, and an interface is not assignable to one",
+  },
+];
+
+test("an object shape is an interface: `type X = { ... }` is kept out unless the allowlist says why, and every allowlist entry still names an alias", () => {
+  assert.deepEqual(
+    scan(ALL_CODE, (path, text) => unallowedTypeLiterals(path, text, ALLOWED_TYPE_LITERALS)),
+    [],
+    "write `interface X { ... }`; keep `type` for unions, intersections, mapped and utility types, or allow the alias here with the reason an interface will not do",
+  );
+  const stale = ALLOWED_TYPE_LITERALS.filter((a) => !typeLiteralAliases(a.file, read(a.file)).some((alias) => alias.name === a.name));
+  assert.deepEqual(stale.map((a) => `${a.file}: ${a.name}`), [], "the alias was removed or became an interface: delete the entry");
+});
+
 /** True when a default-exported expression is a workflow definition: `defineWorkflow(...)` or an object with `meta`. */
 const isWorkflow = (e: ts.Expression): boolean =>
   (ts.isCallExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === "defineWorkflow") ||
@@ -745,6 +804,29 @@ test("every shell script starts strict, locates itself through BASH_SOURCE, and 
   assert.deepEqual(scan(SHELL, lax), [], "open with #!/usr/bin/env bash and set -euo pipefail");
   assert.deepEqual(scan(SHELL, dollarZero), [], 'use "$(dirname "${BASH_SOURCE[0]}")", not $0');
   assert.deepEqual(scan(SHELL, unexplainedDisables), [], "put the reason on the same line: # shellcheck disable=SCnnnn # <why>");
+});
+
+/** Lines calling `process.exit(...)`: it ends the process before the stdout and stderr of a piped run are flushed. */
+function processExits(path: string, text: string): number[] {
+  const sf = parse(path, text);
+  const found: number[] = [];
+  walk(sf, (node) => {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "process" && node.expression.name.text === "exit") {
+      found.push(lineOf(sf, node));
+    }
+  });
+  return found;
+}
+
+test("the process.exit check fires on a call, in a function or at the top level, and passes process.exitCode, a string that holds the call and a comment", () => {
+  assert.deepEqual(processExits("s.ts", 'if (bad) process.exit(2);\nfunction f() {\n  process.exit();\n}\n'), [1, 3]);
+  assert.deepEqual(processExits("s.ts", 'process.exitCode = 2;\nconst child = "process.exit(1)";\n// process.exit(0) cuts the output\nconst exit = () => 1;\n'), []);
+});
+
+test("no maintainer script calls process.exit: it sets process.exitCode and returns, so a piped run keeps its output", () => {
+  const scripts = files("scripts", CODE);
+  assert.ok(scripts.length >= 20, `found ${scripts.length}`);
+  assert.deepEqual(scan(scripts, processExits), [], "return the exit code from `main` and write `if (isEntryPoint(import.meta.url)) process.exitCode = main(process.argv.slice(2))` (scripts/lib/cli.ts)");
 });
 
 // --- CI ---------------------------------------------------------------------------------------------------------------

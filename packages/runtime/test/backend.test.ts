@@ -113,7 +113,10 @@ const usedTokens = (tokens: number) => ({ report: { usage: { inputTokens: tokens
 const turn = (tokens: number): AttemptEvent => ({ type: "turn", usage: { inputTokens: tokens - 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 } });
 const nextMacrotask = () => new Promise((resolve) => setImmediate(resolve));
 /** What a streaming stub saw of its attempt: the turns it emitted and why it was stopped. */
-type Seen = { turns: number; reason?: unknown };
+interface Seen {
+  turns: number;
+  reason?: unknown;
+}
 /** What a backend does for an attempt that streams turns of `tokens` tokens until it is aborted, as an agent that never finishes would. */
 const streamsUntilAborted =
   (tokens: number, seen: Seen = { turns: 0 }): Behaviour =>

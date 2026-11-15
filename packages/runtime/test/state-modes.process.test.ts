@@ -60,7 +60,10 @@ after(() => {
 const stateRoot = () => join(repo, ".workflows");
 
 /** One entry of the state folder: its permission bits, and whether it is a folder. */
-type Entry = { mode: number; folder: boolean };
+interface Entry {
+  mode: number;
+  folder: boolean;
+}
 
 /** `.workflows/` and everything under it but `worktrees/`, by path relative to the repo. */
 function entriesUnderState(dir = stateRoot()): Record<string, Entry> {
