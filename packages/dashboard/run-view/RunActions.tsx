@@ -6,12 +6,9 @@ import { ARGS_PLACEHOLDER, canResume, resumeCommand } from "./resume-command.js"
 import { cancelResult, cancelRun, resumeResult, resumeRun } from "./run-actions.js";
 import type { OfferedActions } from "./run-status.js";
 import type { ApiStatus, RunInfo } from "./use-run-events.js";
+import { useWaitForRunning } from "./use-wait-for-running.js";
 
 type ResumeState = { step: "idle" } | { step: "sending" } | { step: "started" } | { step: "failed"; message: string };
-
-/** After a resume started a job its process needs a moment to start, and the page looks at a stopped run only rarely: the header looks at the run's status this often, and stops waiting for the run to show `running` after this long. */
-const RESUME_LOOK_MS = 1000;
-const RESUME_WAIT_MS = 30_000;
 
 type CancelState = { step: "idle" } | { step: "confirm" } | { step: "sending" } | { step: "done"; message: string } | { step: "failed"; message: string };
 
@@ -42,21 +39,7 @@ export function RunActions({ runId, status, offered, info, argsHash, onChanged }
   }, [status]);
 
   // After a resume started a job, ask for the run's status until it shows `running`; if it never does (the job stopped at once), the button is offered again after a while.
-  const changed = useRef(onChanged); // read through a ref, so that a new `onChanged` each render does not restart the wait
-  changed.current = onChanged;
-  useEffect(() => {
-    if (resume.step !== "started") return;
-    if (status === "running") {
-      setResume({ step: "idle" });
-      return;
-    }
-    const look = setInterval(() => changed.current(), RESUME_LOOK_MS);
-    const giveUp = setTimeout(() => setResume({ step: "idle" }), RESUME_WAIT_MS);
-    return () => {
-      clearInterval(look);
-      clearTimeout(giveUp);
-    };
-  }, [resume.step, status]); // not `onChanged`: see the ref above
+  useWaitForRunning({ waiting: resume.step === "started", running: status === "running", onChanged, onDone: () => setResume({ step: "idle" }) });
 
   const cloudOnly = !offered.cancelRun && offered.leftCloudAgents.length > 0;
   const send = async () => {

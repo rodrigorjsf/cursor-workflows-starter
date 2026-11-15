@@ -39,6 +39,21 @@ code { font-size: var(--text-xs); }
 .cancel-result, .resume-result { max-width: 48ch; font-size: var(--text-sm); }
 .cancel-result.failed, .resume-result.failed { color: var(--s-failed); }
 
+/* the seams panel: what an implement-issue run proposes before it goes on, and the decisions on it. It scrolls on its own, so the canvas keeps its room. */
+.seams-panel { flex: none; max-height: 45vh; overflow: auto; padding: var(--space-3) var(--space-5) var(--space-4); background: var(--surface); border-bottom: 1px solid var(--border); font-size: var(--text-sm); }
+.seams-panel h2 { margin: 0 0 var(--space-2); font-size: var(--text-lg); font-weight: 600; }
+.seams-panel h3 { margin: var(--space-3) 0 var(--space-1); font-size: var(--text-sm); font-weight: 600; }
+.seams-intro { margin: 0; max-width: 80ch; color: var(--fg-muted); }
+.seams-list { margin: 0; padding-left: var(--space-5); overflow-wrap: anywhere; }
+.seams-why { color: var(--fg-muted); }
+.seams-command { margin: 0; padding: var(--space-2) var(--space-3); background: var(--bg); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font: var(--text-xs) var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.seams-buttons { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+.seams-replace { display: flex; flex-direction: column; gap: var(--space-2); max-width: 80ch; margin-top: var(--space-3); }
+.seams-replace textarea { width: 100%; padding: var(--space-2) var(--space-3); color: var(--fg); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font: var(--text-sm) / 1.5 var(--font-mono); resize: vertical; }
+.seams-replace .seams-buttons { margin-top: 0; }
+.seams-error { margin: 0; color: var(--s-failed); }
+.seams-result { margin: var(--space-3) 0 0; color: var(--fg-muted); }
+
 .workspace { position: relative; flex: 1; min-height: 0; display: flex; }
 .canvas { flex: 1; min-width: 0; min-height: 0; position: relative; }
 .notice { margin: var(--space-5); color: var(--fg-muted); }
@@ -161,6 +176,7 @@ code { font-size: var(--text-xs); }
   .toolbar .btn { min-height: 30px; padding: 0 var(--space-2); }
   .actions .hint { text-align: left; }
   .run-banner { padding: var(--space-2) var(--space-4); }
+  .seams-panel { padding: var(--space-2) var(--space-4) var(--space-3); }
   /* the log covers the canvas, which keeps its size and its frame behind it; × or Escape goes back to the graph */
   .step-panel { position: absolute; inset: 0; z-index: 20; border-left: none; }
   /* hidden, not only covered: the nodes and zoom buttons under the log leave the Tab order (the log takes the focus) */

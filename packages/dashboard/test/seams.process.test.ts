@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import { waitFor } from "../../runtime/test/wait-for.js";
-import { postAction } from "../app/dashboard-api.js";
+import { approveSeams, replaceSeams } from "../run-view/run-actions.js";
 import { type DashboardServer, startDashboard } from "../src/server.js";
 import { JOB_WAIT, SEAMS_WORKFLOW, type Sandbox, jobProcesses, jobRecordOf, postWithToken, repoWithWorkflows, runDetail, sandbox, startRequest } from "./support.js";
 
@@ -118,13 +118,15 @@ test("a decision made through the browser's own client starts the job, and a sec
   const repo = knownRepo();
   const { runId, shown } = await proposed(repo);
 
-  const sent = await postAction<{ jobId: string }>(`/api/runs/${runId}/seams/approve`, { digest: shown.digest }, dash.url);
+  const sent = await approveSeams(runId, shown.digest, dash.url);
   assert.ok(sent.ok, sent.ok ? "" : sent.error);
-  jobs.track(repo, sent.body.jobId);
+  jobs.track(repo, sent.jobId);
   await executionEnded(runId, 2);
 
-  const again = await postAction<{ jobId: string }>(`/api/runs/${runId}/seams/approve`, { digest: shown.digest }, dash.url);
+  const again = await approveSeams(runId, shown.digest, dash.url);
   assert.equal(again.ok, false);
-  assert.equal(again.ok ? 0 : again.status, 409);
+  assert.match(again.ok ? "" : again.error, /^the run waits for no decision on its seams/);
+  const replaced = await replaceSeams(runId, ["math.negate(a)"], dash.url);
+  assert.equal(replaced.ok, false, "nor can the run be re-planned once it went on");
   assert.equal((await runOf(runId)).executions, 2, "the run was resumed once");
 });

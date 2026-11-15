@@ -11,6 +11,7 @@ import { batcher } from "./batch.js";
 import { runApiPath } from "./location.js";
 import { parseRunEvent } from "./run-event.js";
 import type { RunEvent } from "./run-graph.js";
+import { type SeamsProposalInfo, isSeamsProposal } from "./seams-form.js";
 import { errorText } from "../app/error-text.js";
 
 /** `waiting`: the API does not know the run yet. `closed`: the stream was read to the end and shut. */
@@ -25,6 +26,8 @@ export interface RunInfo {
   repo: string;
   /** How the latest execution's job was started, when the API knows (see `JobStart` in the runtime). */
   start?: JobStart;
+  /** What the run waits for a decision on, when it stopped at a seams proposal (see `SeamsProposalInfo`). Absent otherwise, and once the run went on. */
+  seamsProposal?: SeamsProposalInfo;
 }
 
 export interface RunFeed {
@@ -79,14 +82,19 @@ export function useRunEvents(runId: string): RunFeed {
           if (stopped) return;
           setUnreachable(reply.ok || reply.status === 404 ? undefined : `the dashboard answered ${reply.status}`);
           if (reply.ok) {
-            const detail = (await reply.json()) as { status: ApiStatus; error?: unknown; workflow?: string; repo?: string; start?: JobStart };
+            const detail = (await reply.json()) as { status: ApiStatus; error?: unknown; workflow?: string; repo?: string; start?: JobStart; seamsProposal?: unknown };
             latest = detail.status;
             setStatus(latest);
             setError(typeof detail.error === "string" ? detail.error : undefined);
             const { workflow, repo } = detail;
             const start = detail.start && typeof detail.start === "object" && "args" in detail.start ? detail.start : undefined;
+            const seamsProposal = isSeamsProposal(detail.seamsProposal) ? detail.seamsProposal : undefined;
             if (typeof workflow === "string" && typeof repo === "string")
-              setInfo((before) => (before && before.workflow === workflow && before.repo === repo && JSON.stringify(before.start) === JSON.stringify(start) ? before : { workflow, repo, start }));
+              setInfo((before) =>
+                before && before.workflow === workflow && before.repo === repo && JSON.stringify(before.start) === JSON.stringify(start) && before.seamsProposal?.digest === seamsProposal?.digest
+                  ? before
+                  : { workflow, repo, start, seamsProposal },
+              );
             if (latest === "missing") setConnection("not-found");
           } else if (reply.status === 404 && Date.now() - since > NOT_FOUND_AFTER_MS) setConnection("not-found");
         } catch (err) {

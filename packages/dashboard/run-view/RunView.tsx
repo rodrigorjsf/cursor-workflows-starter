@@ -5,6 +5,7 @@ import { Background, Controls, type Edge, type Node, ReactFlow, ReactFlowProvide
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { JunctionNode, LaneNode, type LaneNodeData, StartNode, WorkNode, type WorkNodeData } from "./nodes.js";
 import { RunActions } from "./RunActions.js";
+import { SeamsPanel } from "./SeamsPanel.js";
 import { argsHashOf } from "./resume-command.js";
 import { StepLogPanel } from "./StepLogPanel.js";
 import { frameOf, panTarget } from "./framing.js";
@@ -365,6 +366,7 @@ export function RunView({ runId }: { runId: string }) {
           {header.error}
         </p>
       )}
+      {!replaying && info?.seamsProposal && <SeamsPanel key={info.seamsProposal.digest} runId={runId} proposal={info.seamsProposal} status={status} onChanged={refresh} />}
       <div className="workspace">
         <div className="canvas">
           {layoutError !== undefined ? (
