@@ -180,6 +180,17 @@
   `test/vision-and-adrs.test.ts` confere a troca e o caminho do job travado contra `job-children.ts`. Veja
   [7.10](docs/adr/0010-detached-jobs-and-how-each-is-cancelled.md).
 
+- **Um repositório diz ao `implement-issue` onde moram o glossário e os outros arquivos de contexto** (issue #75). A lista que os
+  agentes de plano, de design e de texto do PR recebem ("Repository context files") era fixa no código
+  (`GLOSSARY.md`, `CONTEXT.md`, `AGENTS.md`, `CODING_STANDARDS.md`, `CONTRIBUTING.md` e `docs/adr`), então um repositório com o
+  glossário em outro lugar ficava sem glossário. O novo ajuste `workflows.implement-issue.settings.contextFiles` (no
+  `.agents/workflows/config.json` ou no arquivo global) é uma lista de caminhos relativos à raiz, de arquivos ou de pastas, e o
+  padrão é a lista de antes. Como todo ajuste, vale inteiro (não se combina com o padrão); o
+  [capítulo de configuração](docs/reference/config.md#ajustes-de-um-workflow) mostra o padrão para quem quiser copiá-lo. Um caminho
+  absoluto, com um segmento `..` ou com quebra de linha é recusado quando a configuração é lida, e um caminho que não existe é
+  pulado, como antes. As instruções do planejador e do texto do PR deixaram de citar `GLOSSARY.md` pelo nome: mandam ler o glossário
+  que a lista traz. Este repositório ganhou o próprio `.agents/workflows/config.json`, que aponta `docs/vision/03-conceitos.md`.
+
 ### Mudado
 
 - **O `npm run typecheck` pega o índice que pode não existir, o import que sobra, a promessa perdida e o `JSON.parse` com cast.** O

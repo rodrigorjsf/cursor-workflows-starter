@@ -35,7 +35,8 @@ Rules:
   a failing test, then the least code that makes it pass.
 - In testIdea, give the expected value from an independent source (a known literal, an example from the issue),
   never recomputed the way the code would compute it.
-- If they exist, read GLOSSARY.md (use the domain terms) and the area's ADRs (respect the decisions).
+- Read the repository context files listed below that matter to the area: use the domain terms of a glossary and respect the
+  decisions of the ADRs.
 - State the project's test command.`;
 
 /** Restrições dos designers do HIGH ("Design it twice"): três interfaces radicalmente diferentes. */
@@ -129,7 +130,7 @@ Mark "blocking" only what is exploitable or leaks data; everything else is "note
 export const PR_INSTRUCTIONS = `Write parts of a PR body for the diff below. Be brief, no preamble.
 - summary: the SMALLEST visual that makes the change clear, in a code block: pseudocode for logic, a call tree for
   flow, a file tree for responsibilities, Mermaid for interaction, or a diff of the shape when the surrounding shape
-  already exists. One or two short sentences with it. Use the terms of GLOSSARY.md, if it exists.
+  already exists. One or two short sentences with it. Use the domain terms of the glossary among the repository context files, if there is one.
 - door: "one-way" if the change is hard to undo (destructive, a migration, a public contract), "two-way" if it is cheap
   to revert; doorNote optional.
 - blastRadius: one word for how far the impact reaches; blastNote optional with the possible consequences.

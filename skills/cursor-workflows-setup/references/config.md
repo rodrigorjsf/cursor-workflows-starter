@@ -99,6 +99,12 @@ Under `workflows.<name>`:
     its token to the host it is given, so a `repo` such as `ghe.example.com/owner/name` ends the run before the first forge
     call unless the host is listed (on GitLab a path of four segments or more starts with a host: name a nested group by its
     URL). `wf gc` applies the same rule to the `repo` a run recorded.
+  - `contextFiles`: the files and folders of the repository that the plan, design and PR-text agents are told to read for
+    context: a glossary, the coding standards, the ADRs (one that does not exist is skipped). The default is the usual
+    names (`GLOSSARY.md`, `CONTEXT.md`, `AGENTS.md`, `CODING_STANDARDS.md`, `CONTRIBUTING.md` and the ADR folder); `wf config
+    show implement-issue` prints it. Set it when the repository keeps its glossary elsewhere. It replaces the default whole,
+    so copy the printed list and change what differs. Paths are relative to the repository root: an absolute path, a `..`
+    segment or a line break is refused when the config loads.
   - `gcFailedAfterDays`: `wf gc` removes a failed run's worktree and branches once it failed more days ago than this; a
     cancelled run never counts as failed. A run whose PR was merged or closed goes without waiting, and the origin
     branch stays while its PR is open.

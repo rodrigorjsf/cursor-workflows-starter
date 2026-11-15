@@ -83,7 +83,8 @@ código, os fluxos das skills `tdd`, `codebase-design`, `code-review` e `pr` de
 estão no cabeçalho do workflow. As etapas que só leem (classificar, planejar, desenhar, julgar, revisar, escrever o
 texto do PR) rodam com `settingSources: []`, a única configuração medida que corta as skills
 ([5.2 §4.3](../operating/02-custos-e-cache.md#43-contexto-fixo-mínimo-por-etapa)). No lugar do `AGENTS.md`, o código lista no prompt
-os arquivos de contexto que existem no planejar, desenhar, julgar e no texto do PR, e os de padrão no eixo Standards;
+os arquivos de contexto que existem no planejar, desenhar, julgar e no texto do PR (a lista é o ajuste `contextFiles`, que um
+repositório troca quando o glossário dele mora em outro lugar, como o deste kit), e os de padrão no eixo Standards;
 o classificar recebe só a issue, e os eixos Spec e Segurança, a issue e o diff. Testes, diff, commit, comentário e PR são código: zero tokens.
 As etapas que escrevem (teste, código, correção, refactor) ficam com todas as tools, `task` inclusive, e o default do
 engine (`["project","team","mdm"]`): é a exceção do workflow ao item de `tools` do

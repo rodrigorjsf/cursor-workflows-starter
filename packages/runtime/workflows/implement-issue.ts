@@ -175,6 +175,8 @@ type Settings = {
   backlogLabel: string;
   /** The hosts, besides the forge's own and the one of `origin`, that the `repo` argument may name: the forge's CLI sends its token to the host it is given. `host` (any port) or `host:port`. */
   repoHosts: string[];
+  /** The repository-relative files and folders that the plan, design and PR-text agents are told to read for context (the glossary, the coding standards, the ADRs). The ones that do not exist are skipped. */
+  contextFiles: string[];
 };
 const SETTINGS: Settings = {
   sliceCaps: { LOW: 1, MED: 3, HIGH: 5 },
@@ -196,6 +198,7 @@ const SETTINGS: Settings = {
   networkTimeoutSec: NETWORK_TIMEOUT_SEC,
   backlogLabel: "ready-for-agent",
   repoHosts: [],
+  contextFiles: ["GLOSSARY.md", "CONTEXT.md", "AGENTS.md", "CODING_STANDARDS.md", "CONTRIBUTING.md", "docs/adr"],
 };
 const READ_ONLY = ["read", "grep", "glob", "ls", "semSearch"];
 const REVIEW_TOOLS = ["read", "grep", "glob", "ls"];
@@ -203,8 +206,6 @@ const NO_SETTING_SOURCES: SettingSource[] = [];
 const SEAMS_MARKER = "<!-- wf:implement-issue:seams -->";
 /** The comment of a stopped `test-command-proposed` run: its own marker, so a run that already posted its seams still posts the command. */
 const TEST_COMMAND_MARKER = "<!-- wf:implement-issue:test-command -->";
-/** Arquivos que orientam o desenho e o review, quando existem no repositório. */
-const CONTEXT_FILES = ["GLOSSARY.md", "CONTEXT.md", "AGENTS.md", "CODING_STANDARDS.md", "CONTRIBUTING.md", "docs/adr"];
 const STANDARDS_FILES = ["CODING_STANDARDS.md", "CONTRIBUTING.md", "AGENTS.md", ".editorconfig"];
 
 interface Args {
@@ -590,7 +591,7 @@ export default defineWorkflow<Args>({
       ctx.metric("tier", tier); // covariável de dificuldade: compare modelos dentro do mesmo tier
       ctx.metric("tier_source", labelTier ? "label" : "classifier");
       ctx.card(issueCard(issue, tier)); // on the Board from here on; delivery updates it
-      const ctxFiles = CONTEXT_FILES.filter((f) => existsSync(join(ctx.cwd, f)));
+      const ctxFiles = settings.contextFiles.filter((f) => existsSync(join(ctx.cwd, f)));
       const contextBlock = listBlock("Repository context files (read the ones that matter)", ctxFiles);
 
       // ── Plano (codebase-design): LOW uma fatia; MED planejador; HIGH "Design it twice" ─────
