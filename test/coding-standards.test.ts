@@ -526,7 +526,7 @@ const ERROR_TEXT_HELPERS = ["packages/runtime/src/runtime/error-text.ts", "packa
 
 const unparenthesized = (e: ts.Expression): ts.Expression => (ts.isParenthesizedExpression(e) ? unparenthesized(e.expression) : e);
 
-/** Lines of `x instanceof Error ? x.message : String(x)`, spelled out by hand (one expression `x`, three times): the body of `errorText`. */
+/** Lines of `x instanceof Error ? x.message : String(...)`, spelled out by hand: the body of `errorText`. The tested value `x` is the one whose message is read. */
 function inlineErrorText(path: string, text: string): number[] {
   if (ERROR_TEXT_HELPERS.includes(path)) return [];
   const sf = parse(path, text);
@@ -540,8 +540,7 @@ function inlineErrorText(path: string, text: string): number[] {
     if (!ts.isIdentifier(test.right) || test.right.text !== "Error") return;
     if (!ts.isPropertyAccessExpression(message) || message.name.text !== "message") return;
     if (!ts.isCallExpression(fallback) || !ts.isIdentifier(fallback.expression) || fallback.expression.text !== "String" || fallback.arguments.length !== 1) return;
-    const caught = test.left.getText(sf);
-    if (message.expression.getText(sf) === caught && fallback.arguments[0]!.getText(sf) === caught) found.push(lineOf(sf, node));
+    if (message.expression.getText(sf) === test.left.getText(sf)) found.push(lineOf(sf, node));
   });
   return found;
 }
@@ -553,13 +552,14 @@ test("the errorText check fires on the inline conversion, whatever the value or 
     "const c = (e instanceof Error)",
     "  ? e.message",
     "  : String(e);",
+    "const d = err instanceof Error ? err.message : String(other);",
   ].join("\n");
-  assert.deepEqual(inlineErrorText("a.ts", offender), [1, 2, 3]);
+  assert.deepEqual(inlineErrorText("a.ts", offender), [1, 2, 3, 6]);
   const legit = [
     "const a = errorText(err);",
     'const b = err instanceof Error ? err.message : "unknown";',
     "const c = err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300);",
-    "const d = err instanceof Error ? err.message : String(other);",
+    "const d = err instanceof Error ? other.message : String(err);",
     "const e = err instanceof TypeError ? err.message : String(err);",
     '// err instanceof Error ? err.message : String(err)',
     'const f = "err instanceof Error ? err.message : String(err)";',
@@ -825,21 +825,23 @@ test("the stylesheet reader splits declarations at the rule they sit in, through
 
 /** The sizes the stylesheets space, set and round by: padding, margin, gap, font-size and border-radius, longhands included. */
 const SIZE_PROPERTY = /^(?:(?:padding|margin)(?:-[a-z-]+)?|(?:row-|column-)?gap|font-size|border(?:-[a-z]+)*-radius)$/;
-/** The parts of a value, split at the spaces outside parentheses. */
-const valueParts = (value: string): string[] => {
+/** `text` split at the characters `isSeparator` accepts that sit outside parentheses (`calc(1px + 2px)` and `:is(a, b)` stay whole); empty parts are dropped. */
+const splitOutsideParens = (text: string, isSeparator: (ch: string) => boolean): string[] => {
   const parts: string[] = [];
   let depth = 0;
   let part = "";
-  for (const ch of value) {
+  for (const ch of text) {
     if (ch === "(") depth++;
     if (ch === ")") depth--;
-    if (ch.trim() === "" && depth === 0) {
-      if (part) parts.push(part);
+    if (depth === 0 && isSeparator(ch)) {
+      parts.push(part.trim());
       part = "";
     } else part += ch;
   }
-  return part ? [...parts, part] : parts;
+  return [...parts, part.trim()].filter(Boolean);
 };
+/** The parts of a value, split at the spaces outside parentheses. */
+const valueParts = (value: string): string[] => splitOutsideParens(value, (ch) => ch.trim() === "");
 /** A length that is no token: a number with a unit, other than a 1 or 2px hairline or offset, or a share of the parent or of the viewport (`%`, `vh`, `vw`). Zero has no unit here. */
 const offScaleLengths = (text: string): string[] =>
   (text.replace(/var\(--[\w-]+(?:\s*,[^)]*)?\)/g, "").match(/-?\d*\.?\d+[a-z%]+/gi) ?? []).filter((length) => !/^-?[12]px$/.test(length) && !/(%|vh|vw)$/.test(length));
@@ -874,21 +876,8 @@ test("the dashboard stylesheets take every padding, margin, gap, font size and c
   assert.deepEqual(scan(DASHBOARD_CSS, offScaleSizes), [], "use --space-1…6, --text-xs…2xl or --radius-* (app/tokens.css); a literal stays only as 0, a percentage or a 1 or 2px hairline");
 });
 
-/** The selectors of a rule's list, split at the commas outside parentheses (`:is(a, b)` stays whole). */
-const selectorList = (rule: string): string[] => {
-  const selectors: string[] = [];
-  let depth = 0;
-  let selector = "";
-  for (const ch of rule) {
-    if (ch === "(") depth++;
-    if (ch === ")") depth--;
-    if (ch === "," && depth === 0) {
-      selectors.push(selector.trim());
-      selector = "";
-    } else selector += ch;
-  }
-  return [...selectors, selector.trim()].filter(Boolean);
-};
+/** The selectors of a rule's list, split at the commas outside parentheses. */
+const selectorList = (rule: string): string[] => splitOutsideParens(rule, (ch) => ch === ",");
 
 const REDUCED_MOTION = /^@media\s+\(prefers-reduced-motion:\s*reduce\)$/;
 /** `animation` for `animation` and its longhands, `transition` for `transition` and its longhands, otherwise undefined. */
@@ -1133,12 +1122,16 @@ function logicalLines(text: string): Array<{ line: number; text: string }> {
 }
 
 /**
- * Lines holding a `wf run` or `wf -- run` command (one with at least one `--flag`: a mention of the subcommand in prose has none)
- * that lacks `--max-tokens` or `--max-cents`. The command runs to the next backtick or the end of the joined line.
+ * Lines holding a run command that lacks `--max-tokens` or `--max-cents`. `npm run wf -- run <name>` is a command whatever follows it;
+ * a bare `wf run <name>` is one only with a `--flag`, which tells it from a mention of the subcommand in prose. The command runs
+ * to the next backtick or the end of the joined line.
  */
 function uncappedRuns(_path: string, text: string): number[] {
+  const isCommand = (npmForm: boolean, tail: string) => (npmForm ? /\S/.test(tail) : / --[a-z]/.test(tail));
   return logicalLines(text)
-    .filter(({ text: line }) => [...line.matchAll(/\bwf (?:-- )?run\b([^`]*)/g)].some(([, tail]) => / --[a-z]/.test(tail!) && !(tail!.includes("--max-tokens") && tail!.includes("--max-cents"))))
+    .filter(({ text: line }) =>
+      [...line.matchAll(/\bwf (-- )?run\b([^`]*)/g)].some(([, npmForm, tail]) => isCommand(npmForm !== undefined, tail!) && !(tail!.includes("--max-tokens") && tail!.includes("--max-cents"))),
+    )
     .map(({ line }) => line);
 }
 
@@ -1155,8 +1148,10 @@ test("the caps check fires on a run command without --max-tokens or --max-cents,
     "  npm run wf -- run implement-issue --cwd \"$dir\" --args '{}' --resume <runId>", // 9: the resume
     "Passed to `wf run` as `--max-tokens` and `--max-cents`; see `wf run implement-issue` and wf run smoke.",
     "npm run wf -- cancel job-1 --cwd ~/repo",
+    "npm run wf -- run verify-cloud", // 12: a bare command
+    "Run it with `npm run wf -- run` and the caps.",
   ].join("\n");
-  assert.deepEqual(uncappedRuns("a.sh", sample), [1, 2, 5, 9]);
+  assert.deepEqual(uncappedRuns("a.sh", sample), [1, 2, 5, 9, 12]);
 });
 
 /** Every place that documents a command: the maintainer scripts (their `HOW:` lines and what they print), the verify README and chapter 9.4. */

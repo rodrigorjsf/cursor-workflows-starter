@@ -22,14 +22,6 @@ const RUNTIME = join(ROOT, "packages", "runtime");
 const FAKE_SDK_TSCONFIG = join(RUNTIME, "tsconfig.test.json");
 const SELF = import.meta.filename;
 
-const { values } = parseArgs({
-  options: {
-    home: { type: "string" },
-    live: { type: "boolean", default: false },
-    child: { type: "string" }, // internal: the process the interrupted run is killed in
-  },
-});
-
 /** A refusal the maintainer can act on: `main` prints it and the script exits with 2. */
 class FixtureError extends Error {}
 
@@ -39,7 +31,7 @@ function fail(message: string): never {
 
 // What the script uses of the runtime modules it loads by a computed path, as far as it uses it. The root typecheck checks
 // this file against the real SDK and must not follow those modules into the fake one, so it sees these shapes instead.
-interface RunOutcome {
+interface FixtureRun {
   runId: string;
   status: string;
 }
@@ -49,7 +41,7 @@ interface FixtureEvent {
   runId: string;
 }
 interface EngineModule {
-  runWorkflow(def: WorkflowDefinition, args: object, options: { cwd: string; signal?: AbortSignal; onEvent?: (e: FixtureEvent) => void }): Promise<RunOutcome>;
+  runWorkflow(def: WorkflowDefinition, args: object, options: { cwd: string; signal?: AbortSignal; onEvent?: (e: FixtureEvent) => void }): Promise<FixtureRun>;
 }
 interface FakeSdkModule {
   script: Array<(options: unknown, message: string, n: number) => unknown>;
@@ -158,12 +150,21 @@ function shipFeature(mode: Mode): WorkflowDefinition<unknown, string> {
 }
 
 /** Builds the fixture home and prints its manifest. Returns the exit code: 0, or what the re-executed copy of itself returns. */
-async function main(): Promise<number> {
+async function main(argv: string[]): Promise<number> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      home: { type: "string" },
+      live: { type: "boolean", default: false },
+      child: { type: "string" }, // internal: the process the interrupted run is killed in
+    },
+  });
+
   // 1. The fake SDK, always. tsx reads TSX_TSCONFIG_PATH, and the tsconfig maps `@cursor/sdk` to test/fake-sdk.ts. The
   // variable is inherited, so the job and child processes this script starts get the fake too.
   if (resolve(process.env.TSX_TSCONFIG_PATH ?? "") !== FAKE_SDK_TSCONFIG) {
     if (process.env.WF_DASH_FIXTURES_REEXEC) fail(`TSX_TSCONFIG_PATH is not ${FAKE_SDK_TSCONFIG}`);
-    const again = spawnSync(process.execPath, [...process.execArgv, SELF, ...process.argv.slice(2)], {
+    const again = spawnSync(process.execPath, [...process.execArgv, SELF, ...argv], {
       stdio: "inherit",
       env: { ...process.env, TSX_TSCONFIG_PATH: FAKE_SDK_TSCONFIG, WF_DASH_FIXTURES_REEXEC: "1" },
     });
@@ -202,7 +203,7 @@ async function main(): Promise<number> {
   };
 
   /** Runs the fixture workflow in this process; `onEvent` sees its events. */
-  async function runShip(mode: Mode, opts: { signal?: AbortSignal; onEvent?: (e: FixtureEvent) => void } = {}): Promise<RunOutcome> {
+  async function runShip(mode: Mode, opts: { signal?: AbortSignal; onEvent?: (e: FixtureEvent) => void } = {}): Promise<FixtureRun> {
     refill();
     return runWorkflow(shipFeature(mode), {}, { cwd: repo, ...opts });
   }
@@ -298,7 +299,7 @@ export default {
 }
 
 if (isEntryPoint(import.meta.url)) {
-  process.exitCode = await main().catch((e: unknown) => {
+  process.exitCode = await main(process.argv.slice(2)).catch((e: unknown) => {
     if (!(e instanceof FixtureError)) throw e;
     process.stderr.write(`dash-fixtures: ${e.message}\n`);
     return 2;
