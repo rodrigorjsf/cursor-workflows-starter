@@ -97,8 +97,9 @@ Under `workflows.<name>`:
   - `repoHosts`: the hosts the `repo` argument may name besides the forge's own (`github.com` or `gitlab.com`), the host of
     `origin` and the hosts declared under `forges` (default none; `host` for any port, or `host:port`). The forge's CLI sends
     its token to the host it is given, so a `repo` such as `ghe.example.com/owner/name` ends the run before the first forge
-    call unless the host is listed (on GitLab a path of four segments or more starts with a host: name a nested group by its
-    URL). `wf gc` applies the same rule to the `repo` a run recorded.
+    call unless the host is listed (on GitLab a path of three segments or more starts with a host only when its first segment
+    has a `.` or a `:`, as glab 1.130.0 reads it: a nested group such as `group/sub/deeper/project` names none). `wf gc`
+    applies the same rule to the `repo` a run recorded.
   - `contextFiles`: the files and folders of the repository that the plan, design and PR-text agents are told to read for
     context: a glossary, the coding standards, the ADRs (one that does not exist is skipped). The default is the usual
     names (`GLOSSARY.md`, `CONTEXT.md`, `AGENTS.md`, `CODING_STANDARDS.md`, `CONTRIBUTING.md` and the ADR folder); `wf config
