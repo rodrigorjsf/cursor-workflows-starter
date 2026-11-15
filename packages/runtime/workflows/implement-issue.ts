@@ -516,6 +516,7 @@ export default defineWorkflow<Args>({
     // Before the first call that carries the forge's token: a `repo` of another host sends it there (`implement-issue/repo-arg.ts`).
     if (ctx.args.repo !== undefined) {
       const refusal = repoRefusal(ctx.args.repo, { forge: forge.name, originUrl: await cmd.remoteUrl(ctx.cwd), repoHosts: settings.repoHosts, forges: ctx.forges });
+      // Thrown, not returned as a result status: like invalid args (which the engine also fails), a refused argument is a security refusal that must end the run `failed` (exit code 1, job `failed`), not a `finished` run with a status in its result.
       if (refusal !== undefined) throw new Error(refusal);
     }
     // Uma issue tem no máximo um run ativo: dois runs na mesma issue brigariam pelo mesmo trabalho e abririam dois PRs. O lock

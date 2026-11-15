@@ -50,6 +50,7 @@ function failureMessage(line: string, r: ExecResult, timeoutMs: number | undefin
   if (r.timedOut) return `${line} timed out ${timeoutMs === undefined ? "(the workflow's execTimeoutMs)" : `after ${timeoutMs / 1000}s`}`;
   if (r.error) return `${line} could not start: ${r.error}`;
   const output = r.tail.trim().slice(-1000);
+  // Git's own sentence (`fatal: transport 'http' not allowed`), which git translates: a git in another language falls through to the generic message below, with git's text.
   const blocked = /transport '([^']*)' not allowed/.exec(output);
   if (blocked) {
     return (

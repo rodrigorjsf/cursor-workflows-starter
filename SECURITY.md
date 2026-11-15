@@ -187,7 +187,7 @@ falhas de segurança.
   quem conduz o chat. Ele só pode nomear o host próprio do forge (`github.com` ou `gitlab.com`), o host do `origin` do
   repositório, um host declarado em `forges` ou um de `workflows.implement-issue.settings.repoHosts` (a lista é sua, no arquivo
   global ou no do repositório). Qualquer outro host, escrito como `HOST/OWNER/REPO` ou como URL, e uma URL que não seja `https`
-  nem `ssh` encerram o run antes da primeira chamada ao forge, e os caracteres do argumento são limitados a `owner/name`, a um
+  nem `ssh` encerram o run antes da primeira chamada ao forge (no GitLab, um caminho de quatro segmentos ou mais começa pelo host, até onde o kit sabe: um grupo aninhado se nomeia pela URL), e os caracteres do argumento são limitados a `owner/name`, a um
   caminho de grupo e a uma URL. O `wf gc` aplica a mesma regra ao `repo` que um run gravou no registro dele, que é um arquivo do
   `.workflows/` do repositório.
 - **O token recomendado é um fine-grained, de um repositório só.** Crie-o em *Settings → Developer settings → Personal access

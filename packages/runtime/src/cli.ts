@@ -51,6 +51,8 @@ import { cancelJob, listJobs, readJob, readJobRecord, waitJob } from "./runtime/
 import { loadWorkflows } from "./runtime/registry.js";
 import { applyGc, directCommands, formatPlan, planGc } from "../workflows/implement-issue/gc.js";
 
+const isStringList = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");
+
 /** The command line itself is wrong (an unknown flag, a flag value the command cannot use, a missing argument): exit 2. */
 class UsageError extends Error {}
 
@@ -277,9 +279,9 @@ async function main(): Promise<number> {
       if (typeof failedAfterDays !== "number") throw new Error("workflows.implement-issue.settings.gcFailedAfterDays must be a number of days");
       if (typeof graceHours !== "number") throw new Error("workflows.implement-issue.settings.gcSnapshotGraceHours must be a number of hours");
       if (typeof networkTimeoutSec !== "number") throw new Error("workflows.implement-issue.settings.networkTimeoutSec must be a number of seconds");
-      if (!Array.isArray(repoHosts) || repoHosts.some((host) => typeof host !== "string")) throw new Error("workflows.implement-issue.settings.repoHosts must be a list of hosts");
+      if (!isStringList(repoHosts)) throw new Error("workflows.implement-issue.settings.repoHosts must be a list of hosts");
       const commands = directCommands(networkTimeoutSec);
-      const plan = await planGc({ cwd, commands, failedAfterDays, snapshots: { remote: config.cloud.remote, graceHours }, forges: config.forges, repoHosts: repoHosts as string[] });
+      const plan = await planGc({ cwd, commands, failedAfterDays, snapshots: { remote: config.cloud.remote, graceHours }, forges: config.forges, repoHosts });
       process.stderr.write(formatPlan(plan)); // the plan first, then the removal
       if (values["dry-run"]) process.stderr.write("wf gc: dry run, nothing was changed.\n");
       else await applyGc(plan, commands);

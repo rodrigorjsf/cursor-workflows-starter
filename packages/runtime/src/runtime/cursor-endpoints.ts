@@ -14,9 +14,7 @@ export const CURSOR_ENDPOINT_PATTERN = /^https:\/\/([a-z0-9-]+\.)*(cursor\.sh|cu
 /** One variable whose value is not a Cursor address. */
 export interface EndpointProblem {
   variable: string;
-  /** The value as a sentence fragment: its scheme and host only (`https://evil.example`), or `not a URL`. The path, the query and any userinfo stay out of every message. */
-  shown: string;
-  /** Why it is refused: `shown` as the head of a sentence. */
+  /** Why it is refused. It shows the scheme and host of the value (`https://evil.example`) or says it is not a URL: the path, the query and any userinfo stay out of every message. */
   message: string;
 }
 
@@ -39,7 +37,6 @@ export function cursorEndpointProblems(env: Readonly<Record<string, string | und
     const shown = schemeAndHost(value);
     problems.push({
       variable,
-      shown: shown ?? "not a URL",
       message: shown === undefined ? `${variable} is not a URL, so it is not an https URL on cursor.sh or cursor.com` : `${variable} is ${shown}, which is not an https URL on cursor.sh or cursor.com`,
     });
   }

@@ -106,9 +106,9 @@ forgeTest("on GitLab, group/sub/project is a path and keeps working, gitlab.com 
 // glab reads four segments as HOST/GROUP/NAMESPACE/REPO as far as the kit knows (it could not be checked against a pinned glab): the first one
 // may be a host whatever it looks like, so a nested group is named by its URL, which carries its host.
 forgeTest("on GitLab a path of four segments or more may start with a host, so it is refused until that name is allowed, and a nested group is named by its URL", async () => {
+  issue(["complexity:medium"]);
   await refused("corp/group/sub/project", /\bcorp\b.*repoHosts/s);
   await refused("https://evil.example:99999/group/project", /not a valid URL/);
-  issue(["complexity:medium"]);
   const url = await run({ repo: "https://gitlab.com/group/sub/deeper/project" });
   assert.equal(res(url).status, "seams-proposed", JSON.stringify(url));
 }, ["gitlab"]);

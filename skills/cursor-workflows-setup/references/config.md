@@ -97,7 +97,8 @@ Under `workflows.<name>`:
   - `repoHosts`: the hosts the `repo` argument may name besides the forge's own (`github.com` or `gitlab.com`), the host of
     `origin` and the hosts declared under `forges` (default none; `host` for any port, or `host:port`). The forge's CLI sends
     its token to the host it is given, so a `repo` such as `ghe.example.com/owner/name` ends the run before the first forge
-    call unless the host is listed. `wf gc` applies the same rule to the `repo` a run recorded.
+    call unless the host is listed (on GitLab a path of four segments or more starts with a host: name a nested group by its
+    URL). `wf gc` applies the same rule to the `repo` a run recorded.
   - `gcFailedAfterDays`: `wf gc` removes a failed run's worktree and branches once it failed more days ago than this; a
     cancelled run never counts as failed. A run whose PR was merged or closed goes without waiting, and the origin
     branch stays while its PR is open.

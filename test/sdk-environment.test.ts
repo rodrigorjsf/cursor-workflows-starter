@@ -1,7 +1,7 @@
 // Seam: the installed Cursor SDK as a file tree. The SDK takes the endpoint its API key goes to from the environment
 // (CURSOR_BACKEND_URL, CURSOR_WEBSITE_URL) and checks neither the scheme nor the host, so the kit checks both variables itself
 // (packages/runtime/src/runtime/cursor-endpoints.ts). A new SDK version may read another variable of that kind, and nothing in the
-// kit would say so: this test lists every `process.env.CURSOR_*` the SDK's bundles read and fails when the list is not the one a
+// kit would say so: this test lists every `CURSOR_*` variable the SDK's bundles read from `process.env` and fails when the list is not the one a
 // person reviewed, so a bump that adds an endpoint variable fails the suite instead of reaching users unguarded.
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
@@ -41,7 +41,7 @@ const NOT_AN_ENDPOINT: Readonly<Record<string, string>> = {
 };
 
 /** The `CURSOR_*` names `text` reads from the environment. */
-const namesIn = (text: string): string[] => [...text.matchAll(/process\.env\.(CURSOR_[A-Z0-9_]+)/g)].map((m) => m[1]!);
+const namesIn = (text: string): string[] => [...text.matchAll(/\benv(?:\.|\[\s*["'`])(CURSOR_[A-Z0-9_]+)/g)].map((m) => m[1]!);
 
 const readByTheSdk = (): string[] => [...new Set(bundles.flatMap(namesIn))].sort();
 
