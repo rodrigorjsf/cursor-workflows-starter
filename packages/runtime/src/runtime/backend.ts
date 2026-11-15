@@ -37,6 +37,7 @@ import {
   type SendOptions,
   type SettingSource,
 } from "@cursor/sdk";
+import * as sdk from "@cursor/sdk";
 import type { CloudAgentEvent, TurnUsage } from "./events.js";
 import { errorText } from "./error-text.js";
 import { type Capture, SUBMIT_TOOL, type Validated, repromptMessage, schemaInstruction, submitResultTool } from "./structured.js";
@@ -427,8 +428,20 @@ export async function converse(
   return { kind: "finished", value: delivery ? delivery.value : (answer.result ?? "") };
 }
 
+/**
+ * Under `node --test` only the fake SDK may run an agent: tsx swaps it in through `tsconfig.test.json`, and a test file run
+ * without that config reaches the real one, which spends real money. The fake is told apart by its `calls` export (the
+ * same mark `test/fake-sdk.conformance.ts` uses). Process tests drop NODE_TEST_CONTEXT for the CLIs they spawn.
+ */
+export function assertNoRealSdkUnderTest(env: NodeJS.ProcessEnv = process.env, loaded: object = sdk): void {
+  if (env.NODE_TEST_CONTEXT && !("calls" in loaded)) {
+    throw new Error("the real @cursor/sdk was loaded under node --test: run the file with `tsx --tsconfig tsconfig.test.json --test` from packages/runtime");
+  }
+}
+
 /** The options every agent of a step gets, wherever it runs and whether it is created or resumed. */
 export function agentBase(o: StepOptions) {
+  assertNoRealSdkUnderTest();
   return { apiKey: o.apiKey, name: o.name, model: o.model, agents: o.agents, mcpServers: o.mcpServers };
 }
 
