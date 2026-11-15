@@ -27,13 +27,26 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 2
+      # On a pull request, which checks the change justifies (scripts/ci-scope.sh). The checkout of a pull request is
+      # the merge commit, so with two commits of history HEAD^1 is the base and the diff is exactly the change. A push
+      # to main runs everything.
+      - name: Scope the change
+        id: scope
+        if: github.event_name == 'pull_request'
+        run: git diff --name-only HEAD^1 HEAD | scripts/ci-scope.sh >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci --ignore-scripts
       # Typecheck e testes offline: SDK falso, sem rede, sem conta Cursor e sem segredos.
-      - run: npm run check
+      - if: steps.scope.outputs.docs_only != 'true'
+        run: npm run check
+      # A change to the book or the root guides alone: no package reads them, so only the repo-level tests run (links,
+      # index, ADRs, guides). The job still reports, so the required check `test (<version>)` passes.
+      - if: steps.scope.outputs.docs_only == 'true'
+        run: npm run test:repo
 
   # Renderiza todo bloco Mermaid do repositório e falha em erro de sintaxe. Só aqui: o mermaid-cli usa um Chromium
   # headless, que trava na máquina do mantenedor (docs/contributing/03-diagramas.md).
@@ -56,19 +69,32 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 2
+      # On a pull request, which checks the change justifies (scripts/ci-scope.sh). The checkout of a pull request is
+      # the merge commit, so with two commits of history HEAD^1 is the base and the diff is exactly the change. A push
+      # to main runs everything.
+      - name: Scope the change
+        id: scope
+        if: github.event_name == 'pull_request'
+        run: git diff --name-only HEAD^1 HEAD | scripts/ci-scope.sh >> "$GITHUB_OUTPUT"
+      # No Markdown, no checker and no workflow change: nothing to render. The steps skip and the required check passes.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.scope.outputs.markdown != 'false'
         with:
           node-version: 22.x
           cache: npm
-      - run: npm ci --ignore-scripts
+      - if: steps.scope.outputs.markdown != 'false'
+        run: npm ci --ignore-scripts
       - name: Install the Mermaid renderer and its browser
+        if: steps.scope.outputs.markdown != 'false'
         run: |
           dir="$RUNNER_TEMP/mermaid"
           mkdir -p "$dir"
           npm install --ignore-scripts --no-save --no-package-lock --prefix "$dir" \
             "@mermaid-js/mermaid-cli@$MERMAID_CLI_VERSION" "puppeteer@$PUPPETEER_VERSION"
           cd "$dir" && ./node_modules/.bin/puppeteer browsers install chrome-headless-shell
-      - run: npm run docs:mermaid
+      - if: steps.scope.outputs.markdown != 'false'
+        run: npm run docs:mermaid
         env:
           MERMAID_CLI: ${{ runner.temp }}/mermaid/node_modules/.bin/mmdc
 
