@@ -1,0 +1,10 @@
+{
+  "$schema": "../../packages/runtime/schema/config.schema.json",
+  "workflows": {
+    "implement-issue": {
+      "settings": {
+        "contextFiles": ["docs/vision/03-conceitos.md", "AGENTS.md", "CODING_STANDARDS.md", "CONTRIBUTING.md", "docs/adr"]
+      }
+    }
+  }
+}

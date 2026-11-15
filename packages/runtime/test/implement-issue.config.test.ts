@@ -10,7 +10,7 @@ import { calls } from "./fake-sdk.js";
 import { CONFIG_SCHEMA_PATH, validateConfigData } from "../src/config/file.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import implementIssue from "../workflows/implement-issue.js";
-import { ALL_CODE, ALL_TEST, CLEAN_REVIEW, PLAN, SUB_CODE, forgeState, forgeTest, fx, issue, names, run, submit, write } from "./implement-issue.fixture.js";
+import { ALL_CODE, ALL_TEST, CLEAN_REVIEW, PLAN, SUB_CODE, forgeState, forgeTest, fx, git, issue, names, run, submit, write } from "./implement-issue.fixture.js";
 import { globalConfigPath, runStartOf, withEnv, writeGlobalConfig, writeRepoConfig } from "./config-fixtures.js";
 
 afterEach(() => rmSync(globalConfigPath(), { force: true }));
@@ -68,7 +68,7 @@ const settings = (value: Record<string, unknown>) => writeRepoConfig(fx.repo, { 
 const slice = (n: number) => ({ behavior: `comportamento ${n}`, seam: "math.subtract", testIdea: `ideia ${n}` });
 const WRONG_CODE = SUB_CODE.replace("a - b", "a + b");
 
-test("implement-issue declares its thirteen settings with the code defaults; each is in the config schema, and the defaults pass it", () => {
+test("implement-issue declares its fourteen settings with the code defaults; each is in the config schema, and the defaults pass it", () => {
   assert.deepEqual(implementIssue.meta.settings, {
     sliceCaps: { LOW: 1, MED: 3, HIGH: 5 },
     extraSlices: 2,
@@ -83,6 +83,7 @@ test("implement-issue declares its thirteen settings with the code defaults; eac
     networkTimeoutSec: 120,
     backlogLabel: "ready-for-agent",
     repoHosts: [],
+    contextFiles: ["GLOSSARY.md", "CONTEXT.md", "AGENTS.md", "CODING_STANDARDS.md", "CONTRIBUTING.md", "docs/adr"],
   });
   assert.deepEqual(validateConfigData({ workflows: { "implement-issue": { settings: implementIssue.meta.settings } } }), []);
   const schema = JSON.parse(readFileSync(CONFIG_SCHEMA_PATH, "utf8")) as { definitions: { workflowSettings: { properties: Record<string, unknown> } } };
@@ -120,8 +121,102 @@ forgeTest("a setting that is out of range, misspelled or of the wrong shape fail
   await fails({ repoHosts: ["https://ghe.corp.example"] }, /\/workflows\/implement-issue\/settings\/repoHosts\/0/); // a host, with no scheme and no path
   await fails({ repoHosts: ["ghe.corp.example/acme"] }, /\/workflows\/implement-issue\/settings\/repoHosts\/0/);
   await fails({ repoHosts: ["ghe.corp.example", "ghe.corp.example"] }, /\/workflows\/implement-issue\/settings\/repoHosts/);
+  await fails({ contextFiles: "docs/glossary.md" }, /\/workflows\/implement-issue\/settings\/contextFiles/); // a list, not one path
+  await fails({ contextFiles: ["/etc/passwd"] }, /\/workflows\/implement-issue\/settings\/contextFiles\/0/); // a path is joined to the repository: an absolute one or a `..` would leave it
+  await fails({ contextFiles: ["docs/glossary.md", "../x"] }, /\/workflows\/implement-issue\/settings\/contextFiles\/1/);
+  await fails({ contextFiles: [""] }, /\/workflows\/implement-issue\/settings\/contextFiles\/0/);
+  await fails({ contextFiles: ["docs/glossary.md", "docs/glossary.md"] }, /\/workflows\/implement-issue\/settings\/contextFiles/);
   await fails({ fixRound: 1 }, /\/workflows\/implement-issue\/settings\/fixRound: unknown setting \(workflow implement-issue declares: sliceCaps, extraSlices, fixRounds/);
   assert.equal(calls.length, 0);
+});
+
+test("contextFiles refuses an absolute path and a `..` segment in either separator, and accepts a name that only contains two dots", () => {
+  const check = (path: string) => validateConfigData({ workflows: { "implement-issue": { settings: { contextFiles: [path] } } } });
+  for (const refused of ["/etc/passwd", "../x", "docs/../../x", "docs/..", "..", "\\\\server\\share", "\\x", "C:\\x", "docs\\..\\..\\x", "docs/\nREAD-THIS.md"]) {
+    const errors = check(refused);
+    assert.deepEqual(errors.map((e) => e.path), ["/workflows/implement-issue/settings/contextFiles/0"], JSON.stringify(refused));
+  }
+  for (const accepted of ["docs/adr", "GLOSSARY.md", "docs/a..b.md", "docs/vision/03-conceitos.md", "..hidden", ".github/CONTRIBUTING.md", "docs/glossary.md"]) {
+    assert.deepEqual(check(accepted), [], accepted);
+  }
+});
+
+// ── contextFiles: where a repository keeps its glossary and the other files the agents read for context ──────────────────
+
+const CONTEXT_HEADING = "## Repository context files (read the ones that matter)";
+/** What the old workflow listed whenever the file existed: the default of `contextFiles`. */
+const DEFAULT_CONTEXT_PATHS = ["GLOSSARY.md", "CONTEXT.md", "AGENTS.md", "CODING_STANDARDS.md", "CONTRIBUTING.md", "docs/adr/0001-record.md"];
+
+/** Puts the files (path → text) in the repository and commits them: the agents are told to read what the branch holds. */
+function commitFiles(paths: string[]) {
+  for (const path of paths) {
+    mkdirSync(join(fx.repo, path, ".."), { recursive: true });
+    writeFileSync(join(fx.repo, path), `# ${path}\n`);
+  }
+  git(fx.repo, "add", "-A");
+  git(fx.repo, "commit", "-qm", "context files");
+}
+
+/** The paths the "Repository context files" block of the prompt of step `label` lists, in order; none when the prompt has no such block. */
+function contextListed(label: string): string[] {
+  const prompt = fx.prompts.find((p) => p.label === label);
+  assert.ok(prompt, `no ${label} step ran: ${fx.prompts.map((p) => p.label).join(", ")}`);
+  const lines = prompt.msg.split("\n");
+  const heading = lines.indexOf(CONTEXT_HEADING);
+  if (heading === -1) return [];
+  const listed: string[] = [];
+  for (const line of lines.slice(heading + 1)) {
+    if (!line.startsWith("- ")) break;
+    listed.push(line.slice(2));
+  }
+  return listed;
+}
+
+forgeTest("without contextFiles the plan prompt lists the files it always listed, in the same order", async () => {
+  issue(["complexity:medium"]);
+  commitFiles([...DEFAULT_CONTEXT_PATHS, "docs/glossary.md"]);
+  const r = await run({});
+  assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
+  assert.deepEqual(contextListed("plan"), ["GLOSSARY.md", "CONTEXT.md", "AGENTS.md", "CODING_STANDARDS.md", "CONTRIBUTING.md", "docs/adr"]);
+});
+
+forgeTest("contextFiles in the repo config replaces the default list: the plan prompt lists the glossary it names and none of the defaults", async () => {
+  issue(["complexity:medium"]);
+  commitFiles([...DEFAULT_CONTEXT_PATHS, "docs/glossary.md"]);
+  settings({ contextFiles: ["docs/glossary.md"] });
+  const r = await run({});
+  assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
+  assert.deepEqual(contextListed("plan"), ["docs/glossary.md"]);
+  assert.ok(!fx.prompts.find((p) => p.label === "plan")!.msg.includes("GLOSSARY.md"), "the instructions do not send the planner to a glossary file the repository does not name");
+});
+
+forgeTest("a contextFiles path that does not exist is skipped, a folder is listed as it is, and an empty list leaves the block out", async () => {
+  issue(["complexity:medium"]);
+  commitFiles(["docs/glossary.md", "docs/adr/0001-record.md"]);
+  settings({ contextFiles: ["docs/glossary.md", "docs/missing.md", "docs/adr"] });
+  const listed = await run({});
+  assert.equal(res(listed).status, "seams-proposed", JSON.stringify(res(listed)));
+  assert.deepEqual(contextListed("plan"), ["docs/glossary.md", "docs/adr"]);
+
+  fx.prompts = [];
+  settings({ contextFiles: [] });
+  const none = await run({});
+  assert.equal(res(none).status, "seams-proposed", JSON.stringify(res(none)));
+  assert.deepEqual(contextListed("plan"), []);
+  assert.ok(!fx.prompts.find((p) => p.label === "plan")!.msg.includes("Repository context files"), "no empty heading");
+});
+
+forgeTest("the contextFiles of the config reach the three designers of a HIGH run and the PR-text agent, not only the planner", async () => {
+  issue(["complexity:high"]);
+  commitFiles([...DEFAULT_CONTEXT_PATHS, "docs/glossary.md"]);
+  settings({ contextFiles: ["docs/glossary.md"] });
+  const design = (o: any) => submit(o, { interface: "subtract(a, b)", usage: "subtract(5, 3)", hides: "nada", dependencies: "em processo", tradeoffs: "-" });
+  for (const kind of ["minimal", "flexible", "common"]) fx.handlers[`design:${kind}`] = design;
+  fx.handlers.judge = (o) => submit(o, { ...PLAN, rationale: "a interface mínima basta" });
+  const r = await run({ seams: ["math.subtract(a, b)"], openPr: true });
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  for (const label of ["design:minimal", "design:flexible", "design:common", "pr-text"]) assert.deepEqual(contextListed(label), ["docs/glossary.md"], label);
+  assert.ok(!fx.prompts.find((p) => p.label === "pr-text")!.msg.includes("GLOSSARY.md"), "the instructions do not send the PR-text agent to a glossary file the repository does not name");
 });
 
 forgeTest("labelTiers is the label-to-tier map: the file's labels count (any case), the default ones no longer do", async () => {
