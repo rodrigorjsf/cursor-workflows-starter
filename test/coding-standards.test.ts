@@ -11,7 +11,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { builtinModules } from "node:module";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { test } from "node:test";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 import { parseMarkdown } from "../scripts/lib/markdown.js";
 
 const ROOT = resolve(import.meta.dirname, "..");

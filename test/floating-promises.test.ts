@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 
 const ROOT = resolve(import.meta.dirname, "..");
 

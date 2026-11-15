@@ -12,6 +12,11 @@ updates:
     cooldown:
       default-days: 7
       semver-major-days: 14
+    # @types/node follows the oldest Node in `engines` (22): newer majors type APIs that Node 22 lacks.
+    # Raise it together with `engines.node`.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

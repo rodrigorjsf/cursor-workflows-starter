@@ -9,7 +9,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 import { bookPlace } from "./check-docs.js";
 import { isEntryPoint, writeGeneratedPage } from "./lib/cli.js";
 
