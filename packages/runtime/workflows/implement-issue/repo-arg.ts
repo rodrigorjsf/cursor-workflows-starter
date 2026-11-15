@@ -21,7 +21,7 @@ export const REPO_ARG_PATTERN = "^[A-Za-z0-9][A-Za-z0-9_.:/@-]*$";
  * scp-like remote name their host. Without one, `gh` takes the first of three segments as the host whatever it looks like. `glab` reads three
  * segments as an ordinary `group/sub/project` unless the first has a dot, but as far as the kit knows (it could not be checked against a pinned
  * `glab`) it reads four or more as `HOST/GROUP/NAMESPACE/REPO`, so there the first is a host whatever it looks like: both are refused unless
- * allowed, and a nested GitLab group is named by its URL, which carries its host.
+ * allowed, and a nested GitLab group is named by its URL, which carries its host (see https://github.com/rodrigorjsf/cursor-workflows-starter/issues/102).
  */
 export function repoHostOf(repo: string, forge: ForgeName): string | undefined {
   const text = repo.trim();
