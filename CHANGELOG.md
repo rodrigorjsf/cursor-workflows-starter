@@ -4,6 +4,29 @@
 
 ### Adicionado
 
+- **O runtime recusa mais cedo o que passa de um limite que ele quer manter.** Sete frentes do mesmo endurecimento (issue #70):
+  - **Teto de jobs simultâneos.** O teto global `caps.maxRunningJobs` (padrão 3; `null` o tira) faz o `wf start`, o
+    `start_workflow` e o Start do dashboard recusarem um job quando esse tanto já roda no repositório, sem criar o job nem o
+    processo (o `start_workflow` devolve `isError`), e recusarem um job que roda o mesmo workflow com os mesmos args de um que já
+    roda. O registro do job passa a guardar o nome do workflow em `start`.
+  - **Ambiente sem segredos para o que roda código do repositório alvo.** O `ctx.exec` ganhou `scrubSecrets`, que começa o comando
+    sem as variáveis cujo nome tem `KEY`, `TOKEN`, `SECRET` ou `PASSWORD`. O `implement-issue` o liga para a suíte de testes e para o
+    `setupCommand`, que deixam de herdar a `CURSOR_API_KEY` e o `GH_TOKEN`; o `git` e o CLI do forge do workflow seguem com os tokens.
+  - **Snapshot de uma etapa na nuvem com varredura e checagem do remote.** Um snapshot que difere do HEAD passa pela varredura de
+    segredos que o `implement-issue` já fazia no commit (movida para `src/runtime/secret-guard.ts`) e o motor pergunta ao
+    `gh repo view` se o remote é público; recusa se for, ou se a pergunta não for respondida, a menos que o arquivo global tenha
+    `cloud.allowPublicRemote: true` (que só vale lá). A recusa não é repetida e nada vai para o remote. O `--no-verify` do push
+    ficou, com o motivo escrito. Uma etapa que não escreve e que o run diz ter empurrado uma branch gera um `warning` que a nomeia.
+  - **O código que as configurações do repositório rodam aparece.** Quando uma etapa pode carregar `"project"` (o padrão), a
+    verificação `config` do `wf doctor` avisa e lista os comandos de hook de `.cursor/hooks.json` e `.claude/settings.json` e de
+    servidor MCP de `.cursor/mcp.json` (sem o servidor `workflows` do kit), e o run emite um `warning` com a mesma lista antes da
+    primeira etapa.
+  - **O texto do modelo para o forge não leva dado por um link.** O `sanitizeModelText` mostra como código, com o `https` quebrado por
+    um espaço de largura zero, toda imagem, link, tag HTML e URL para um host que não é o do forge (`github.com`, `gitlab.com`).
+  - **Uma verificação do repositório reprova um workflow que roda `git push` por conta própria**, fora dos helpers de `commands.ts`.
+  - **O dashboard mostra o erro em vez de uma página em branco.** As duas páginas montam o root num Error Boundary (e passam
+    `onUncaughtError`), e o Run view descarta, com um aviso no console, a mensagem do stream que não é um evento.
+
 - **O Privacy Mode passa a ser uma pré-condição da instalação, confirmada por você.** Com o modo desligado, a Cursor pode guardar e
   treinar com o código, os prompts e a saída de comandos que cada etapa manda, e o SDK segue a regra do IDE. O SDK
   fixado (1.3.1) não tem chamada pública que leia o modo (o `Cursor.me()` não devolve o campo), então o kit não o confere: o
@@ -221,6 +244,15 @@
   texto do PR); as que escrevem nunca vêm do journal. Veja [5.1 §Segurança](docs/operating/01-governanca-e-custos.md#segurança).
 
 ### Corrigido
+
+- **O `wf init` não escreve mais fora do repositório por um link simbólico.** Um repositório clonado que commita o `.gitignore`, o
+  `.mcp.json` ou o `AGENTS.md` como link para um arquivo da sua home, ou uma pasta como `.cursor` apontando para fora, fazia o
+  `wf init` reescrever esse arquivo (CWE-59). Agora ele resolve cada caminho antes de ler ou escrever e sai com erro, nomeando o
+  arquivo, se o caminho real cai fora do repositório; um link para outro arquivo do repositório continua valendo.
+
+- **O log de eventos, o journal e o memo escondem a chave que o `wf login` salvou.** O run só escondia a chave passada a ele e a
+  `CURSOR_API_KEY`; com o login salvo, que o SDK usa quando nenhuma das duas existe, só a trava de entrega do `implement-issue`
+  conhecia a chave. O motor lê agora o `~/.cursor/sdk/auth.json` que o SDK lê.
 
 - **Cancelar um job travado mata também os comandos que ele iniciou, não só o processo.** O cancelamento de um job com
   heartbeat parado (`wf cancel`, `cancel_workflow` e o botão Cancel do dashboard) mandava `SIGKILL` só ao pid do job. Cada

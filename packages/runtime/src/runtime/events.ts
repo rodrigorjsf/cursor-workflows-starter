@@ -192,7 +192,7 @@ export interface EffectiveRole {
 export interface EffectiveCloud {
   /** O remote do git para onde vão as branches de snapshot das etapas na nuvem. Padrão: `origin`. */
   remote: string;
-  /** `true` deixa o snapshot ir para um remote público, ou para um que o `gh` não sabe dizer se é. Só o arquivo global liga. Padrão: `false`. */
+  /** `true` deixa o snapshot ir para um remote público, ou para um que a pergunta ao GitHub (`gh repo view`; o `glab` não é consultado) não responde. Só o arquivo global liga. Padrão: `false`. */
   allowPublicRemote: boolean;
 }
 

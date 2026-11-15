@@ -216,7 +216,7 @@
         },
         "allowPublicRemote": {
           "type": "boolean",
-          "description": "Só vale no arquivo global; no do repositório é registrado como violação e não tem efeito. Antes de empurrar um snapshot que difere do HEAD (ou seja, com arquivos não commitados ou novos), o motor pergunta ao `gh repo view` se o remote é público e recusa o snapshot se for, ou se o `gh` não souber responder (outro host que não o GitHub, sem rede, sem login): apagar a branch depois não despublica os commits, o GitHub os mantém alcançáveis pelo SHA e os forks também. `true` empurra mesmo assim e não pergunta. A busca de segredos no snapshot roda sempre. Padrão: `false`."
+          "description": "Só vale no arquivo global; no do repositório é registrado como violação e não tem efeito. Antes de empurrar um snapshot que difere do HEAD (ou seja, com arquivos não commitados ou novos), o motor pergunta ao GitHub, pelo `gh repo view` (o `glab` não é consultado), se o remote é público e recusa o snapshot se for, ou se a pergunta não for respondida (um remote no GitLab ou em outro host que não o GitHub, sem rede, sem login): apagar a branch depois não despublica os commits, o GitHub os mantém alcançáveis pelo SHA e os forks também. `true` empurra mesmo assim e não pergunta. A busca de segredos no snapshot roda sempre. Padrão: `false`."
         }
       }
     },

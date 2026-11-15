@@ -46,7 +46,7 @@ Top-level keys besides `caps`:
   (`wf/cloud-snapshot/...`). Default `origin`; point it at a fork when `origin`'s CI must not run on every snapshot.
 - `cloud.allowPublicRemote` (global file only): a snapshot that differs from HEAD holds uncommitted files, so before pushing it the
   kit scans it for secrets (always) and asks `gh repo view` whether the remote is public, and refuses a public remote or one `gh` cannot
-  answer for (GitHub only). `true` skips the question, never the scan. Default `false`; a repo file's value is a violation.
+  answer for (GitHub only: a GitLab remote is refused, since `glab` is not asked). `true` skips the question, never the scan. Default `false`; a repo file's value is a violation.
 - `forges` (either file): which forge, `github` or `gitlab`, each host the kit does not know runs, as in
   `{ "git.example.com": "gitlab" }`. The kit knows `github.com` and `gitlab.com`; a repository whose `origin` (or `repo`
   argument, when it is a URL) is on any other host fails before any step until the host is declared here. A key is the
