@@ -109,6 +109,13 @@ A proposta de mudança que um workflow abre a partir de uma branch sua: o *pull 
 do GitLab. É o termo do kit nos dois forges; só a interface mostra o nome e a referência de cada um (`PR #9`, `MR !9`).
 _Evite_: MR fora da interface, change request.
 
+**Modo de entrega** (*delivery mode*):
+Onde um workflow que escreve no repositório trabalha. Pode ser a **árvore principal**: a branch da run fica em checkout
+na pasta que o usuário tem aberta no IDE, e a árvore pertence ao workflow enquanto o job roda. Ou pode ser um
+**worktree**: uma pasta própria da run, isolada da árvore do usuário, que permite runs em paralelo. A árvore principal é
+o padrão, e o worktree é pedido por run ou na configuração. Decisão em [ADR-0012](../adr/0012-delivery-modes.md).
+_Evite_: sandbox (é o isolamento do agente, não o lugar da run), checkout (é só um dos passos).
+
 ## Onde cada coisa mora no disco
 
 | Conceito | Onde |

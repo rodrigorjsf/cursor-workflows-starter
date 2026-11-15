@@ -104,20 +104,21 @@ const ADRS: Array<{ file: string; number: string; topic: RegExp[] }> = [
   { file: "docs/adr/0009-forge-seam-github-and-gitlab.md", number: "0009", topic: [/forge/i, /GitLab/, /glab api/, /forges/] },
   { file: "docs/adr/0010-detached-jobs-and-how-each-is-cancelled.md", number: "0010", topic: [/detached/i, /heartbeat/i, /cancel/i, /frozen/i, /SIGKILL/, /supersedes/i] },
   { file: "docs/adr/0011-npm-bootstrapper.md", number: "0011", topic: [/bootstrapper/i, /npm/, /immutable/i, /consent/i, /provenance/i] },
+  { file: "docs/adr/0012-delivery-modes.md", number: "0012", topic: [/main tree/i, /worktree/i, /openPr/, /dirty/i, /codegraph/] },
 ];
 
-test("part 7 lists eleven ADRs, one per load-bearing decision, in order", () => {
+test("part 7 lists twelve ADRs, one per load-bearing decision, in order", () => {
   assert.deepEqual(
     indexPart(7),
     ADRS.map((adr) => adr.file),
   );
 });
 
-/** Every ADR on disk, not only the eleven: the format below binds the ones added later too. */
+/** Every ADR on disk, not only the twelve: the format below binds the ones added later too. */
 const adrFiles = () => readdirSync(join(ROOT, "docs/adr")).filter((name) => /^\d{4}-.*\.md$/.test(name)).map((name) => `docs/adr/${name}`);
 
 test("every ADR is titled ADR-NNNN, names its status and records the context, the decision, the consequences and the options considered", () => {
-  assert.ok(adrFiles().length >= ADRS.length, "the eleven ADRs are on disk");
+  assert.ok(adrFiles().length >= ADRS.length, "the twelve ADRs are on disk");
   for (const file of adrFiles()) {
     const number = /\/(\d{4})-/.exec(file)![1]!;
     const doc = parseMarkdown(read(file));
@@ -132,7 +133,7 @@ test("every ADR is titled ADR-NNNN, names its status and records the context, th
   }
 });
 
-test("each of the eleven ADRs is about its decision", () => {
+test("each of the twelve ADRs is about its decision", () => {
   for (const adr of ADRS) for (const pattern of adr.topic) assert.match(read(adr.file), pattern, `${adr.file}: should be about ${pattern}`);
 });
 
