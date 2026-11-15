@@ -1,4 +1,4 @@
-// Seam 1, the run: a job's status, phase, recent lines and spend are a projection of the run's event log. The job record
+// Seam: the run. A job's status, phase, recent lines and spend are a projection of the run's event log. The job record
 // on disk holds only identity. Asserts on `readJob` / `listJobs` / `waitJob` output and on the files written, with the
 // fake Cursor SDK.
 process.env.WF_METRICS = "off";

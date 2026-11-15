@@ -1,4 +1,4 @@
-// Seam 1, the run: `runWorkflow` with the fake Cursor SDK. The per-step token cap and the run's cumulative token cap are
+// Seam: the run. `runWorkflow` with the fake Cursor SDK. The per-step token cap and the run's cumulative token cap are
 // enforced on every turn while a step runs, not after it: crossing either cancels the agent run at once, so the overshoot
 // is at most the turn that crossed. The fake's `live` runs stream their turns after `send()` returns and stop delivering
 // when cancelled, as the real SDK does. Assertions are on the outcome, the replayed event log and what the SDK was asked.

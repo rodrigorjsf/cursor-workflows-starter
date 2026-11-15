@@ -1,4 +1,4 @@
-// Testes offline de partes do workflow de exemplo que não dependem do SDK.
+// Seam: the pure modules of the `implement-issue` workflow (its prompts and `pr-body`), called directly and offline, with no SDK in the picture.
 process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
 import { test } from "node:test";

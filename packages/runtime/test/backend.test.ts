@@ -1,4 +1,4 @@
-// Seam 2, the AgentBackend interface: `runWorkflow` with a backend handed in through `RunOptions.backend`, so the engine is
+// Seam: the AgentBackend interface. `runWorkflow` with a backend handed in through `RunOptions.backend`, so the engine is
 // exercised without the Cursor SDK in the picture (the fake SDK is only there to prove it is never touched). The backend
 // takes the prompt, the step's resolved options and an abort signal, streams events through a callback and reports how the
 // attempt ended. Assertions are on the outcome, the replayed event log and what the backend was handed.

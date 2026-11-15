@@ -1,5 +1,6 @@
-// O SDK escreve logs INFO por console.log (medido em 2026-11-11: "LocalCursorRulesService load completed"). No CLI eles
-// sujavam o JSON do stdout; no servidor MCP, o stdout é o canal JSON-RPC.
+// Seam: the `wf` CLI and the MCP server as they print, at stdout. The SDK writes INFO logs through console.log (measured on
+// 2026-11-11: "LocalCursorRulesService load completed"). In the CLI they dirtied the JSON on stdout; in the MCP server, stdout
+// is the JSON-RPC channel, so `console-to-stderr` diverts them and has to load before any other module.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

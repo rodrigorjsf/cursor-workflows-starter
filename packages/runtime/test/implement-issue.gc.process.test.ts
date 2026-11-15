@@ -1,4 +1,4 @@
-// Seam 2 on `wf gc`: the `wf` CLI as a child process, against a temporary repo with a bare origin, real git and the fake gh
+// Seam: the process, on `wf gc`. The `wf` CLI as a child process, against a temporary repo with a bare origin, real git and the fake gh
 // of implement-issue.fixture.ts. The runs it cleans up are real: they are made by `runWorkflow` with the fake Cursor SDK,
 // so the worktrees, the branches, the pushes and the run state are what the workflow leaves behind. What happened on GitHub
 // (a PR merged or closed) is set in the fake gh; what happened to a run in the past (a failure N days ago) is set in its event log.

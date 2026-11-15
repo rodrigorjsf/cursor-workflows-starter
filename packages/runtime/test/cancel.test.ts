@@ -1,4 +1,4 @@
-// Seam 1, the run: cancelling a run through `RunOptions.signal` (what `wf cancel`, `cancel_workflow`, SIGINT and SIGTERM
+// Seam: the run. Cancelling a run through `RunOptions.signal` (what `wf cancel`, `cancel_workflow`, SIGINT and SIGTERM
 // all end up doing). Asserts on the run outcome, the replayed event log, the job projection and the files in the working
 // directory, with the fake Cursor SDK.
 process.env.WF_METRICS = "off";

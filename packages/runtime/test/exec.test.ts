@@ -1,4 +1,4 @@
-// Seam 1, the run: `ctx.exec` runs a command a workflow needs (tests, git, gh) asynchronously, with a timeout, streams its
+// Seam: the run. `ctx.exec` runs a command a workflow needs (tests, git, gh) asynchronously, with a timeout, streams its
 // output into the run's event log and records the call as a step node. Runs `runWorkflow` with the fake Cursor SDK against a
 // real child process and asserts on what the workflow gets back and on the replayed event log.
 import assert from "node:assert/strict";

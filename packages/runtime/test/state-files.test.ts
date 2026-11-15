@@ -1,5 +1,5 @@
-// State files survive a crash. Whole-file state (job records, memo entries, workflow progress) is replaced atomically;
-// append-only state is JSON Lines that tolerates a torn last line.
+// Seam: the state files a crash leaves behind, read from disk. Whole-file state (job records, memo entries, workflow
+// progress) is replaced atomically; append-only state is JSON Lines that tolerates a torn last line.
 //
 // "Atomically" is observed through what it guarantees: the target is never opened and rewritten in place, it is replaced
 // by a complete new file. So after every write the file is a different inode, and no temp file is left behind.

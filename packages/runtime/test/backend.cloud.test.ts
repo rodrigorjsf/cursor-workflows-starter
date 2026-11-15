@@ -1,4 +1,4 @@
-// Seam 2, the AgentBackend interface, from the other side: the cloud backend called directly, the way the engine calls it,
+// Seam: the AgentBackend interface, from the other side. The cloud backend called directly, the way the engine calls it,
 // with the fake Cursor SDK underneath and a temporary bare repository as the remote. It holds the contract the engine
 // relies on (see backend.ts) for an agent that runs elsewhere: events streamed through the callback, an abort that cancels
 // the run in flight and reports the signal's reason, the usage read, the agent disposed, and the snapshot branch gone.

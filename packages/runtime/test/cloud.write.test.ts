@@ -1,4 +1,4 @@
-// Seam 1, the run, for a write step in the cloud: `runWorkflow` with the fake Cursor SDK in cloud mode, a temp repository and a
+// Seam: the run, for a write step in the cloud. `runWorkflow` with the fake Cursor SDK in cloud mode, a temp repository and a
 // temporary bare repository as its `origin`. The fake agent's work is real git on the remote (test/cloud-fixtures.ts): it commits
 // on the snapshot branch the engine pushed. The assertions are on the outcome, the agent the SDK was asked for, the replayed
 // event log and the git state of the worktree and of the remote: what the local worktree holds after the step, and what a

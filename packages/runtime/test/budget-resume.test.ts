@@ -1,4 +1,4 @@
-// Seam 1, the run: a run's budget accumulates across resumes, failed attempts included, and a cap passed to a resume is the
+// Seam: the run. A run's budget accumulates across resumes, failed attempts included, and a cap passed to a resume is the
 // new total cap. Runs `runWorkflow` and `startJob` with the fake Cursor SDK; every attempt there costs 9 cents (7 charged)
 // and 110 tokens.
 process.env.WF_METRICS = "off";

@@ -185,6 +185,24 @@ test("every test that runs a workflow isolates the home, itself or through a fix
   assert.deepEqual(offenders, [], 'import "./isolate-home.js" before the modules under test, or import a fixture that does');
 });
 
+/** 0 (the file) unless line 1 is `// Seam: <the seam, in words>`. A numbered `// Seam 1, ...` or any other opening is no header. */
+const seamless = (_path: string, text: string): number[] => (/^\/\/ Seam: \S/.test(text) ? [] : [0]);
+
+test("the seam header check fires on a numbered seam, a comment of another kind and a file that opens with code, and passes `// Seam: <name>`", () => {
+  assert.deepEqual(seamless("a.test.ts", "// Seam 1, the run: the engine.\n"), [0]);
+  assert.deepEqual(seamless("a.test.ts", "// Seam:\n"), [0], "a header with no seam named");
+  assert.deepEqual(seamless("a.test.ts", "// The engine, offline.\n"), [0]);
+  assert.deepEqual(seamless("a.test.ts", '// A comment first\n// Seam: the engine.\nimport "x";\n'), [0], "the header is line 1");
+  assert.deepEqual(seamless("a.test.ts", 'import "x";\n'), [0]);
+  assert.deepEqual(seamless("a.test.ts", "// Seam: the engine; the event log.\nimport \"x\";\n"), []);
+});
+
+test("every test file opens with `// Seam: <the seam, in words>` on line 1; a file that tests several seams names them on one line, `// Seam: a; b`", () => {
+  const tests = ALL_CODE.filter((f) => f.endsWith(".test.ts"));
+  assert.ok(tests.length >= 140, `found ${tests.length}`);
+  assert.deepEqual(scan(tests, seamless), [], "open the file with `// Seam: <the interface the file asserts at, and what is real and what is a stand-in>`");
+});
+
 /** Lines importing jsdom or a wrapper of it. */
 const jsdomImports = (path: string, text: string) => importsOf(path, text).filter((i) => /^(jsdom|global-jsdom|jsdom-global)(\/|$)/.test(i.spec)).map((i) => i.line);
 /** The jsdom packages a manifest declares, in any dependency group. */

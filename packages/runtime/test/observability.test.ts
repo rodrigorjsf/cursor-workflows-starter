@@ -1,4 +1,4 @@
-// Testes offline da observabilidade (banco SQLite temporário, fake SDK): `npm test`.
+// Seam: the metrics database, offline: `runWorkflow` with the fake Cursor SDK writes a temporary SQLite database, which the tests read back through `observability/queries.js`.
 import assert from "node:assert/strict";
 import "./isolate-home.js";
 import { mkdtempSync, rmSync, statSync } from "node:fs";

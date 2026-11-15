@@ -1,4 +1,4 @@
-// Seam 1, the run: `runWorkflow` with the fake Cursor SDK. Asserts on the run outcome and on the replayed per-run event
+// Seam: the run. `runWorkflow` with the fake Cursor SDK. Asserts on the run outcome and on the replayed per-run event
 // log (`.workflows/runs/<runId>/events.jsonl`), never on internal calls.
 process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";

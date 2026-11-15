@@ -1,4 +1,4 @@
-// Seam 2, the process: detached jobs, heartbeat and cancellation. The `wf` CLI and the MCP server are real child processes
+// Seam: the process. Detached jobs, heartbeat and cancellation. The `wf` CLI and the MCP server are real child processes
 // against the fake Cursor SDK, a temporary repo and a temporary home directory. A prompt with `[fake:hang]` makes the fake
 // agent run hang until it is cancelled.
 import assert from "node:assert/strict";

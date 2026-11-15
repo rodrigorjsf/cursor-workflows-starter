@@ -1,4 +1,4 @@
-// Seam 1, the run: `runWorkflow` with the fake Cursor SDK against a temp repo and a throwaway home. The two config
+// Seam: the run. `runWorkflow` with the fake Cursor SDK against a temp repo and a throwaway home. The two config
 // files are written to disk; the assertions are on the run outcome, the agent calls the SDK received and the replayed
 // event log (the `run-start` event carries the effective config, its provenance and the violations).
 process.env.WF_METRICS = "off";

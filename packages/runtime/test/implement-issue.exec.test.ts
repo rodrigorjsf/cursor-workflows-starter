@@ -1,4 +1,4 @@
-// Seam 1 on the shipped workflow: `implement-issue` runs every command it needs (the tests of the TDD loop, `git`, `gh`)
+// Seam: the run, on the shipped workflow. `implement-issue` runs every command it needs (the tests of the TDD loop, `git`, `gh`)
 // through `ctx.exec`. A command never blocks the process, is killed at its timeout and shows in the run's event log as a
 // step node; a `gh` failure is an error, never "no PR". Runs `runWorkflow` with the fake SDK and the environment of
 // implement-issue.fixture.ts (fake gh, temp repo, real git and real `node --test`) and reads the replayed event log.
