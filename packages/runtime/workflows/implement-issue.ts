@@ -22,9 +22,9 @@
 //     the issue and stops with "test-command-proposed"; its `next` line drops `seams` (the stored plan holds them) and, resumed,
 //     runs that plan;
 //   - the issue's text is a stranger's: before the first agent call the run asks the forge how the issue's author stands to the repository
-//     (GitHub: `author_association`, through `gh api`), and an author who is not the owner, a member or a collaborator stops the run
-//     with "untrusted-author" until the user passes `allowExternalAuthor` after reading the issue (GitLab says nothing, so it is not
-//     gated, and the log says so: see #100). The text that does reach an agent (the issue's title and body, the output of a test run, the
+//     (GitHub: `author_association`, through `gh api`; GitLab: the author's access level in the project, through `glab api`), and an
+//     author the forge does not trust (GitHub: not the owner, a member or a collaborator; GitLab: not a member with Developer access or
+//     above) stops the run with "untrusted-author" until the user passes `allowExternalAuthor` after reading the issue. The text that does reach an agent (the issue's title and body, the output of a test run, the
 //     diff of the run's own changes) comes behind a fixed line that says it is data, in a fence nothing in it can close
 //     (implement-issue/untrusted.ts);
 //   - a suíte tem de estar verde antes da primeira fatia ("baseline-red"; um runner sem nenhum teste conta como
@@ -232,7 +232,7 @@ interface Args {
   approveSeams?: boolean;
   /** Seams approved by you, in place of the proposed ones: the plan is made again with them (without `testCommand`, the command the planner chooses waits for your approval). On a resume of a run that proposed seams, the run comments the replacement on the issue. */
   seams?: string[];
-  /** Lifts the author gate: the run goes on although the forge does not call the issue's author the owner, a member or a collaborator. Pass it after you read the issue. */
+  /** Lifts the author gate: the run goes on although the forge does not trust the issue's author (GitHub: the owner, a member or a collaborator; GitLab: a member with Developer access or above). Pass it after you read the issue. */
   allowExternalAuthor?: boolean;
   /** O que conta como arquivo de teste (default: DEFAULT_TEST_GLOBS). */
   testGlobs?: string[];
@@ -573,9 +573,7 @@ export default defineWorkflow<Args>({
       // `allowExternalAuthor` skips the lookup too. A lookup that fails is an error (a CommandError fails the run), never a trusted author.
       if (!ctx.args.allowExternalAuthor) {
         const author = await forge.authorStanding(ctx.cwd, number, repo);
-        if (author === undefined) {
-          ctx.log(`could not check the author of issue #${issue.number}: ${forge.name} does not say how an author stands to the repository; the issue's text still reaches the agents as fenced data`);
-        } else if (!author.trusted) {
+        if (!author.trusted) {
           ctx.card({ title: `#${issue.number} ${issue.title}`, badges: ["untrusted author"] });
           return {
             issue: issue.number,
@@ -583,7 +581,7 @@ export default defineWorkflow<Args>({
             runId: ctx.runId,
             authorAssociation: author.association,
             reason:
-              `the author of issue #${issue.number} is not the repository's owner, a member of its organization or a collaborator (the forge says: ${author.association}), ` +
+              `the author of issue #${issue.number} is not ${forge.trusts} (the forge says: ${author.association}), ` +
               "and the issue's text reaches steps that write code and run commands with your credentials. Read the issue; if you trust it, run again with allowExternalAuthor: true",
             next: `npm run wf -- run implement-issue --args ${shellQuote(JSON.stringify({ ...ctx.args, allowExternalAuthor: true }))} --resume ${ctx.runId}`,
           };

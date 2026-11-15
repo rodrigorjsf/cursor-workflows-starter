@@ -60,7 +60,7 @@ export const forgeState = () =>
     /** The calls the CLI of the other forge got: the workflow asked the wrong one. */
     wrongCli?: string[][];
   };
-/** From now on the fake forge fails the operation `op` with `message` on stderr and exit code 1; `message` undefined restores it. `op` is the `gh` call it replaces: "issue view", "issue comment", "pr view" or "pr create" (glab's own commands and routes map to the same names). */
+/** From now on the fake forge fails the operation `op` with `message` on stderr and exit code 1; `message` undefined restores it. `op` is the `gh` call it replaces: "issue view", "issue comment", "pr view" or "pr create", or "author" for the lookup of the issue's author (glab's own commands and routes map to the same names). */
 export function failForge(op: string, message: string | undefined) {
   changeForgeState((state) => {
     state.fail = { ...state.fail };
@@ -119,7 +119,8 @@ const a = process.argv.slice(2);
 if (st.forge !== "github") { (st.wrongCli = st.wrongCli || []).push(["gh", ...a]); fs.writeFileSync(f, JSON.stringify(st)); process.stderr.write("fake gh: this test's forge is " + st.forge); process.exit(99); }
 st.calls.push(a);
 (st.ghToken = st.ghToken || []).push(process.env.GH_TOKEN === undefined ? "unset" : "set"); // does the workflow's own call still get the token?
-const failure = (st.fail || {})[a[0] + " " + a[1]];
+// the operation a call stands for, so a test can fail it with failForge: \`gh api\` is the lookup of the issue's author, the only REST call here
+const failure = (st.fail || {})[a[0] === "api" ? "author" : a[0] + " " + a[1]];
 if (failure !== undefined) { fs.writeFileSync(f, JSON.stringify(st)); process.stderr.write(failure); process.exit(1); }
 const flag = (n) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };
 const save = () => fs.writeFileSync(f, JSON.stringify(st));
@@ -192,11 +193,14 @@ const endpoint = a[0] === "api" ? a.slice(1).find((x, i, all) => !x.startsWith("
 const originUrl = () => require("child_process").execFileSync("git", ["config", "--get", "remote.origin.url"], { encoding: "utf8" }).trim();
 const hostAndPath = (url) => { const m = /^[a-z][a-z0-9+.-]*:\\/\\/(?:[^@/]*@)?([^/:]+)(?::\\d+)?\\/(.+?)(?:\\.git)?\\/?$/i.exec(url) || /^(?:[^@/:]+@)?([^@/:]+):(.+?)(?:\\.git)?$/.exec(url); return { host: m[1].toLowerCase(), path: m[2] }; };
 const post = a[0] === "api" && ["POST", "post"].includes(flag("--method") || flag("-X"));
+// \`projects/<project>/members/all/<id>\`: how an author stands in the project
+const member = endpoint && /^projects\\/[^/?]+\\/members\\/all\\/(\\d+)$/.exec(endpoint);
 const route = a[0] === "issue" && a[1] === "view" ? "issue view"
   : a[0] === "mr" && a[1] === "create" ? "pr create"
   : endpoint && /\\/issues\\/\\d+\\/notes$/.test(endpoint) ? (post ? "issue comment" : "issue view")
   : endpoint && /\\/merge_requests\\?/.test(endpoint) ? "pr view"
   : endpoint && /^projects\\/[^/?]+$/.test(endpoint) ? "repo view"
+  : member ? "author"
   : undefined;
 const failure = route && (st.fail || {})[route];
 if (failure !== undefined) fail(failure, 1);
@@ -204,7 +208,8 @@ if (route === "issue view" && a[0] === "issue") {
   if (flag("--output") !== "json") fail("fake glab: issue view without --output json", 2);
   // the recording of the same form: \`--repo <url>\` names the project, without it the cwd's origin does
   const name = has("--repo", "-R") ? "issue-view-repo" : "issue-view";
-  out({ ...recordedJson(name), iid: st.issue.number, title: st.issue.title, description: st.issue.body, labels: st.issue.labels.map((l) => l.name) }, name);
+  const recordedIssue = recordedJson(name);
+  out({ ...recordedIssue, iid: st.issue.number, title: st.issue.title, description: st.issue.body, labels: st.issue.labels.map((l) => l.name), author: { ...recordedIssue.author, id: st.issue.author_id } }, name);
 } else if (route === "issue view") {
   // all the notes of the issue, newest first as GitLab lists them: the comments, then GitLab's own system notes made before them
   const notes = [...(st.systemNotes || []).map((body) => ({ body, system: true })), ...st.comments.map((body) => ({ body, system: false }))]
@@ -235,6 +240,13 @@ if (route === "issue view" && a[0] === "issue") {
   save();
   process.stderr.write(now(printed("mr-create").stderr));
   process.stdout.write(stdout);
+} else if (route === "author") {
+  // The author of the issue is the one member the test sets, by id and access level; GitLab answers 404 for any other id, as the recording of a stranger shows.
+  const level = Number(member[1]) === st.issue.author_id ? st.issue.access_level : null;
+  if (level === null || level === undefined) { const stranger = printed("author-stranger"); save(); process.stderr.write(fill(stranger.stderr)); process.stdout.write(fill(stranger.stdout)); process.exit(stranger.exitCode); }
+  // the recording of the same form: the project of the cwd, or a named one; the member's own is the recording of its level, the closest one else
+  const name = endpoint.startsWith("projects/:fullpath/") ? ({ 50: "author-owner", 30: "author-developer", 20: "author-reporter" }[level] ?? "author-developer") : "author-owner-repo";
+  out({ ...recordedJson(name), id: st.issue.author_id, access_level: level }, name);
 } else if (route === "repo view") {
   // the project of the cwd is the one its origin names; a named one comes back in GitLab's case (lower case here), on the host asked for
   const cwdRemote = hostAndPath(originUrl());
@@ -254,8 +266,11 @@ export function issue(labels: string[], title = "Add subtract(a, b)") {
         title,
         body: "Exportar `subtract(a, b)` em src/math.js, que devolve a - b.",
         labels: labels.map((name) => ({ name })),
-        /** What the forge says of the author (GitHub's `author_association`): the owner's, unless a test sets another. */
+        /** What the forge says of the author: GitHub's `author_association`, the owner's unless a test sets another. */
         author_association: "OWNER",
+        /** GitLab's way of saying it: the id of the issue's author, and the access level that user has in the project (50 is Owner; null: no member). */
+        author_id: 1,
+        access_level: 50,
       },
       comments: [],
       prs: [],

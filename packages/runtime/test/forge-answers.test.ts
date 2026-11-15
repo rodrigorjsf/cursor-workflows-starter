@@ -12,7 +12,7 @@ import { test } from "node:test";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import { createForge } from "../workflows/implement-issue/forge.js";
 import { GH_RECORDINGS_PATH, type GhRecordingsFile } from "../../../scripts/verify/record-gh-fixtures.js"; // the recorder owns the format and the path; importing it runs nothing
-import { recorded } from "./glab-recordings.js";
+import { type Recording, recorded } from "./glab-recordings.js";
 
 /** An Exec whose every command exits 0 after printing `stdout`: `Commands.read` has its Exec send a command's stdout to the file named in WF_STDOUT. */
 const printing =
@@ -20,6 +20,18 @@ const printing =
   async (_command, _args, opts) => {
     writeFileSync(opts?.env?.WF_STDOUT ?? "", stdout);
     return { ok: true, exitCode: 0, timedOut: false, tail: "" };
+  };
+/**
+ * An Exec that answers the two `glab` calls of the author gate: reading the issue (`glab issue view`) prints `issue`, and the member
+ * route (`glab api`) answers as `member` was recorded. `Commands.read` runs the command as `bash -c 'exec "$@" >"$WF_STDOUT"' read glab <args>`:
+ * the stdout goes to the file, and only the stderr is left in the result's tail, as in a real run.
+ */
+const answeringAuthor =
+  (issue: string, member: Recording): Exec =>
+  async (_command, args, opts) => {
+    const answer = args?.[4] === "issue" ? { exitCode: 0, stdout: issue, stderr: "" } : member;
+    writeFileSync(opts?.env?.WF_STDOUT ?? "", answer.stdout);
+    return { ok: answer.exitCode === 0, exitCode: answer.exitCode, timedOut: false, tail: answer.stderr };
   };
 const LIMITS = { localMs: 1000, networkMs: 1000 };
 const github = (stdout: string) => createForge("github", new Commands(printing(stdout), LIMITS));
@@ -95,4 +107,31 @@ test("GitLab: the merge requests of a branch are read, and one with no state or 
   await assert.rejects(gitlab(JSON.stringify([{ state: "opened" }])).prUrl("/x", "b"), /^Error: glab api merge_requests \(b\): 0\.0\.web_url: /);
   await assert.rejects(gitlab(JSON.stringify([{ web_url: "https://x/-/merge_requests/1" }])).prState("/x", "b"), /^Error: glab api merge_requests \(b\): 0\.0\.state: /);
   await assert.rejects(gitlab('{"message":"401 Unauthorized"}').prUrl("/x", "b"), /^Error: glab api merge_requests \(b\): expected a list/);
+});
+
+test("GitLab: an author stands as the recorded member answer says: an owner and a developer are trusted, a reporter and an account that is no member are strangers", async () => {
+  const issue = recorded("issue-view").stdout;
+  const standing = async (member: Recording) => {
+    const { association, trusted } = await createForge("gitlab", new Commands(answeringAuthor(issue, member), LIMITS)).authorStanding("/x", 1);
+    return [association, trusted];
+  };
+  assert.deepEqual(await standing(recorded("author-owner")), ["Owner (50)", true], "a member the project has from its group");
+  assert.deepEqual(await standing(recorded("author-developer")), ["Developer (30)", true]);
+  assert.deepEqual(await standing(recorded("author-reporter")), ["Reporter (20)", false]);
+  assert.deepEqual(await standing(recorded("author-stranger")), ["not a member", false], "GitLab's 404 for an account that is no member, as glab prints it, is a stranger");
+});
+
+test("GitLab: any answer about the author that is not a member's or a 404 is an error, never a trusted author", async () => {
+  const issue = recorded("issue-view").stdout;
+  const member = recorded("author-developer");
+  const standing = (member: Recording, issueText = issue) => createForge("gitlab", new Commands(answeringAuthor(issueText, member), LIMITS)).authorStanding("/x", 1);
+  await assert.rejects(standing({ ...member, exitCode: 1, stdout: "", stderr: "glab: 401 Unauthorized (HTTP 401)" }), /401 Unauthorized/);
+  await assert.rejects(standing({ ...member, exitCode: 1, stdout: "", stderr: "glab: 403 Forbidden (HTTP 403)" }), /403 Forbidden/);
+  await assert.rejects(standing({ ...member, exitCode: 2, stdout: "", stderr: recorded("author-stranger").stderr }), /404 Not found/, "only the exit code glab gave for the recorded 404 is that answer");
+  await assert.rejects(standing({ ...member, exitCode: 1, stdout: "", stderr: "glab: 404 Project Not Found (HTTP 404)" }), /404 Project Not Found/, "a 404 for another reason than a missing member is no stranger's answer");
+  await assert.rejects(standing({ ...member, stdout: JSON.stringify({ id: 5, access_level: "30" }) }), /^Error: glab api project member 1: access_level: .*expected number/);
+  await assert.rejects(standing({ ...member, stdout: "<html>502</html>" }), /^Error: glab api project member 1: not valid JSON \(/);
+  const record: Record<string, unknown> = JSON.parse(issue);
+  await assert.rejects(standing(member, JSON.stringify({ ...record, author: null })), /^Error: glab issue view 1 author: author: /);
+  await assert.rejects(standing(member, JSON.stringify({ ...record, author: { id: "one" } })), /^Error: glab issue view 1 author: author\.id: .*expected number/);
 });

@@ -200,7 +200,7 @@ const ALLOWED_JSON_CASTS: Array<{ file: string; call: string; why: string }> = [
   { file: "scripts/verify/validation-report.ts", call: 'readFileSync(join(kitDir, "package.json"), "utf8")', why: "the package.json of the kit the report is about, read for its version" },
   { file: "scripts/config-reference.ts", call: "schemaText", why: "the kit's own shipped config schema" },
   { file: "scripts/verify/record-gh-fixtures.ts", call: 'readFileSync(join(calls, name), "utf8")', why: "a recording this script wrote" },
-  { file: "scripts/verify/record-glab-fixtures.ts", call: 'readFileSync(join(this.recordDir, calls[0]!), "utf8")', why: "a recording this script wrote" },
+  { file: "scripts/verify/record-glab-fixtures.ts", call: 'readFileSync(join(this.recordDir, calls.at(-1)!), "utf8")', why: "a recording this script wrote" },
   { file: "scripts/verify/record-release-fixtures.ts", call: "createRedactor({ env: {} }).text(text)", why: "the recording the script has just built and scrubbed, parsed back to its own type" },
 ];
 

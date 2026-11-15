@@ -183,7 +183,12 @@ export class Commands {
    * Returns its stdout, or undefined for "nothing found". Any other failure (an auth error, a network stall) is an error.
    */
   async forgeReadOrNothing(cli: string, cwd: string, nothing: RegExp, ...args: string[]): Promise<string | undefined> {
-    const r = await this.read(cli, args, cwd, this.timeouts.networkMs, FORGE_LABEL_WORDS);
+    return this.forgeReadOrNothingWith(cli, cwd, {}, nothing, ...args);
+  }
+
+  /** `forgeReadOrNothing` with variables added to the CLI's environment (`undefined` removes one), as `forgeReadWith`. */
+  async forgeReadOrNothingWith(cli: string, cwd: string, env: Record<string, string | undefined>, nothing: RegExp, ...args: string[]): Promise<string | undefined> {
+    const r = await this.read(cli, args, cwd, this.timeouts.networkMs, FORGE_LABEL_WORDS, env);
     if (r.ok) return r.stdout;
     if (r.exitCode === 1 && nothing.test(r.tail)) return undefined;
     throw new CommandError(cli, args, r, this.timeouts.networkMs);
