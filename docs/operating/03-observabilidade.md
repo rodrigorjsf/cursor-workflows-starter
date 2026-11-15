@@ -17,7 +17,7 @@ O objetivo é responder com dados:
 ## 1. Começo rápido
 
 ```bash
-npm run wf -- run implement-issue --cwd ../meu-repo --args '{"issue":12}'   # grava métricas automaticamente
+npm run wf -- run implement-issue --cwd ../meu-repo --args '{"issue":12}' --max-cents 100 --max-tokens 2000000   # grava métricas automaticamente
 npm run stats                         # resumo dos últimos 30 dias no terminal
 npm run dash                          # http://127.0.0.1:4317
 npm run wf -- metrics export --days 90 --format csv --out ./metrics-export   # anonimizado por padrão
