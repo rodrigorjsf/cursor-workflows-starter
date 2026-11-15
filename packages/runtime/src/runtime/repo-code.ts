@@ -6,7 +6,7 @@
 //
 // Read only, and forgiving: a file that is missing or is not the JSON it should be is skipped, because naming what it holds is all
 // this is for. The kit's own `workflows` MCP server, which `wf init` writes, is not a finding.
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { SettingSource } from "@cursor/sdk";
 import { allowedSources } from "../config/index.js";
@@ -34,15 +34,27 @@ const KIT_SERVER = "workflows";
 
 const shown = (text: string): string => (text.length > COMMAND_MAX_CHARS ? `${text.slice(0, COMMAND_MAX_CHARS)}...` : text);
 
-/** The parsed JSON object in `cwd/file`, or undefined when there is none or it is not one. */
+/**
+ * Read errors that mean the file runs nothing. The Cursor SDK loads the settings as this same user: a file that is missing, that
+ * this user may not read, or that is a folder, is one it cannot load either, so leaving it out of the listing hides no code.
+ */
+const UNLOADABLE = new Set(["ENOENT", "ENOTDIR", "EISDIR", "EACCES", "EPERM"]);
+
+/** The parsed JSON object in `cwd/file`, or undefined when there is none or it is not one. Any other read error is thrown. */
 function readObject(cwd: string, file: string): Record<string, unknown> | undefined {
-  const path = join(cwd, file);
-  if (!existsSync(path)) return undefined;
+  let text: string;
   try {
-    const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+    text = readFileSync(join(cwd, file), "utf8");
+  } catch (err) {
+    if (UNLOADABLE.has((err as NodeJS.ErrnoException).code ?? "")) return undefined;
+    throw err;
+  }
+  try {
+    const value: unknown = JSON.parse(text);
     return isRecord(value) ? value : undefined;
-  } catch {
-    return undefined;
+  } catch (err) {
+    if (err instanceof SyntaxError) return undefined; // not JSON: the SDK cannot load it either, so it runs nothing
+    throw err;
   }
 }
 
