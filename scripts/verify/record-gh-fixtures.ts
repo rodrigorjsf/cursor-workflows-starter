@@ -5,15 +5,19 @@
 //   `gh api -i --silent user` (the response headers `wf doctor` reads the token's scopes from, `readTokenScopes`). It writes what gh printed, with
 //   the repository's `owner/name` replaced by `owner/repo` and the per-request and per-account headers neutralised, to
 //   packages/runtime/test/fixtures/gh/recordings.json. The fake `gh` of the dashboard's tests, the one of the `implement-issue` tests and the
-//   one of the doctor's tests read that file. It only reads: nothing is created on GitHub.
+//   one of the doctor's tests read that file. It also records `gh repo view <url> --json visibility -q .visibility` (`remoteVisibility`,
+//   packages/runtime/src/runtime/remote-visibility.ts: what the cloud snapshot guard asks) for a public repository, a private one and a URL
+//   on a host that is not GitHub. It only reads: nothing is created on GitHub.
 // WHY: a fake of an external CLI answers from a recording of the real tool (CODING_STANDARDS, Testing): the argument list the forge
 //   sends and what gh prints for it are what the fake accepts and prints, never what someone remembered of gh's documentation.
 // WHEN: after changing the `gh issue list` or the `gh api` command line in forge.ts, or to try a newer gh. Needs `gh auth login`, and at
 //   least two open issues with the label (default `ready-for-agent`) in the repository, so that the recording shows how gh prints a list
-//   of issues; the author of the first one is the one `gh api` reads.
+//   of issues; the author of the first one is the one `gh api` reads. Also needs a private repository of the logged-in account, to record
+//   how gh prints "PRIVATE" (`--private-repo <owner/name>` or `GH_RECORD_PRIVATE_REPO`; only its answer is kept, never its name).
 // HOW: `npx tsx scripts/verify/record-gh-fixtures.ts` in a clone of the repository to read (a GitHub origin), or with `--repo
-//   <owner/name>`; `GH_RECORD_LABEL=<label>` picks the label. Prints where it wrote; exits 1 and writes nothing when the repository
-//   has fewer than two open issues with the label, or when a recording still holds a credential.
+//   <owner/name>` and `--private-repo <owner/name>`; `GH_RECORD_LABEL=<label>` picks the label. Prints where it wrote; exits 1 and writes
+//   nothing when the repository has fewer than two open issues with the label, when no private repository was named, or when a recording
+//   still holds a credential.
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,6 +27,7 @@ import { createRedactor } from "../../packages/runtime/src/runtime/redaction.js"
 import { directCommands } from "../../packages/runtime/workflows/implement-issue/gc.js";
 import { createForge, loginOf } from "../../packages/runtime/workflows/implement-issue/forge.js";
 import { readTokenScopes } from "../../packages/runtime/src/github-token-scopes.js";
+import { remoteVisibility } from "../../packages/runtime/src/runtime/remote-visibility.js";
 import { isEntryPoint } from "../lib/cli.js";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
@@ -34,6 +39,13 @@ export const AUTHOR_RECORDING = { cwd: "issue-author-association", repo: "issue-
 
 /** The name of the recording of `gh api -i --silent user`, made for github.com: the headers a token's scopes are read from. */
 export const TOKEN_SCOPES_RECORDING = "token-scopes";
+
+/** The names of the recordings of `gh repo view --json visibility`: a public repository, a private one, and a URL gh cannot answer for. */
+export const VISIBILITY_RECORDING = { public: "repo-visibility-public", private: "repo-visibility-private", unavailable: "repo-visibility-unavailable" } as const;
+
+/** A repository on a host that is not GitHub: `gh repo view` fails for it. Its name in the recording is `UNAVAILABLE_PLACEHOLDER`. */
+const UNAVAILABLE_REPO = "https://gitlab.com/gitlab-org/gitlab";
+export const UNAVAILABLE_PLACEHOLDER = "https://gitlab.com/owner/repo";
 
 /**
  * What replaces the value of a response header that names the request, the moment or the account the recording was made for (the
@@ -113,8 +125,24 @@ async function recordCalls(run: () => Promise<unknown>): Promise<GhRecording[]> 
   }
 }
 
+/**
+ * The recordings of `gh repo view <url> --json visibility -q .visibility` for `repo` (public) and `privateRepo`, both `owner/name` on
+ * GitHub, and for a URL on another host, made through `remoteVisibility`. The two names are replaced by `owner/repo` and the other
+ * host's repository by `UNAVAILABLE_PLACEHOLDER`.
+ */
+export async function recordVisibility(repo: string, privateRepo: string): Promise<Record<string, GhRecording>> {
+  const asked = (url: string) => recordCalls(() => remoteVisibility(url, { timeoutMs: 20_000 })).then(([call]) => call!);
+  const [publicCall, privateCall, unavailableCall] = [await asked(`https://github.com/${repo}`), await asked(`https://github.com/${privateRepo}`), await asked(UNAVAILABLE_REPO)];
+  const scrub = (text: string) => text.split(`https://github.com/${repo}`).join(`https://github.com/${REPO_PLACEHOLDER}`).split(`https://github.com/${privateRepo}`).join(`https://github.com/${REPO_PLACEHOLDER}`).split(UNAVAILABLE_REPO).join(UNAVAILABLE_PLACEHOLDER);
+  const recorded = { [VISIBILITY_RECORDING.public]: publicCall, [VISIBILITY_RECORDING.private]: privateCall, [VISIBILITY_RECORDING.unavailable]: unavailableCall };
+  const file = Object.fromEntries(Object.entries(recorded).map(([name, r]) => [name, { args: r.args.map(scrub), exitCode: r.exitCode, stdout: scrub(r.stdout), stderr: scrub(r.stderr) }]));
+  const text = JSON.stringify(file);
+  if (text.includes(repo) || text.includes(privateRepo) || text.includes("gitlab-org")) throw new Error("a visibility recording still names a repository: nothing was written");
+  return file;
+}
+
 /** The recordings of `gh issue list` for `label` and for a label no issue has, and of the author of the first issue listed (of the cwd's repository, and of `repo` by name and by URL), made in `cwd`, whose origin names the repository. */
-export async function record(cwd: string, label: string, repo: string): Promise<GhRecordingsFile> {
+export async function record(cwd: string, label: string, repo: string, privateRepo: string): Promise<GhRecordingsFile> {
   const forge = createForge("github", directCommands());
   const listed: Array<{ number: number }> = [];
   const [full, empty] = [
@@ -135,10 +163,13 @@ export async function record(cwd: string, label: string, repo: string): Promise<
     recordedWith: { gh: version },
     placeholders: { repo: REPO_PLACEHOLDER },
     recordings: Object.fromEntries(
-      Object.entries({ "issue-list": full!, "issue-list-empty": empty!, [AUTHOR_RECORDING.cwd]: author!, [AUTHOR_RECORDING.repo]: authorOfRepo!, [AUTHOR_RECORDING.url]: authorOfUrl!, [TOKEN_SCOPES_RECORDING]: scopes! }).map(([name, r]) => [
-        name,
-        { args: r.args.map(scrub), exitCode: r.exitCode, stdout: scrub(name === TOKEN_SCOPES_RECORDING ? neutraliseHeaders(r.stdout) : r.stdout), stderr: scrub(r.stderr) },
-      ]),
+      [
+        ...Object.entries({ "issue-list": full!, "issue-list-empty": empty!, [AUTHOR_RECORDING.cwd]: author!, [AUTHOR_RECORDING.repo]: authorOfRepo!, [AUTHOR_RECORDING.url]: authorOfUrl!, [TOKEN_SCOPES_RECORDING]: scopes! }).map(([name, r]) => [
+          name,
+          { args: r.args.map(scrub), exitCode: r.exitCode, stdout: scrub(name === TOKEN_SCOPES_RECORDING ? neutraliseHeaders(r.stdout) : r.stdout), stderr: scrub(r.stderr) },
+        ]),
+        ...Object.entries(await recordVisibility(repo, privateRepo)),
+      ],
     ),
   };
   if (repo !== "" && JSON.stringify(file).includes(repo)) throw new Error("a recording still names the repository: nothing was written");
@@ -149,7 +180,10 @@ export async function record(cwd: string, label: string, repo: string): Promise<
 export async function main(argv: string[]): Promise<number> {
   const at = argv.indexOf("--repo");
   const repo = at === -1 ? execFileSync("gh", ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], { encoding: "utf8" }).trim() : (argv[at + 1] ?? "");
-  const file = await record(process.cwd(), process.env.GH_RECORD_LABEL ?? "ready-for-agent", repo);
+  const privateAt = argv.indexOf("--private-repo");
+  const privateRepo = privateAt === -1 ? (process.env.GH_RECORD_PRIVATE_REPO ?? "") : (argv[privateAt + 1] ?? "");
+  if (privateRepo === "") throw new Error("name a private repository of the logged-in account to record how gh prints PRIVATE: --private-repo <owner/name> or GH_RECORD_PRIVATE_REPO (only gh's answer is kept, never the name)");
+  const file = await record(process.cwd(), process.env.GH_RECORD_LABEL ?? "ready-for-agent", repo, privateRepo);
   mkdirSync(dirname(GH_RECORDINGS_PATH), { recursive: true });
   const partial = `${GH_RECORDINGS_PATH}.partial`;
   writeFileSync(partial, `${JSON.stringify(file, null, 2)}\n`);
