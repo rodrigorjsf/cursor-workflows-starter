@@ -18,7 +18,9 @@
     (nada de espaço, `?`, `;` ou um `-` na frente) e só nomeia o host próprio do forge, o do `origin`, um declarado em `forges` ou
     um do novo ajuste `workflows.implement-issue.settings.repoHosts` (padrão: nenhum). `example.invalid/o/r`, `ghe/o/r` e uma URL
     `http://`, `git://` ou `ext::` terminam o run antes da primeira chamada ao `gh` ou ao `glab`. O `wf gc` aplica a mesma regra
-    ao `repo` que um run gravou no registro dele, que é um arquivo do `.workflows/` do repositório.
+    ao `repo` que um run gravou no registro dele, que é um arquivo do `.workflows/` do repositório. No GitLab, um grupo aninhado como
+    `grupo/sub/fundo/projeto` não nomeia host algum: só um primeiro segmento com `.` ou `:` conta como host, como o `glab` 1.130.0
+    o lê em `glrepo.FromFullName`.
   - **O instalador é baixado por `https` para um arquivo que o `mktemp` escolheu**: `curl --proto '=https' --tlsv1.2 -fsSL ... -o
     "$installer"`, no `INSTALL-AGENT.md`, nos dois READMEs e no capítulo [2.1](docs/usage/01-instalacao.md#pelo-instalador).
   - **Os comandos `git` de rede só usam `https`, `ssh` e caminhos locais.** O `push` e o `ls-remote` do `implement-issue`, o

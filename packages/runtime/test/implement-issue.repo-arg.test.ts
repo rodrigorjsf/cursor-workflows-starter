@@ -1,4 +1,5 @@
-// Seam: the workflow's `repo` argument, through `runWorkflow` with the fake Cursor SDK and the fake `gh` and `glab`. The forge's CLI
+// Seam: the workflow's `repo` argument, through `runWorkflow` with the fake Cursor SDK and the fake `gh` and `glab`; `repoHostOf`, the host a
+// scheme-less `repo` names, called directly (the ticket's rule of which spellings name a host is a table of inputs). The forge's CLI
 // sends its token to the host the `--repo` it is given names (`gh` takes `[HOST/]OWNER/REPO` and a URL, and sends GH_ENTERPRISE_TOKEN,
 // or the login stored for that host, to a host other than github.com), so a `repo` chosen by whoever drove the chat must not pick that
 // host. `repo` names its own host only when that host is the forge's default, the host of this repository's `origin`, or one the config
@@ -121,7 +122,7 @@ forgeTest("on GitLab a dotted first segment is still a host at four segments or 
   issue(["complexity:medium"]);
   await refused("evil.example/g/s/p", /evil\.example.*repoHosts/s);
   await refused("evil.example/g/s/n/p", /evil\.example.*repoHosts/s);
-  await refused("host:3000/g/p", /\bhost\b/); // a port: the kit reads it as an scp-like remote, which names its host (refused by the forge detection)
+  await refused("ghe:3000/g/p", /names the host ghe\b/); // a port: the kit reads it as an scp-like remote, which names its host (refused by the forge detection)
   await refused("https://evil.example:99999/group/project", /not a valid URL/);
 
   settings({ repoHosts: ["evil.example"] });
@@ -137,8 +138,8 @@ test("repoHostOf: on GitLab only a dotted or colon first segment of three segmen
   assert.equal(repoHostOf("H.X/g/s/p", "gitlab"), "h.x", "in lower case");
   assert.equal(repoHostOf("h.x/g/s/n/p", "gitlab"), "h.x");
   assert.equal(repoHostOf("h.x/p", "gitlab"), undefined, "two segments are OWNER/REPO whatever the owner looks like");
-  assert.equal(repoHostOf("host:3000/g/p", "gitlab"), "host", "a port is read as an scp-like remote, which names its host");
-  assert.notEqual(repoHostOf("h:/g/p", "gitlab"), undefined, "a colon in the first segment never passes as a path, whatever else reads it");
+  assert.equal(repoHostOf("ghe:3000/g/p", "gitlab"), "ghe", "a port is read as an scp-like remote, which names its host");
+  assert.equal(repoHostOf("h:/g/p", "gitlab"), "h:", "a colon in the first segment never passes as a path, even when it is no scp-like remote (a drive-like `h:/`)");
   assert.equal(repoHostOf("https://evil.example/g/s/n/p", "gitlab"), "evil.example", "a URL names its host");
 });
 
