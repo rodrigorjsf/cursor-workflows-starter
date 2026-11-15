@@ -7,7 +7,7 @@ process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
 import "./isolate-home.js";
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { calls, costConfig, script, stats } from "./fake-sdk.js";
@@ -229,6 +229,23 @@ test("a memo folder that is missing has nothing to prune, and one that cannot be
   assert.deepEqual(pruned, []);
   assert.equal(failed.length, 1);
   assert.match(failed[0]?.error ?? "", /ENOTDIR/);
+});
+
+test("a run whose memo folder cannot be listed warns that the old memo entries could not be pruned, not that an entry could not be deleted", async () => {
+  const memoDir = join(cwd, ".workflows", "memo");
+  mkdirSync(memoDir, { recursive: true });
+  chmodSync(memoDir, 0o000); // the folder is there, but listing it fails with EACCES
+  let id: string;
+  try {
+    id = await run("memo-unlistable");
+  } finally {
+    chmodSync(memoDir, 0o700); // so afterEach can delete it
+  }
+  const warnings = logOf(id).filter((e) => e.type === "warning").map((e) => (e as { message: string }).message);
+  const memoWarnings = warnings.filter((message) => message.includes("memo"));
+  assert.equal(memoWarnings.length, 1, warnings.join("\n"));
+  assert.match(memoWarnings[0] ?? "", /^could not prune the old memo entries: could not list .*EACCES/);
+  assert.doesNotMatch(memoWarnings[0] ?? "", /delete|entry \*/);
 });
 
 test("a limit set to null is off, and a limit passed to the run replaces the default", async () => {

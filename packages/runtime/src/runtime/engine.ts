@@ -262,7 +262,9 @@ function announceRun<A>(o: {
     emit({ type: "warning", message: `could not delete the old content and step results of run ${prunedRun}: ${error}` });
   }
   for (const { key, error } of memoPruned.failed) {
-    emit({ type: "warning", message: `could not delete the old memo entry ${key}: ${error}` });
+    // Key "*": the memo folder itself could not be listed (see `pruneMemo`), so no entry was tried.
+    const message = key === "*" ? `could not prune the old memo entries: ${error}` : `could not delete the old memo entry ${key}: ${error}`;
+    emit({ type: "warning", message });
   }
   if (store.tornTail.events) emit({ type: "warning", message: "the last line of the event log was incomplete (a crash in the middle of a write): ignored" });
   if (store.tornTail.journal) emit({ type: "warning", message: "the last line of the journal was incomplete (a crash in the middle of a write): its step runs again" });
