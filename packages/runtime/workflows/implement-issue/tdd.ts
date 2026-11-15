@@ -4,6 +4,9 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { z } from "zod";
+import { errorText } from "../../src/runtime/error-text.js";
+import { isRecord, parseJson } from "../../src/runtime/parse-json.js";
 import { runDirIn } from "../../src/runtime/run-store.js";
 import { writeFileAtomic } from "../../src/runtime/state-files.js";
 import { CommandError, type Commands } from "./commands.js";
@@ -114,9 +117,10 @@ const PKG_RUNNER_FIELDS = ["jest", "vitest", "mocha", "ava", "c8", "nyc"];
 
 /** O `package.json` mudou o que roda nos testes? Compara os scripts e os campos de configuração de runners. */
 export async function runnerConfigChanged(cmd: Commands, cwd: string, before: string, after: string): Promise<boolean> {
-  const read = async (tree: string) => {
+  const read = async (tree: string): Promise<Record<string, unknown>> => {
     try {
-      return JSON.parse(await cmd.gitRead(cwd, "show", `${tree}:package.json`)) as Record<string, unknown>;
+      const manifest: unknown = JSON.parse(await cmd.gitRead(cwd, "show", `${tree}:package.json`));
+      return isRecord(manifest) ? manifest : {}; // a package.json that is not an object (`null`, a list) names no runner
     } catch (err) {
       // O git respondeu que não há package.json na árvore (saiu com erro), ou ele não é JSON: não mudou o que roda.
       if ((err instanceof CommandError && err.result.exitCode !== null) || err instanceof SyntaxError) return {};
@@ -245,6 +249,47 @@ export interface Progress {
   slices: SliceRecord[];
 }
 
+/**
+ * What a progress file holds, as the workflow writes it. A file of another shape stops the run with an error that names the file
+ * and the field, instead of a TypeError where the run first reads it. A field a newer kit adds is kept.
+ */
+const PROGRESS: z.ZodType<Progress> = z.looseObject({
+  branch: z.string().optional(),
+  worktree: z.string().optional(),
+  baseCommit: z.string().optional(),
+  baselineGreen: z.boolean().optional(),
+  proposedPlan: z.unknown().optional(),
+  reviews: z.record(z.string(), z.unknown()).optional(),
+  refactorDone: z.boolean().optional(),
+  refactorSummary: z.string().optional(),
+  deliveredCommit: z.string().optional(),
+  pushed: z.array(z.string()).optional(),
+  repo: z.string().optional(),
+  forge: z.string().optional(),
+  inFlight: z.looseObject({ id: z.string(), before: z.string(), interrupted: z.boolean().optional(), execution: z.number().optional() }).optional(),
+  crashes: z.record(z.string(), z.number()).optional(),
+  writeSeq: z.number().optional(),
+  slices: z.array(
+    z.looseObject({
+      key: z.string(),
+      behavior: z.string(),
+      seam: z.string(),
+      testFile: z.string().optional(),
+      testName: z.string().optional(),
+      testHash: z.string().nullable().optional(),
+      redTree: z.string().optional(),
+      red: z.string().optional(),
+      green: z.string().optional(),
+      alreadySatisfied: z.string().optional(),
+      redAttempt: z.number().optional(),
+      greenAttempt: z.number().optional(),
+      greenDone: z.boolean().optional(),
+      fixRound: z.number().optional(),
+      done: z.boolean(),
+    }),
+  ),
+});
+
 /** Progresso por run, em `.workflows/runs/<runId>/`, fora da árvore versionada. */
 export class ProgressStore {
   readonly file: string;
@@ -254,7 +299,14 @@ export class ProgressStore {
   constructor(cwd: string, runId: string) {
     this.file = join(runDirIn(cwd, runId), "tdd-progress.json");
     this.existed = existsSync(this.file);
-    this.data = this.existed ? (JSON.parse(readFileSync(this.file, "utf8")) as Progress) : { slices: [] };
+    this.data = this.existed ? this.read() : { slices: [] };
+  }
+  private read(): Progress {
+    try {
+      return parseJson(readFileSync(this.file, "utf8"), PROGRESS, this.file);
+    } catch (err) {
+      throw new Error(`${errorText(err)}; restore the file, or start a new run instead of resuming this one`);
+    }
   }
   slice(key: string): SliceRecord | undefined {
     return this.data.slices.find((s) => s.key === key);

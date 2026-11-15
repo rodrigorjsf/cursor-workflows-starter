@@ -10,15 +10,15 @@ import type { WorkflowDefinition } from "./workflow.js";
 const RUNTIME_SRC = resolve(import.meta.dirname, "..") + sep;
 const RELATIVE_IMPORT = /(?:\bfrom\s*|\bimport\s*\(?\s*)["'](\.{1,2}\/[^"']+)["']/g;
 
-const fingerprints = new WeakMap<WorkflowDefinition<any, any>, string>();
+const fingerprints = new WeakMap<WorkflowDefinition, string>();
 
 /** Records the source fingerprint of the file `def` was loaded from. */
-export function recordWorkflowSource(def: WorkflowDefinition<any, any>, file: string): void {
+export function recordWorkflowSource(def: WorkflowDefinition, file: string): void {
   fingerprints.set(def, hashWorkflowSource(file));
 }
 
 /** The source fingerprint recorded for `def`, or undefined when it was not loaded from a file (a test, an inline def). */
-export function workflowSourceHash(def: WorkflowDefinition<any, any>): string | undefined {
+export function workflowSourceHash(def: WorkflowDefinition): string | undefined {
   return fingerprints.get(def);
 }
 

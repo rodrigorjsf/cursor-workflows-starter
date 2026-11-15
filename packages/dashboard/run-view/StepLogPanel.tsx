@@ -104,6 +104,8 @@ export function StepLogPanel({ runId, node, now, live, upTo, onClose }: StepLogP
     if (panel.current && closeButton.current) focusOnOpen(panel.current, closeButton.current, (el) => getComputedStyle(el));
     // A passive cleanup runs once the panel is out of the page and the canvas is shown again, so the node can take the focus.
     return () => focusOnClose(document, node.id);
+    // Once, on purpose: the focus goes into the panel when it opens and back to the node when it closes. RunView keys the panel by
+    // the node's id (`key={selected.id}`), so another node is another mount, and the `node.id` the cleanup closed over is its node's.
   }, []);
 
   useEffect(() => {

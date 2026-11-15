@@ -192,7 +192,7 @@ test("tokens como a API devolve: inputTokens já inclui leitura e escrita de cac
   db.exec(`INSERT INTO runs (exec_id, run_id, workflow, workflow_hash, started_at) VALUES ('e2', 'r2', 'w', 'h', '2026-11-10T00:00:00Z')`);
   db.prepare(`INSERT INTO attempts (attempt_id, exec_id, step_key, attempt, model_id, model_key, ok, steps, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, started_at)
               VALUES ('real', 'e2', 'k', 1, 'claude-haiku-5-5', 'claude-haiku-5-5', 1, 1, 3345, 32, 384, 0, '2026-11-10T00:00:00Z')`).run();
-  const a = db.prepare("SELECT prompt_tokens, avg_prompt_per_step, cost_cents FROM v_attempts WHERE attempt_id = 'real'").get() as Record<string, number>;
+  const a = db.prepare("SELECT prompt_tokens, avg_prompt_per_step, cost_cents FROM v_attempts WHERE attempt_id = 'real'").get() as { prompt_tokens: number; avg_prompt_per_step: number; cost_cents: number };
   assert.equal(a.prompt_tokens, 3345, "o cache não pode ser somado de novo ao input");
   assert.equal(a.avg_prompt_per_step, 3345);
   // Estimativa: input sem cache pela tarifa de input, cache read pela tarifa de cache read (Haiku 5.5 no Cursor: 0,10 / 0,01 / 0,50 por milhão).

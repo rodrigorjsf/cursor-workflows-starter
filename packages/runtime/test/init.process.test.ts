@@ -110,7 +110,7 @@ async function toolsOfServer(server: { command: string; args: string[]; env?: Re
 
 test("both generated MCP configs start the kit's MCP server on the target repo, as the IDEs launch them", async () => {
   const repo = emptyRepo();
-  put(join(repo, ".agents", "workflows", "repo-local.mjs"), 'export default { meta: { name: "repo-local", description: "workflow of the target repo" } };\n');
+  put(join(repo, ".agents", "workflows", "repo-local.mjs"), 'export default { meta: { name: "repo-local", description: "workflow of the target repo" }, async run() { return "ok"; } };\n');
   assert.equal(init(repo).status, 0);
 
   // A user whose kit is installed at ~/.cursor-workflows/kit (here: a link to this checkout).

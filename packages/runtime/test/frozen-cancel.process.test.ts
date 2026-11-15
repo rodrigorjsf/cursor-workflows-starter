@@ -35,8 +35,8 @@ function running(pid: number): boolean {
 }
 
 /** Starts `command` as a process group leader of its own, so the afterEach reaches everything it left. */
-function detach(command: string, args: string[]): ChildProcess {
-  const child = spawn(command, args, { detached: true, stdio: "ignore" });
+function detach(command: string, args: string[], env: NodeJS.ProcessEnv = process.env): ChildProcess {
+  const child = spawn(command, args, { detached: true, stdio: "ignore", env });
   leaders.add(child.pid!);
   return child;
 }
@@ -46,7 +46,7 @@ async function startJob(jobId: string, mode?: "detached" | "grouped") {
   const repo = mkdtempSync(join(sandbox, "repo-"));
   const pidDir = mkdtempSync(join(sandbox, "pids-"));
   const env = { ...process.env, TSX_TSCONFIG_PATH: join(import.meta.dirname, "..", "tsconfig.test.json") };
-  const child = detach(process.execPath, ["--import", import.meta.resolve("tsx"), join(import.meta.dirname, "exec-job.ts"), repo, jobId, `run-${jobId}`, pidDir, ...(mode ? [mode] : [])]);
+  const child = detach(process.execPath, ["--import", import.meta.resolve("tsx"), join(import.meta.dirname, "exec-job.ts"), repo, jobId, `run-${jobId}`, pidDir, ...(mode ? [mode] : [])], env);
   const stillThere = () => {
     if (child.exitCode !== null || child.signalCode !== null) throw new Error(`the job process ended early (${child.exitCode ?? child.signalCode})`);
   };

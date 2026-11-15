@@ -102,6 +102,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import { wasKilledByCancel } from "../src/runtime/job-state.js";
+import { isRecord } from "../src/runtime/parse-json.js";
 import { createRedactor, findCredential, findSecretEnvValue } from "../src/runtime/redaction.js";
 import { NamedLockedError, acquireNamedLock, eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { defineWorkflow, type AgentCallOptions, type WorkflowCard } from "../src/runtime/workflow.js";
@@ -485,8 +486,8 @@ function savedSecrets(): string[] {
   const keys: string[] = [];
   if (process.env.CURSOR_API_KEY) keys.push(process.env.CURSOR_API_KEY);
   try {
-    const stored = JSON.parse(readFileSync(join(homedir(), ".cursor", "sdk", "auth.json"), "utf8")) as { apiKey?: unknown };
-    if (typeof stored.apiKey === "string") keys.push(stored.apiKey);
+    const stored: unknown = JSON.parse(readFileSync(join(homedir(), ".cursor", "sdk", "auth.json"), "utf8"));
+    if (isRecord(stored) && typeof stored.apiKey === "string") keys.push(stored.apiKey);
   } catch {
     // sem login salvo
   }

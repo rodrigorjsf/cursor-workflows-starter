@@ -22,6 +22,7 @@ import { MCP_CONFIG_FILES, type McpLaunch, type McpLaunches, readMcpLaunches } f
 import { errorText } from "./runtime/error-text.js";
 import { createRedactor } from "./runtime/redaction.js";
 import { loadWorkflows } from "./runtime/registry.js";
+import { isRecord } from "./runtime/parse-json.js";
 import { userDir } from "./runtime/state.js";
 import type { WorkflowDefinition } from "./runtime/workflow.js";
 import { type ForgeLogin, type ForgeToken, type OriginForge, forgeOfOrigin, loginOf } from "../workflows/implement-issue/forge.js";
@@ -377,7 +378,8 @@ function checkKitVersion(cwd: string, probes: ServerProbe[]): CheckResult {
 /** What the `readBoundary` of a Cursor `sandbox.json` is: undefined when the file is missing, does not parse or sets none. */
 function readBoundaryOf(file: string): unknown {
   try {
-    return (JSON.parse(readFileSync(file, "utf8")) as { readBoundary?: unknown }).readBoundary;
+    const config: unknown = JSON.parse(readFileSync(file, "utf8"));
+    return isRecord(config) ? config.readBoundary : undefined;
   } catch {
     return undefined;
   }
@@ -418,8 +420,8 @@ function checkSandbox(cwd: string, resolution: Resolution): CheckResult {
 /** The `version` of the kit's runtime package at `kit`: undefined when the manifest is missing or is not JSON with a version. */
 function installedKitVersion(kit: string): string | undefined {
   try {
-    const { version } = JSON.parse(readFileSync(join(kit, "packages", "runtime", "package.json"), "utf8")) as { version?: unknown };
-    return typeof version === "string" ? version : undefined;
+    const manifest: unknown = JSON.parse(readFileSync(join(kit, "packages", "runtime", "package.json"), "utf8"));
+    return isRecord(manifest) && typeof manifest.version === "string" ? manifest.version : undefined;
   } catch {
     return undefined; // the manifest is missing or broken: the caller reports a kit with no readable version
   }

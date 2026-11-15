@@ -309,6 +309,7 @@ forgeTest("a step begun after a cancelled execution belongs to the execution tha
       writeFileSync(lock, ""); // the check after the step fails: execution 2 ends failed, not cancelled
     }
     submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
+    return undefined;
   };
   for (execution = 1; execution <= 2; execution++) {
     const controller = new AbortController();
@@ -466,6 +467,7 @@ forgeTest("what a failed attempt of a write step left in the worktree is gone wh
     seenByRetry.push(existsSync(join(o.local.cwd, "src", "junk.js")), readFileSync(join(o.local.cwd, "src", "math.js"), "utf8").includes("half-made"));
     write(o, "src/math.js", SUB_CODE);
     submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
+    return undefined;
   };
   const r = await run({});
   assert.equal(res(r).status, "done", JSON.stringify(res(r)));

@@ -35,10 +35,10 @@ before(() => {
   writeFileSync(join(kit, "package.json"), JSON.stringify({ ...manifest, version: "9.9.9-relocated" }));
   symlinkSync(dependenciesDir(), join(kit, "node_modules"));
   // Only the relocated copy has this built-in: finding it proves the built-ins come from the install location.
-  writeFileSync(join(kit, "workflows", "kit-marker.mjs"), 'export default { meta: { name: "kit-marker", description: "built-in of the relocated copy" } };\n');
+  writeFileSync(join(kit, "workflows", "kit-marker.mjs"), 'export default { meta: { name: "kit-marker", description: "built-in of the relocated copy" }, async run() { return "ok"; } };\n');
 
   mkdirSync(join(targetRepo, ".agents", "workflows"), { recursive: true });
-  writeFileSync(join(targetRepo, ".agents", "workflows", "repo-local.mjs"), 'export default { meta: { name: "repo-local", description: "workflow of the target repo" } };\n');
+  writeFileSync(join(targetRepo, ".agents", "workflows", "repo-local.mjs"), 'export default { meta: { name: "repo-local", description: "workflow of the target repo" }, async run() { return "ok"; } };\n');
   writeFileSync(
     join(targetRepo, ".agents", "workflows", "repo-runner.mjs"),
     'export default { meta: { name: "repo-runner", description: "finishes at once" }, async run() { return "ok"; } };\n',

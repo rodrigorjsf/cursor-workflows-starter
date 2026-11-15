@@ -16,7 +16,7 @@ import { runWorkflow } from "../src/runtime/engine.js";
 import { tryAcquireRunLock } from "../src/runtime/run-store.js";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import implementIssue from "../workflows/implement-issue.js";
-import { type GcPlan, applyGc, directCommands, planGc } from "../workflows/implement-issue/gc.js";
+import { applyGc, directCommands, planGc } from "../workflows/implement-issue/gc.js";
 import { branchOf, failForge, fx, forgeState, git, issue, originBranches, run, setPrState, setup, teardown, worktreeOf } from "./implement-issue.fixture.js";
 import { type GcOutput, age, delivered, editRecord, failedRun, gc, localBranches, stillThere } from "./implement-issue.gc.fixture.js";
 

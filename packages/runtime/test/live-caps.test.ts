@@ -350,7 +350,7 @@ test("a cap crossed while the agent answers a schema re-prompt cuts the step too
 test("the tokens of an attempt that failed on a rate limit are counted once while it backs off, not twice", { timeout: 30_000 }, async () => {
   const rateLimited = Object.assign(new RateLimitError("slow down"), { isRetryable: true }); // the engine sleeps 2 s before the retry
   let aSends = 0;
-  script.push(...[0, 1, 2].map(() => (o: any, msg: string, n: number) => {
+  script.push(...[0, 1, 2].map(() => (_o: any, msg: string) => {
     if (msg === "b") return live(2, 40)();
     return aSends++ === 0 ? { live: true, deltas: [turn(100), turn(100)], rejectWait: rateLimited } : live(1, 10)();
   }));

@@ -11,8 +11,10 @@
 import { randomUUID } from "node:crypto";
 import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { z } from "zod";
 import { EVENT_SCHEMA_VERSION, type RunStartEvent, type RunStatus, type WorkflowEvent, isContentLine } from "./events.js";
 import { Journal } from "./journal.js";
+import { tryParseJson } from "./parse-json.js";
 import { isAlive } from "./pid.js";
 import { type InterruptedCloudStep, type Ledger, interruptedCloudSteps, replayLedger } from "./projection.js";
 import { CREDENTIAL_FORMATS, type Redactor, createRedactor } from "./redaction.js";
@@ -80,10 +82,21 @@ function isHeld(holder: LockContent, file: string): boolean {
   return now === undefined || now === holder.identity; // unknown identity: assume it is the same process
 }
 
+/**
+ * What a lock file holds, as `takeLock` writes it. A lock this does not describe names no holder, and is taken over like a stale
+ * one: the lock decides whether a run is executing, so a field of another type is not read as a live holder's.
+ */
+const LOCK_CONTENT: z.ZodType<LockContent> = z.looseObject({
+  pid: z.number(),
+  token: z.string(),
+  startedAt: z.string(),
+  runId: z.string().optional(),
+  identity: z.string().optional(),
+});
+
 function readLock(file: string): LockContent | undefined {
   try {
-    const lock = JSON.parse(readFileSync(file, "utf8")) as Partial<LockContent>;
-    return typeof lock.pid === "number" ? (lock as LockContent) : undefined;
+    return tryParseJson(readFileSync(file, "utf8"), LOCK_CONTENT);
   } catch {
     return undefined;
   }

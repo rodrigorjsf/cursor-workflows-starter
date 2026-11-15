@@ -12,6 +12,7 @@
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { z } from "zod";
 import type { LimitOverrides } from "../config/index.js";
 import { cancelLeftCloudAgents, leftAgentsNote } from "./cloud-cancel.js";
 import type { RunStatus } from "./events.js";
@@ -20,12 +21,13 @@ import { killFrozenJob } from "./job-children.js";
 import { commandLineHas, isAlive } from "./pid.js";
 import { eventLogPath, readEventLog, runLockHolder } from "./run-store.js";
 import { isPlainName, stateDir } from "./state.js";
+import { tryParseJson } from "./parse-json.js";
 import { writeFileAtomic } from "./state-files.js";
 
 /** How a job was started: what `wf start` (or `start_workflow`) was given, which a resume of its run gives again. */
 export interface JobStart {
-  /** The workflow's args. */
-  args: unknown;
+  /** The workflow's args. Absent when the job was started with none (a JSON file does not keep an undefined). */
+  args?: unknown;
   /** The flag layer of the config (`--max-cents`, `--max-tokens`). */
   maxCents?: number;
   maxTokens?: number;
@@ -55,6 +57,28 @@ export interface JobRecord {
    */
   killedByCancel?: string;
 }
+
+const LIMIT_OVERRIDES = z.looseObject({
+  maxTokens: z.number().nullable().optional(),
+  maxTokensPerStep: z.number().nullable().optional(),
+  maxCents: z.number().nullable().optional(),
+  concurrency: z.number().optional(),
+});
+
+/**
+ * What a job record holds, as the runtime writes it. A record is read to decide whether a job's process is alive and what a
+ * resume repeats (caps included), so a field of another type makes the whole file not a record, never a `start` quietly dropped.
+ * A field a newer kit adds is kept.
+ */
+const JOB_RECORD: z.ZodType<JobRecord> = z.looseObject({
+  jobId: z.string(),
+  runId: z.string(),
+  pid: z.number(),
+  heartbeat: z.string(),
+  refused: z.string().optional(),
+  start: z.looseObject({ args: z.unknown().optional(), maxCents: z.number().optional(), maxTokens: z.number().optional(), overrides: LIMIT_OVERRIDES.optional() }).optional(),
+  killedByCancel: z.string().optional(),
+});
 
 /** What `wf status`, `wf jobs`, `get_workflow_status` and `wait_workflow` return: the record plus the projection of the log. */
 export interface JobState {
@@ -110,12 +134,14 @@ export function jobLogPath(cwd: string, jobId: string): string {
  */
 function parseJobRecord(file: string): JobRecord | undefined {
   if (!existsSync(file)) return undefined;
+  let text: string;
   try {
-    const record = JSON.parse(readFileSync(file, "utf8")) as JobRecord | null;
-    return isPlainName(record?.runId) ? record : undefined;
+    text = readFileSync(file, "utf8");
   } catch {
     return undefined;
   }
+  const record = tryParseJson(text, JOB_RECORD);
+  return record !== undefined && isPlainName(record.runId) ? record : undefined;
 }
 
 /** How job `jobId` of `repo` was started, from its record. Only reads: nothing is created. Undefined when the id is not a plain name, or the record is not there or has no `start`. */

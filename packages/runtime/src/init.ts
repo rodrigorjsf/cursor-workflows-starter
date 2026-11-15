@@ -146,7 +146,7 @@ function importsOf(file: string): string[] {
   for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
     const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
     if (fence !== undefined) {
-      if (marker?.[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) fence = undefined;
+      if (marker !== undefined && marker[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) fence = undefined;
       continue;
     }
     if (marker !== undefined) {
@@ -154,6 +154,7 @@ function importsOf(file: string): string[] {
       continue;
     }
     for (const [, path] of line.replace(/(`+).*?\1/g, "").matchAll(/(?:^|\s)@(\S+)/g)) {
+      if (path === undefined) continue;
       paths.push(path.startsWith("~/") ? join(homedir(), path.slice(2)) : resolve(dirname(file), path));
     }
   }

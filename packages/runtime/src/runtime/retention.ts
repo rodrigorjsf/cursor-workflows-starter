@@ -12,6 +12,7 @@
 import { readFileSync, readdirSync, statSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { isContentLine } from "./events.js";
+import { isRecord } from "./parse-json.js";
 import { writeFileAtomic } from "./state-files.js";
 
 /** What to keep. A limit left out takes the default; `null` turns that limit off. */
@@ -33,8 +34,8 @@ function withoutContentText(log: string): string | undefined {
   const lines = log.split("\n").map((line) => {
     if (!isContentLine(line)) return line;
     try {
-      const event = JSON.parse(line) as { type?: string; text?: unknown };
-      if (event.type !== "content" || event.text === undefined) return line;
+      const event: unknown = JSON.parse(line);
+      if (!isRecord(event) || event.type !== "content" || event.text === undefined) return line;
       delete event.text;
       changed = true;
       return JSON.stringify(event);

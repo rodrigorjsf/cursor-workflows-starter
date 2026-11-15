@@ -5,6 +5,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { isRecord } from "./runtime/parse-json.js";
 
 /** The repo files that can register the server, relative to the repo, in the order the doctor reports them. */
 export const MCP_CONFIG_FILES = [".cursor/mcp.json", ".mcp.json"];
@@ -41,9 +42,12 @@ export function readMcpLaunches(cwd: string): McpLaunches {
   for (const file of MCP_CONFIG_FILES) {
     const path = join(cwd, file);
     if (!existsSync(path)) continue;
-    let entry: { command?: unknown; args?: unknown; env?: unknown } | undefined;
+    let entry: Record<string, unknown> | undefined;
     try {
-      entry = (JSON.parse(readFileSync(path, "utf8")) as { mcpServers?: { workflows?: typeof entry } }).mcpServers?.workflows;
+      const config: unknown = JSON.parse(readFileSync(path, "utf8"));
+      const servers = isRecord(config) ? config.mcpServers : undefined;
+      const workflows = isRecord(servers) ? servers.workflows : undefined;
+      entry = isRecord(workflows) ? workflows : undefined;
     } catch (err) {
       problems.push(`${file}: invalid JSON (${err instanceof Error ? err.message : String(err)})`);
       continue;
@@ -57,7 +61,7 @@ export function readMcpLaunches(cwd: string): McpLaunches {
       file,
       command: command.includes("/") ? resolve(cwd, command) : command,
       args: Array.isArray(entry.args) ? entry.args.map((a) => substitute(String(a), cwd)) : [],
-      env: Object.fromEntries(Object.entries((entry.env ?? {}) as Record<string, unknown>).map(([k, v]) => [k, substitute(String(v), cwd)])),
+      env: Object.fromEntries(Object.entries(isRecord(entry.env) ? entry.env : {}).map(([k, v]) => [k, substitute(String(v), cwd)])),
       cwd,
     });
   }
