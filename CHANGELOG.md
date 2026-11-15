@@ -141,6 +141,18 @@
   `gh` de verdade imprimiu (a gravação `token-scopes` do `record-gh-fixtures.ts`). Veja
   [2.3](docs/usage/03-invocacao-no-cursor-ide.md#conferindo-o-ambiente-wf-doctor) e [SECURITY.md](SECURITY.md#o-token-do-github).
 
+- **O dashboard retoma um run parado com um clique.** O Run view de um run `failed` ou `cancelled` ganhou o botão **Resume run**,
+  ao lado do **Copy resume command**. Ele chama o novo `POST /api/runs/<runId>/resume`, atrás do mesmo token CSRF e das mesmas
+  checagens de origem do cancelamento e do início, e sem corpo: o servidor lê do registro do job da última execução os args,
+  os tetos e os `overrides` com que ele foi iniciado e inicia um job novo sobre o mesmo run, pelo mesmo caminho do
+  `POST /api/start` (o repositório é o que o índice global de runs dá ao run). A página segue a execução retomada como segue
+  um run em andamento. As recusas são `403` (token ou origem), `404` (run desconhecido) e `409` (o run está `running`,
+  `finished` ou `missing`; está travado, e pede um cancelamento antes; não tem registro de job que diga como começou, como
+  o `wf run` num terminal, e a frase manda retomar pelo terminal, com o comando copiado; ou o início recusa o workflow, os args
+  ou a configuração). O botão só aparece num run `failed` ou `cancelled` que não está travado. O `observe` do runtime ganhou
+  `resumeRun`, e o início de um job (`startRun` e o resume) passou a ser um caminho só (`launchJob`). Veja
+  [5.3 §Cancelar um run e copiar o comando de resume](docs/operating/03-observabilidade.md#cancelar-um-run-e-copiar-o-comando-de-resume).
+
 - **O dashboard inicia um workflow, sem o chat nem um terminal.** O botão **Start**, na barra de cima do app, abre um painel:
   repositório, workflow, args em JSON e os dois tetos (`maxTokens` e `maxCents`, obrigatórios). O servidor resolve o que pode
   começar: só um repositório que o índice global de runs conhece e só um workflow que o runtime lista para ele (um caminho

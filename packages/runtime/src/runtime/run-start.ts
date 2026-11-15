@@ -1,14 +1,14 @@
 // Starting a run from outside the process that will execute it, for a tool that sits next to the runtime: the dashboard's Start
-// action. It starts a job the way `wf start` and `start_workflow` do (a detached process, `spawnJob`), after the same checks
-// (the kit fits the repo, the config is usable, the args fit the workflow's `argsSchema`, the caps are within the global ones),
-// and adds the one rule this door exists for: the repository must be one the global runs index already names, and the workflow
-// one the runtime lists for it. The caller hands over a path and a name the user typed in a browser, and a free path would let
-// the browser run code in any folder.
+// action (and, through `launchJob`, its Resume button: run-resume.ts). It starts a job the way `wf start` and `start_workflow` do
+// (a detached process, `spawnJob`), after the same checks (the kit fits the repo, the config is usable, the args fit the workflow's
+// `argsSchema`, the caps are within the global ones), and adds the one rule this door exists for: the repository must be one the
+// global runs index already names, and the workflow one the runtime lists for it. The caller hands over a path and a name the user
+// typed in a browser, and a free path would let the browser run code in any folder.
 //
 // Like job-state.ts and run-cancel.ts, it imports no engine, so the dashboard process that calls it does not load the Cursor SDK.
 // Nothing is created in a repository until every check has passed.
 import { statSync } from "node:fs";
-import { ConfigError, loadEffectiveConfig } from "../config/index.js";
+import { ConfigError, type LimitOverrides, loadEffectiveConfig } from "../config/index.js";
 import { kitCompatibility } from "../kit-version.js";
 import { argsError } from "./args-schema.js";
 import { errorText } from "./error-text.js";
@@ -82,10 +82,23 @@ export async function listRepoWorkflows(repo: string): Promise<RepoWorkflows | u
   return { workflows: [...workflows.values()].map((def) => startable(def.meta)), broken };
 }
 
-/** Starts `request.workflow` in `request.repo` as a job, or says why not (see `StartRunOutcome`). */
-export async function startRun(request: StartRunRequest): Promise<StartRunOutcome> {
+/** What `launchJob` starts a job with, beyond where and what: the args, the caps of the flag layer, the chat's overrides, and the run to resume. */
+export interface JobLaunch {
+  args: unknown;
+  maxTokens?: number;
+  maxCents?: number;
+  overrides?: LimitOverrides;
+  /** The run to resume: a new job over an existing run. Absent for a new run. */
+  resumeRunId?: string;
+}
+
+/**
+ * The start path both doors share (`startRun`, and `resumeRun` in run-resume.ts): the checks every start passes (not inside a workflow step,
+ * a repository the runs index names, a workflow it lists, args that fit the `argsSchema`, a kit that fits the repo, a usable config, caps
+ * within the global ones), then `spawnJob`. Nothing is created in the repository until every check has passed.
+ */
+export async function launchJob(repo: string, workflow: string, { args, maxTokens, maxCents, overrides, resumeRunId }: JobLaunch): Promise<StartRunOutcome> {
   if (process.env[INSIDE_WORKFLOW_ENV] === "1") return { kind: "refused", error: "workflows cannot be started from inside a workflow step" };
-  const { repo, workflow, args, maxTokens, maxCents } = request;
   if (!knownRepos().includes(repo)) return { kind: "unknown-repo" };
   const { workflows } = await discoverWorkflows(repo, { fresh: true });
   const def = workflows.get(workflow);
@@ -94,11 +107,12 @@ export async function startRun(request: StartRunRequest): Promise<StartRunOutcom
   if (invalid) return { kind: "invalid-args", error: invalid };
   const { problem } = kitCompatibility(repo);
   if (problem) return { kind: "refused", error: `${problem.message}. ${problem.hint}` };
+  const flags = { ...(maxTokens === undefined ? {} : { maxTokens }), ...(maxCents === undefined ? {} : { maxCents }) };
   let violations: ConfigViolation[];
   let maxRunningJobs: number | null;
   try {
     // Read afresh, so an unusable config is refused before a job exists, and a cap the global ones cut is reported now.
-    const resolved = loadEffectiveConfig(def, { cwd: repo, flags: { maxTokens, maxCents } });
+    const resolved = loadEffectiveConfig(def, { cwd: repo, flags, mcpOverrides: overrides });
     violations = resolved.violations;
     maxRunningJobs = resolved.config.caps.maxRunningJobs;
   } catch (err) {
@@ -106,10 +120,15 @@ export async function startRun(request: StartRunRequest): Promise<StartRunOutcom
     throw err;
   }
   try {
-    const { job } = spawnJob({ cwd: repo, workflow: def.meta.name, args, maxRunningJobs, maxTokens, maxCents });
+    const { job } = spawnJob({ cwd: repo, workflow: def.meta.name, args, maxRunningJobs, resumeRunId, overrides, ...flags });
     return { kind: "started", jobId: job.jobId, runId: job.runId, violations };
   } catch (err) {
     if (err instanceof JobRefusedError) return { kind: "refused", error: err.message };
     throw err;
   }
+}
+
+/** Starts `request.workflow` in `request.repo` as a job, or says why not (see `StartRunOutcome`). */
+export function startRun({ repo, workflow, args, maxTokens, maxCents }: StartRunRequest): Promise<StartRunOutcome> {
+  return launchJob(repo, workflow, { args, maxTokens, maxCents });
 }

@@ -9,33 +9,20 @@ import { afterEach, beforeEach, test } from "node:test";
 import { postStart } from "../app/start-api.js";
 import { type DashboardServer, startDashboard } from "../src/server.js";
 import { waitFor } from "../../runtime/test/wait-for.js";
-import { ECHO_WORKFLOW, JOB_ENV, JOB_WAIT, type Sandbox, http, jobPidOf, repoWithWorkflows, sandbox, startRequest } from "./support.js";
+import { ECHO_WORKFLOW, JOB_WAIT, type Sandbox, http, jobProcesses, repoWithWorkflows, sandbox, startRequest } from "./support.js";
 
 let box: Sandbox;
 let dash: DashboardServer;
-let jobPids: number[];
-let previousEnv: Record<string, string | undefined>;
+let jobs: ReturnType<typeof jobProcesses>;
 
 beforeEach(async () => {
   box = sandbox();
-  previousEnv = Object.fromEntries(Object.keys(JOB_ENV).map((name) => [name, process.env[name]]));
-  Object.assign(process.env, JOB_ENV);
-  jobPids = [];
+  jobs = jobProcesses();
   dash = await startDashboard({ port: 0 });
 });
 afterEach(async () => {
-  for (const pid of jobPids) {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      /* the job ended on its own, which is what the tests wait for */
-    }
-  }
+  jobs.restore();
   await dash.close();
-  for (const [name, value] of Object.entries(previousEnv)) {
-    if (value === undefined) delete process.env[name];
-    else process.env[name] = value;
-  }
   box.dispose();
 });
 
@@ -45,10 +32,6 @@ const CAPS = { maxTokens: 50_000, maxCents: 20 };
 const knownRepo = (): string => repoWithWorkflows(box, "repo", { "echo.mjs": ECHO_WORKFLOW });
 
 const start = (body: unknown) => startRequest(dash.url, body);
-
-function trackJob(repo: string, jobId: string): void {
-  jobPids.push(jobPidOf(repo, jobId));
-}
 
 /** The `run-start` event of a run, read from its log: what the job's own process resolved. */
 function runStartOf(repo: string, runId: string): { config: { limits: Record<string, number | null> } } {
@@ -76,7 +59,7 @@ test("a start with a known repository, a listed workflow, valid args and both ca
   const { jobId, runId } = reply.json as { jobId: string; runId: string };
   assert.match(runId, /^echo-[0-9a-f]{8}$/);
   assert.deepEqual(reply.json, { jobId, runId, repo, workflow: "echo" });
-  trackJob(repo, jobId);
+  jobs.track(repo, jobId);
 
   const { card, detail } = await runOnTheBoard(runId);
   assert.equal(card.runId, runId);
@@ -93,7 +76,7 @@ test("the global caps still apply on top of the caps a start gives: the looser o
   const reply = await start({ repo, workflow: "echo", args: { issue: 7 }, ...CAPS });
   assert.equal(reply.status, 202, reply.text);
   const { jobId, runId, violations } = reply.json as { jobId: string; runId: string; violations: Array<{ message: string }> };
-  trackJob(repo, jobId);
+  jobs.track(repo, jobId);
   assert.equal(violations.length, 1);
   assert.match(violations[0]!.message, /maxCents 20 exceeds the global cap 5: the cap applies/);
 
@@ -117,7 +100,7 @@ test("the browser's own client starts a run through the same door: its answer ca
   const reply = await postStart({ repo, workflow: "echo", args: { issue: 3 }, ...CAPS }, dash.url);
   assert.ok(reply.ok, reply.ok ? "" : reply.error);
   assert.equal(reply.status, 202);
-  trackJob(repo, reply.body.jobId);
+  jobs.track(repo, reply.body.jobId);
   const { detail } = await runOnTheBoard(reply.body.runId);
   assert.deepEqual(detail.start, { workflow: "echo", args: { issue: 3 }, maxTokens: 50_000, maxCents: 20 });
 });

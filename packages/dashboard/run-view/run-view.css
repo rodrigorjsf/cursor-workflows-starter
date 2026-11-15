@@ -36,8 +36,8 @@ code { font-size: var(--text-xs); }
 .actions .command { width: min(560px, 100%); padding: var(--space-1) var(--space-2); color: var(--fg); background: var(--bg); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font: var(--text-xs) var(--font-mono); }
 .actions .copied { color: var(--s-ok); font-size: var(--text-sm); }
 .actions .hint { flex-basis: 100%; color: var(--fg-muted); font-size: var(--text-xs); text-align: right; }
-.cancel-result { max-width: 48ch; font-size: var(--text-sm); }
-.cancel-result.failed { color: var(--s-failed); }
+.cancel-result, .resume-result { max-width: 48ch; font-size: var(--text-sm); }
+.cancel-result.failed, .resume-result.failed { color: var(--s-failed); }
 
 .workspace { position: relative; flex: 1; min-height: 0; display: flex; }
 .canvas { flex: 1; min-width: 0; min-height: 0; position: relative; }
