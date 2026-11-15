@@ -11,12 +11,11 @@
 //   allowed), so a missing CLI costs a failed start now and then, not one per poll.
 // - A refresh that fails keeps the state it had.
 import { type ForgePrState, isPrUrl, prStateOfUrl } from "@cursor-workflows/runtime/observe";
+import { FORGE_CLI_PARALLEL, Limiter } from "./limiter.js";
 
 /** How a forge says a PR or MR stands, in lower case as the Board's API and page spell it (the runtime's `ForgePrState` is upper case). */
 export type PrState = "open" | "merged" | "closed";
 
-/** How many forge CLI processes run at once. */
-const MAX_PARALLEL = 4;
 /** How many PRs the cache remembers. The oldest answer goes first. */
 const MAX_ENTRIES = 1000;
 /** A total record: a state the runtime learns to report is a compile error here. */
@@ -32,8 +31,8 @@ export class PrStates {
   private readonly entries = new Map<string, Entry>();
   /** Queued or being asked: a URL is asked once at a time. */
   private readonly pending = new Set<string>();
-  private readonly queue: string[] = [];
-  private running = 0;
+  /** How many PRs are asked at once. */
+  private readonly limiter = new Limiter(FORGE_CLI_PARALLEL);
   private readonly stopping = new AbortController();
 
   constructor(private readonly cacheMs: number) {}
@@ -46,32 +45,20 @@ export class PrStates {
       if (!isPrUrl(url) || known.has(url)) continue;
       const entry = this.entries.get(url);
       if (entry?.state) known.set(url, entry.state);
-      if ((!entry || now - entry.at >= entry.ttlMs) && !this.pending.has(url)) {
+      if ((!entry || now - entry.at >= entry.ttlMs) && !this.pending.has(url) && !this.stopping.signal.aborted) {
         this.pending.add(url);
-        this.queue.push(url);
+        void this.limiter.run(() => this.ask(url)).then((state) => {
+          this.pending.delete(url);
+          if (!this.stopping.signal.aborted) this.record(url, state);
+        });
       }
     }
-    this.pump();
     return known;
   }
 
   /** Stops asking: nothing more is started, and what is running is ended. */
   close(): void {
     this.stopping.abort();
-    this.queue.length = 0;
-  }
-
-  private pump(): void {
-    while (this.running < MAX_PARALLEL && this.queue.length > 0 && !this.stopping.signal.aborted) {
-      const url = this.queue.shift()!;
-      this.running++;
-      void this.ask(url).then((state) => {
-        this.running--;
-        this.pending.delete(url);
-        if (!this.stopping.signal.aborted) this.record(url, state);
-        this.pump();
-      });
-    }
   }
 
   private record(url: string, state: PrState | undefined): void {
@@ -82,8 +69,9 @@ export class PrStates {
     if (this.entries.size > MAX_ENTRIES) this.entries.delete(this.entries.keys().next().value!);
   }
 
-  /** What the runtime says of `url`, or undefined when the forge could not answer. */
+  /** What the runtime says of `url`, or undefined when the forge could not answer. Nothing is asked once the cache is closed: a URL still in line is dropped. */
   private async ask(url: string): Promise<PrState | undefined> {
+    if (this.stopping.signal.aborted) return undefined;
     const state = await prStateOfUrl(url, this.stopping.signal);
     return state && STATES[state];
   }
