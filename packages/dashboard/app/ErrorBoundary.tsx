@@ -42,7 +42,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, BoundarySt
 /**
  * The `onUncaughtError` of a page's root: for an error that no boundary caught (one in the boundary itself), logs it and shows the
  * same error and link in plain DOM. React unmounts the tree as it reports the error, so it writes after that, not during.
- * Not yet run in a browser (see #101): whether the write survives React's unmount is a hypothesis.
+ * Not yet run in a browser (see https://github.com/rodrigorjsf/cursor-workflows-starter/issues/101): whether the write survives React's unmount is a hypothesis.
  */
 export function showCrashIn(container: HTMLElement): (error: unknown) => void {
   return (error) => {
