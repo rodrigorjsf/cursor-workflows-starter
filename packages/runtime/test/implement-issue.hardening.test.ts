@@ -4,7 +4,6 @@
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { writeRepoConfig } from "./config-fixtures.js";
 import {
   ALL_CODE,
@@ -13,6 +12,7 @@ import {
   PLAN,
   SUB_CODE,
   SUB_TEST,
+  type TestForge,
   branchOf,
   changeForgeState,
   failForge,
@@ -460,7 +460,17 @@ forgeTest("approveSeams sem plano proposto neste run (outro runId ou outro --cwd
 
 const STRANGERS = ["NONE", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR", "FIRST_TIMER", "MANNEQUIN", "A_VALUE_GITHUB_ADDS_LATER"];
 const setAuthor = (association: string) => changeForgeState((state) => void (state.issue.author_association = association));
+/** GitLab says it by the author's id and the access level that user has in the project (`null`: no member of it). */
+const setAccessLevel = (level: number | null, authorId = 1) =>
+  changeForgeState((state) => {
+    state.issue.author_id = authorId;
+    state.issue.access_level = level;
+  });
+/** The issue's author is a stranger to the repository, in the words of `forge`. */
+const setStranger = (forge: TestForge) => (forge === "github" ? setAuthor("NONE") : setAccessLevel(null));
 const apiCalls = () => forgeState().calls.filter((call) => call[0] === "api");
+/** The calls that ask how the issue's author stands to the repository: `gh api` of the issue, `glab api` of the project's member. */
+const authorLookups = () => forgeState().calls.filter((call) => call[0] === "api" && call.some((arg) => /\.author_association$|\/members\/all\/\d+$/.test(arg)));
 
 forgeTest("an issue whose author is a stranger to the repository stops the run before any agent call: untrusted-author", async () => {
   for (const association of STRANGERS) {
@@ -476,23 +486,41 @@ forgeTest("an issue whose author is a stranger to the repository stops the run b
   }
 }, ["github"]);
 
-forgeTest("the untrusted-author result says why and carries the relaunch that lifts the gate: the same args plus allowExternalAuthor", async () => {
+/** What a GitLab author who is no Developer of the project is called in the result, by access level (`null`: no member). */
+const GITLAB_STRANGERS: Array<[number | null, string]> = [[null, "not a member"], [5, "Minimal access (5)"], [10, "Guest (10)"], [15, "Planner (15)"], [20, "Reporter (20)"]];
+
+forgeTest("an issue whose author is not a member of the project with Developer access stops the run before any agent call: untrusted-author", async () => {
+  for (const [level, word] of GITLAB_STRANGERS) {
+    issue(["complexity:medium"]);
+    setAccessLevel(level, 42);
+    const r = await run({ issue: 7 });
+    assert.equal(res(r).status, "untrusted-author", `${word}: ${JSON.stringify(res(r))}`);
+    assert.deepEqual(names(), [], `${word}: no agent saw the issue`);
+    assert.equal(res(r).authorAssociation, word);
+    assert.match(res(r).reason, /not a member of the project with Developer access or above/);
+    assert.equal(forgeState().comments.length, 0, "nothing is posted on a stranger's issue");
+    assert.ok(!onOrigin(), "nothing reaches the origin");
+    assert.deepEqual(authorLookups(), [["api", "projects/:fullpath/members/all/42"]], "the member asked about is the issue's author, by the id the issue carries");
+  }
+}, ["gitlab"]);
+
+forgeTest("the untrusted-author result says why and carries the relaunch that lifts the gate: the same args plus allowExternalAuthor", async (forge) => {
   issue(["complexity:medium"]);
-  setAuthor("NONE");
+  setStranger(forge);
   const r = await run({});
   const result = res(r);
   assert.equal(result.status, "untrusted-author", JSON.stringify(result));
   assert.equal(result.issue, 7);
   assert.equal(result.runId, r.runId);
   assert.match(result.reason, /issue #7/);
-  assert.match(result.reason, /NONE/, "what the forge said of the author");
+  assert.match(result.reason, forge === "github" ? /NONE/ : /not a member/, "what the forge said of the author");
   assert.match(result.reason, /allowExternalAuthor/, "how to go on, after reading the issue");
   assert.ok(!JSON.stringify(result).includes("Exportar"), "none of the issue's text goes into the result");
   const next = /^npm run wf -- run implement-issue --args '(.*)' --resume (\S+)$/.exec(result.next);
   assert.ok(next, result.next);
   assert.deepEqual(JSON.parse(next[1]!), { issue: 7, testCommand: "node --test", allowExternalAuthor: true });
   assert.equal(next[2], r.runId);
-}, ["github"]);
+}, ["github", "gitlab"]);
 
 forgeTest("an owner, a member or a collaborator is no stranger: the run goes on", async () => {
   for (const association of ["OWNER", "MEMBER", "COLLABORATOR"]) {
@@ -504,35 +532,48 @@ forgeTest("an owner, a member or a collaborator is no stranger: the run goes on"
   }
 }, ["github"]);
 
-forgeTest("allowExternalAuthor lifts the gate, and the forge is not asked about an author whose issue the user already read", async () => {
+forgeTest("an author with Developer access or above is no stranger: the run goes on", async () => {
+  for (const level of [30, 40, 50]) {
+    issue(["complexity:medium"]);
+    setAccessLevel(level, 42);
+    const r = await run({});
+    assert.equal(res(r).status, "seams-proposed", `access level ${level}: ${JSON.stringify(res(r))}`);
+    assert.ok(names().includes("plan"), `access level ${level}`);
+    assert.deepEqual(authorLookups(), [["api", "projects/:fullpath/members/all/42"]]);
+  }
+}, ["gitlab"]);
+
+forgeTest("allowExternalAuthor lifts the gate, and the forge is not asked about an author whose issue the user already read", async (forge) => {
   issue(["complexity:medium"]);
-  setAuthor("NONE");
+  setStranger(forge);
   const r = await run({ allowExternalAuthor: true });
   assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
   assert.ok(names().includes("plan"));
-  assert.deepEqual(apiCalls(), []);
-}, ["github"]);
+  assert.deepEqual(authorLookups(), []);
+}, ["github", "gitlab"]);
 
-forgeTest("the relaunch of a stopped run, as the result gives it, goes on", async () => {
+forgeTest("the relaunch of a stopped run, as the result gives it, goes on", async (forge) => {
   issue(["complexity:medium"]);
-  setAuthor("CONTRIBUTOR");
+  if (forge === "github") setAuthor("CONTRIBUTOR");
+  else setAccessLevel(20);
   const first = await run({});
   assert.equal(res(first).status, "untrusted-author", JSON.stringify(res(first)));
   const next = /--args '(.*)' --resume (\S+)$/.exec(res(first).next)!;
   const second = await run(JSON.parse(next[1]!), next[2]);
   assert.equal(res(second).status, "seams-proposed", JSON.stringify(res(second)));
-}, ["github"]);
+}, ["github", "gitlab"]);
 
-forgeTest("a failed lookup of the author is an error, never a trusted author: no agent runs, and the user's own allowExternalAuthor still goes", async () => {
+forgeTest("a failed lookup of the author is an error, never a trusted author: no agent runs, and the user's own allowExternalAuthor still goes", async (forge) => {
   issue(["complexity:medium"]);
-  failForge("api --hostname", "gh: Not Found (HTTP 404)"); // the fake keys a failure by the first two words of the call
+  // On GitLab a 404 is the answer for an account that is no member (a stranger, above), so the failure is another one.
+  failForge("author", forge === "github" ? "gh: Not Found (HTTP 404)" : "glab: 500 Internal Server Error (HTTP 500)");
   const failed = await run({});
   assert.equal(failed.status, "failed");
-  assert.match(failed.error!, /Not Found/);
+  assert.match(failed.error!, forge === "github" ? /Not Found/ : /Internal Server Error/);
   assert.deepEqual(names(), []);
   const lifted = await run({ allowExternalAuthor: true });
   assert.equal(res(lifted).status, "seams-proposed", JSON.stringify(res(lifted)));
-}, ["github"]);
+}, ["github", "gitlab"]);
 
 forgeTest("the author of an issue of another repository is looked up in that repository", async () => {
   issue(["complexity:medium"]);
@@ -544,6 +585,16 @@ forgeTest("the author of an issue of another repository is looked up in that rep
   assert.equal(res(url).status, "untrusted-author", JSON.stringify(res(url)));
   assert.deepEqual(apiCalls().at(-1), ["api", "--hostname", "github.com", "repos/acme/c/issues/7", "--jq", ".author_association"]);
 }, ["github"]);
+
+forgeTest("the author of an issue of another GitLab project is looked up in that project", async () => {
+  issue(["complexity:medium"]);
+  setAccessLevel(10, 42);
+  const r = await run({ repo: "https://gitlab.com/acme/b" });
+  assert.equal(res(r).status, "untrusted-author", JSON.stringify(res(r)));
+  assert.deepEqual(authorLookups(), [["api", "--hostname", "gitlab.com", "projects/acme%2Fb/members/all/42"]]);
+  const reads = forgeState().calls.filter((call) => call[0] === "issue");
+  assert.ok(reads.length > 0 && reads.every((call) => call.includes("--repo") && call.includes("https://gitlab.com/acme/b")), `the issue, and so its author, is read from the named project: ${JSON.stringify(reads)}`);
+}, ["gitlab"]);
 
 forgeTest("a repository spelled HOST/OWNER/REPO, as gh takes it, is looked up on that host once the config lists it in repoHosts", async () => {
   issue(["complexity:medium"]);
@@ -572,14 +623,6 @@ forgeTest("a --repo that is not owner/name is refused before anything runs, so t
   assert.deepEqual(forgeState().calls, [], "no forge call at all: the arguments' schema refuses it");
   assert.deepEqual(names(), []);
 }, ["github"]);
-
-forgeTest("GitLab does not say who an issue's author is, so the run goes on, and the log says it was not checked", async () => {
-  issue(["complexity:medium"]);
-  const r = await run({});
-  assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
-  const logs = readEventLog(eventLogPath(fx.repo, r.runId)).events.flatMap((e) => (e.type === "log" ? [e.message] : []));
-  assert.ok(logs.some((m) => /^could not check the author of issue #7/.test(m)), logs.join("\n"));
-}, ["gitlab"]);
 
 /**
  * Fences and headings a hostile issue could use to end the data block and start giving orders. The marker is at both ends: the one
