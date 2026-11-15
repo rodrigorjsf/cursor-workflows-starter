@@ -8,7 +8,7 @@
   código privado em disco:
   - **Modos privados.** O runtime cria `.workflows/` e as pastas dentro dela com `0700` e os arquivos com `0600` (log de eventos,
     journal, trava do run, memo, registro e log de cada job, e o registro dos grupos de processo de um `ctx.exec`), qualquer que
-    seja o `umask`; `.workflows/worktrees/` fica de fora. O modo vale só quando o arquivo nasce: nada que já existe é mudado. O
+    seja o `umask`; `.workflows/worktrees/` fica de fora. O modo vale só quando o arquivo nasce: o runtime nunca chama `chmod`, e uma pasta ou um log que já existe mantém o modo que tinha (um arquivo reescrito inteiro, como o registro de um job, é um arquivo novo e nasce `0600`). O
     `wf doctor` ganhou a verificação `state` (a 11ª, no fim da lista), que avisa (`warn`) de uma `.workflows/` que o grupo ou os
     outros alcançam e dá o `chmod 700`. O instalador roda com `umask 077`, então `~/.cursor-workflows/` nasce `0700`.
   - **Retenção do journal e do memo.** Para os runs fora da retenção (30 runs, 14 dias), o `result` de cada linha do journal

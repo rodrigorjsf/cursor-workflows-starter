@@ -1,4 +1,4 @@
-// Seams 1 and 2: what a run leaves in `.workflows/` is private to its user. Under the default umask of most machines (0o022) a
+// Seam: the engine with the fake Cursor SDK, and real job processes: what a run leaves in `.workflows/` is private to its user. Under the default umask of most machines (0o022) a
 // file or folder made without a mode is readable by every local user, and the event log, the journal and the memo hold the
 // private source and the step results of the repository. The first test runs a workflow with the fake Cursor SDK in this
 // process; the second starts a real detached job (`wf start`, which the job's own process, its heartbeat worker and the
@@ -8,7 +8,7 @@ process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
 import "./isolate-home.js";
 import { execFileSync, spawnSync } from "node:child_process";
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { after, afterEach, before, test } from "node:test";
@@ -108,6 +108,29 @@ test("a run writes its event log, journal, lock and memo, and the folders around
   }
   assert.deepEqual(notPrivate(during), {}, "while the run executes");
   assert.deepEqual(notPrivate(entriesUnderState()), {}, "after the run");
+});
+
+test("a folder or a file that exists keeps its mode: the runtime never chmods, and what it makes inside them is private", async () => {
+  rmSync(stateRoot(), { recursive: true, force: true }); // a clean slate: the other tests' state is private, this one sets up its own
+  mkdirSync(join(stateRoot(), "runs"), { recursive: true });
+  chmodSync(stateRoot(), 0o755); // as an older kit (or a loose umask) left it
+  chmodSync(join(stateRoot(), "runs"), 0o750);
+  const wf = defineWorkflow({ meta: { name: "keeps-modes", description: "one step" }, defaults: { model: { id: "m" } }, run: (ctx) => ctx.agent<string>("plan", { label: "plan" }) });
+  const first = await runWorkflow(wf, {}, { cwd: repo, runId: "kept-run" });
+  assert.equal(first.status, "finished", first.error);
+  const log = join(stateRoot(), "runs", "kept-run", "events.jsonl");
+  chmodSync(log, 0o644); // a log an older kit made
+
+  const resumed = await runWorkflow(wf, {}, { cwd: repo, runId: "kept-run" }); // appends to the log that exists
+  assert.equal(resumed.status, "finished", resumed.error);
+
+  const modes = entriesUnderState();
+  assert.equal(modes[".workflows"]!.mode, 0o755, "the folder that existed");
+  assert.equal(modes[".workflows/runs"]!.mode, 0o750, "the folder that existed");
+  assert.equal(modes[".workflows/runs/kept-run/events.jsonl"]!.mode, 0o644, "the log that existed is appended to, not chmodded");
+  assert.equal(modes[".workflows/runs/kept-run"]!.mode, 0o700, "the folder the run made is private");
+  assert.equal(modes[".workflows/runs/kept-run/journal.jsonl"]!.mode, 0o600, "and so is the journal it made");
+  rmSync(stateRoot(), { recursive: true, force: true }); // the folder this test opened up must not reach the next one
 });
 
 test("a detached job writes its record, its log and the record of its command's process group for its user alone", async () => {

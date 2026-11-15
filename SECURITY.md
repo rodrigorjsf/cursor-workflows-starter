@@ -74,7 +74,7 @@ falhas de segurança.
   privado. O runtime cria `.workflows/` e as pastas dentro dela com `0700` e os arquivos com `0600` (o log, o journal, a
   trava do run, o memo, o registro e o log de cada job), qualquer que seja o `umask`, e o instalador roda com `umask 077`, então
   `~/.cursor-workflows/` também nasce `0700`. O `.workflows/worktrees/` fica de fora: o código lá mantém os modos do git. O modo
-  vale só quando o arquivo nasce: **uma `.workflows/` que um kit mais antigo criou com `0755` continua assim**, e o `wf doctor`
+  vale só quando o arquivo nasce (o runtime nunca chama `chmod`; um arquivo reescrito inteiro, como o registro de um job, é um arquivo novo e nasce `0600`): **uma `.workflows/` que um kit mais antigo criou com `0755` continua assim**, e o `wf doctor`
   (verificação `state`) avisa e dá o `chmod 700`. A retenção apaga, dos runs fora dos 30 mais recentes ou com mais de 14 dias, o
   texto dos logs e o `result` de cada linha do journal (o run não retoma mais, e o `--resume` dele é recusado dizendo por quê), e
   apaga as entradas do memo com mais de 14 dias; antes, o journal e o memo ficavam para sempre. Os 14 dias contam da última

@@ -28,15 +28,18 @@ const isEntry = (v: unknown): v is JournalEntry => typeof v === "object" && v !=
 /**
  * The journal text with the `result` of every entry removed and every entry marked `pruned`, or undefined when every entry already
  * is. A journal holds the results of the run's steps, which are private source: retention (retention.ts) empties the journal of a
- * run that falls outside it. A line that is not an entry (a torn last line) stays byte for byte.
+ * run that falls outside it. A line that is not an entry (a torn last line, which can hold the start of a result) is removed:
+ * readers skip it, so it is of no use to a resume.
  */
 export function withoutResults(journal: string): string | undefined {
   let changed = false;
   const lines = journal.split("\n").map((line) => {
-    const entry = line.trim() ? parseJsonlLine(line, isEntry) : undefined;
-    if (!entry || entry.pruned) return line;
-    const { result: _result, ...kept } = entry;
+    if (!line.trim()) return line;
+    const entry = parseJsonlLine(line, isEntry);
+    if (entry?.pruned) return line;
     changed = true;
+    if (!entry) return "";
+    const { result: _result, ...kept } = entry;
     return JSON.stringify({ ...kept, pruned: true });
   });
   return changed ? lines.join("\n") : undefined;

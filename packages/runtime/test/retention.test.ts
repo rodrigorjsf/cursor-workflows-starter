@@ -1,4 +1,4 @@
-// Seam 1, the run: what a run holds that is private (the text of its step content, and the results of its steps) is pruned
+// Seam: the run, with the fake Cursor SDK: what a run holds that is private (the text of its step content, and the results of its steps) is pruned
 // when it falls outside the retention (default: the last 30 runs or 14 days per repo) and another run starts: the `text` of the
 // content events of its event log, the `result` of every line of its journal (the run is then marked, and a resume of it is
 // refused), and the memo entries older than the days. The metadata around it stays. Runs `runWorkflow` with the fake Cursor SDK,
@@ -161,24 +161,49 @@ test("a run outside the retention that finished no step has no results to lose: 
   assert.equal(resumed.status, "finished", "nothing was pruned from it, so it resumes (from the start)");
 });
 
-test("a journal is pruned once: it keeps its modification time and is not rewritten, and a torn last line stays byte for byte", async () => {
+test("a journal is pruned once: it keeps its modification time and is not rewritten", async () => {
   const old = await run("old-run");
   age(old, 20 * DAY);
   const file = journalFile(old);
   const stamp = statSync(file).mtimeMs;
-  const fs = await import("node:fs");
-  fs.appendFileSync(file, '{"key":"torn');
-  fs.utimesSync(file, new Date(stamp), new Date(stamp));
 
   await run("one");
-  const whole = readFileSync(file, "utf8").split("\n").slice(0, -1);
-  assert.ok(whole.length > 0 && whole.every((line) => (JSON.parse(line) as { pruned?: boolean }).pruned === true), "every whole line is pruned");
-  assert.ok(readFileSync(file, "utf8").endsWith('{"key":"torn'), "the torn tail is kept byte for byte");
+  assert.ok(isJournalPruned(old), "every line is pruned");
   assert.ok(Math.abs(statSync(file).mtimeMs - stamp) < 1, "rewriting the journal did not make it look fresh");
   const bytes = readFileSync(file, "utf8");
 
   await run("two");
   assert.equal(readFileSync(file, "utf8"), bytes, "nothing left to prune: the file is not rewritten");
+});
+
+test("a torn last line of a journal can hold the start of a result: pruning removes it, and the whole lines are pruned as usual", async () => {
+  const old = await run("old-run");
+  const fs = await import("node:fs");
+  fs.appendFileSync(journalFile(old), '{"key":"torn","result":"private source of a step that was being written');
+  age(old, 20 * DAY);
+
+  await run("trigger");
+
+  const text = readFileSync(journalFile(old), "utf8");
+  assert.doesNotMatch(text, /private source/, "no part of the torn result is left");
+  assert.ok(isJournalPruned(old), "the whole lines are pruned");
+  await run("again");
+  assert.equal(readFileSync(journalFile(old), "utf8"), text, "and the file is settled: not rewritten again");
+});
+
+test("a torn content event of an event log is removed with the other texts, and the other lines stay byte for byte", async () => {
+  const old = await run("torn-content-run");
+  const file = eventLogPath(cwd, old);
+  const before = readEventLog(file).events;
+  const fs = await import("node:fs");
+  fs.appendFileSync(file, '{"v":1,"ts":"2026-01-01T00:00:00.000Z","runId":"torn-content-run","type":"content","kind":"agent-message","text":"private text that was being appen');
+  age(old, 20 * DAY);
+
+  await run("trigger");
+
+  assert.doesNotMatch(readFileSync(file, "utf8"), /private text/, "no part of the torn text is left");
+  assert.deepEqual(withoutContent(readEventLog(file).events), withoutContent(before), "every metadata event is untouched");
+  assert.ok(isPruned(old));
 });
 
 test("memo entries are deleted by age alone: the days limit decides, a null days keeps them, and the runs limit does not touch them", async () => {

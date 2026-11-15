@@ -289,7 +289,7 @@ export class RunStore {
       this.journal = new Journal(join(dir, JOURNAL_FILE));
       if (this.journal.pruned) {
         throw new RunPrunedError(
-          `run ${runId} cannot be resumed: the retention policy deleted the step results its journal held, so its finished steps would all run again. Start a new run instead; the run's history in its event log is kept`,
+          `run ${runId} cannot be resumed: the retention policy deleted the step results its journal held, so its finished steps would all run again (the run's history in its event log is kept). Start a new run instead`,
         );
       }
       this.tornTail = { events: hasTornTail(this.eventsFile), journal: hasTornTail(join(dir, JOURNAL_FILE)) };

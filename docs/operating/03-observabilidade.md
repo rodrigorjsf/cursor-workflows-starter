@@ -685,8 +685,9 @@ Para validar a entrega depois, por exemplo quando o PR é aceito ou recusado, us
 - **Permissões do estado dos runs (`.workflows/`):** o runtime cria `.workflows/` e as pastas dentro dela com `0700` e os
   arquivos com `0600` (log de eventos, journal, trava do run, memo, registro e log de cada job), qualquer que seja o
   `umask` do usuário: o log e o journal guardam código privado do repositório. `.workflows/worktrees/` fica de fora,
-  porque o código lá mantém os modos do git. O modo vale só quando o arquivo ou a pasta nasce, e o runtime nunca muda o
-  de um que já existe: o `wf doctor` (verificação `state`) avisa de uma `.workflows/` que o grupo ou os outros alcançam e
+  porque o código lá mantém os modos do git. O modo vale só quando o arquivo ou a pasta nasce: o runtime nunca chama `chmod`, e uma pasta ou
+  um log que já existe mantém o modo que tinha. Um arquivo que o runtime reescreve inteiro (o registro de um job, o log que a
+  retenção poda) é um arquivo novo e nasce `0600`: o modo só se aperta. O `wf doctor` (verificação `state`) avisa de uma `.workflows/` que o grupo ou os outros alcançam e
   dá o `chmod 700`. O instalador roda com `umask 077`, então `~/.cursor-workflows/` também nasce `0700`.
 - **Export anonimizado por padrão:** sem nome de repositório, sem `agent_id`, sem prompt, com erros redigidos. Use
   `--no-anonymize` só para análise local.

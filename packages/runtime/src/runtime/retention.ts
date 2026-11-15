@@ -18,6 +18,7 @@
 
 import { readFileSync, readdirSync, rmSync, statSync, utimesSync } from "node:fs";
 import { join } from "node:path";
+import { errorText } from "./error-text.js";
 import { isContentLine } from "./events.js";
 import { withoutResults } from "./journal.js";
 import { isRecord } from "./parse-json.js";
@@ -36,7 +37,14 @@ export const DEFAULT_RETENTION = { runs: 30, days: 14 } as const;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** The log text with the `text` of every content event removed, or undefined when there was nothing to remove. Other lines stay byte for byte. */
+/** The limit the policy gives, the default when it leaves the limit out; `null` stays `null`: that limit is off. */
+const limitOf = (given: number | null | undefined, fallback: number): number | null => (given === undefined ? fallback : given);
+
+/**
+ * The log text with the `text` of every content event removed, or undefined when there was nothing to remove. Other lines stay byte
+ * for byte. A content line that does not parse is a torn last line (a crash in the middle of an append): readers skip it, and the
+ * part of the text it holds is as private as the rest, so it is removed.
+ */
 function withoutContentText(log: string): string | undefined {
   let changed = false;
   const lines = log.split("\n").map((line) => {
@@ -48,7 +56,8 @@ function withoutContentText(log: string): string | undefined {
       changed = true;
       return JSON.stringify(event);
     } catch {
-      return line; // a torn line: not ours to repair here
+      changed = true;
+      return "";
     }
   });
   return changed ? lines.join("\n") : undefined;
@@ -93,8 +102,8 @@ export function pruneRuns(options: {
   tryLock: (runDir: string, runId: string) => (() => void) | undefined;
 }): { pruned: string[]; failed: Array<{ runId: string; error: string }> } {
   const { runsDir, logFile, journalFile, current, tryLock } = options;
-  const maxRuns = options.policy?.runs === undefined ? DEFAULT_RETENTION.runs : options.policy.runs;
-  const maxDays = options.policy?.days === undefined ? DEFAULT_RETENTION.days : options.policy.days;
+  const maxRuns = limitOf(options.policy?.runs, DEFAULT_RETENTION.runs);
+  const maxDays = limitOf(options.policy?.days, DEFAULT_RETENTION.days);
   const now = options.now ?? Date.now();
   const result = { pruned: [] as string[], failed: [] as Array<{ runId: string; error: string }> };
   if (maxRuns === null && maxDays === null) return result;
@@ -129,7 +138,7 @@ export function pruneRuns(options: {
       const journalPruned = rewritePruned(join(dir, journalFile), withoutResults);
       if (logPruned || journalPruned) result.pruned.push(runId);
     } catch (err) {
-      result.failed.push({ runId, error: err instanceof Error ? err.message : String(err) });
+      result.failed.push({ runId, error: errorText(err) });
     } finally {
       release?.();
     }
@@ -143,7 +152,7 @@ export function pruneRuns(options: {
  * entry (the temporary file of a write in progress) is left. Never throws: what could not be deleted is returned as `failed`.
  */
 export function pruneMemo(options: { memoDir: string; policy?: RetentionPolicy; now?: number }): { pruned: string[]; failed: Array<{ key: string; error: string }> } {
-  const maxDays = options.policy?.days === undefined ? DEFAULT_RETENTION.days : options.policy.days;
+  const maxDays = limitOf(options.policy?.days, DEFAULT_RETENTION.days);
   const now = options.now ?? Date.now();
   const result = { pruned: [] as string[], failed: [] as Array<{ key: string; error: string }> };
   if (maxDays === null) return result;
@@ -162,7 +171,7 @@ export function pruneMemo(options: { memoDir: string; policy?: RetentionPolicy; 
       result.pruned.push(key);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") continue; // another process deleted it first
-      result.failed.push({ key, error: err instanceof Error ? err.message : String(err) });
+      result.failed.push({ key, error: errorText(err) });
     }
   }
   return result;
