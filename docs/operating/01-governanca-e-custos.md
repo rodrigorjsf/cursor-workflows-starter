@@ -175,9 +175,10 @@ contexto que as etapas carregam (`settingSources`):
     ([2.3](../usage/03-invocacao-no-cursor-ide.md#conferindo-o-ambiente-wf-doctor)). Nenhum dos dois confere o modo.
   - **Modelos sem ZDR e chave de API própria ficam fora da garantia.** O `caps.allowedModels` que o instalador grava é `null`, que
     libera todo modelo, inclusive os que não têm retenção zero de dados (ZDR). A página diz que a Cursor mantém acordos ZDR com
-    os provedores e que um modelo sem ZDR é designado como tal e precisa de opt-in do admin; uma chave de API própria continua
-    passando pelo backend da Cursor. Quando a retenção importa, liste em `caps.allowedModels` só os modelos que a sua conta
-    mostra como ZDR ([6.2](../reference/config.md)).
+    todos os provedores e que um modelo sem ZDR é designado como tal ou exige que um admin o habilite no workspace. Uma chave de
+    API própria não tira o pedido do backend da Cursor, e os acordos ZDR são os da Cursor com os provedores: trate a chave própria
+    como fora da garantia. Quando a retenção importa, liste em `caps.allowedModels` só os modelos que a sua conta mostra como ZDR
+    ([6.2](../reference/config.md)).
 - **Self-hosted** (pools, My Machines): checkout e execução das tools ficam na sua infraestrutura, mas o loop do
   agente fica na nuvem da Cursor ([DOC](https://cursor.com/help/security-and-privacy/privacy)). As requisições
   passam pelos servidores da Cursor ([DOC](https://cursor.com/help/models-and-usage/api-keys)) e seguem para

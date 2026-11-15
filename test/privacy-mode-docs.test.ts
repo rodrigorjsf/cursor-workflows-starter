@@ -7,18 +7,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
-import { parseMarkdown } from "../scripts/lib/markdown.js";
+import { sectionOf } from "../scripts/lib/markdown.js";
 
 const CHAPTER = readFileSync(join(resolve(import.meta.dirname, ".."), "docs", "operating", "01-governanca-e-custos.md"), "utf8");
-
-/** The text of the level-2 section called `title`, up to the next level-2 heading; undefined when there is none. */
-function sectionOf(markdown: string, title: string): string | undefined {
-  const { headings } = parseMarkdown(markdown);
-  const at = headings.findIndex((h) => h.level === 2 && h.text === title);
-  if (at === -1) return undefined;
-  const next = headings.slice(at + 1).find((h) => h.level <= 2);
-  return markdown.split("\n").slice(headings[at]!.line, next ? next.line - 1 : undefined).join("\n");
-}
 
 /** The list item of `section` that opens with `opening`, with its continuation lines, as one line of text. */
 function itemOf(section: string, opening: string): string | undefined {

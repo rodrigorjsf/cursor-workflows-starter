@@ -1,24 +1,16 @@
 // Seam: SECURITY.md read as text, the way a user finds it. The section on the GitHub token that `wf doctor`'s warning points at is
 // there under the heading the doctor names, and says what a leaked token exposes, how to narrow it and which token to use. The scopes
-// come from the doctor's own list (`BROAD_SCOPES`), so the text cannot drift from what the doctor warns about. Whether the links
-// resolve is docs-check.test.ts; the doctor itself is packages/runtime/test/doctor.process.test.ts.
+// come from the doctor's own list (`BROAD_SCOPES`), so the text cannot drift from what the doctor warns about. The Privacy Mode section
+// links Cursor's data-use page and says what the kit does about a setting it cannot read. Whether the links resolve is
+// docs-check.test.ts; the doctor itself is packages/runtime/test/doctor.process.test.ts.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
-import { parseMarkdown } from "../scripts/lib/markdown.js";
+import { parseMarkdown, sectionOf } from "../scripts/lib/markdown.js";
 import { BROAD_SCOPES, SECURITY_TOKEN_SECTION } from "../packages/runtime/src/github-token-scopes.js";
 
 const SECURITY = readFileSync(join(resolve(import.meta.dirname, ".."), "SECURITY.md"), "utf8");
-
-/** The text of the level-2 section called `title`, up to the next level-2 heading; undefined when there is none. */
-function sectionOf(markdown: string, title: string): string | undefined {
-  const { headings } = parseMarkdown(markdown);
-  const at = headings.findIndex((h) => h.level === 2 && h.text === title);
-  if (at === -1) return undefined;
-  const next = headings.slice(at + 1).find((h) => h.level <= 2);
-  return markdown.split("\n").slice(headings[at]!.line, next ? next.line - 1 : undefined).join("\n");
-}
 
 test("SECURITY.md has one section on the GitHub token, under the heading the doctor's warning names", () => {
   assert.equal(SECURITY_TOKEN_SECTION, "O token do GitHub");

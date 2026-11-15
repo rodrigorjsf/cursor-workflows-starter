@@ -159,7 +159,7 @@ e pode ser aberta em outro dispositivo. Gere a URL só quando for concluir o log
 (medido em 2026-11-11).
 
 **Privacy Mode.** Com ele desligado, a Cursor pode guardar e treinar com o código, os prompts e a saída de comandos que cada etapa
-manda, e as runs do SDK seguem a mesma regra do IDE. O SDK não deixa o kit ler o modo: confirme que está ligado em *Cursor
+manda, e o SDK segue a mesma regra do IDE. O SDK não deixa o kit ler o modo: confirme que está ligado em *Cursor
 Settings → General* (conta individual) ou com o admin do time. O guia de instalação para e pergunta isso antes de configurar o
 repositório, e o `wf doctor` repete o lembrete na verificação `login`. O que o modo desligado permite, e por que o
 `caps.allowedModels` só deve listar modelos ZDR quando a retenção importa: [5.1](../operating/01-governanca-e-custos.md#políticas-de-admin-que-se-aplicam).

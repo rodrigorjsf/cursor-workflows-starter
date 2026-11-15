@@ -88,7 +88,7 @@ test("between the login and the repo setup, the guide has the user confirm Priva
   const flat = step.replace(/\s+/g, " ");
   assert.match(flat, /Cursor Settings → General/, "the step says where an individual account finds the setting");
   assert.match(flat, /team admin/, "the step says a team admin can enforce the setting");
-  assert.match(flat, /\bask\b/i, "the agent asks: it cannot read the setting");
+  assert.match(flat, /Ask the user to confirm that Privacy Mode is on/, "the agent asks: it cannot read the setting");
   assert.match(flat, /Do not (?:go on|continue)[^.]*until/, "the step does not go on before the user answers");
   assert.match(flat, /Done when the user has answered/, "the answer is the step's Done when");
 });
@@ -177,7 +177,7 @@ test("no tag fetch of the installer or of wf upgrade forces over a moved tag, an
 test("the guide quotes the start of the Privacy Mode reminder the doctor's passing login check prints, word for word", () => {
   const quoted = "Privacy Mode cannot be read through the SDK";
   assert.ok(GUIDE.includes(`\`${quoted}\``), `INSTALL-AGENT.md no longer quotes \`${quoted}\``);
-  assert.ok(read("packages", "runtime", "src", "doctor.ts").includes(`"${quoted}: confirm it is on in Cursor Settings > General"`), `the doctor no longer starts its reminder with "${quoted}"`);
+  assert.ok(read("packages", "runtime", "src", "doctor.ts").includes(`${quoted}: confirm it is on in Cursor Settings > General`), `the doctor no longer starts its reminder with "${quoted}"`);
 });
 
 test("the installer and wf upgrade say the same four things about a tag, and the guide quotes only words both say", () => {

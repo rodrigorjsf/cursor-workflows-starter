@@ -5,7 +5,7 @@
 ### Adicionado
 
 - **O Privacy Mode passa a ser uma pré-condição da instalação, confirmada por você.** Com o modo desligado, a Cursor pode guardar e
-  treinar com o código, os prompts e a saída de comandos que cada etapa manda, e as runs do SDK seguem a regra do IDE. O SDK
+  treinar com o código, os prompts e a saída de comandos que cada etapa manda, e o SDK segue a regra do IDE. O SDK
   fixado (1.3.1) não tem chamada pública que leia o modo (o `Cursor.me()` não devolve o campo), então o kit não o confere: o
   `INSTALL-AGENT.md` ganhou o passo 4, "Confirm Privacy Mode", depois do login e antes do `wf init`, em que o agente pergunta se o
   modo está ligado (*Cursor Settings → General*, ou imposto pelo admin do time) e não segue até a pessoa responder; os passos
