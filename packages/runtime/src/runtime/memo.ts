@@ -9,13 +9,14 @@
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { ToolName } from "@cursor/sdk";
 import { z } from "zod";
 import { errorText } from "./error-text.js";
 import { parseJson } from "./parse-json.js";
+import { type RetentionPolicy, pruneMemo } from "./retention.js";
 import { stateDir } from "./state.js";
 import { writeFileAtomic } from "./state-files.js";
 
@@ -66,14 +67,24 @@ export class MemoStore {
   }
   get(key: string): unknown | undefined {
     const file = join(this.dir, `${key}.json`);
-    if (!existsSync(file)) return undefined;
+    let text: string;
     try {
-      return parseJson(readFileSync(file, "utf8"), MEMO_ENTRY, file).result;
+      text = readFileSync(file, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined; // a miss, also when retention (another run's start) deleted it just now
+      throw err;
+    }
+    try {
+      return parseJson(text, MEMO_ENTRY, file).result;
     } catch (err) {
       throw new Error(`${errorText(err)}; delete the file and the step runs again`);
     }
   }
   set(key: string, result: unknown): void {
     writeFileAtomic(join(this.dir, `${key}.json`), JSON.stringify({ result }));
+  }
+  /** Deletes the entries older than the policy's `days` (see retention.ts). Call it when a run starts. Never throws. */
+  pruneOld(policy?: RetentionPolicy): ReturnType<typeof pruneMemo> {
+    return pruneMemo({ memoDir: this.dir, policy });
   }
 }

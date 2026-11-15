@@ -128,7 +128,7 @@ test("seed 31 older runs with journal results and memo entries, then start a run
   seedMemo("stale-a", 15 * DAY);
   seedMemo("stale-b", 400 * DAY);
   seedMemo("fresh", 13 * DAY);
-  assert.ok(hasResults("run-00") && hasResults("run-30"), "31 runs: nothing is pruned yet, the 31st was the last to start");
+  assert.ok(hasResults("run-01") && hasResults("run-30"), "the 31st run to start pushed run-00 out; run-01 is still inside the 30");
 
   const trigger = await run("run-31");
 
