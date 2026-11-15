@@ -185,8 +185,8 @@ process.exit(r.status ?? 1);
   process.env.PATH = `${bin}:${process.env.PATH}`; // teardown puts the PATH back
 }
 
-/** Runs `active` until it is writing code, then `others` one after the other while it waits; returns their results. */
-async function whileActive(active: Record<string, unknown>, others: Array<[Record<string, unknown>, string]>) {
+/** Runs `active` until it is writing code, then `others` (at least one) one after the other while it waits; returns their results. */
+async function whileActive(active: Record<string, unknown>, others: [[Record<string, unknown>, string], ...Array<[Record<string, unknown>, string]>]) {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
   let reached!: () => void;
@@ -219,11 +219,11 @@ forgeTest("the lock is on the issue of the cwd's repository whether or not --rep
   ghKnowsTheCwdRepository();
   const a = await whileActive({}, [[{ repo: "owner/repo" }, "with-repo"], [{ repo: "https://github.com/OWNER/REPO" }, "with-url"], [{ repo: "other/x" }, "other"]]);
   assert.deepEqual(a.results.map((r) => r.status), ["issue-locked", "issue-locked", "done"], JSON.stringify(a.results));
-  assert.equal(a.results[0].activeRunId, a.activeId);
+  assert.equal(a.results[0]?.activeRunId, a.activeId);
 
   const b = await whileActive({ repo: "Owner/Repo" }, [[{}, "without-repo"]]);
   assert.deepEqual(b.results.map((r) => r.status), ["issue-locked"], JSON.stringify(b.results));
-  assert.equal(b.results[0].activeRunId, b.activeId);
+  assert.equal(b.results[0]?.activeRunId, b.activeId);
 }, ["github"]);
 
 forgeTest("GitHub names ignore case: a --repo spelled in another case than gh's answer for the cwd is still the cwd's issue", async () => {
@@ -231,7 +231,7 @@ forgeTest("GitHub names ignore case: a --repo spelled in another case than gh's 
   ghKnowsTheCwdRepository(true);
   const { activeId, results } = await whileActive({}, [[{ repo: "OWNER/REPO" }, "upper"]]);
   assert.deepEqual(results.map((r) => r.status), ["issue-locked"], JSON.stringify(results));
-  assert.equal(results[0].activeRunId, activeId);
+  assert.equal(results[0]?.activeRunId, activeId);
 }, ["github"]);
 
 forgeTest("a run whose progress cannot be read fails without holding the issue: the next run on it is not locked out", async () => {

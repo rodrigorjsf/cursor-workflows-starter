@@ -17,6 +17,25 @@ export function workflowDirs(cwd: string): string[] {
   return [...new Set(dirs)].filter((d) => existsSync(d));
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
+
+/**
+ * Is `value` a workflow definition? A workflow file is code the kit imports without a type check, so what its default export
+ * holds is checked at load: the two members every caller relies on, the name (the key of the registry, and of `wf run <name>`)
+ * and `run`. The rest of the shape is validated where it is used: the args against `meta.argsSchema`, the roles and settings by
+ * the config layers.
+ */
+const isWorkflowDefinition = (value: unknown): value is WorkflowDefinition =>
+  isRecord(value) && isRecord(value.meta) && typeof value.meta.name === "string" && value.meta.name !== "" && typeof value.run === "function";
+
+/** Why `value`, which failed `isWorkflowDefinition`, is not a workflow: the first member that is wrong. */
+function whyNotWorkflow(value: unknown): string {
+  const lead = "the default export is not a workflow definition";
+  if (!isRecord(value)) return `${lead}: expected an object, got ${value === null ? "null" : typeof value}`;
+  if (!isRecord(value.meta) || typeof value.meta.name !== "string" || value.meta.name === "") return `${lead}: meta.name must be a non-empty string`;
+  return `${lead}: run must be a function`;
+}
+
 /** A workflow file that failed to load: its path and why. */
 export interface BrokenWorkflow {
   file: string;
@@ -37,8 +56,8 @@ export interface DiscoverOptions {
 export async function discoverWorkflows(
   cwd: string,
   { fresh = false }: DiscoverOptions = {},
-): Promise<{ workflows: Map<string, WorkflowDefinition<any, any>>; broken: BrokenWorkflow[] }> {
-  const workflows = new Map<string, WorkflowDefinition<any, any>>();
+): Promise<{ workflows: Map<string, WorkflowDefinition>; broken: BrokenWorkflow[] }> {
+  const workflows = new Map<string, WorkflowDefinition>();
   const broken: BrokenWorkflow[] = [];
   for (const dir of workflowDirs(cwd)) {
     for (const file of readdirSync(dir).sort()) {
@@ -46,11 +65,15 @@ export async function discoverWorkflows(
       const path = join(dir, file);
       try {
         const { mtimeMs, size } = fresh ? statSync(path) : { mtimeMs: 0, size: 0 };
-        const mod = (await import(pathToFileURL(path).href + (fresh ? `?v=${mtimeMs}-${size}` : ""))) as { default?: WorkflowDefinition<any, any> };
-        if (mod.default?.meta?.name) {
-          recordWorkflowSource(mod.default, path);
-          workflows.set(mod.default.meta.name, mod.default);
+        const mod: unknown = await import(pathToFileURL(path).href + (fresh ? `?v=${mtimeMs}-${size}` : ""));
+        const def = isRecord(mod) ? mod.default : undefined;
+        if (def === undefined) continue; // no default export: a module the workflows import, not a workflow
+        if (!isWorkflowDefinition(def)) {
+          broken.push({ file: path, error: whyNotWorkflow(def) });
+          continue;
         }
+        recordWorkflowSource(def, path);
+        workflows.set(def.meta.name, def);
       } catch (err) {
         broken.push({ file: path, error: err instanceof Error ? err.message : String(err) });
       }
@@ -60,7 +83,7 @@ export async function discoverWorkflows(
 }
 
 /** Loads every workflow, and throws on the first broken file: for callers that must not run with a partial set. */
-export async function loadWorkflows(cwd: string): Promise<Map<string, WorkflowDefinition<any, any>>> {
+export async function loadWorkflows(cwd: string): Promise<Map<string, WorkflowDefinition>> {
   const { workflows, broken } = await discoverWorkflows(cwd);
   if (broken.length) throw new Error(broken.map((b) => `${b.file}: ${b.error}`).join("\n"));
   return workflows;

@@ -34,10 +34,11 @@ test("an agent step reads in the order it happened: prompt, what the agent said,
     ["prompt", "message", "tool", "tool", "message"],
   );
   const [, , read, shell] = entries;
-  assert.equal(read!.kind === "tool" && read.title, "read");
-  assert.deepEqual(read!.kind === "tool" && read.output.map((o) => o.text), ["export const a = 1;"]);
-  assert.equal(shell!.kind === "tool" && shell.args, '{\n  "command": "npm test"\n}');
-  assert.deepEqual(shell!.kind === "tool" && shell.output.map((o) => o.text), ["ok 12 tests"], "the output that arrives after other entries still goes under its call");
+  assert.ok(read && shell, "the two tool calls are there");
+  assert.equal(read.kind === "tool" && read.title, "read");
+  assert.deepEqual(read.kind === "tool" && read.output.map((o) => o.text), ["export const a = 1;"]);
+  assert.equal(shell.kind === "tool" && shell.args, '{\n  "command": "npm test"\n}');
+  assert.deepEqual(shell.kind === "tool" && shell.output.map((o) => o.text), ["ok 12 tests"], "the output that arrives after other entries still goes under its call");
 });
 
 test("a command of ctx.exec is its command line with the output that came from it, stdout and stderr apart and in order", () => {
@@ -49,8 +50,9 @@ test("a command of ctx.exec is its command line with the output that came from i
     output("exec", "three\n", "x1", "x1", "stdout"),
   ]);
   const [command] = log.attempts[0]!.entries;
-  assert.equal(command!.kind, "tool");
-  if (command!.kind !== "tool") return;
+  assert.ok(command, "the call is there");
+  assert.equal(command.kind, "tool");
+  if (command.kind !== "tool") return;
   assert.equal(command.title, "$ git commit -m 'fix: a thing'");
   assert.equal(command.args, "in /work/repo");
   assert.deepEqual(
@@ -63,8 +65,9 @@ test("a command of ctx.exec is its command line with the output that came from i
 test("a call to an MCP tool is titled by the tool it reaches, not by the generic name the SDK gives every one of them", () => {
   const log = buildStepLog([call("mcp", { providerIdentifier: "custom-user-tools", toolName: "submit_result", args: { answer: "pong" } }, "c1")]);
   const [tool] = log.attempts[0]!.entries;
-  assert.equal(tool!.kind === "tool" && tool.title, "mcp: submit_result");
-  assert.match(String(tool!.kind === "tool" && tool.args), /"answer": "pong"/, "the arguments stay whole");
+  assert.ok(tool, "the call is there");
+  assert.equal(tool.kind === "tool" && tool.title, "mcp: submit_result");
+  assert.match(String(tool.kind === "tool" && tool.args), /"answer": "pong"/, "the arguments stay whole");
 });
 
 test("each attempt of a step is its own section, in the order the attempts began", () => {
@@ -97,17 +100,19 @@ test("text that retention removed, and text that was cut, say so instead of look
     item({ kind: "agent-message", attemptId: "a1", text: "begin", chars: 99_000, truncated: true }),
   ]);
   const [kept, cut] = log.attempts[0]!.entries;
-  assert.equal(kept!.kind === "prompt" && kept.text, undefined);
-  assert.equal(kept!.kind === "prompt" && kept.chars, 5120);
-  assert.equal(cut!.kind === "message" && cut.truncated, true);
-  assert.equal(cut!.kind === "message" && cut.chars, 99_000);
+  assert.ok(kept && cut, "both entries are there");
+  assert.equal(kept.kind === "prompt" && kept.text, undefined);
+  assert.equal(kept.kind === "prompt" && kept.chars, 5120);
+  assert.equal(cut.kind === "message" && cut.truncated, true);
+  assert.equal(cut.kind === "message" && cut.chars, 99_000);
 });
 
 test("a tool call whose arguments are not JSON keeps them as written; an unknown kind is left out", () => {
   const log = buildStepLog([item({ kind: "tool-call", attemptId: "a1", tool: "shell", callId: "c1", text: "not { json" }), item({ kind: "reasoning", attemptId: "a1", text: "from a newer kit" }), said("done")]);
   const [tool, message] = log.attempts[0]!.entries;
-  assert.equal(tool!.kind === "tool" && tool.args, "not { json");
-  assert.equal(message!.kind, "message");
+  assert.ok(tool && message, "both entries are there");
+  assert.equal(tool.kind === "tool" && tool.args, "not { json");
+  assert.equal(message.kind, "message");
   assert.equal(log.attempts[0]!.entries.length, 2);
 });
 

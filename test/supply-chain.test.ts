@@ -107,7 +107,7 @@ function dependabotEcosystems(text: string): { ecosystem: string; defaultDays?: 
       const lines = block.split("\n");
       const indentOf = (l: string) => l.length - l.trimStart().length;
       const at = lines.findIndex((l) => /^\s+cooldown:\s*$/.test(l));
-      const under = at === -1 ? [] : lines.slice(at + 1).filter((l, i, rest) => rest.slice(0, i + 1).every((m) => m.trim() === "" || indentOf(m) > indentOf(lines[at]!)));
+      const under = at === -1 ? [] : lines.slice(at + 1).filter((_line, i, rest) => rest.slice(0, i + 1).every((m) => m.trim() === "" || indentOf(m) > indentOf(lines[at]!)));
       const days = (key: string) => {
         const found = under.map((l) => new RegExp(`^\\s+${key}:\\s*(\\d+)\\s*$`).exec(l)).find(Boolean);
         return found ? Number(found[1]) : undefined;

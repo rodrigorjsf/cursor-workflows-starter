@@ -37,7 +37,8 @@ const PROMPTS: Record<string, string> = {
     "Answer with one line per file: the file name and its number of lines. Do not edit anything.",
 };
 const mode = values.mode!;
-if (!(mode in PROMPTS)) throw new Error(`invalid --mode: ${mode}`);
+const prompt = PROMPTS[mode];
+if (prompt === undefined) throw new Error(`invalid --mode: ${mode}`);
 const model = { id: mode === "invalid-model" ? "wf-probe-modelo-inexistente" : values.model };
 const settingSources = values["setting-sources"]!.split(",").filter(Boolean) as SettingSource[];
 const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
@@ -69,7 +70,7 @@ try {
 out.agentId = agent.agentId;
 try {
   const t0 = Date.now();
-  const run = await agent.send(PROMPTS[mode], {
+  const run = await agent.send(prompt, {
     onDelta: ({ update }) => {
       const u = update as { type: string; usage?: unknown; toolCall?: { type?: string } };
       deltaCounts[u.type] = (deltaCounts[u.type] ?? 0) + 1;
