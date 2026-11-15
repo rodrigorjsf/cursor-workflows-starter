@@ -14,6 +14,7 @@ export { type ResumeRunOutcome, resumeRun } from "./runtime/run-resume.js";
 export { leftAgentsNote } from "./runtime/cloud-cancel.js";
 export { errorText } from "./runtime/error-text.js";
 export { type BacklogIssue, type BacklogRead, BACKLOG_WORKFLOW, issuesWithRuns, readBacklog } from "../workflows/implement-issue/backlog.js";
+export { type SeamsProposal, seamsProposalOf } from "../workflows/implement-issue/seams-approval.js";
 export { type RepoWorkflows, type StartRunOutcome, type StartRunRequest, type StartableWorkflow, knownRepos, listRepoWorkflows, startRun } from "./runtime/run-start.js";
 export { type PrState as ForgePrState, isPrUrl, prStateOfUrl } from "./runtime/pr-by-url.js";
 export { type JobStart } from "./runtime/job-state.js";

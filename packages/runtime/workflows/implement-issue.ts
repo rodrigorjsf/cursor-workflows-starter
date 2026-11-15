@@ -115,6 +115,7 @@ import { buildPrBody, inlineCode, sanitizeModelText, type PrText } from "./imple
 import { CommandError, Commands, NETWORK_TIMEOUT_SEC, SNAPSHOT_GRACE_HOURS, WORKFLOW_BRANCH_PREFIX, worktreeOf } from "./implement-issue/commands.js";
 import { type Forge, createForge, detectForge, forgeNameOf, prLabel } from "./implement-issue/forge.js";
 import * as P from "./implement-issue/prompts.js";
+import { DEFAULT_TEST_COMMAND, type Plan, type Slice, proposedCommand, testCommandOf } from "./implement-issue/plan.js";
 import { REPO_ARG_PATTERN, repoRefusal } from "./implement-issue/repo-arg.js";
 import { untrusted } from "./implement-issue/untrusted.js";
 import { AXES, AXIS_SCHEMAS, blockingAxes, blockingOf, type Axis, type ReviewReports } from "./implement-issue/review.js";
@@ -240,12 +241,6 @@ interface Args {
   protectedGlobs?: string[];
 }
 
-interface Slice { behavior: string; seam: string; testIdea: string }
-interface Plan { seams: Array<{ name: string; interface: string; why: string }>; slices: Slice[]; testCommand: string; rationale?: string }
-/** The test command of a LOW run, and of any run whose planner proposed none: a constant of the kit, not model text. */
-const DEFAULT_TEST_COMMAND = "npm test";
-/** The test command the planner proposed; a blank one is no proposal (the run then takes the kit's `npm test`). */
-const proposedCommand = (plan: Plan): string | undefined => (plan.testCommand?.trim() ? plan.testCommand : undefined);
 /**
  * How a comment shows the test command, which `bash -c` runs as written. An inline code span cannot hold a line break, so a
  * command of several lines goes line by line, one span each: a person who approves it sees the script that runs, not a one-line
@@ -772,7 +767,7 @@ export default defineWorkflow<Args>({
                 ? ["", `The slices marked deferred are left out by the tier ${tier} slice cap (${sliceCap} slices): the PR only references the issue, without closing it.`]
                 : []),
               "",
-              ...testCommandLines(ctx.args.testCommand ?? proposedCommand(plan) ?? DEFAULT_TEST_COMMAND), // what the run executes, whatever the planner wrote
+              ...testCommandLines(testCommandOf(plan, ctx.args.testCommand)), // what the run executes, whatever the planner wrote
               ...(plan.rationale ? ["", `### Why this design\n\n${prose(plan.rationale)}`] : []),
               "",
               "### To approve",
@@ -866,7 +861,7 @@ export default defineWorkflow<Args>({
           hint: "find what makes this step kill the process, or raise workflows.implement-issue.settings.maxStepCrashes in the config and resume the run; a new run starts the count again",
         };
       }
-      const testCommand = ctx.args.testCommand ?? proposedCommand(plan) ?? DEFAULT_TEST_COMMAND;
+      const testCommand = testCommandOf(plan, ctx.args.testCommand);
       const suite = (label: string) => runTests(cmd, testCommand, worktree, { timeoutMs: testTimeout, label: `suite:${label}` });
       if (!progress.data.baselineGreen) {
         if (ctx.args.setupCommand) {
