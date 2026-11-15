@@ -11,6 +11,7 @@ import { join } from "node:path";
 import type { SettingSource } from "@cursor/sdk";
 import { allowedSources } from "../config/index.js";
 import type { EffectiveConfig } from "./events.js";
+import { isRecord } from "./parse-json.js";
 
 /** The setting sources a step loads when its role, its call and the run's options say none: the engine's default. */
 export const DEFAULT_SETTING_SOURCES: SettingSource[] = ["project", "team", "mdm"];
@@ -31,7 +32,6 @@ const LIST_MAX = 20;
 /** The name `wf init` gives the kit's own MCP server. */
 const KIT_SERVER = "workflows";
 
-const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const shown = (text: string): string => (text.length > COMMAND_MAX_CHARS ? `${text.slice(0, COMMAND_MAX_CHARS)}...` : text);
 
 /** The parsed JSON object in `cwd/file`, or undefined when there is none or it is not one. */
@@ -40,7 +40,7 @@ function readObject(cwd: string, file: string): Record<string, unknown> | undefi
   if (!existsSync(path)) return undefined;
   try {
     const value: unknown = JSON.parse(readFileSync(path, "utf8"));
-    return isObject(value) ? value : undefined;
+    return isRecord(value) ? value : undefined;
   } catch {
     return undefined;
   }
@@ -49,23 +49,23 @@ function readObject(cwd: string, file: string): Record<string, unknown> | undefi
 /** Every string `command` in `value`, at any depth: Cursor lists `{ command }` entries under an event, Claude Code nests `{ hooks: [{ command }] }` under a matcher. */
 function commandsIn(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap(commandsIn);
-  if (!isObject(value)) return [];
+  if (!isRecord(value)) return [];
   return [...(typeof value.command === "string" ? [value.command] : []), ...Object.values(value).flatMap(commandsIn)];
 }
 
 /** The hooks of a settings file (`hooks`, keyed by event), as `RepoCommand`s. */
 function hooksOf(cwd: string, file: string): RepoCommand[] {
   const hooks = readObject(cwd, file)?.hooks;
-  if (!isObject(hooks)) return [];
+  if (!isRecord(hooks)) return [];
   return Object.entries(hooks).flatMap(([event, entries]) => commandsIn(entries).map((command) => ({ file, what: event, command: shown(command) })));
 }
 
 /** The MCP servers of `.cursor/mcp.json` that start a process, except the kit's own. */
 function serversOf(cwd: string, file: string): RepoCommand[] {
   const servers = readObject(cwd, file)?.mcpServers;
-  if (!isObject(servers)) return [];
+  if (!isRecord(servers)) return [];
   return Object.entries(servers).flatMap(([name, server]) => {
-    if (name === KIT_SERVER || !isObject(server) || typeof server.command !== "string") return [];
+    if (name === KIT_SERVER || !isRecord(server) || typeof server.command !== "string") return [];
     const args = Array.isArray(server.args) ? server.args.map(String) : [];
     return [{ file, what: `MCP server "${name}"`, command: shown([server.command, ...args].join(" ")) }];
   });
