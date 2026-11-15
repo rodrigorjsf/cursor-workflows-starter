@@ -13,3 +13,4 @@ auth.json
 .env.*
 .probe/
 .claude/skills/
+.check.log

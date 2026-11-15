@@ -37,7 +37,8 @@ Workflows live in `packages/runtime/workflows/*.ts` (built in) and `.agents/work
   (`skills/cursor-workflow-authoring/`).
 - To convert existing skills and subagents, use `/skill-to-workflow`.
 - After any change run `mise exec -- npm run check` (typecheck plus every test, docs and generated pages included; `mise.toml`
-  pins Node 22.23.4). Tests are offline and use `packages/runtime/test/fake-sdk.ts`.
+  pins Node 22.23.4). Tests are offline and use `packages/runtime/test/fake-sdk.ts`. It takes minutes: an agent runs
+  `mise exec -- npm run check:log` with `run_in_background`, which logs to `.check.log` and prints the totals and `EXIT=`.
 - Read `CODING_STANDARDS.md` (repo root) when reviewing code: it holds the judgement rules a reviewer applies.
 
 ## Skills
@@ -83,4 +84,3 @@ When something fails repeatedly, when User has to re-explain, or when a workarou
 - Fresh worktree has no node_modules: `mise exec -- npm ci --prefer-offline`.
 - Piped `gh issue view --comments` prints only comments: use `--json body,comments`.
 - Test repos: set `core.autocrlf=false`; global git here converts line endings.
-- Workspace test failure skips root tests (`&&`): run `npx tsx --test test/*.test.ts` too.
