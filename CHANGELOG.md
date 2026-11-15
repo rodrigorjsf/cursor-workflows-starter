@@ -147,7 +147,7 @@
   os tetos e os `overrides` com que ele foi iniciado e inicia um job novo sobre o mesmo run, pelo mesmo caminho do
   `POST /api/start` (o repositório é o que o índice global de runs dá ao run). A página segue a execução retomada como segue
   um run em andamento. As recusas são `403` (token ou origem), `404` (run desconhecido) e `409` (o run está `running`,
-  `finished` ou `missing`; está travado, e pede um cancelamento antes; não tem registro de job que diga como começou, como
+  `finished` ou `missing`; está travado, e pede um cancelamento antes; saiu da retenção, com a frase do motor, em vez de a recusa só aparecer no job, que a página não vê; não tem registro de job que diga como começou, como
   o `wf run` num terminal, e a frase manda retomar pelo terminal, com o comando copiado; ou o início recusa o workflow, os args
   ou a configuração). O botão só aparece num run `failed` ou `cancelled` que não está travado. O `observe` do runtime ganhou
   `resumeRun`, e o início de um job (`startRun` e o resume) passou a ser um caminho só (`launchJob`). Veja

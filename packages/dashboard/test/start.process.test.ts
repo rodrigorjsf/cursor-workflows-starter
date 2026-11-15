@@ -3,13 +3,13 @@
 // `WF_HOME`: the tests wait for that run to show on the board and read its event log. Nothing reaches the Cursor API (the
 // workflow takes no steps, and the job gets the fake SDK like every TypeScript child process of the tests).
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { postStart } from "../app/start-api.js";
 import { type DashboardServer, startDashboard } from "../src/server.js";
 import { waitFor } from "../../runtime/test/wait-for.js";
-import { ECHO_WORKFLOW, JOB_WAIT, type Sandbox, http, jobProcesses, repoWithWorkflows, sandbox, startRequest } from "./support.js";
+import { ECHO_WORKFLOW, JOB_WAIT, type Sandbox, eventsOfRun, http, jobProcesses, repoWithWorkflows, sandbox, startRequest } from "./support.js";
 
 let box: Sandbox;
 let dash: DashboardServer;
@@ -34,10 +34,7 @@ const knownRepo = (): string => repoWithWorkflows(box, "repo", { "echo.mjs": ECH
 const start = (body: unknown) => startRequest(dash.url, body);
 
 /** The `run-start` event of a run, read from its log: what the job's own process resolved. */
-function runStartOf(repo: string, runId: string): { config: { limits: Record<string, number | null> } } {
-  const lines = readFileSync(join(repo, ".workflows", "runs", runId, "events.jsonl"), "utf8").split("\n").filter(Boolean);
-  return JSON.parse(lines.find((line) => (JSON.parse(line) as { type: string }).type === "run-start")!) as { config: { limits: Record<string, number | null> } };
-}
+const runStartOf = (repo: string, runId: string) => eventsOfRun(repo, runId).find((event) => event.type === "run-start")!;
 
 /** Waits for the run to appear on the board and to finish, and returns its card and its detail. */
 async function runOnTheBoard(runId: string) {

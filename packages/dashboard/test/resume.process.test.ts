@@ -4,13 +4,12 @@
 // resumed; the tests wait for what the run's log and its job record say. Nothing reaches the Cursor API (the job gets the fake SDK).
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { waitFor } from "../../runtime/test/wait-for.js";
 import { resumeRun } from "../run-view/run-actions.js";
 import { type DashboardServer, startDashboard } from "../src/server.js";
-import { JOB_WAIT, RESUMABLE_WORKFLOW, type Sandbox, eventsOfRun, http, jobPidOf, jobProcesses, postWithToken, processAlive, repoWithWorkflows, sandbox, startRequest } from "./support.js";
+import { JOB_WAIT, RESUMABLE_WORKFLOW, type Sandbox, eventsOfRun, jobPidOf, jobProcesses, jobRecordOf, postWithToken, processAlive, repoWithWorkflows, runDetail, sandbox, startRequest } from "./support.js";
 
 let box: Sandbox;
 let dash: DashboardServer;
@@ -33,8 +32,7 @@ const CAPS = { maxTokens: 500_000, maxCents: 200 };
 /** A repo the runs index knows, with the `resumable` workflow. */
 const knownRepo = (): string => repoWithWorkflows(box, "repo", { "resumable.mjs": RESUMABLE_WORKFLOW });
 
-const runOf = async (runId: string) => (await http(dash.url, `/api/runs/${runId}`)).json;
-const jobRecordOf = (repo: string, jobId: string) => JSON.parse(readFileSync(join(repo, ".workflows", "jobs", `${jobId}.json`), "utf8")) as { start?: unknown };
+const runOf = (runId: string) => runDetail(dash.url, runId);
 
 /** Starts `resumable` through the dashboard with `args` and the caps, and returns where its run is. */
 async function startThroughDashboard(repo: string, args: Record<string, unknown>) {
@@ -80,23 +78,26 @@ test("resuming a cancelled run that was started as a job starts a job over the s
   assert.deepEqual(stepOnes.map((e) => Boolean(e.cached)), [false, true], "the step that finished before the cancel is replayed from the journal, not run again");
 });
 
-test("a failed run is resumed the same way: a new execution of the same run, with the recorded args", async () => {
+test("a failed run, whose job process was killed, is resumed the same way: the run goes back to running, with the recorded args and caps", async () => {
   const repo = knownRepo();
-  const first = await startThroughDashboard(repo, { fail: true });
-  await waitFor("the run to fail", async () => (await runOf(first.runId)).status === "failed", JOB_WAIT);
-  await waitFor("the failed job's process to be gone", () => !processAlive(jobPidOf(repo, first.jobId)), JOB_WAIT);
+  const first = await startThroughDashboard(repo, { hang: true });
+  await waitFor("the second step to start", () => eventsOfRun(repo, first.runId).some((e) => e.type === "step-start" && e.label === "two"), JOB_WAIT);
+  process.kill(jobPidOf(repo, first.jobId), "SIGKILL"); // no run end is written: the run shows as failed, with a process that is gone
+  await waitFor("the run to show as failed", async () => (await runOf(first.runId)).status === "failed", JOB_WAIT);
+  await waitFor("the killed job's process to be gone", () => !processAlive(jobPidOf(repo, first.jobId)), JOB_WAIT);
 
   // through the browser's own client (it takes the CSRF token itself), as the Resume button does
   const resumed = await resumeRun(first.runId, dash.url);
   assert.ok(resumed.ok, resumed.ok ? "" : resumed.error);
   jobs.track(repo, resumed.jobId);
 
-  const again = await waitFor("the second execution to fail the same way", async () => {
+  const again = await waitFor("the resumed run to be running", async () => {
     const detail = await runOf(first.runId);
-    return detail.executions === 2 && detail.status === "failed" ? detail : undefined;
+    return detail.status === "running" && detail.executions === 2 ? detail : undefined;
   }, JOB_WAIT);
-  assert.equal(again.runId, first.runId);
-  assert.deepEqual(again.start, { workflow: "resumable", args: { fail: true }, ...CAPS });
+  assert.deepEqual(again.start, { workflow: "resumable", args: { hang: true }, ...CAPS });
+  const [, secondStart] = eventsOfRun(repo, first.runId).filter((e) => e.type === "run-start");
+  assert.deepEqual([secondStart!.config.limits.maxTokens, secondStart!.config.limits.maxCents], [CAPS.maxTokens, CAPS.maxCents], "the resumed execution runs under the recorded caps");
 });
 
 test("a run started from a terminal with caps and overrides resumes with all three: the job record is what a resume repeats", async () => {

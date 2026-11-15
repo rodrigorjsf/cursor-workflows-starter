@@ -4,12 +4,12 @@
 // is in resume.process.test.ts.
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { resumeRun } from "../run-view/run-actions.js";
 import { type DashboardServer, startDashboard } from "../src/server.js";
-import { ECHO_WORKFLOW, type Reply, type Sandbox, http, postWithToken, repoWithWorkflows, sandbox, writeJobRecord, writeRun } from "./support.js";
+import { ECHO_WORKFLOW, type Reply, type Sandbox, http, postWithToken, repoWithWorkflows, runDetail, sandbox, writeJobRecord, writeRun } from "./support.js";
 
 let box: Sandbox;
 let dash: DashboardServer;
@@ -33,7 +33,7 @@ const FAILED = { type: "run-end", status: "failed", error: "boom" };
 const knownRepo = (): string => repoWithWorkflows(box, "repo", { "echo.mjs": ECHO_WORKFLOW });
 
 const resume = (runId: string, headers?: Record<string, string>): Promise<Reply> => postWithToken(dash.url, `/api/runs/${runId}/resume`, headers);
-const runOf = async (runId: string) => (await http(dash.url, `/api/runs/${runId}`)).json;
+const runOf = (runId: string) => runDetail(dash.url, runId);
 /** The job records of a repo: what a start leaves behind, which a refusal must not. */
 const jobFiles = (repo: string): string[] => {
   try {
@@ -147,6 +147,19 @@ test("what the start path refuses on a start, it refuses on a resume: a workflow
   assert.equal(invalid.status, 409);
   assert.match(invalid.json.error, /^invalid args: .*\/issue must be integer/);
   assert.deepEqual(jobFiles(repo), before, "no job was started");
+});
+
+test("a run whose journal the retention policy emptied is refused with the engine's own sentence, before a job exists: its finished steps would all run again", async () => {
+  const repo = knownRepo();
+  stoppedRun(repo, "echo-aaaa0011", { workflow: "echo", args: { issue: 7 }, ...CAPS });
+  // the journal line retention leaves: the key and the costs, no result, marked pruned
+  mkdirSync(join(repo, ".workflows", "runs", "echo-aaaa0011"), { recursive: true });
+  writeFileSync(join(repo, ".workflows", "runs", "echo-aaaa0011", "journal.jsonl"), `${JSON.stringify({ key: "0123abcd:0", label: "one", chargedCents: 9, totalTokens: 110, pruned: true })}\n`);
+
+  const reply = await resume("echo-aaaa0011");
+  assert.equal(reply.status, 409, reply.text);
+  assert.match(reply.json.error, /^run echo-aaaa0011 cannot be resumed: the retention policy deleted the step results its journal held/);
+  assert.deepEqual(jobFiles(repo), ["job-0001.json"], "no job was started, so there is no refused job record to look for");
 });
 
 test("resume is a POST: a GET of its address is refused, and says which method is allowed", async () => {

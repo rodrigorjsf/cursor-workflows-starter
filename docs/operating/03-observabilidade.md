@@ -416,7 +416,7 @@ No cabeçalho da página do run:
   |---|---|
   | `403` | o token CSRF falta ou está errado, ou o pedido declara outra origem |
   | `404` | o índice global de runs não conhece o run |
-  | `409` | o run não está parado (`running`, `finished` ou `missing`); o run está travado (`failed`, mas o processo dele ainda o segura: cancele antes); nenhum registro de job diz como ele começou (um `wf run` num terminal, ou um job de um kit antigo: a frase manda retomar pelo terminal, com o comando copiado); o repositório já não lista o workflow, os args já não passam no `argsSchema`, o kit está fora da faixa do repositório, a configuração dele não é utilizável, ou outro job já roda o mesmo workflow com os mesmos args |
+  | `409` | o run não está parado (`running`, `finished` ou `missing`); o run está travado (`failed`, mas o processo dele ainda o segura: cancele antes); o run saiu da retenção (o journal dele foi esvaziado, e a frase é a do motor, `run <id> cannot be resumed: the retention policy deleted the step results its journal held…`: inicie um run novo); nenhum registro de job diz como ele começou (um `wf run` num terminal, ou um job de um kit antigo: a frase manda retomar pelo terminal, com o comando copiado); o repositório já não lista o workflow, os args já não passam no `argsSchema`, o kit está fora da faixa do repositório, a configuração dele não é utilizável, ou outro job já roda o mesmo workflow com os mesmos args |
 
   O botão só aparece num run `failed` ou `cancelled` que não está travado.
 - **Copy resume command** (num run `failed` ou `cancelled`) copia

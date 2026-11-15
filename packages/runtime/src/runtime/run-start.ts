@@ -2,8 +2,8 @@
 // action (and, through `launchJob`, its Resume button: run-resume.ts). It starts a job the way `wf start` and `start_workflow` do
 // (a detached process, `spawnJob`), after the same checks (the kit fits the repo, the config is usable, the args fit the workflow's
 // `argsSchema`, the caps are within the global ones), and adds the one rule this door exists for: the repository must be one the
-// global runs index already names, and the workflow one the runtime lists for it. The caller hands over a path and a name the user
-// typed in a browser, and a free path would let the browser run code in any folder.
+// global runs index already names, and the workflow one the runtime lists for it. A Start hands over a path and a name the user typed in
+// a browser, and a free path would let the browser run code in any folder; a Resume takes them from the run's own index entry and job record.
 //
 // Like job-state.ts and run-cancel.ts, it imports no engine, so the dashboard process that calls it does not load the Cursor SDK.
 // Nothing is created in a repository until every check has passed.

@@ -37,6 +37,7 @@ export function RunActions({ runId, status, offered, info, argsHash, onChanged }
   const before = useRef(status);
   useEffect(() => {
     if (status === "running" && before.current !== "running") setCancel({ step: "idle" });
+    if (status !== before.current) setResume((state) => (state.step === "failed" ? { step: "idle" } : state)); // a refusal is about the state the run was in
     before.current = status;
   }, [status]);
 

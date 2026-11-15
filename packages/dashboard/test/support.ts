@@ -182,9 +182,19 @@ export function processAlive(pid: number): boolean {
   }
 }
 
+/** The record of a job of `repo`, as the runtime wrote it (`.workflows/jobs/<jobId>.json`). */
+export function jobRecordOf(repo: string, jobId: string): { pid: number; runId: string; start?: unknown } {
+  return JSON.parse(readFileSync(join(repo, ".workflows", "jobs", `${jobId}.json`), "utf8")) as { pid: number; runId: string; start?: unknown };
+}
+
 /** The pid of a job's process, read from its record, so a test that fails halfway does not leave the process running. */
 export function jobPidOf(repo: string, jobId: string): number {
-  return (JSON.parse(readFileSync(join(repo, ".workflows", "jobs", `${jobId}.json`), "utf8")) as { pid: number }).pid;
+  return jobRecordOf(repo, jobId).pid;
+}
+
+/** What `GET /api/runs/<runId>` answers on the dashboard at `url`: the run's detail (`json`, undefined when the answer is not JSON). */
+export async function runDetail(url: string, runId: string): Promise<any> {
+  return (await http(url, `/api/runs/${runId}`)).json;
 }
 
 /** `POST /api/start` on the dashboard at `url`, with its CSRF token unless `headers` replaces the headers, and `body`. */
@@ -199,17 +209,16 @@ export async function postWithToken(url: string, path: string, headers?: Record<
   return http(url, path, { method: "POST", headers: headers ?? { "x-csrf-token": token } });
 }
 
-/** A workflow of two steps, for the runs a resume is for: its second step hangs until the run is cancelled when `hang` is set, and the run throws after the first when `fail` is set. */
+/** A workflow of two steps, for the runs a resume is for: its second step hangs, when `hang` is set, until the run is cancelled or its process is killed. */
 export const RESUMABLE_WORKFLOW = `export default {
   meta: {
     name: "resumable",
-    description: "Two steps; the second hangs on args.hang, and the run fails on args.fail.",
-    argsSchema: { type: "object", additionalProperties: false, properties: { hang: { type: "boolean" }, fail: { type: "boolean" } } },
+    description: "Two steps; the second hangs on args.hang.",
+    argsSchema: { type: "object", additionalProperties: false, properties: { hang: { type: "boolean" } } },
   },
   defaults: { model: { id: "m" } },
   async run(ctx) {
     await ctx.agent("one", { label: "one" });
-    if (ctx.args.fail) throw new Error("boom");
     await ctx.agent(ctx.args.hang ? "[fake:hang] two" : "two", { label: "two", retries: 0, timeoutMs: 120000 });
     return { status: "done" };
   },

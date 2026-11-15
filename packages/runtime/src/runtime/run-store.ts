@@ -13,7 +13,7 @@ import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { EVENT_SCHEMA_VERSION, type RunStartEvent, type RunStatus, type WorkflowEvent, isContentLine } from "./events.js";
-import { Journal } from "./journal.js";
+import { Journal, journalPruned } from "./journal.js";
 import { tryParseJson } from "./parse-json.js";
 import { isAlive } from "./pid.js";
 import { type InterruptedCloudStep, type Ledger, interruptedCloudSteps, replayLedger } from "./projection.js";
@@ -33,6 +33,9 @@ export class RunLockedError extends Error {}
 
 /** The run's journal was pruned by the retention policy: its step results are gone, so it cannot be resumed. */
 export class RunPrunedError extends Error {}
+
+const prunedMessage = (runId: string): string =>
+  `run ${runId} cannot be resumed: the retention policy deleted the step results its journal held, so its finished steps would all run again (the run's history in its event log is kept). Start a new run instead`;
 
 /** Another run holds the named lock (`acquireNamedLock`). `holderRunId` is that run's id; absent for a lock written without one. */
 export class NamedLockedError extends Error {
@@ -164,6 +167,11 @@ export function runLockHolder(cwd: string, runId: string): number | undefined {
   return holder !== undefined && isHeld(holder, file) ? holder.pid : undefined;
 }
 
+/** Why run `runId` of the repo `cwd` cannot be resumed (the sentence `RunPrunedError` carries), when the retention policy emptied its journal; undefined when it can be. Only reads: it neither creates the run's directory nor takes its lock. */
+export function prunedReason(cwd: string, runId: string): string | undefined {
+  return journalPruned(join(runDirIn(cwd, runId), JOURNAL_FILE)) ? prunedMessage(runId) : undefined;
+}
+
 /** Is a live process executing run `runId` of the repo `cwd`? Only reads: it neither creates the run's directory nor takes its lock. */
 export function isRunExecuting(cwd: string, runId: string): boolean {
   return runLockHolder(cwd, runId) !== undefined;
@@ -287,11 +295,7 @@ export class RunStore {
     this.eventsFile = join(dir, EVENTS_FILE);
     try {
       this.journal = new Journal(join(dir, JOURNAL_FILE));
-      if (this.journal.pruned) {
-        throw new RunPrunedError(
-          `run ${runId} cannot be resumed: the retention policy deleted the step results its journal held, so its finished steps would all run again (the run's history in its event log is kept). Start a new run instead`,
-        );
-      }
+      if (this.journal.pruned) throw new RunPrunedError(prunedMessage(runId));
       this.tornTail = { events: hasTornTail(this.eventsFile), journal: hasTornTail(join(dir, JOURNAL_FILE)) };
       const { events } = readEventLog(this.eventsFile, { content: false });
       this.previousStart = events.findLast((e): e is RunStartEvent => e.type === "run-start");
