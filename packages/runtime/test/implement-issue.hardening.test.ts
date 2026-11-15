@@ -545,9 +545,10 @@ forgeTest("the author of an issue of another repository is looked up in that rep
   assert.deepEqual(apiCalls().at(-1), ["api", "--hostname", "github.com", "repos/acme/c/issues/7", "--jq", ".author_association"]);
 }, ["github"]);
 
-forgeTest("a repository spelled HOST/OWNER/REPO, as gh takes it, is looked up on that host", async () => {
+forgeTest("a repository spelled HOST/OWNER/REPO, as gh takes it, is looked up on that host once the config lists it in repoHosts", async () => {
   issue(["complexity:medium"]);
   setAuthor("NONE");
+  writeRepoConfig(fx.repo, { workflows: { "implement-issue": { settings: { repoHosts: ["ghe.corp.example"] } } } });
   const r = await run({ repo: "ghe.corp.example/acme/b" });
   assert.equal(res(r).status, "untrusted-author", JSON.stringify(res(r)));
   assert.deepEqual(apiCalls(), [["api", "--hostname", "ghe.corp.example", "repos/acme/b/issues/7", "--jq", ".author_association"]]);
@@ -563,12 +564,12 @@ forgeTest("on a GitHub Enterprise origin declared in forges, the author is looke
   assert.deepEqual(apiCalls(), [["api", "--hostname", "ghe.corp.example", "repos/{owner}/{repo}/issues/7", "--jq", ".author_association"]]);
 }, ["github"]);
 
-forgeTest("a --repo that is not owner/name is refused before the issue's author is looked up under another path", async () => {
+forgeTest("a --repo that is not owner/name is refused before anything runs, so the issue's author is not looked up under another path", async () => {
   issue(["complexity:medium"]);
   const r = await run({ repo: "acme/b?x=1" });
   assert.equal(r.status, "failed");
-  assert.match(r.error!, /repo argument .* is not a GitHub repository/);
-  assert.deepEqual(apiCalls(), []);
+  assert.match(r.error!, /invalid args: data\/repo must match pattern/);
+  assert.deepEqual(forgeState().calls, [], "no forge call at all: the arguments' schema refuses it");
   assert.deepEqual(names(), []);
 }, ["github"]);
 
