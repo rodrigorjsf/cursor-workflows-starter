@@ -13,6 +13,7 @@ export const CHECK_TITLES = {
   "kit-version": "Kit version",
   sandbox: "SDK sandbox",
   kit: "Installed kit",
+  host: "Host",
 } as const;
 
 export type CheckId = keyof typeof CHECK_TITLES;
@@ -20,7 +21,7 @@ export type CheckId = keyof typeof CHECK_TITLES;
 export interface CheckResult {
   id: CheckId;
   title: string;
-  /** `warn`: the check passed, but what it found is worth fixing (a GitHub token broader than the kit needs). It never fails the report. */
+  /** `warn`: the check passed, but what it found is worth fixing (a GitHub token broader than the kit needs, or WSL interop on). It never fails the report. */
   status: "pass" | "warn" | "fail";
   /** What was found (several lines when there are several problems). */
   message: string;

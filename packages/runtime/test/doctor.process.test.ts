@@ -1,8 +1,10 @@
 // Seam: the process. `wf doctor` is spawned (against the fake Cursor SDK) in a temporary repo with a temporary home, as
 // the IDE's environment would be: the kit sits at ~/.cursor-workflows/kit, the repo has the MCP configs `wf init` writes,
 // and `gh`, `glab` and `node` are whatever the PATH of the process says (git is the real one). The fake `gh` answers `gh api -i --silent user`
-// from the recording of the real one (packages/runtime/test/fixtures/gh/recordings.json), setting only the scopes header. The tests read the
-// report, the exit code and the messages; they never import the doctor.
+// from the recording of the real one (packages/runtime/test/fixtures/gh/recordings.json), setting only the scopes header. The `host` check
+// reads the WSL interop file the kernel exposes: every run points it at a file of the test's own (`WF_DOCTOR_WSL_INTEROP_FILE`), so the
+// machine the suite runs on, WSL or not, never decides a result. The tests read the report, the exit code and the messages; they never
+// import the doctor.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -66,6 +68,7 @@ function env(bins: string[], extra: Record<string, string> = {}, userHome = home
     TSX_TSCONFIG_PATH: join(kit, "packages", "runtime", "tsconfig.test.json"),
     WF_METRICS: "off",
     WF_DASH_AUTOSTART: "off", // the tests must not leave a dashboard behind
+    WF_DOCTOR_WSL_INTEROP_FILE: join(sandbox, "no-wsl-interop"), // a file that is not there: the host is not WSL, whatever the machine running the suite is
     ...extra,
   };
 }
@@ -217,14 +220,14 @@ const checkOf = (report: Report, id: string): Check => {
   return check;
 };
 
-test("on a healthy setup every check passes: exit 0, and --json lists the ten checks in a fixed order, none with a hint", () => {
+test("on a healthy setup every check passes: exit 0, and --json lists the eleven checks in a fixed order, none with a hint", () => {
   const r = doctor(repoCopy());
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const report = reportOf(r);
   assert.equal(report.ok, true);
   assert.deepEqual(
     report.checks.map((c) => c.id),
-    ["node", "dependencies", "login", "models", "forge", "mcp-server", "config", "kit-version", "sandbox", "kit"],
+    ["node", "dependencies", "login", "models", "forge", "mcp-server", "config", "kit-version", "sandbox", "kit", "host"],
   );
   for (const c of report.checks) assert.ok(c.status === "pass" && c.hint === undefined, `${c.id}: ${c.message}`);
   assert.equal(r.stderr, "", "the doctor writes its report to stdout and nothing to stderr");
@@ -234,7 +237,7 @@ test("without --json the report is text, one block per check with the fix hint u
   const healthy = doctor(repoCopy(), { args: [] });
   assert.equal(healthy.status, 0, healthy.stdout + healthy.stderr);
   assert.match(healthy.stdout, /\[ok\]\s+Node\.js: v\d+/);
-  assert.match(healthy.stdout, /All good: 10 checks passed\./);
+  assert.match(healthy.stdout, /All good: 11 checks passed\./);
 
   // Logged out and no gh in a GitHub repository: login, models (no catalog without a login) and forge fail.
   const r = doctor(gitRepoCopy("https://github.com/acme/widgets.git"), { args: [], bins: [], env: { FAKE_SDK_LOGGED_OUT: "1" } });
@@ -244,7 +247,7 @@ test("without --json the report is text, one block per check with the fix hint u
   assert.match(r.stdout, /\[FAIL\]\s+Cursor SDK login: /);
   assert.match(r.stdout, /how to fix: Log in with `wf login`/);
   assert.match(r.stdout, /\[FAIL\]\s+Forge CLI: /);
-  assert.match(r.stdout, /3 of 10 checks failed\./);
+  assert.match(r.stdout, /3 of 11 checks failed\./);
 });
 
 /** The hooks and MCP servers a cloned repository can bring: the three files a step that loads the project's settings runs code from. */
@@ -629,7 +632,7 @@ test("--json shows a warning as `status: warn` with its hint and `ok: true`, and
   assert.equal(report.ok, true);
   assert.deepEqual(
     report.checks.map((c) => [c.id, c.status]),
-    [["node", "pass"], ["dependencies", "pass"], ["login", "pass"], ["models", "pass"], ["forge", "warn"], ["mcp-server", "pass"], ["config", "pass"], ["kit-version", "pass"], ["sandbox", "pass"], ["kit", "pass"]],
+    [["node", "pass"], ["dependencies", "pass"], ["login", "pass"], ["models", "pass"], ["forge", "warn"], ["mcp-server", "pass"], ["config", "pass"], ["kit-version", "pass"], ["sandbox", "pass"], ["kit", "pass"], ["host", "pass"]],
   );
   assert.deepEqual(Object.keys(checkOf(report, "forge")), ["id", "title", "status", "message", "hint"]);
   assert.deepEqual(Object.keys(checkOf(report, "node")), ["id", "title", "status", "message"]);
@@ -643,13 +646,13 @@ test("without --json a warning prints as `[warn]` with its fix hint, and the las
   assert.match(warned.stdout, /\[warn\]\s+Forge CLI: GitHub at github\.com: .*admin:public_key/);
   assert.match(warned.stdout, /how to fix: Remove them with `gh auth refresh --remove-scopes admin:public_key --hostname github\.com`/);
   assert.match(warned.stdout, /\[ok\]\s+Node\.js/);
-  assert.match(warned.stdout, /All 10 checks passed, 1 with a warning\./);
+  assert.match(warned.stdout, /All 11 checks passed, 1 with a warning\./);
 
   const both = doctor(repo, { bins: [gh.dir], args: [], env: { FAKE_SDK_LOGGED_OUT: "1" } });
   assert.equal(both.status, 1, "a failure still fails the doctor");
   assert.match(both.stdout, /\[warn\]\s+Forge CLI/);
   assert.match(both.stdout, /\[FAIL\]\s+Cursor SDK login/);
-  assert.match(both.stdout, /2 of 10 checks failed, 1 with a warning\./);
+  assert.match(both.stdout, /2 of 11 checks failed, 1 with a warning\./);
 });
 
 test("an origin on a host nobody declared fails the forge check naming the host and the `forges` key, and a hint to declare it", () => {
@@ -866,7 +869,7 @@ test("a check that throws is a failed check naming the workflow, not a crashed d
   const r = doctor(repo);
   assert.equal(r.status, 1, r.stderr);
   const report = reportOf(r);
-  assert.equal(report.checks.length, 10);
+  assert.equal(report.checks.length, 11);
   const config = checkOf(report, "config");
   assert.equal(config.status, "fail");
   assert.match(config.message, /bad-roles/);
@@ -1100,4 +1103,77 @@ test("the kit check has nothing to check when no kit is installed in the home, a
   assert.equal(notAClone.status, "fail", notAClone.message);
   assert.match(notAClone.message, /not a git clone/);
   assert.match(notAClone.hint ?? "", /Reinstall the kit/);
+});
+
+// ---- the host: WSL interop (issue #73) ----
+
+/** What `/proc/sys/fs/binfmt_misc/WSLInterop` holds on a WSL2 distribution with interop on (read on 2026-11-15, kernel 6.18): the switch, then the binfmt entry. */
+const WSL_INTEROP_ON = "enabled\ninterpreter /init\nflags: PF\noffset 0\nmagic 4d5a\n";
+
+/** A file for the doctor to read as the WSL interop file, holding `content`. */
+function interopFile(content: string): string {
+  const file = join(sandbox, `interop-${++counter}`);
+  writeFileSync(file, content);
+  return file;
+}
+
+const hostCheck = (repo: string, interop: string) => checkOf(reportOf(doctor(repo, { env: { WF_DOCTOR_WSL_INTEROP_FILE: interop } })), "host");
+
+test("the host check warns, and the doctor still exits 0, when WSL interop is enabled: it names auth.json and the wsl.conf setting that closes the boundary, and changes nothing", () => {
+  const interop = interopFile(WSL_INTEROP_ON);
+  const r = doctor(repoCopy(), { env: { WF_DOCTOR_WSL_INTEROP_FILE: interop } });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const report = reportOf(r);
+  assert.equal(report.ok, true, "a warning leaves the report ok");
+  const host = checkOf(report, "host");
+  assert.equal(host.status, "warn", host.message);
+  assert.match(host.message, /~\/\.cursor\/sdk\/auth\.json/);
+  assert.ok(host.message.includes("\\\\wsl$"), "it says how a Windows process reaches the Linux home");
+  assert.match(host.message, /0600/);
+  assert.match(host.hint ?? "", /separate WSL distribution/);
+  assert.match(host.hint ?? "", /\/etc\/wsl\.conf/);
+  assert.match(host.hint ?? "", /\[interop\]/);
+  assert.match(host.hint ?? "", /enabled=false/);
+  assert.match(host.hint ?? "", /never changes or restarts WSL/);
+  assert.match(host.hint ?? "", /the paragraph on WSL in https:\/\/github\.com\/rodrigorjsf\/cursor-workflows-starter\/blob\/v[^ ]*\/SECURITY\.md/);
+  assert.deepEqual(
+    report.checks.filter((c) => c.status !== "pass").map((c) => c.id),
+    ["host"],
+    "no other check warns because of it",
+  );
+  assert.equal(readFileSync(interop, "utf8"), WSL_INTEROP_ON, "the doctor only reads the file");
+  assert.equal(r.stderr, "");
+
+  const text = doctor(repoCopy(), { args: [], env: { WF_DOCTOR_WSL_INTEROP_FILE: interop } });
+  assert.equal(text.status, 0, text.stdout + text.stderr);
+  assert.match(text.stdout, /\[warn\]\s+Host: .*auth\.json/);
+  assert.match(text.stdout, /how to fix: For a repository you do not trust/);
+  assert.match(text.stdout, /All 11 checks passed, 1 with a warning\./);
+});
+
+test("with no WSL interop file the host check passes and says the host is not WSL or has interop off, with no hint", () => {
+  const host = hostCheck(repoCopy(), join(sandbox, "there-is-no-such-interop-file"));
+  assert.equal(host.status, "pass", host.message);
+  assert.match(host.message, /not WSL/);
+  assert.match(host.message, /interop is off/);
+  assert.equal(host.hint, undefined);
+});
+
+test("a WSL interop file that reads disabled passes the host check: Windows programs cannot be started from this distribution", () => {
+  const host = hostCheck(repoCopy(), interopFile("disabled\n"));
+  assert.equal(host.status, "pass", host.message);
+  assert.match(host.message, /interop is off/);
+  assert.equal(host.hint, undefined);
+});
+
+test("a WSL interop file that cannot be read is a warning that says why, not a failure and not a pass", () => {
+  const directory = join(sandbox, "interop-is-a-directory");
+  mkdirSync(directory);
+  const r = doctor(repoCopy(), { env: { WF_DOCTOR_WSL_INTEROP_FILE: directory } });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const host = checkOf(reportOf(r), "host");
+  assert.equal(host.status, "warn", host.message);
+  assert.match(host.message, /could not read/);
+  assert.match(host.message, /EISDIR/);
+  assert.match(host.hint ?? "", /the paragraph on WSL in https:\/\//);
 });

@@ -25,6 +25,7 @@ import { REPO_CODE_INTRO, loadsProjectSettings, repoCommandLines, repoCommandsIn
 import { loadWorkflows } from "./runtime/registry.js";
 import { isRecord } from "./runtime/parse-json.js";
 import { userDir } from "./runtime/state.js";
+import { WSL_INTEROP_FILE, WSL_INTEROP_FILE_ENV, readWslInterop } from "./wsl-interop.js";
 import type { WorkflowDefinition } from "./runtime/workflow.js";
 import { type ForgeLogin, type ForgeToken, type OriginForge, forgeOfOrigin, loginOf } from "../workflows/implement-issue/forge.js";
 
@@ -474,6 +475,33 @@ function checkKit(): CheckResult {
   return problems.length ? fail("kit", problems.join("\n"), hint) : pass("kit", `${kit} is at v${version} with a clean tree`);
 }
 
+/**
+ * The host the kit runs on, as far as the WSL trust boundary goes: on WSL2 with interop on, a Windows process reaches this Linux home
+ * through `\\wsl$` as the distribution's default user, so the 0600 mode of `~/.cursor/sdk/auth.json` does not keep it out, and a step that
+ * runs without the SDK sandbox can start Windows programs. That is a warning, since the boundary is the user's to choose per repository;
+ * the doctor reads the kernel's interop file and never changes `wsl.conf` or restarts WSL. A host with no interop file (not WSL, or
+ * interop off) passes. `WF_DOCTOR_WSL_INTEROP_FILE` replaces the file's path, for the tests.
+ */
+function checkHost(): CheckResult {
+  const file = process.env[WSL_INTEROP_FILE_ENV] || WSL_INTEROP_FILE;
+  const interop = readWslInterop(file);
+  const securityDoc = `See the paragraph on WSL in ${kitFileUrl("SECURITY.md", readKitPackage().version)}.`;
+  switch (interop.kind) {
+    case "absent":
+      return pass("host", `no WSL interop: ${file} does not exist, so this host is not WSL, or its interop is off`);
+    case "disabled":
+      return pass("host", `WSL interop is off: ${file} reads "${interop.reads}", so a step cannot start Windows programs from this distribution`);
+    case "unreadable":
+      return warn("host", `could not read ${file}: ${interop.said}. The doctor cannot tell whether WSL interop is on, which decides whether a step can start Windows programs`, `Check the file's permissions, or ignore this on a host that is not WSL. ${securityDoc}`);
+    case "enabled":
+      return warn(
+        "host",
+        `WSL interop is on (${file} reads "enabled"). A Windows process reaches this Linux home through \\\\wsl$ as the distribution's default user, so the 0600 mode of ~/.cursor/sdk/auth.json does not keep it out, and a step that runs without the SDK sandbox can start Windows programs`,
+        `For a repository you do not trust, work in a separate WSL distribution, or turn interop off in this one: put \`[interop]\` and \`enabled=false\` in its /etc/wsl.conf, then stop the distribution from Windows (\`wsl --terminate <distribution>\`) and start it again. The doctor never changes or restarts WSL. ${securityDoc}`,
+      );
+  }
+}
+
 /** A check that throws is a failed check: the doctor exists to say what is wrong, not to crash on it. */
 function guarded(id: CheckId, run: () => CheckResult | Promise<CheckResult>): Promise<CheckResult> {
   return Promise.resolve()
@@ -497,6 +525,7 @@ export async function runDoctor({ cwd }: { cwd: string }): Promise<DoctorReport>
     guarded("kit-version", async () => checkKitVersion(cwd, await servers)),
     guarded("sandbox", async () => checkSandbox(cwd, await resolution)),
     guarded("kit", checkKit),
+    guarded("host", checkHost),
   ]);
   return createRedactor().value(reportOf(checks));
 }

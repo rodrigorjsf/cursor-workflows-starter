@@ -40,6 +40,24 @@ O `npm test` confere os dois (`test/scripts-conventions.test.ts`): um script sem
 Os seis `verify-*` custam tokens: rode sempre com `--max-tokens` e `--max-cents`, e veja a
 política de custo em [9.1](01-contribuindo.md#testes-contra-a-api-real-política-de-custo).
 
+## Conta do mantenedor
+
+A conta do GitHub que é dona dos releases é a raiz de confiança de toda instalação: o kit se instala de uma tag, e quem controla
+a conta controla a tag, o código e as configurações do repositório. As configurações que se fazem uma vez (2FA que resiste a
+phishing, assinatura SSH de commits, o limite de gasto da Cursor) estão, com o caminho na interface e um comando que confere cada
+uma, no how-to [#74](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/74). A lista abaixo é o que se mantém:
+
+- [ ] **2FA com passkey ou TOTP, nunca por SMS**, e os códigos de recuperação guardados offline: o SMS não resiste a phishing, e os
+  códigos são o caminho de volta se o dispositivo se perder.
+- [ ] **Assinatura SSH de commits e tags, com o vigilant mode ligado** (*Settings → SSH and GPG keys*): sem a assinatura, quem tem
+  uma credencial de push escreve um commit que o GitHub mostra como do dono, e as tags saem desses commits; com o vigilant mode, o
+  GitHub marca como não verificado todo commit e toda tag sem assinatura.
+- [ ] **A cada trimestre, audite** as chaves SSH da conta (de autenticação e de assinatura), as deploy keys de cada repositório e os
+  OAuth apps e GitHub Apps autorizados (*Settings → Applications*), o GitHub App da Cursor incluído: apague o que você não
+  reconhece ou não usa mais, e confira que o app da Cursor só alcança os repositórios que você quer.
+- [ ] **A cada trimestre, exporte o log de segurança** (*Settings → Security log → Export*, em JSON ou CSV) e guarde o arquivo fora
+  do GitHub: o log lista só os últimos 90 dias, então o que aconteceu há mais de um trimestre some se ninguém o exportou.
+
 ---
 
 [← Anterior: 9.3 · Convenções de diagramas](03-diagramas.md) · [Índice](../README.md)

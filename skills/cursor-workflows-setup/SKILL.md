@@ -39,7 +39,7 @@ Pick the task, then run its steps in order. Each step ends on a stated result.
 ## Check the setup
 
 1. Run `wf doctor --json`. Its `checks`, always in this order: `node`, `dependencies`, `login`, `models`, `forge`,
-   `mcp-server`, `config`, `kit-version`, `sandbox`, `kit`. `ok: true` and exit code 0 mean the setup works. A check's `status` is
+   `mcp-server`, `config`, `kit-version`, `sandbox`, `kit`, `host`. `ok: true` and exit code 0 mean the setup works. A check's `status` is
    `pass`, `warn` or `fail`: a `warn` passed, and names something worth fixing. Done when no check is `fail`, or each failing
    check's `message` and `hint` went to the user, and each `warn`'s `message` and `hint` went to the user too.
    - On a Node older than 22.13 the report holds the `node` check alone.
@@ -66,6 +66,11 @@ Pick the task, then run its steps in order. Each step ends on a stated result.
      `wf upgrade`. Show the user the list. Only with their ok, reinstall: `mv ~/.cursor-workflows/kit
      ~/.cursor-workflows/kit.changed`, then run the installer again (INSTALL-AGENT.md, step 2). A development
      install (a link to a working copy) is reported, not checked.
+   - `host` with `status: "warn"`: the host is WSL with interop on, so a Windows process reads `~/.cursor/sdk/auth.json`
+     through `\\wsl$` whatever its `0600` mode says, and a step that runs without the sandbox can start Windows programs.
+     Relay the `message` and `hint`: a separate WSL distribution, or `[interop]` with `enabled=false` in the `/etc/wsl.conf`
+     of the distribution that runs untrusted repositories (it applies after the user stops that distribution from Windows).
+     Editing `wsl.conf` and restarting WSL are the user's call. It is the check for a WSL host only: elsewhere it passes.
    - `models`: a model id in the config is not in the account's catalog; `wf models` lists the ids. Changing the
      config is the user's call (see "Read or change the config").
 3. Run `wf doctor` again. Done when it exits 0, or when the user has the remaining failures and their hints. A `warn` does not
