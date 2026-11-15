@@ -66,7 +66,7 @@ test("one palette: colours are written only in app/tokens.css, and both pages lo
     if (path === TOKENS) continue;
     const source = path.endsWith(".css") ? withoutComments(text) : text.replace(/^\s*\/\/.*$/gm, "");
     const hit = COLOR_LITERAL.exec(source);
-    assert.equal(hit, null, `${relative(PACKAGE, path)} writes a colour of its own (${hit?.[0]}): use a token from app/tokens.css`);
+    assert.equal(hit, null, `${relative(PACKAGE, path)} writes a colour of its own (${hit?.[0]}): use a token from app/tokens.css (an issue number like #101 reads as a colour: cite the issue by URL)`);
   }
   for (const entry of ["app/main.tsx", "run-view/run-page.tsx"]) {
     assert.match(readFileSync(join(PACKAGE, entry), "utf8"), /import\s+["'][./]*(?:app\/)?tokens\.css["']/, `${entry} loads the tokens`);

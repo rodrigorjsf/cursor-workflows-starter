@@ -18,6 +18,8 @@ const SRC = join(import.meta.dirname, "..", "src");
 const PORTUGUESE = /[ãõçáéíóúâêôà]|\b(não|para|uma|que|dos|das|são|também|você|com o|de um|de|da|em|ou|sem|nenhuma?|chave|desconhecid[oa]s?|encontrad[oa]s?|arquivo|pasta|rode|banco|uso|falha|nem|autenticado|servidor|fatias?|teste|falhando|adiad[oa]s?|corpo)\b/i;
 /** Not messages: the metrics database's DDL, whose SQL comments are comments (the rule above), and the pricing rows it seeds. */
 const DATA = ["CREATE VIEW", "CREATE TABLE", "cursor.com/docs/models-and-pricing"];
+/** The fix every check below asks for, printed with its offenders. */
+const FIX = "write these strings in English; to point at a pt-BR doc, name its heading in English prose";
 
 const sources = (dir: string): string[] =>
   readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? sources(join(dir, e.name)) : /\.(ts|mjs)$/.test(e.name) ? [join(dir, e.name)] : []));
@@ -42,7 +44,7 @@ test("no string in the runtime's source is Portuguese: every message that can re
       .filter(({ text }) => PORTUGUESE.test(text) && !DATA.some((d) => text.includes(d)))
       .map(({ line, text }) => `${relative(SRC, file)}:${line}: ${text.slice(0, 100)}`),
   );
-  assert.deepEqual(offenders, []);
+  assert.deepEqual(offenders, [], FIX);
 });
 
 const WORKFLOWS = join(import.meta.dirname, "..", "workflows");
@@ -55,7 +57,7 @@ test("no string in the built-in workflows is Portuguese: prompts, step labels, r
       .filter(({ text }) => PORTUGUESE.test(text))
       .map(({ line, text }) => `${relative(WORKFLOWS, file)}:${line}: ${text.slice(0, 100)}`),
   );
-  assert.deepEqual(offenders, []);
+  assert.deepEqual(offenders, [], FIX);
 });
 
 const SCRIPTS =join(import.meta.dirname, "..", "..", "..", "scripts");
@@ -69,7 +71,7 @@ const shellOffenders = (name: string) =>
     .map(({ line, text }) => `${name}:${line}: ${text.trim().slice(0, 100)}`);
 
 test("the installer's messages are English too: an agent runs it (INSTALL-AGENT.md) and reads what it prints", () => {
-  assert.deepEqual(shellOffenders("install.sh"), []);
+  assert.deepEqual(shellOffenders("install.sh"), [], FIX);
 });
 
 // The measurement fixtures are agent-facing too: their prompts, schemas and meta go to real agents, and the probe repo's
@@ -89,5 +91,5 @@ test("the measurement fixtures an agent reads are English: the verify workflows,
     ...shellOffenders("verify/setup-sandbox-repo.sh"),
     ...shellOffenders("link-claude-skills.sh"),
   ];
-  assert.deepEqual(offenders, []);
+  assert.deepEqual(offenders, [], FIX);
 });
