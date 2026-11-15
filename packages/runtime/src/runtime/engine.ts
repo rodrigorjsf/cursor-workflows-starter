@@ -23,6 +23,7 @@ import { type AgentBackend, type AttemptEvent, type AttemptResult, type ResultVi
 import { createCloudBackend } from "./backend-cloud.js";
 import { type CommandOutcome, EXEC_FLUSH_MS, EXEC_LOG_MAX_CHARS, outputLog, runCommand, toExecResult } from "./command-runner.js";
 import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedConfig, type StepOverrides, allowedSources, isModelAllowed, loadEffectiveConfig } from "../config/index.js";
+import { cursorEndpointRefusal } from "./cursor-endpoints.js";
 import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type OutputStream, type NewEvent, type RunStatus, type StepRef, type TurnUsage, type WorkflowEvent } from "./events.js";
 import { recordExecGroup } from "./job-children.js";
 import { jobsDirIn } from "./job-state.js";
@@ -524,6 +525,11 @@ export async function runWorkflow<A, R>(
 
   const badArgs = argsError(def.meta.argsSchema, args);
   if (badArgs) return refused(badArgs);
+
+  // Before anything is written or any agent exists: the SDK sends the API key to the address in these variables with no check of its own.
+  // Every later SDK call of the run (agents, usage, cloud runs) goes through the same environment, so the whole run is refused, not one step.
+  const badEndpoint = cursorEndpointRefusal();
+  if (badEndpoint) return refused(badEndpoint);
 
   // The config is read afresh at the start of every execution (also a resume): an edit takes effect on the next run.
   let resolved: ResolvedConfig;

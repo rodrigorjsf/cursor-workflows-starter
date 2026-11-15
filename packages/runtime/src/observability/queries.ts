@@ -1,6 +1,7 @@
 // Consultas de análise usadas por `wf stats`, pelo dashboard e pelo export.
 // Todas aceitam uma janela em dias. As views do schema servem para uso direto com o sqlite3.
 
+import { assertCursorEndpoints } from "../runtime/cursor-endpoints.js";
 import { type Db, write } from "./db.js";
 
 type Row = Record<string, unknown>;
@@ -99,6 +100,7 @@ export function toCsv(rows: Row[]): string {
  * resultado conta quantos foram atualizados e quantos falharam.
  */
 export async function reconcile(db: Db, opts: { apiKey?: string } = {}): Promise<{ updated: number; failed: number }> {
+  assertCursorEndpoints(); // `Agent.getUsage` sends the key to the address in CURSOR_BACKEND_URL; a row-by-row failure below would hide that
   // Loaded here, not at the top of the module: `summary` is also the dashboard's, a process that stays up and has no use for the SDK (hundreds of MB).
   const { Agent } = await import("@cursor/sdk");
   const rows = db.prepare(`SELECT attempt_id, agent_id FROM v_unreconciled`).all() as Array<{ attempt_id: string; agent_id: string }>;

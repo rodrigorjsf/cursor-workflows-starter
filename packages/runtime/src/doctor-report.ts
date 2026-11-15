@@ -5,6 +5,7 @@
 export const CHECK_TITLES = {
   node: "Node.js",
   dependencies: "Installed dependencies",
+  endpoints: "Cursor endpoints",
   login: "Cursor SDK login",
   models: "Configured models",
   forge: "Forge CLI",

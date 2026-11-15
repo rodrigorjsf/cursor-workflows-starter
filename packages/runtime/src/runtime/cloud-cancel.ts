@@ -5,6 +5,7 @@
 // The SDK is loaded only when the log names an agent: the dashboard, a process that stays up, cancels through here too and
 // has no use for the SDK (hundreds of MB) otherwise.
 import { join } from "node:path";
+import { cursorEndpointRefusal } from "./cursor-endpoints.js";
 import { errorText } from "./error-text.js";
 import { interruptedCloudSteps } from "./projection.js";
 import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn } from "./run-store.js";
@@ -37,6 +38,9 @@ export async function cancelLeftCloudAgents(repo: string, runId: string, apiKey?
     return result;
   }
   if (agentIds.length === 0) return result;
+  // `Agent.listRuns` sends the key to the address in CURSOR_BACKEND_URL: with one that is not Cursor's, no agent is asked, and each is reported as unreached.
+  const refused = cursorEndpointRefusal();
+  if (refused !== undefined) return { cancelled: [], failed: agentIds.map((agentId) => ({ agentId, error: refused })) };
   const { Agent } = await import("@cursor/sdk");
   for (const agentId of agentIds) {
     try {

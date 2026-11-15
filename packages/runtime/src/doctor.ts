@@ -19,6 +19,7 @@ import { SECURITY_TOKEN_SECTION, broadScopesOf, readTokenScopes } from "./github
 import { kitChanges, kitChangesMessage, kitTagsAtHead } from "./kit-state.js";
 import { kitCompatibility, kitFileUrl, readKitPackage } from "./kit-version.js";
 import { MCP_CONFIG_FILES, type McpLaunch, type McpLaunches, readMcpLaunches } from "./mcp-launch.js";
+import { CURSOR_ENDPOINT_VARIABLES, cursorEndpointProblems, schemeAndHost } from "./runtime/cursor-endpoints.js";
 import { errorText } from "./runtime/error-text.js";
 import { createRedactor } from "./runtime/redaction.js";
 import { REPO_CODE_INTRO, loadsProjectSettings, repoCommandLines, repoCommandsIn } from "./runtime/repo-code.js";
@@ -112,6 +113,32 @@ function checkDependencies(mcp: McpLaunches): CheckResult {
   }
   return pass("dependencies", found.join("\n"));
 }
+
+/**
+ * Where the SDK would send the API key: the address in `CURSOR_BACKEND_URL` (the API and the token exchange) and `CURSOR_WEBSITE_URL`
+ * (login), which it reads from the environment and uses with no check of its own. Both must be unset or an https URL on cursor.sh or
+ * cursor.com. The doctor's own environment is read, and so is the `env` of each MCP entry, because the server the IDE starts gets it.
+ * The report shows the scheme and host of a value, never the rest of it. Until this check passes, the checks that call the SDK do not run.
+ */
+function checkEndpoints(mcp: McpLaunches): CheckResult {
+  const sources = [{ where: "", env: process.env as Record<string, string | undefined> }, ...mcp.launches.map((l) => ({ where: `${l.file}: `, env: l.env }))];
+  const problems = sources.flatMap(({ where, env }) => cursorEndpointProblems(env).map((p) => ({ variable: p.variable, line: `${where}${p.message}` })));
+  if (problems.length) {
+    const names = [...new Set(problems.map((p) => p.variable))];
+    return fail(
+      "endpoints",
+      problems.map((p) => p.line).join("\n"),
+      `Unset ${names.join(" and ")} in the environment that starts the IDE (and in the "env" of the MCP entry, when the message names its file), or set ${names.length > 1 ? "them" : "it"} to an https URL on cursor.sh or cursor.com. ` +
+        "Until then the login and models checks do not run: asking Cursor would send your API key to that address, and the kit refuses to start a run with it too.",
+    );
+  }
+  const set = sources.flatMap(({ where, env }) => CURSOR_ENDPOINT_VARIABLES.flatMap((name) => (env[name] ? [`${where}${name}=${schemeAndHost(env[name]!)}`] : [])));
+  return pass("endpoints", set.length ? set.join("\n") : `neither ${CURSOR_ENDPOINT_VARIABLES.join(" nor ")} is set: the SDK uses Cursor's own endpoints`);
+}
+
+/** The login and models checks ask Cursor, which sends the key to the address the endpoints check refused: they stay unrun. */
+const notRun = (id: "login" | "models"): CheckResult =>
+  fail(id, "not run: the endpoints check failed, and asking Cursor would send your API key to the address it names", "Fix the endpoints check first.");
 
 /**
  * What a passing login adds: the SDK exposes no public way to read Privacy Mode (`Cursor.me()` has no such field, and an internal export
@@ -486,11 +513,13 @@ export async function runDoctor({ cwd }: { cwd: string }): Promise<DoctorReport>
   const mcp = readMcpLaunches(cwd);
   const resolution = resolveWorkflows(cwd);
   const servers = Promise.all(mcp.launches.map(probeServer));
+  const endpoints = guarded("endpoints", () => checkEndpoints(mcp));
   const checks = await Promise.all([
     guarded("node", () => checkNode(mcp)),
     guarded("dependencies", () => checkDependencies(mcp)),
-    guarded("login", checkLogin),
-    guarded("models", async () => checkModels(await resolution)),
+    endpoints,
+    guarded("login", async () => ((await endpoints).status === "fail" ? notRun("login") : checkLogin())),
+    guarded("models", async () => ((await endpoints).status === "fail" ? notRun("models") : checkModels(await resolution))),
     guarded("forge", async () => checkForge(cwd, await resolution)),
     guarded("mcp-server", async () => checkMcpServer(mcp, await servers)),
     guarded("config", async () => checkConfig(cwd, await resolution)),
