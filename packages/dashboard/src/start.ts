@@ -9,7 +9,8 @@ import type { StartRunOutcome, StartRunRequest, StartableWorkflow } from "@curso
 import { isRecord } from "../app/is-record.js";
 import { jsonObjectOf } from "./request-body.js";
 
-type StartRunOutcomeStarted = Extract<StartRunOutcome, { kind: "started" }>;
+/** The runtime's answer to a start or a resume that started a job. */
+export type StartedOutcome = Extract<StartRunOutcome, { kind: "started" }>;
 
 /** The most a start request may weigh. The args are a hand-typed JSON; anything larger is not one. */
 export const MAX_START_BODY_BYTES = 256 * 1024;
@@ -22,7 +23,7 @@ export interface StartedReply {
   runId: string;
   repo: string;
   workflow: string;
-  violations?: StartRunOutcomeStarted["violations"];
+  violations?: StartedOutcome["violations"];
 }
 
 /** A workflow as the start form lists it (`GET /api/workflows`): what it is, and what its args box starts with. */
@@ -75,7 +76,7 @@ export const unknownRepoError = (repo: string): string =>
   `unknown repository: ${repo}; the dashboard starts workflows only in repositories whose runs it already knows: start one there from the chat or with \`wf start\` first`;
 
 /** The fields of a 202 both doors answer (start here, resume in resume.ts): the job, its run, and what the global caps cut, left out when nothing was. */
-export const startedFields = (outcome: StartRunOutcomeStarted): Pick<StartedReply, "jobId" | "runId" | "violations"> => ({
+export const startedFields = (outcome: StartedOutcome): Pick<StartedReply, "jobId" | "runId" | "violations"> => ({
   jobId: outcome.jobId,
   runId: outcome.runId,
   ...(outcome.violations.length > 0 ? { violations: outcome.violations } : {}),

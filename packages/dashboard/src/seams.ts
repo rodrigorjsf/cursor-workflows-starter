@@ -9,13 +9,13 @@
 // Every refusal is a 404 for a run the index does not know, a 400 for a body that is not a decision, and a 409 for the rest: the run exists,
 // but waits for no decision, or on another proposal, or has not got what it takes to be resumed from here.
 import type { SeamsActionOutcome } from "@cursor-workflows/runtime/observe";
+import { isTextList } from "../app/is-record.js";
 import { jsonObjectOf } from "./request-body.js";
 import { type ResumedReply, resumeReply } from "./resume.js";
 
 /** The most a seams decision may weigh. A list of seams is a few lines of text; anything larger is not one. */
 export const MAX_SEAMS_BODY_BYTES = 64 * 1024;
 
-const isTexts = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");
 
 export type SeamsDecision = { kind: "approve"; digest: string } | { kind: "replace"; seams: string[] };
 
@@ -32,7 +32,7 @@ export function parseSeamsBody(action: SeamsDecision["kind"], raw: string): Pars
     return { ok: true, decision: { kind: "approve", digest } };
   }
   const list = seams ?? [];
-  if (!isTexts(list)) return { ok: false, error: "seams must be a list of text: one seam in each" };
+  if (!isTextList(list)) return { ok: false, error: "seams must be a list of text: one seam in each" };
   const given = list.map((seam) => seam.trim()).filter((seam) => seam !== "");
   if (given.length === 0) return { ok: false, error: "seams must list at least one seam: a replacement with none would leave the run with nothing to plan on" };
   return { ok: true, decision: { kind: "replace", seams: given } };

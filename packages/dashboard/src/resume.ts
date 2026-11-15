@@ -4,16 +4,14 @@
 // The request carries nothing: the run's id is in the address, and what to start is what the run's latest job was started with, which the
 // runtime reads from that job's record. Every refusal is a 404 for a run the index does not know and a 409 for the rest: the run exists,
 // but is not in a state, or has not got what it takes, to be resumed from here.
-import type { ResumeRunOutcome, StartRunOutcome } from "@cursor-workflows/runtime/observe";
-import { listedWorkflows, startedFields } from "./start.js";
-
-type Started = Extract<StartRunOutcome, { kind: "started" }>;
+import type { ResumeRunOutcome } from "@cursor-workflows/runtime/observe";
+import { type StartedOutcome, listedWorkflows, startedFields } from "./start.js";
 
 /** What `POST /api/runs/<runId>/resume` answers (202) when the job started. `violations` are what the global caps cut, and is left out when nothing was cut. */
 export interface ResumedReply {
   jobId: string;
   runId: string;
-  violations?: Started["violations"];
+  violations?: StartedOutcome["violations"];
 }
 
 /** The status and the body the runtime's answer to a resume becomes. A resume that worked is 202: the job runs on its own, and the run shows `running` a moment later. */

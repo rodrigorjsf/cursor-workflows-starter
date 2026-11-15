@@ -3,10 +3,9 @@
 // against them before the panel reads it.
 import type { StartedReply, WorkflowEntry, WorkflowsReply } from "../src/start.js";
 import { type ApiReply, getJson, postAction } from "./dashboard-api.js";
-import { isRecord } from "./is-record.js";
+import { isRecord, isTextList } from "./is-record.js";
 import type { StartRequestBody } from "./start-form.js";
 
-const isTextList = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");
 
 const isReposReply = (value: unknown): value is { repos: string[] } => isRecord(value) && isTextList(value.repos);
 
