@@ -79,7 +79,7 @@ export default defineWorkflow<{ target: string }>({
 | `settingSources` | Which config layers the step loads: `"project"` (AGENTS.md, rules, skills, hooks, project MCP), `"team"`, `"mdm"`, `"user"`, `"plugins"`, `"all"` (the global cap `allowedSettingSources` leaves `"all"` out by default). Default when omitted: `["project","team","mdm"]`. Every layer adds fixed context to every call (cost.md). |
 | `memo` | Result cache across runs, keyed by prompt, model, schema, tools, context and repository state. Accepted only with read-only `tools`. |
 | `revertOnRetry` | Before each retry of a step that can write, puts `cwd` back as it was when the step started (files created are deleted, files changed are restored, the index is unstaged). Default off. Use it only when no other step writes in that directory at the same time (a worktree of the step's own): the undo restores the whole directory. In a directory that is not a git repository the retry runs anyway, with a warning. |
-| `sandbox` | Turns on the SDK's local sandbox for shell calls (Linux needs `bubblewrap`). Untested here; leave it off. |
+| `sandbox` | Turns on the SDK's local sandbox (Linux needs `bubblewrap` or a kernel with Landlock). Measured: it denies the network except the hosts of `.cursor/sandbox.json`, blocks shell writes outside `cwd` (the `edit` tool did not create a file there either), and refuses reading `~/.cursor/sdk/auth.json` only with `readBoundary: "workspace"` in the repository's `.cursor/sandbox.json`. The installer's global config already turns it on for every step (`caps.requireSandbox`); a step that downloads packages then needs its hosts listed. |
 
 ## `exec()`: commands the workflow runs itself
 
@@ -99,6 +99,7 @@ if (!tests.ok) { /* tests.exitCode, tests.timedOut, tests.tail: the last 32768 c
 | `timeoutMs` | The command is killed after this long: SIGTERM to its whole process group, SIGKILL two seconds later. Default: `workflows.<name>.execTimeoutMs` in the config files, 10 minutes when unset. Give a network command (`git push`, `gh`, `glab`) a short one. |
 | `cwd` | Working directory. Default: the run's cwd. |
 | `env` | Variables added to the process's own environment. A variable set to `undefined` is removed from the command's (`{ NODE_TEST_CONTEXT: undefined }`). |
+| `scrubSecrets` | `true` starts the command without the variables of the process's environment whose name holds `KEY`, `TOKEN`, `SECRET` or `PASSWORD` (any case: `CURSOR_API_KEY`, `GH_TOKEN`). Use it for a command that runs code the run does not trust, such as a test suite of the target repository; `env` still adds what you name. Default: `false`: a `git` call or the forge CLI's (`gh`, `glab`) needs its token. |
 
 - There is **no shell**: `command` and its `args` go to the program as they are. Use `["bash", ["-c", line]]` when you
   need one (`bash -c`, not `bash -lc`: rules.md, rule 3). The command has no stdin and no controlling terminal, so a
@@ -201,9 +202,10 @@ own commands take `--repo <path>`; `glab api` takes `--hostname <host>` and the 
   included) strictly above the cap cancels the SDK run at once, and the attempt fails as `errorKind: "budget"` with no
   retry. A step over its own cap fails alone (an `agent()` error, `null` in `parallel`); the run's cap cancels every
   active step, starts none, and ends the run with `Token cap reached` (even if the workflow code catches the step's
-  error and carries on). A step that already used its whole cap gets no further attempt. The overshoot is at most one turn per
-  active step. The SDK reports usage only at the end of a turn and a turn can be the agent's whole loop, so keep a short
-  `timeoutMs` on steps that write. The cents cap is checked only **before** each step and retry (cost arrives after the
+  error and carries on). A step that already used its whole cap gets no further attempt. The overshoot is at most one send per
+  active step. The SDK reports usage only at the end of a turn, and a turn is the whole `send` (measured: one `turn-ended`
+  for a write step of 31 tool calls), so the caps act between sends and never inside one: keep a short `timeoutMs` on
+  steps that write. The cents cap is checked only **before** each step and retry (cost arrives after the
   step).
 - `maxCents` is compared with `spentCents()`: per attempt, the larger of the raw cost and the charged cost. The charged
   cost alone is 0 for usage included in the plan, bring-your-own-key and credits.

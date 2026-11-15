@@ -88,6 +88,8 @@ rodou: custo zero.
 
 > **Nota (2026-11-12, [#51](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/51)):** os prompts do `scripts/probe-sdk.ts` estão em inglês desde então. As linhas das §4 a §6 foram medidas com os prompts em pt-BR e ficam como foram medidas.
 
+> **Nota (2026-11-14, [#37](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/37)):** a linha "Granularidade dos eventos" veio de uma sonda curta (1 `send` que lê 4 arquivos). Um envio longo que escreve, medido em §15, também dá **1** `turn-ended`: o turno do SDK é o envio inteiro, e os tetos de tokens ao vivo só olham o uso quando ele termina. As linhas desta seção ficam como foram medidas.
+
 ## 7. Fase 2, Blocos 4 e 5: saída estruturada, contexto do projeto e guarda contra recursão
 
 **Ambiente:** Premium da The X Subscription · `@cursor/sdk@1.3.1` · `composer-2.5` · `settingSources`
@@ -295,6 +297,11 @@ aponta onde o texto corrigido está agora: docs do kit (`docs N.M`), relatório 
 - **X05 ◐:** no IDE, chamadas MCP seguem o Run Mode, como o shell; sem allowlist, cada `wait_workflow` pode pedir
   aprovação (docs 2.3 §1).
 
+> **Nota (2026-11-14, [#62](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/62)):** a linha C46 ("Com sandbox, escrita só no cwd e rede só pela allowlist") ficou `◐; teste: ⏭ sem
+> bubblewrap`. A §16 mediu o sandbox numa etapa que escreve: a rede e a escrita fora do repositório (shell e tool `edit`) foram
+> bloqueadas, e a leitura do `~/.cursor/sdk/auth.json` só com `readBoundary: "workspace"`. A linha fica como foi medida.
+
+
 ## 12. Não executado (pendências)
 
 O que ficou sem teste nesta sessão. Cada linha diz por que e como testar. Para os itens que exigem modelos que
@@ -317,6 +324,9 @@ política de custo em [9.1](../contributing/01-contribuindo.md#testes-contra-a-a
 | Concorrência e rate limit acima de 2 agentes em paralelo | O máximo medido foi 2 etapas em `ctx.parallel` (§8); a doc não dá limite de agentes por usuário (C15) | `concurrency` 4, 8 e 16 com etapas curtas; registrar `RateLimitError`, `AgentBusyError` e tempo por etapa |
 | Etapas na nuvem contra a API real (`verify-cloud`) | Exige um plano com Cloud Agents e um repositório num code host conectado, e o run empurra e apaga uma branch no `origin`: não rodou na sessão que escreveu o workflow (§14) | `scripts/verify/README.md` (seção `verify-cloud`), com tetos baixos; registrar o resultado em §14 |
 | `getUsage()` em agentes locais (custo real no kit) | A doc do SDK diz que o uso de agentes locais "is rolling out gradually and is enabled per account" ([doc](https://cursor.com/docs/sdk/typescript#agentgetusage)); nesta conta deu `feature_unavailable` em todas as chamadas, inclusive no Premium (§5). Não há como pedir a liberação pela doc. Enquanto isso, o teto em centavos fica cego e o custo vem da tabela `pricing` | Reconfirmar de tempos em tempos: `npm run wf -- metrics reconcile` (se passar a atualizar tentativas, a conta foi liberada, desde que o Cursor ainda guarde o uso dos agentes descartados) ou `npx tsx scripts/probe-sdk.ts --mode smoke --model composer-2.5` (cerca de 3 mil tokens, na franquia): `getUsageReads` com `cost` em vez de `feature_unavailable`. Quando liberar, registrar aqui e revisar o Status do README e os docs 2.2 §3, 5.1 e 5.3 |
+
+> **Nota (2026-11-14, [#62](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/62)):** a linha "Sandbox (`sandbox: true`)" foi executada na §16, com o `bubblewrap` instalado. As linhas
+> da tabela ficam como estavam.
 
 ## 13. Fase 6: o `implement-issue` com TDD, review em três eixos e checkpoint (2026-11-11)
 
@@ -386,6 +396,131 @@ Para a API real (`verify-cloud` e a conferência manual do ciclo de vida, descri
 | Uma etapa que escreve: o cloud agent commita e empurra para a branch de snapshot, mesmo com um prompt que manda não rodar git | uma etapa de escrita num papel `ok` na `sandbox-repo`; olhar `git log` depois e o aviso "made no commit" | ⏭ não executado | — | — |
 | O trabalho volta: o `git fetch` da branch de snapshot traz os commits do agente e o worktree avança sem aviso de não fast-forward | o mesmo run | ⏭ não executado | — | — |
 | `resultVia: "artifact"`: onde o agente grava o `result.json` e que caminho `listArtifacts` devolve | uma etapa de leitura com schema e `resultVia: "artifact"` | ⏭ não executado | — | — |
+
+## 15. Fase 8: o turno de uma etapa local longa e o `Run.cancel()` (2026-11-14)
+
+Os tetos de tokens ao vivo (`maxTokens` e `maxTokensPerStep`) olham o uso quando o SDK entrega um `turn-ended`
+([2.2 §3](../usage/02-configuracao-inicial.md#3-teto-de-custo)). A única medição era a sonda curta da §6 (1 `send` = 1
+`turn-ended`); o SDK falso emite os turnos que o teste manda, então só um run real diz se um envio longo também dá um só. A
+pergunta é do [#37](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/37).
+
+**Ambiente:** Premium da The X Subscription · `@cursor/sdk@1.3.1` · `composer-2.5` · `settingSources: []` · Linux x64 (WSL2). O
+workflow é o [`verify-turn-granularity`](../../scripts/verify/README.md): uma etapa local que escreve, pelo motor, e dois
+envios diretos pelo SDK, todos com o mesmo pedido (seis módulos com testes, um por vez, com `node --test` entre eles). Rodou
+duas vezes, cada uma num repositório novo, com `--max-tokens 400000 --max-cents 40`. O `getUsage()` de agente local deu
+`feature_unavailable` (como na §5), então o `step-end` conta os tokens pela soma dos eventos `turn`.
+
+| Item | Método | Resultado | Evidência | Ação tomada |
+|---|---|---|---|---|
+| `turn-ended` numa etapa longa do motor | etapa `long-write` (`ctx.agent`, 31 e 24 tool calls: edit, shell, read e glob); eventos `turn` do `events.jsonl` contra o `step-end` | ✅ **1** | run 1: 1 `turn`, `step-end` com `turns: 1` e `steps: 1`, 267.526 tokens (261.343 de entrada, 6.183 de saída) em 57,2 s; run 2: 1 `turn`, `turns: 1`, `steps: 1`, 133.969 tokens (129.594 e 4.375) em 51,9 s. Os tokens dos eventos `turn` e o `usage.totalTokens` do `step-end` são iguais, mas por construção (a soma dos `turn` é a fonte, pelo `feature_unavailable`) | Documentado: o teto só vê o uso quando o envio termina |
+| `turn-ended` num envio longo direto | `agent.send` com `onDelta`, contando cada update | ✅ **1** | run 1: 1 `turn-ended` e 1 `step-completed` para 21 `tool-call-started`, 14 `tool-requests-listed` e 15 `thinking-completed`; `RunResult.usage` 124.436 de entrada e 3.655 de saída (128.091 no total). Run 2: as mesmas contagens, 124.331 e 4.023 (128.354) | Idem |
+| `token-delta` × `RunResult.usage` | soma dos valores do mesmo envio | ❌ não soma ao uso | run 1: 149 `token-delta`, soma 5.596, que é 1,53 vezes o `outputTokens` e 4,4% do `totalTokens`; run 2: 166, soma 5.651, 1,41 vezes o `outputTokens`. O `RunResult.usage` não trouxe `reasoningTokens`. Nos 20 primeiros valores do run 1, quase todos são 1 ou 2, e um é 121 | Nenhum teto no meio do turno: o `token-delta` passa do `outputTokens` e, mesmo certo, cobriria só a saída, menos de 5% do total (a entrada, reenviada a cada chamada ao modelo, é o resto) |
+| O que mais sinaliza uso no meio do turno | contagem dos tipos de update do envio | ❌ nada | `step-completed` chegou uma vez, no fim, e `tool-requests-listed` não traz tokens | — |
+| `Run.cancel()` no meio do turno | segundo envio direto pelo SDK (não uma etapa do motor com `maxTokensPerStep` baixo, que só corta no fim do envio), cancelado na 3ª `tool-call-started` (a soma dos `token-delta` estava em 491 e 504, longe do teto de 3.000 que a sonda tinha como primeiro gatilho) | ✅ para | run 1: cancelado 5.040 ms depois do `send`, com 3 tool calls iniciadas e 2 concluídas e nenhum `turn-ended`; `cancel()` resolveu em 3 ms, `wait()` assentou 3 ms depois do cancelamento, `status: "cancelled"` e nenhum update chegou depois. Run 2: igual (5.525 ms, 3 ms e 3 ms) | O corte do run funciona no meio de um envio e é imediato: falta só um sinal de uso para decidir quando cortar |
+| Uso de um run cancelado no meio | `RunResult.usage` dos dois envios cancelados | ◐ ausente | `RunResult.usage` não veio (e nenhum `turn-ended` chegou) nos dois: os tokens gastos até o corte não aparecem em lugar nenhum, também sem o `getUsage()` | Documentado: um corte no meio do envio seria cego ao próprio uso |
+| Custo | `spentCents`, `chargedCents`, `spentTokens` e a tabela `pricing` | ◐ | `spentCents: 0` e `chargedCents: 0` nos dois (uso incluído no plano). Pelo preço de lista da tabela `pricing`, o run 1 custaria cerca de 11 centavos (7,5 da etapa do motor e 3,8 do envio direto longo, fora o cancelado) e o run 2 cerca de 8,5 | Dentro do orçamento de 100 centavos que a medição dividia com a sonda do sandbox |
+
+**Decisão (regra do #37):** nenhum envio longo deu mais de um `turn-ended`, e o `token-delta` não soma ao uso: vale a regra 3.
+Os tetos de tokens ao vivo agem **entre envios**, não dentro de um: uma etapa que escreve de 130 mil a 270 mil tokens num
+envio só é vista pelo teto quando o envio termina, e o freio de dentro dele é o `timeoutMs` da tentativa. O que o teto faz
+depois que o envio termina continua valendo: o teto do run manda cancelar os envios das outras etapas ativas, e o `Run.cancel()`,
+chamado direto no SDK, parou um envio no meio em 3 ms (o caminho do motor até ele não foi medido; ele é lido no código:
+`cutters`, `AttemptAbort.cut`, `RunCanceller`). O custo é o da linha acima: o envio cortado não reporta uso. Os textos do teto (2.2 §3, 3.1, 4.1, 5.1, 6.2 e as skills) passam a dizer "limitado por um envio".
+
+Esta medição é de etapas **locais**. Num run da nuvem, o `onDelta` e o `turn-ended` seguem sem medida (§14).
+
+## 16. Fase 9: o sandbox do SDK numa etapa que escreve (2026-11-14)
+
+O [SECURITY.md](../../SECURITY.md) dizia que o sandbox do SDK "não foi testado neste kit", e o arquivo de configuração que o instalador
+grava não o ligava: uma etapa que leu texto não confiável rodava com shell e rede abertos, e podia ler o `~/.cursor/sdk/auth.json`. A
+pergunta é do [#62](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/62): o sandbox segura o que este kit precisa? Só uma medição decide se o padrão muda.
+
+**Ambiente:** Premium da The X Subscription · `@cursor/sdk@1.3.1` · `composer-2.5` · `settingSources` default do engine
+(`["project","team","mdm"]`), todas as tools, como uma etapa que escreve do `implement-issue` · Linux x64 (WSL2, kernel 6.18) ·
+`bubblewrap` 0.13.1 do Homebrew (`/home/linuxbrew/.linuxbrew/bin/bwrap`, que pertence ao usuário, não ao root). O workflow é o
+[`verify-sandbox`](../../scripts/verify/README.md): uma etapa local com o sandbox ligado, num repositório descartável (um projeto Node
+mínimo, sem remoto), com este `.cursor/sandbox.json`: `readBoundary: "workspace"` e `networkPolicy` com `default: "deny"` e
+`allow: ["registry.npmjs.org"]`. A etapa roda, em ordem, `curl` para um host da allowlist (controle) e para `example.com`, um
+`touch` dentro do repositório (controle) e um `touch` na home, um `cat` do `~/.cursor/sdk/auth.json` (a saída vai para o
+`/dev/null`: a chave não entra no contexto nem no log), o `env` filtrado pelas variáveis `CURSOR_SANDBOX_*` e um pedido de escrita pela
+tool `edit`. O veredito não vem do que o agente diz: vem do log de eventos (a chamada e a saída de cada tool) e dos arquivos que o
+código do workflow confere, de fora do sandbox, depois da etapa. Seis runs, com `--max-tokens 150000 --max-cents 25`; os runs 2 a 5
+rodaram revisões anteriores do verificador, que ainda não conferiam o `exit` do `touch`, a escrita na home fora do sandbox nem o
+controle da tool `edit` dentro do repositório, e o run 6 rodou o verificador final.
+
+| Item | Método | Resultado | Evidência | Ação tomada |
+|---|---|---|---|---|
+| `curl` para um host fora da allowlist | `curl -m 20 https://example.com/` na etapa; o mesmo `curl` fora do sandbox é o controle | ✅ bloqueado | runs 2, 4, 5 e 6: `exit 7`, `http=000` e `curl: (7) CONNECT tunnel failed, response 403`; fora do sandbox, o mesmo `curl` deu 200 | Rede negada confirmada |
+| `curl` para um host da allowlist | `curl https://registry.npmjs.org/` na etapa | ✅ passa | `http=200` nos runs 2 a 6 | O `.cursor/sandbox.json` do projeto vale para runs locais do SDK com o `settingSources` default |
+| Escrita fora do repositório, pelo shell | `touch "$HOME/.wf-sandbox-…"`; o arquivo é procurado de fora do sandbox | ✅ bloqueada | runs 2, 4, 5 e 6: `touch: cannot touch …: Permission denied`, `exit 1`, o arquivo não existe depois; o `touch` dentro do repositório (controle) criou o arquivo, e, no run 6, a máquina escreve na home fora do sandbox (controle) | Escrita fora do cwd negada confirmada |
+| Escrita fora do repositório, pela tool `edit` | a tool `edit` pedida para criar um arquivo na home; o arquivo é procurado de fora | ✅ não criou o arquivo | runs 2 a 6: o arquivo não existe depois, e o agente disse que a política do sandbox recusou a escrita (as palavras são dele: o log não guarda a saída da tool `edit`); no run 6, a mesma tool criou um arquivo dentro do repositório (controle) | A doc não dizia se o sandbox cobria `edit`: nesta medição cobriu. É o caminho do incidente da §9 |
+| Leitura do `~/.cursor/sdk/auth.json` com `readBoundary: "workspace"` | `cat ~/.cursor/sdk/auth.json > /dev/null` | ✅ bloqueada | runs 2, 4, 5 e 6: `cat: …/auth.json: Permission denied`, `exit 1`; a chave é legível fora do sandbox (controle) | O portão do #62 abre |
+| Leitura **sem** `readBoundary` (base de comparação) | o mesmo `cat`, com um `.cursor/sandbox.json` que só tem a `networkPolicy` | ❌ passou | run 3: `exit 0`: a etapa leu a chave | Só o `readBoundary` bloqueia a leitura: ligar o sandbox sozinho não a bloqueia |
+| Qual mecanismo impôs as regras | `env` filtrado pelas variáveis `CURSOR_SANDBOX_*`; run 5 com só um `bwrap` que sai com 1 no PATH | ◐ Landlock, não bubblewrap | runs 4 a 6: `CURSOR_SANDBOX_LANDLOCK_STATUS=fully_enforced`; no run 5 o `bwrap` de verdade estava fora do PATH e os três bloqueios se repetiram. O helper do SDK (`cursorsandbox`) tem dois backends, `landlock` e `bubblewrap`, e a mensagem "Linux auto backend selection failed. Landlock error" | Nesta máquina o `bubblewrap` não foi necessário. A doc do SDK o exige no Linux; num kernel sem Landlock (a ABI 3 pede o 6.2 ou mais novo) ele deve ser o único caminho, o que não foi medido |
+| Custo | `wf stats` do banco de métricas dos runs | ◐ | 315.548 tokens nos seis runs (de 24 mil a 83 mil cada), cerca de 11 centavos no preço de lista, `spentCents: 0` e `chargedCents: 0` (uso incluído no plano); o `getUsage()` segue `feature_unavailable` | Dentro dos 100 centavos que a medição dividia com a sonda do #37 (cerca de 20 centavos) |
+
+O run 1 foi descartado: o verificador procurava o conteúdo das chamadas pelo rótulo da etapa, que as linhas de conteúdo não trazem
+(trazem o `attemptId`), então ele não achou nenhuma chamada e não deu veredito. O log cru do run 1 mostra os mesmos quatro bloqueios.
+O verificador passou a achar o conteúdo pela tentativa aberta pelo `step-start` da etapa.
+
+**Decisão (portão do #62):** com `readBoundary: "workspace"`, as três tentativas ficaram bloqueadas em todos os runs, então
+`templates/global-config.json` passa a gravar `caps.requireSandbox: true`, o `wf doctor` ganha a verificação `sandbox` (falha, nomeando o
+`bubblewrap`, quando o `bwrap` não está no PATH, porque o kit não testa o Landlock), e o SECURITY.md diz o resultado. O `readBoundary`
+**não** vem do `requireSandbox`: o kit não grava o `sandbox.json`, e o `wf doctor` diz se ele está posto. A medição usou o
+`.cursor/sandbox.json` do repositório; o `~/.cursor/sandbox.json`, que a doc do Cursor diz valer para todos os workspaces, com o
+arquivo do repositório prevalecendo, **não foi medido**, e o `wf doctor` diz isso quando só ele tem o `readBoundary`.
+
+**Não medido:** macOS (seatbelt) e Windows; o `implement-issue` inteiro com o sandbox ligado (uma etapa que baixa pacotes
+precisa dos hosts no `sandbox.json`; se o `git` dentro de um worktree, que escreve no `.git` do repositório principal, funciona
+no sandbox, é suspeita, no [#99](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/99)); um kernel sem Landlock.
+
+> **Nota (2026-11-15, [#99](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/99)):** o `implement-issue` inteiro com o
+> sandbox ligado foi medido na §17: o exemplo LOW terminou `done`, e o `git` dentro do worktree funcionou. As linhas da §16 ficam como
+> foram medidas.
+
+## 17. Fase 10: o `implement-issue` inteiro com o sandbox ligado (2026-11-15)
+
+A §16 mediu **uma** etapa que escreve. O [#99](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/99) perguntava se o
+padrão que ela abriu (`caps.requireSandbox: true` no `templates/global-config.json`) deixa um `implement-issue` chegar a `done`: as
+etapas de escrita dele rodam num worktree em `<repo>/.workflows/worktrees/<branch>`, cujo `.git` aponta para fora do `cwd` da etapa, e
+o sandbox nega a rede e a escrita fora do `cwd`. Nenhum run dele tinha rodado assim.
+
+**Ambiente (runs de 2026-11-15):** Premium da The X Subscription · `@cursor/sdk@1.3.1` · modelos do `implement-issue` sem troca, porque o exemplo LOW
+documentado usa o modelo padrão de cada papel (`composer-2.5` em `implement.low`, as etapas que escrevem e que o sandbox limita;
+`grok-4.7` com `reasoning_effort=high` nos três revisores, que só leem) · Linux x64 (WSL2, kernel 6.18) · kit no commit
+`6890441`. O `WF_HOME` era uma pasta descartável cujo `config.json` é cópia do `templates/global-config.json`
+(`caps.requireSandbox: true`); a configuração global do dono (`~/.cursor-workflows/config.json`) não existe e continuou sem existir.
+O repositório alvo foi um clone novo (`git clone -c core.autocrlf=false`) de
+[rodrigorjsf/wf-sandbox](https://github.com/rodrigorjsf/wf-sandbox), **sem** `.cursor/sandbox.json`, como o de quem acabou de
+instalar, com uma issue nova `complexity:low` ("Add min(a, b) to src/math.js", `wf-sandbox#13`). Nenhum repositório foi criado
+(o token do `gh` não tem `delete_repo`).
+
+```bash
+WF_HOME=<pasta descartável> npm run wf -- run implement-issue --cwd <clone do wf-sandbox> \
+  --args '{"issue":13,"testCommand":"npm test","openPr":false}' --max-tokens 400000 --max-cents 30
+```
+
+| Item | Método | Resultado | Evidência | Ação tomada |
+|---|---|---|---|---|
+| `implement-issue`, exemplo LOW, com `caps.requireSandbox: true` | o comando acima | ✅ `status: "done"` | `implement-issue-acfe2c7e`: tier LOW pelo rótulo, 1 fatia, 5 agentes (`test-1` 87.312 tokens e `code-1` 76.556, `composer-2.5`; revisores de segurança, padrões e spec 27.331, 46.552 e 61.354, `grok-4.7`), 0 achados nos três eixos, `tdd_retries 0`, `red_discarded_files 0`, suíte final verde e o commit `15b4d8c` no worktree (`openPr: false`: nada foi empurrado). **299.105 tokens** (cache 79,4%), cerca de 80 segundos, 21,07 centavos no preço de lista; `spentCents` e `chargedCents` 0 (o `getUsage()` segue `feature_unavailable`) | Regra de decisão do #99, caso 1: o padrão fica, e só este registro muda |
+| O `npm test` do shell do agente | as duas etapas de escrita rodaram `npm test` e depois `node --test` | ◐ falha de **ambiente**, não do sandbox | `Cannot find module '/home/rodrigo/.local/lib/node_modules/npm/bin/npm-cli.js'`: o `npm` do PATH de login é o do Node 22.11 do mise, quebrado, e o arquivo não existe nesta máquina (o defeito que a §9 já registrou, sem sandbox). O agente não mexeu fora do repositório e rodou `node --test` (vermelho na etapa de teste, como devia, e verde na de código) | O comando de teste do workflow (`bash -c "npm test"` pelo `ctx.exec`, fora do sandbox) passou |
+| Revisores sem shell | `grep` e `read` fora do worktree | ◐ leitura livre | os revisores leram e procuraram em pastas fora do `cwd`: sem `readBoundary` o sandbox não limita a leitura (§16, base de comparação) | O `readBoundary` continua um pedido ao dono do repositório (SECURITY.md) |
+| Qual mecanismo impôs as regras | uma etapa só com `cwd` num worktree do mesmo clone, o mesmo `WF_HOME`, e o código dela **sem** `sandbox`: só o teto o ligou | ✅ `CURSOR_SANDBOX=native`, `CURSOR_SANDBOX_LANDLOCK_STATUS=fully_enforced` | `env` dentro da etapa; 82.503 tokens (cerca de 2,65 centavos). O log do run LOW não tem marcador do sandbox (a etapa não imprimiu o ambiente): que ele rodou sandboxado vem da regra do motor (`sandbox: caps.requireSandbox === true || …`, em `packages/runtime/src/runtime/engine.ts`, fixada por `config.test.ts`) e desta etapa, com a mesma configuração | Landlock, como na §16 |
+| Suspeita 1: rede para baixar pacotes | `curl` e `npm view`/`npm install is-odd` na etapa | ✅ negada, **inclusive o registro do npm** | sem `.cursor/sandbox.json`, `curl: (6) Could not resolve host` para `registry.npmjs.org` e para `example.com`; o `npm` do Node 22.23.4 terminou com `EAI_AGAIN` depois de cerca de 70 segundos de tentativas (a saída do `npm` está nos `terminals/*.txt` que o SDK grava em `~/.cursor/projects/<repositório>/`; o `events.jsonl` só tem o `exit=1`) | Já dito no SECURITY.md: um passo do agente que baixa pacotes precisa dos hosts no `.cursor/sandbox.json` (a §16 mediu o host da allowlist respondendo 200). O `setupCommand` do repositório roda pelo `ctx.exec`, fora do sandbox |
+| Suspeita 2: cache fora do `cwd` | `mkdir -p ~/.cache/…` e o `npm` da etapa | ◐ negada, e o `npm` se ajeita | `mkdir: cannot create directory '/home/rodrigo/.cache/…': Permission denied`; o cache e os logs do `npm` foram para `/tmp/cursor-sandbox-cache/<hash>/npm/`, que o sandbox deixou escrever (mesma fonte, os `terminals/*.txt`) | Uma ferramenta que respeita a variável de cache do ambiente funciona; uma que grava um caminho fixo na home falha |
+| Suspeita 3: `git` dentro do worktree | `git status`, `git add`, `git commit`, `git log` na etapa, num worktree cujo `.git` aponta para `<clone>/.git/worktrees/<nome>` | ✅ funciona | `status`, `add` e `log` saíram com 0, e o `commit` também na segunda rodada (na primeira saiu com 1, "nothing to commit": o agente chamou os comandos em paralelo e o `commit` correu antes do `add`); o commit (`7ee1d00`) apareceu no `git log` do worktree, lido de fora do sandbox depois da etapa (o `git log` da própria etapa correu em paralelo e ainda não o mostrava; o worktree descartável foi removido no fim). A suspeita de que escrever fora do `cwd` o quebraria não se confirmou | Nada: os prompts das etapas de escrita proíbem o `git`, e o código do workflow roda o `git` pelo `ctx.exec` |
+| Arquivos fora do repositório | marcador antes do run e `find "$HOME" -newer <marcador>`, sem as pastas de trabalho e de estado das ferramentas desta sessão e do Cursor | ✅ nenhum | só duas mudanças alheias aos runs (uma entrada do cache do npm do `ccstatusline` e o log do Docker Desktop); nada em `~/.cursor/sdk/`, `~/.local/share/mise` nem `~/.cursor-workflows/` | — |
+| Limpeza | `gh issue close`, `gh api repos/rodrigorjsf/wf-sandbox/branches` | ✅ | a issue `wf-sandbox#13` ficou fechada; o remoto só tem `main` (com `openPr: false` o run não empurra branch); nenhum repositório foi criado | — |
+| Custo | `wf stats` do `WF_HOME` descartável | ◐ | os dois runs somam 381.608 tokens e 23,72 centavos no preço de lista, 0 cobrado. Com cerca de 11 centavos do #62 e 20 do #37, os 100 centavos do orçamento local do spec #95 já gastaram cerca de 55 e sobram cerca de 45 | — |
+
+**Decisão (#99):** o run terminou `done` com o padrão do instalador, então a regra de decisão manda registrar o resultado só aqui: o
+`requireSandbox` continua `true` no `templates/global-config.json`, e o SECURITY.md e o CHANGELOG só trocam a frase "não medido"
+pelo que a §17 mediu. O MED não rodou: o LOW já decidiu, e um MED com os modelos padrão (o planejador e os revisores em `grok-4.7`) custou
+cerca de 825 mil tokens na §13, bem acima do que sobra dos 100 centavos.
+
+**Não medido:** o MED e o HIGH com o sandbox ligado (mais fatias, rodadas de correção e o refactor, que usam as mesmas etapas de
+escrita no mesmo worktree); um `setupCommand` real (ele roda fora do sandbox, pelo código); macOS e Windows; um kernel sem Landlock.
+
 
 ---
 

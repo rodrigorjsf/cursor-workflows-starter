@@ -17,19 +17,25 @@ import { createHash, randomUUID } from "node:crypto";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ModelSelection, RunUsage, SettingSource } from "@cursor/sdk";
-import { Ajv } from "ajv";
+import { argsError } from "./args-schema.js";
 import { errorText } from "./error-text.js";
 import { type AgentBackend, type AttemptEvent, type AttemptResult, type ResultVia, type StepLocation, type StepOptions, type UsageReading, localBackend } from "./backend.js";
 import { createCloudBackend } from "./backend-cloud.js";
 import { type CommandOutcome, EXEC_FLUSH_MS, EXEC_LOG_MAX_CHARS, outputLog, runCommand, toExecResult } from "./command-runner.js";
 import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedConfig, type StepOverrides, allowedSources, isModelAllowed, loadEffectiveConfig } from "../config/index.js";
+import { cursorEndpointRefusal } from "./cursor-endpoints.js";
 import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type OutputStream, type NewEvent, type RunStatus, type StepRef, type TurnUsage, type WorkflowEvent } from "./events.js";
+import { recordExecGroup } from "./job-children.js";
+import { jobsDirIn } from "./job-state.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
 import { type InterruptedCloudStep, addUsage, emptyUsage, resumeHint, subtractUsage, turnTokens, withRatio } from "./projection.js";
-import { CONTENT_MAX_CHARS, RunLockedError, RunStore } from "./run-store.js";
+import { CONTENT_MAX_CHARS, RunLockedError, RunPrunedError, RunStore } from "./run-store.js";
+import { DEFAULT_SETTING_SOURCES, loadsProjectSettings, repoCodeWarning, repoCommandsIn } from "./repo-code.js";
+import { savedSecrets } from "./secret-guard.js";
 import type { RetentionPolicy } from "./retention.js";
 import { registerRun } from "./runs-index.js";
-import { stateDir as runtimeStateDir } from "./state.js";
+import { INSIDE_WORKFLOW_ENV } from "./inside-workflow.js";
+import { newRunId, stateDir as runtimeStateDir } from "./state.js";
 import type { AgentCallOptions, Budget, ExecOptions, ExecResult, UsageTotals, WorkflowContext, WorkflowDefinition } from "./workflow.js";
 import { workflowSourceHash } from "./workflow-source.js";
 import { type Snapshot, revertToSnapshot, takeSnapshot } from "./worktree-snapshot.js";
@@ -92,12 +98,6 @@ class StepTimeoutError extends StepFailedError {}
  */
 export class RunCancelledError extends FatalRunError {}
 
-/**
- * Marca o ambiente do processo: o shell das etapas herda (o CLI recusa `wf run/start`). Os servidores MCP do
- * .cursor/mcp.json NÃO herdam (medido); para eles o engine registra o guarda inline de `nestedGuard`.
- */
-export const INSIDE_WORKFLOW_ENV = "WF_INSIDE_WORKFLOW";
-
 /** Nome do servidor MCP do kit no mcp.json do projeto (o default é o do kit). */
 const WORKFLOWS_MCP_NAME = process.env.WF_MCP_SERVER_NAME ?? "workflows";
 
@@ -148,9 +148,10 @@ export interface RunOptions {
   /** Onde ficam journal e estado. Default <cwd>/.workflows/runs. */
   stateDir?: string;
   /**
-   * How long step content stays in the repo's event logs (default: the last 30 runs or 14 days). When the run starts, the
-   * `text` of the `content` events of runs outside the retention is deleted; the rest of the log stays. A `null` limit
-   * turns that limit off.
+   * How long what a run holds that is private stays (default: the last 30 runs or 14 days). When the run starts, for the runs
+   * outside the retention, the `text` of the `content` events of their logs and the `result` of their journal lines are deleted
+   * (such a run can no longer be resumed), and the memo entries older than `days` are deleted; the rest of the log stays. A
+   * `null` limit turns that limit off.
    */
   retention?: RetentionPolicy;
   /**
@@ -200,32 +201,32 @@ async function settledWithin(promises: Promise<unknown>[], ms: number): Promise<
     clearTimeout(timer);
   }
 }
-const ajv = new Ajv({ allErrors: true, strict: false });
-
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
 /**
  * Opens an execution of the run in its log: the run-start event with the effective config, then the warnings an
  * execution starts with (config violations, metrics off, workflow code changed since the last execution, old content
- * that could not be pruned, a torn last line). Registers a first execution in the global runs index.
+ * or memo entries that could not be pruned, a torn last line). Registers a first execution in the global runs index.
  */
 function announceRun<A>(o: {
-  def: WorkflowDefinition<A, any>;
+  def: WorkflowDefinition<A, unknown>;
   args: A;
   opts: RunOptions;
   runId: string;
   store: RunStore;
+  memo: MemoStore;
   resolved: ResolvedConfig;
   emit: (e: NewEvent) => void;
   recorderWarning: string | undefined;
   /** The repository the run is in (`repoIdentity`). */
   repo: { name: string; hash: string };
 }): void {
-  const { def, args, opts, runId, store, resolved, emit, recorderWarning } = o;
+  const { def, args, opts, runId, store, memo, resolved, emit, recorderWarning } = o;
   // The source fingerprint covers the modules the workflow imports (prompts, helpers); `run.toString()` alone does not.
   const workflowHash = sha(JSON.stringify(def.meta) + JSON.stringify(def.defaults ?? {}) + def.run.toString() + (workflowSourceHash(def) ?? "")).slice(0, 16);
   const startedAt = new Date().toISOString();
-  const pruned = store.pruneOldContent(opts.retention);
+  const pruned = store.pruneOldRuns(opts.retention);
+  const memoPruned = memo.pruneOld(opts.retention);
   emit({
     type: "run-start",
     workflow: def.meta.name,
@@ -239,6 +240,9 @@ function announceRun<A>(o: {
     violations: resolved.violations,
   });
   for (const v of resolved.violations) emit({ type: "warning", message: `config: ${v.message} (${v.ref ?? v.layer}${v.path ? ` ${v.path}` : ""})` });
+  // A step that loads the project's settings runs the repository's own hooks and MCP servers: say which, before the first step.
+  const repoCommands = loadsProjectSettings(resolved.config, opts.settingSources) ? repoCommandsIn(opts.cwd) : [];
+  if (repoCommands.length) emit({ type: "warning", message: repoCodeWarning(repoCommands) });
   if (recorderWarning) emit({ type: "warning", message: recorderWarning });
   if (store.previousStart && store.previousStart.workflowHash !== workflowHash) {
     emit({
@@ -251,11 +255,16 @@ function announceRun<A>(o: {
     try {
       registerRun({ runId, repo: resolve(opts.cwd), workflow: def.meta.name, startedAt });
     } catch (err) {
-      emit({ type: "warning", message: `could not register the run in the global runs index: ${err instanceof Error ? err.message : String(err)}` });
+      emit({ type: "warning", message: `could not register the run in the global runs index: ${errorText(err)}` });
     }
   }
   for (const { runId: prunedRun, error } of pruned.failed) {
-    emit({ type: "warning", message: `could not delete the old content of run ${prunedRun}: ${error}` });
+    emit({ type: "warning", message: `could not delete the old content and step results of run ${prunedRun}: ${error}` });
+  }
+  for (const { key, error } of memoPruned.failed) {
+    // Key "*": the memo folder itself could not be listed (see `pruneMemo`), so no entry was tried.
+    const message = key === "*" ? `could not prune the old memo entries: ${error}` : `could not delete the old memo entry ${key}: ${error}`;
+    emit({ type: "warning", message });
   }
   if (store.tornTail.events) emit({ type: "warning", message: "the last line of the event log was incomplete (a crash in the middle of a write): ignored" });
   if (store.tornTail.journal) emit({ type: "warning", message: "the last line of the journal was incomplete (a crash in the middle of a write): its step runs again" });
@@ -285,7 +294,7 @@ class RevertQueue {
           await revertToSnapshot(o.snapshot);
           return true;
         } catch (err) {
-          o.warn(`step "${o.label}" ${why}: could not undo the changes in ${o.stepCwd}: ${err instanceof Error ? err.message : String(err)}`);
+          o.warn(`step "${o.label}" ${why}: could not undo the changes in ${o.stepCwd}: ${errorText(err)}`);
           return false;
         }
       });
@@ -324,7 +333,7 @@ async function openEventChannel(store: RunStore, runId: string, opts: RunOptions
       const { createRecorder } = await import("../observability/recorder.js");
       recorder = await createRecorder(opts.metricsDb || undefined);
     } catch (err) {
-      recorderWarning = `metrics off: ${err instanceof Error ? err.message : String(err)}`;
+      recorderWarning = `metrics off: ${errorText(err)}`;
     }
   }
   // Every event is stamped and redacted here, once: the log, the recorder and the listeners all get the same redacted event.
@@ -336,7 +345,7 @@ async function openEventChannel(store: RunStore, runId: string, opts: RunOptions
     } catch (err) {
       if (logFailed) return;
       logFailed = true; // one warning only: the log is the source of truth, but a full disk must not take the run down
-      opts.onEvent?.(stamp({ type: "warning", message: `could not write the event log: ${err instanceof Error ? err.message : String(err)}` }));
+      opts.onEvent?.(stamp({ type: "warning", message: `could not write the event log: ${errorText(err)}` }));
     }
   };
   const emit = (e: NewEvent) => {
@@ -345,7 +354,7 @@ async function openEventChannel(store: RunStore, runId: string, opts: RunOptions
     try {
       recorder?.record(event);
     } catch (err) {
-      const warning = stamp({ type: "warning", message: `could not write a metric: ${err instanceof Error ? err.message : String(err)}` });
+      const warning = stamp({ type: "warning", message: `could not write a metric: ${errorText(err)}` });
       append(warning);
       opts.onEvent?.(warning);
     }
@@ -460,11 +469,6 @@ async function repoIdentity(cwd: string): Promise<{ name: string; hash: string }
   return { name: basename(top), hash: sha(origin || top).slice(0, 16) };
 }
 
-/** A new run id: the workflow's name, with anything but letters, digits, "_" and "-" made a "-" (the id names the run's folder), and a random suffix. */
-export function newRunId(workflow: string): string {
-  return `${workflow.replace(/[^A-Za-z0-9_-]/g, "-")}-${randomUUID().slice(0, 8)}`;
-}
-
 class Semaphore {
   private active = 0;
   private readonly queue: Array<() => void> = [];
@@ -527,10 +531,13 @@ export async function runWorkflow<A, R>(
   const runId = opts.runId ?? newRunId(def.meta.name);
   const refused = (error: string): RunOutcome<R> => ({ runId, status: "failed", error, refused: true, spentCents: 0, chargedCents: 0, spentTokens: 0, usage: withRatio(emptyUsage()) });
 
-  if (def.meta.argsSchema) {
-    const validate = ajv.compile(def.meta.argsSchema);
-    if (!validate(args)) return refused(`invalid args: ${ajv.errorsText(validate.errors)}`);
-  }
+  const badArgs = argsError(def.meta.argsSchema, args);
+  if (badArgs) return refused(badArgs);
+
+  // Before anything is written or any agent exists: the SDK sends the API key to the address in these variables with no check of its own.
+  // Every later SDK call of the run (agents, usage, cloud runs) goes through the same environment, so the whole run is refused, not one step.
+  const badEndpoint = cursorEndpointRefusal();
+  if (badEndpoint) return refused(badEndpoint);
 
   // The config is read afresh at the start of every execution (also a resume): an edit takes effect on the next run.
   let resolved: ResolvedConfig;
@@ -543,9 +550,12 @@ export async function runWorkflow<A, R>(
 
   let store: RunStore;
   try {
-    store = RunStore.open(join(opts.stateDir ?? runtimeStateDir(opts.cwd, "runs"), runId), runId, { secrets: [opts.apiKey] });
+    // The SDK takes the key from `opts.apiKey`, then CURSOR_API_KEY, then the login `wf login` saved: the first two are known here (and CURSOR_API_KEY
+    // is an env value the redactor already learns), the third only by reading the file the SDK reads, so the store redacts that key too.
+    store = RunStore.open(join(opts.stateDir ?? runtimeStateDir(opts.cwd, "runs"), runId), runId, { secrets: [opts.apiKey, ...savedSecrets()] });
   } catch (err) {
     if (err instanceof RunLockedError) return refused(err.message); // nothing is written: the run belongs to the other execution
+    if (err instanceof RunPrunedError) return refused(err.message); // nothing is written: retention emptied its journal, so it has nothing to resume from
     throw err;
   }
   try {
@@ -583,13 +593,13 @@ async function executeRun<A, R>(
   });
 
   const { emit, attemptContent, recorderWarning, close: closeEvents } = await openEventChannel(store, runId, opts);
-  announceRun({ def, args, opts, runId, store, resolved, emit, recorderWarning, repo: await repoIdentity(opts.cwd) });
+  const memo = new MemoStore(opts.cwd);
+  announceRun({ def, args, opts, runId, store, memo, resolved, emit, recorderWarning, repo: await repoIdentity(opts.cwd) });
 
   process.env[INSIDE_WORKFLOW_ENV] = "1";
   const journal = store.journal;
-  const memo = new MemoStore(opts.cwd);
   const sem = new Semaphore(limits.concurrency);
-  const settingSources = opts.settingSources ?? ["project", "team", "mdm"];
+  const settingSources = opts.settingSources ?? DEFAULT_SETTING_SOURCES;
   const roles = new Map((def.meta.roles ?? []).map((r) => [r.name, r]));
   // The backend of each location. A backend handed in through the options serves its own location; the cloud one is made on
   // first use, so a run that never goes to the cloud never touches it.
@@ -597,7 +607,7 @@ async function executeRun<A, R>(
   const backendFor = (location: StepLocation): AgentBackend => {
     if (opts.backend?.location === location) return opts.backend;
     if (location === "local") return localBackend;
-    return (cloudBackend ??= createCloudBackend({ remote: resolved.config.cloud.remote, runId }));
+    return (cloudBackend ??= createCloudBackend({ remote: resolved.config.cloud.remote, runId, allowPublicRemote: resolved.config.cloud.allowPublicRemote }));
   };
   let currentPhase: string | undefined;
   const flows = new AsyncLocalStorage<Flow>();
@@ -996,7 +1006,7 @@ async function executeRun<A, R>(
             emit({ type: "turn", ...ref, attemptId, idx: c.turns, steps: c.stepsInTurn, usage: t });
             addUsage(turnUsage, turnTokens(t));
             if (t.reasoningTokens) turnUsage.reasoningTokens = (turnUsage.reasoningTokens ?? 0) + t.reasoningTokens;
-            // The real SDK may report one turn per send, so this can fire only when a send ends (see #37).
+            // The real SDK reports one turn per send, however long (measured with a 31-tool-call write step, #37): this fires only when a send ends.
             const breach = tokenBreach(step, turnUsage.totalTokens);
             if (breach instanceof BudgetExceededError) for (const active of cutters) active.cut(breach); // the run's cap: every active attempt
             else if (breach) abort.cut(breach);
@@ -1098,7 +1108,7 @@ async function executeRun<A, R>(
               lastError = outcome.message;
               break;
             case "aborted": {
-              lastError = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+              lastError = errorText(outcome.reason);
               if (abort.isCutBy(outcome.reason)) {
                 // Over a token cap: the attempt fails as "budget" and is not retried. The run's cap ends the run, the step's cap only the step.
                 errorKind = "budget";
@@ -1164,6 +1174,24 @@ async function executeRun<A, R>(
   /** How many times each call has been made in this execution, by its shape and the branch that made it: the same call twice is two nodes, and a resume numbers them alike. */
   const execOccurrences = new Map<string, number>();
 
+  /**
+   * What a job does so that a cancel which kills its frozen process can still reach its live commands: it records the process
+   * group of each (`job-children.ts`). A run with no job has no such cancel, and records nothing. A record that cannot be
+   * written is a warning: the command still runs, out of that cancel's reach.
+   */
+  const jobId = opts.jobId;
+  const recordGroup =
+    jobId === undefined
+      ? undefined
+      : (pgid: number) => {
+          try {
+            return recordExecGroup(jobsDirIn(opts.cwd), jobId, pgid);
+          } catch (err) {
+            emit({ type: "warning", message: `could not record the process group ${pgid} of a command: ${errorText(err)}; cancelling this job while it is frozen will not stop that command` });
+            return () => {};
+          }
+        };
+
   /** One `ctx.exec` call: a step node of the run. The command runs in its own process, and the call returns what the command did. */
   async function execCall(command: string, args: string[] = [], callOpts: ExecOptions = {}): Promise<ExecResult> {
     const flow = currentFlow();
@@ -1199,7 +1227,7 @@ async function executeRun<A, R>(
     const flushing = setInterval(() => log.flush(), EXEC_FLUSH_MS);
     let done: CommandOutcome;
     try {
-      done = await runCommand({ command, args, cwd, env: callOpts.env, timeoutMs, signal }, log.push);
+      done = await runCommand({ command, args, cwd, env: callOpts.env, scrubSecrets: callOpts.scrubSecrets, timeoutMs, signal, onGroup: recordGroup }, log.push);
     } finally {
       clearInterval(flushing);
       log.end();
@@ -1238,7 +1266,7 @@ async function executeRun<A, R>(
       runGroup("parallel", thunks, (thunk) =>
         thunk().catch((err: unknown) => {
           if (err instanceof FatalRunError) throw err; // teto de custo ou conta sem acesso aborta o workflow inteiro
-          emit({ type: "warning", message: `parallel: ${err instanceof Error ? err.message : String(err)}` });
+          emit({ type: "warning", message: `parallel: ${errorText(err)}` });
           return null;
         }),
       ),
@@ -1250,7 +1278,7 @@ async function executeRun<A, R>(
           return prev;
         } catch (err) {
           if (err instanceof FatalRunError) throw err;
-          emit({ type: "warning", message: `pipeline item ${index}: ${err instanceof Error ? err.message : String(err)}` });
+          emit({ type: "warning", message: `pipeline item ${index}: ${errorText(err)}` });
           return null;
         }
       }),
@@ -1276,7 +1304,7 @@ async function executeRun<A, R>(
     ended = { status: "finished", result: await (abandoned ? Promise.race([workflow, abandoned]) : workflow) };
   } catch (err) {
     if (err instanceof RunCancelledError) interrupted = true;
-    ended = { status: "failed", error: err instanceof Error ? err.message : String(err) };
+    ended = { status: "failed", error: errorText(err) };
   }
   // A run that hit its token cap cancelled its active steps; they finish their accounting before the run is closed, so no
   // step event trails the run-end and their tokens are in the outcome.

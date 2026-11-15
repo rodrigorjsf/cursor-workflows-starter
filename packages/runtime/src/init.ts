@@ -3,10 +3,11 @@
 
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { kitFileUrl, readKitPackage } from "./kit-version.js";
 import { writeFileAtomic } from "./runtime/state-files.js";
+import { errorText } from "./runtime/error-text.js";
 
 /** One file `wf init` changed. `before` is undefined for a new file, `after` for a deleted one. */
 export interface FileChange {
@@ -107,13 +108,40 @@ function parseObject(file: string, text: string | undefined): Json {
   try {
     value = JSON.parse(text);
   } catch (err) {
-    throw new Error(`${file}: invalid JSON (${err instanceof Error ? err.message : String(err)}); fix the file and run \`wf init\` again`);
+    throw new Error(`${file}: invalid JSON (${errorText(err)}); fix the file and run \`wf init\` again`);
   }
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`${file}: expected a JSON object`);
   return value as Json;
 }
 
 const readIfExists = (path: string): string | undefined => (existsSync(path) ? readFileSync(path, "utf8") : undefined);
+
+/**
+ * Where a write to `path` lands: its real path when the path exists, else the real path of its nearest folder that does, followed
+ * by what is left. A link that leads nowhere has no real path, so it resolves to its own place: the atomic write replaces the link
+ * (rename), it does not follow it.
+ */
+function landing(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return join(landing(dirname(path)), basename(path));
+  }
+}
+
+/**
+ * Throws unless a read or a write of `path` (relative to `cwd`) stays inside the repository once every symbolic link on the way is
+ * followed. A cloned repository can commit `.gitignore` or `.mcp.json` as a link to a file in the user's home (a shell rc,
+ * `~/.ssh/authorized_keys`), or `.cursor` as a link to a folder there, and `wf init` would rewrite that file with the user's
+ * rights (CWE-59). A link to another file of the repository (`AGENTS.md` to `CLAUDE.md`) is fine.
+ */
+function assertInside(cwd: string, path: string): void {
+  const target = landing(join(cwd, path));
+  const inside = relative(realpathSync(cwd), target);
+  if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) {
+    throw new Error(`${path}: it leads outside the repository (it is, or sits under, a symbolic link to ${target}): wf init writes only inside the repository; replace the link with a regular file, or remove it, and run \`wf init\` again`);
+  }
+}
 
 export interface InitOptions {
   cwd: string;
@@ -146,7 +174,7 @@ function importsOf(file: string): string[] {
   for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
     const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
     if (fence !== undefined) {
-      if (marker?.[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) fence = undefined;
+      if (marker !== undefined && marker[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) fence = undefined;
       continue;
     }
     if (marker !== undefined) {
@@ -154,6 +182,7 @@ function importsOf(file: string): string[] {
       continue;
     }
     for (const [, path] of line.replace(/(`+).*?\1/g, "").matchAll(/(?:^|\s)@(\S+)/g)) {
+      if (path === undefined) continue;
       paths.push(path.startsWith("~/") ? join(homedir(), path.slice(2)) : resolve(dirname(file), path));
     }
   }
@@ -231,6 +260,7 @@ export function initRepo({ cwd, skipAgentsMd = false, remove = false }: InitOpti
   // Plan everything before writing anything: a file that cannot be used leaves the repo as it was.
   const changes: FileChange[] = [];
   for (const [path, plan] of plans) {
+    assertInside(cwd, path); // before the file is read: a link out of the repository is not followed, not even for its text
     const before = readIfExists(join(cwd, path));
     const after = plan(before, path);
     if (after !== undefined) changes.push({ path, before, after: after ?? undefined });
@@ -242,7 +272,7 @@ export function initRepo({ cwd, skipAgentsMd = false, remove = false }: InitOpti
       continue;
     }
     mkdirSync(dirname(file), { recursive: true });
-    writeFileAtomic(existsSync(file) ? realpathSync(file) : file, after); // through a symlink, not over it
+    writeFileAtomic(existsSync(file) ? realpathSync(file) : file, after, 0o666); // through a symlink, not over it; a repo file keeps the ordinary default (the umask narrows it), not the private mode of run state
   }
   // On every run, not only when this one changed AGENTS.md: a memory file added after the first init hides the block all the same.
   const note = !remove && !skipAgentsMd ? claudeCodeNote(cwd) : undefined;

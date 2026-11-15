@@ -35,7 +35,7 @@ import {
 } from "./backend.js";
 import { errorText } from "./error-text.js";
 import { isGone } from "./cloud-cancel.js";
-import { BringBackError, type PushedSnapshot, UnsupportedRemoteError, bringBack, deleteSnapshot, pushSnapshot, snapshotBranch } from "./cloud-snapshot.js";
+import { BringBackError, type PushedSnapshot, SnapshotRefusedError, UnsupportedRemoteError, bringBack, deleteSnapshot, pushSnapshot, snapshotBranch } from "./cloud-snapshot.js";
 import type { JsonSchema } from "./workflow.js";
 import { type Parsed, RESULT_ARTIFACT, artifactInstruction, artifactReprompt, jsonBlockInstruction, jsonBlockReprompt, resultFromArtifact, resultFromJsonBlock } from "./structured.js";
 
@@ -55,6 +55,8 @@ export interface CloudBackendOptions {
   remote: string;
   /** The run the steps belong to: part of every snapshot branch's name. */
   runId: string;
+  /** The global config's `cloud.allowPublicRemote`: push snapshots to a public remote, or one that cannot be asked about, without asking. Default: false. */
+  allowPublicRemote?: boolean;
   /** The least time between two waits on a run that is still going (default one second; tests turn it off). */
   waitFloorMs?: number;
 }
@@ -179,13 +181,31 @@ function rememberingGit(exchange: Exchange, remember: (git: PushedBranches | und
   return Object.assign((message: string) => noting(exchange(message)), { attach: (run: Run) => noting(exchange.attach(run)) });
 }
 
+/** The branches a run says it pushed to; empty when it says nothing about where it pushed. */
+const reportedBranches = (pushed: PushedBranches | undefined): string[] => (pushed?.branches ?? []).flatMap((entry) => (entry.branch ? [entry.branch] : []));
+
 /**
  * The branches the run says it pushed to when the snapshot branch is not among them (an agent that did not work on the current
  * branch pushes to one of its own); empty when it pushed to the snapshot branch, or says nothing about where it pushed.
  */
 function pushedElsewhere(pushed: PushedBranches | undefined, snapshotBranch: string): string[] {
-  const reported = (pushed?.branches ?? []).flatMap((entry) => (entry.branch ? [entry.branch] : []));
+  const reported = reportedBranches(pushed);
   return reported.includes(snapshotBranch) ? [] : reported;
+}
+
+/**
+ * A step that does not write was told not to push (`READ_ONLY_INSTRUCTION`), and nothing but the agent's own obedience stops it: a
+ * step that read untrusted text may have been steered into one. When the run says it pushed, the attempt warns, naming the branches:
+ * the push is not undone, and a branch of the agent's own stays on the remote for the person to delete. The answer of the step is
+ * left as it is.
+ */
+function warnOfReadOnlyPush(pushed: PushedBranches | undefined, snapshotBranch: string | undefined, remote: string, onEvent: (event: AttemptEvent) => void): void {
+  const branches = reportedBranches(pushed);
+  if (!branches.length) return;
+  const own = branches.filter((branch) => branch !== snapshotBranch);
+  const stays = own.length === 1 ? "that branch stays" : "those branches stay";
+  const what = own.length ? `${stays} on ${remote}, delete ${own.length === 1 ? "it" : "them"} by hand` : "it is the snapshot branch, deleted when the step ends";
+  onEvent({ type: "warning", message: `a read-only cloud step pushed to ${branches.join(", ")}, though it was told not to push: ${what}` });
 }
 
 /**
@@ -214,7 +234,7 @@ async function bringWorkBack(result: AttemptResult, pushed: PushedBranches | und
   }
 }
 
-async function runCloudAttempt({ remote, runId, waitFloorMs = WAIT_FLOOR_MS }: CloudBackendOptions, prompt: string, o: StepOptions, signal: AbortSignal, onEvent: (event: AttemptEvent) => void): Promise<AttemptResult> {
+async function runCloudAttempt({ remote, runId, allowPublicRemote, waitFloorMs = WAIT_FLOOR_MS }: CloudBackendOptions, prompt: string, o: StepOptions, signal: AbortSignal, onEvent: (event: AttemptEvent) => void): Promise<AttemptResult> {
   onEvent({
     type: "warning",
     message: `cloud agents ignore setting sources (requested: ${o.settingSources.join(", ") || "none"}): the VM loads the project, team and plugin settings it always loads`,
@@ -241,11 +261,11 @@ async function runCloudAttempt({ remote, runId, waitFloorMs = WAIT_FLOOR_MS }: C
     start = { kind: "resumed", ...resumed };
   } else {
     try {
-      start = { kind: "fresh", snapshot: await pushSnapshot({ cwd: o.cwd, remote, branch: snapshotBranch(runId), signal }) };
+      start = { kind: "fresh", snapshot: await pushSnapshot({ cwd: o.cwd, remote, branch: snapshotBranch(runId), signal, allowPublicRemote }) };
     } catch (err) {
       if (signal.aborted) return { outcome: { kind: "aborted", reason: signal.reason } };
-      // A remote no cloud step can use is refused the same way on every attempt: the step fails now.
-      return { outcome: { kind: "error", reason: "other", message: `cloud snapshot: ${errorText(err)}` }, ...(err instanceof UnsupportedRemoteError && { final: true as const }) };
+      // A remote no cloud step can use, a secret in the snapshot and a public remote are refused the same way on every attempt: the step fails now.
+      return { outcome: { kind: "error", reason: "other", message: `cloud snapshot: ${errorText(err)}` }, ...((err instanceof UnsupportedRemoteError || err instanceof SnapshotRefusedError) && { final: true as const }) };
     }
   }
   /** Where the agent of this attempt starts from. A reattached one keeps the branch the interrupted attempt pushed. */
@@ -278,8 +298,12 @@ async function runCloudAttempt({ remote, runId, waitFloorMs = WAIT_FLOOR_MS }: C
       (exchange) => converse(rememberingGit(exchange, (git) => (pushed = git)), message, { schemaRetries: o.schemaRetries, check: schema ? check : undefined, onEvent, running: start.kind === "resumed" ? start.running : undefined }),
       settleCloudRun(o.apiKey, signal, waitFloorMs),
     );
+    if (!o.writes) {
+      warnOfReadOnlyPush(pushed, startsFrom?.branch, startsFrom?.remote ?? remote, onEvent);
+      return result;
+    }
     // The work comes back before the snapshot branch is deleted (the agent's branch is the snapshot branch).
-    if (!o.writes || result.outcome.kind !== "finished" || signal.aborted) return result;
+    if (result.outcome.kind !== "finished" || signal.aborted) return result;
     return await bringWorkBack(result, pushed, startsFrom, o, signal, onEvent);
   } finally {
     // The branch this attempt pushed, and the one an interrupted attempt left (the agent it belonged to is done with it, or gone).

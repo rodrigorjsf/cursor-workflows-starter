@@ -1,4 +1,4 @@
-// Seam 1, the run: `runWorkflow` with the fake Cursor SDK. The per-step token cap and the run's cumulative token cap are
+// Seam: the run. `runWorkflow` with the fake Cursor SDK. The per-step token cap and the run's cumulative token cap are
 // enforced on every turn while a step runs, not after it: crossing either cancels the agent run at once, so the overshoot
 // is at most the turn that crossed. The fake's `live` runs stream their turns after `send()` returns and stop delivering
 // when cancelled, as the real SDK does. Assertions are on the outcome, the replayed event log and what the SDK was asked.
@@ -350,7 +350,7 @@ test("a cap crossed while the agent answers a schema re-prompt cuts the step too
 test("the tokens of an attempt that failed on a rate limit are counted once while it backs off, not twice", { timeout: 30_000 }, async () => {
   const rateLimited = Object.assign(new RateLimitError("slow down"), { isRetryable: true }); // the engine sleeps 2 s before the retry
   let aSends = 0;
-  script.push(...[0, 1, 2].map(() => (o: any, msg: string, n: number) => {
+  script.push(...[0, 1, 2].map(() => (_o: any, msg: string) => {
     if (msg === "b") return live(2, 40)();
     return aSends++ === 0 ? { live: true, deltas: [turn(100), turn(100)], rejectWait: rateLimited } : live(1, 10)();
   }));

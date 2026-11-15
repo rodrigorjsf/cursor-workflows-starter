@@ -14,6 +14,7 @@ import { calls, script } from "./fake-sdk.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import implementIssue from "../workflows/implement-issue.js";
 import { RECORDINGS_PATH, TEST_HOST } from "./glab-recordings.js";
+import { AUTHOR_RECORDING, GH_RECORDINGS_PATH } from "../../../scripts/verify/record-gh-fixtures.js"; // the recorder owns the format and the path; importing it runs nothing
 
 export type Handler = (o: any, msg: string) => unknown;
 
@@ -31,6 +32,8 @@ export const fx = {
   forge: "github" as TestForge,
   savedPath: undefined as string | undefined,
   handlers: {} as Record<string, Handler>,
+  /** What every agent step of the test was sent, in order: its label and its prompt. */
+  prompts: [] as Array<{ label: string; msg: string }>,
 };
 
 /** The URL `origin` has in each forge's tests: the host decides the forge. The bare repository behind it is reached through `url.<base>.insteadOf`. */
@@ -51,11 +54,13 @@ export const forgeState = () =>
     comments: string[];
     prs: Array<{ url: string; body: string; head?: string; state?: string; title?: string }>;
     calls: string[][];
+    /** Whether GH_TOKEN was in the environment of each `gh` call, in the order of `calls`. */
+    ghToken?: Array<"set" | "unset">;
     fail?: Record<string, string>;
     /** The calls the CLI of the other forge got: the workflow asked the wrong one. */
     wrongCli?: string[][];
   };
-/** From now on the fake forge fails the operation `op` with `message` on stderr and exit code 1; `message` undefined restores it. `op` is the `gh` call it replaces: "issue view", "issue comment", "pr view" or "pr create" (glab's own commands and routes map to the same names). */
+/** From now on the fake forge fails the operation `op` with `message` on stderr and exit code 1; `message` undefined restores it. `op` is the `gh` call it replaces: "issue view", "issue comment", "pr view" or "pr create", or "author" for the lookup of the issue's author (glab's own commands and routes map to the same names). */
 export function failForge(op: string, message: string | undefined) {
   changeForgeState((state) => {
     state.fail = { ...state.fail };
@@ -103,6 +108,9 @@ export const originBranches = () =>
     .filter(Boolean);
 export const onOrigin = () => originBranches().length > 0;
 
+// The fake gh: hand-written for what `gh issue ... --json`, `gh pr ...` print, and playing the recording of the real gh for `gh api` (the
+// author association: test/gh-fixtures.test.ts reads the same file). A `gh api` command line is accepted only in a form that was recorded,
+// with the number and the repository of the call; the association it prints is the one the test sets on the issue.
 const FAKE_GH = `#!/usr/bin/env node
 const fs = require("fs");
 const f = process.env.FAKE_FORGE_STATE;
@@ -110,7 +118,9 @@ const st = JSON.parse(fs.readFileSync(f, "utf8"));
 const a = process.argv.slice(2);
 if (st.forge !== "github") { (st.wrongCli = st.wrongCli || []).push(["gh", ...a]); fs.writeFileSync(f, JSON.stringify(st)); process.stderr.write("fake gh: this test's forge is " + st.forge); process.exit(99); }
 st.calls.push(a);
-const failure = (st.fail || {})[a[0] + " " + a[1]];
+(st.ghToken = st.ghToken || []).push(process.env.GH_TOKEN === undefined ? "unset" : "set"); // does the workflow's own call still get the token?
+// the operation a call stands for, so a test can fail it with failForge: \`gh api\` is the lookup of the issue's author, the only REST call here
+const failure = (st.fail || {})[a[0] === "api" ? "author" : a[0] + " " + a[1]];
 if (failure !== undefined) { fs.writeFileSync(f, JSON.stringify(st)); process.stderr.write(failure); process.exit(1); }
 const flag = (n) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };
 const save = () => fs.writeFileSync(f, JSON.stringify(st));
@@ -119,6 +129,13 @@ if (a[0] === "issue" && a[1] === "view") {
   const out = {};
   for (const k of (flag("--json") || "").split(",")) out[k] = k === "comments" ? st.comments.map((b) => ({ body: b })) : st.issue[k];
   save(); process.stdout.write(JSON.stringify(out));
+} else if (a[0] === "api") {
+  const REC = JSON.parse(fs.readFileSync(${JSON.stringify(GH_RECORDINGS_PATH)}, "utf8")).recordings;
+  // the form of a call: the number, the repository and the host of the call are not part of it
+  const shape = (args) => args.map((x, i) => (args[i - 1] === "--hostname" ? "<host>" : x.replace(/^repos\\/\\{owner\\}\\/\\{repo\\}\\/issues\\/\\d+$/, "repos/{owner}/{repo}/issues/<n>").replace(/^repos\\/(?!\\{owner\\}\\/\\{repo\\}\\/)[^/]+\\/[^/]+\\/issues\\/\\d+$/, "repos/<repo>/issues/<n>"))).join(" ");
+  const recording = ${JSON.stringify(Object.values(AUTHOR_RECORDING))}.map((n) => REC[n]).find((r) => shape(r.args) === shape(a));
+  if (!recording) { save(); process.stderr.write("fake gh: no recording of " + a.join(" ")); process.exit(2); }
+  save(); process.stdout.write(recording.stdout.replace(/^[A-Z_]+/, st.issue.author_association));
 } else if (a[0] === "issue" && a[1] === "comment") {
   st.comments.push(body()); save(); process.stdout.write("https://example.invalid/issues/1#c" + st.comments.length + "\\n");
 } else if (a[0] === "pr" && a[1] === "view" && flag("--json") === "state") {
@@ -176,11 +193,14 @@ const endpoint = a[0] === "api" ? a.slice(1).find((x, i, all) => !x.startsWith("
 const originUrl = () => require("child_process").execFileSync("git", ["config", "--get", "remote.origin.url"], { encoding: "utf8" }).trim();
 const hostAndPath = (url) => { const m = /^[a-z][a-z0-9+.-]*:\\/\\/(?:[^@/]*@)?([^/:]+)(?::\\d+)?\\/(.+?)(?:\\.git)?\\/?$/i.exec(url) || /^(?:[^@/:]+@)?([^@/:]+):(.+?)(?:\\.git)?$/.exec(url); return { host: m[1].toLowerCase(), path: m[2] }; };
 const post = a[0] === "api" && ["POST", "post"].includes(flag("--method") || flag("-X"));
+// \`projects/<project>/members/all/<id>\`: how an author stands in the project
+const member = endpoint && /^projects\\/[^/?]+\\/members\\/all\\/(\\d+)$/.exec(endpoint);
 const route = a[0] === "issue" && a[1] === "view" ? "issue view"
   : a[0] === "mr" && a[1] === "create" ? "pr create"
   : endpoint && /\\/issues\\/\\d+\\/notes$/.test(endpoint) ? (post ? "issue comment" : "issue view")
   : endpoint && /\\/merge_requests\\?/.test(endpoint) ? "pr view"
   : endpoint && /^projects\\/[^/?]+$/.test(endpoint) ? "repo view"
+  : member ? "author"
   : undefined;
 const failure = route && (st.fail || {})[route];
 if (failure !== undefined) fail(failure, 1);
@@ -188,7 +208,8 @@ if (route === "issue view" && a[0] === "issue") {
   if (flag("--output") !== "json") fail("fake glab: issue view without --output json", 2);
   // the recording of the same form: \`--repo <url>\` names the project, without it the cwd's origin does
   const name = has("--repo", "-R") ? "issue-view-repo" : "issue-view";
-  out({ ...recordedJson(name), iid: st.issue.number, title: st.issue.title, description: st.issue.body, labels: st.issue.labels.map((l) => l.name) }, name);
+  const recordedIssue = recordedJson(name);
+  out({ ...recordedIssue, iid: st.issue.number, title: st.issue.title, description: st.issue.body, labels: st.issue.labels.map((l) => l.name), author: { ...recordedIssue.author, id: st.issue.author_id } }, name);
 } else if (route === "issue view") {
   // all the notes of the issue, newest first as GitLab lists them: the comments, then GitLab's own system notes made before them
   const notes = [...(st.systemNotes || []).map((body) => ({ body, system: true })), ...st.comments.map((body) => ({ body, system: false }))]
@@ -219,6 +240,13 @@ if (route === "issue view" && a[0] === "issue") {
   save();
   process.stderr.write(now(printed("mr-create").stderr));
   process.stdout.write(stdout);
+} else if (route === "author") {
+  // The author of the issue is the one member the test sets, by id and access level; GitLab answers 404 for any other id, as the recording of a stranger shows.
+  const level = Number(member[1]) === st.issue.author_id ? st.issue.access_level : null;
+  if (level === null || level === undefined) { const stranger = printed("author-stranger"); save(); process.stderr.write(fill(stranger.stderr)); process.stdout.write(fill(stranger.stdout)); process.exit(stranger.exitCode); }
+  // the recording of the same form: the project of the cwd, or a named one; the member's own is the recording of its level, the closest one else
+  const name = endpoint.startsWith("projects/:fullpath/") ? ({ 50: "author-owner", 30: "author-developer", 20: "author-reporter" }[level] ?? "author-developer") : "author-owner-repo";
+  out({ ...recordedJson(name), id: st.issue.author_id, access_level: level }, name);
 } else if (route === "repo view") {
   // the project of the cwd is the one its origin names; a named one comes back in GitLab's case (lower case here), on the host asked for
   const cwdRemote = hostAndPath(originUrl());
@@ -233,7 +261,17 @@ export function issue(labels: string[], title = "Add subtract(a, b)") {
     fx.forgeStateFile,
     JSON.stringify({
       forge: fx.forge,
-      issue: { number: 7, title, body: "Exportar `subtract(a, b)` em src/math.js, que devolve a - b.", labels: labels.map((name) => ({ name })) },
+      issue: {
+        number: 7,
+        title,
+        body: "Exportar `subtract(a, b)` em src/math.js, que devolve a - b.",
+        labels: labels.map((name) => ({ name })),
+        /** What the forge says of the author: GitHub's `author_association`, the owner's unless a test sets another. */
+        author_association: "OWNER",
+        /** GitLab's way of saying it: the id of the issue's author, and the access level that user has in the project (50 is Owner; null: no member). */
+        author_id: 1,
+        access_level: 50,
+      },
       comments: [],
       prs: [],
       calls: [],
@@ -266,6 +304,7 @@ function defaults(): Record<string, Handler> {
 }
 const dispatcher = (o: any, msg: string) => {
   const label = labelOf(o);
+  fx.prompts.push({ label, msg });
   const h = fx.handlers[label] ?? fx.handlers[label.replace(/:\d+$/, "")];
   if (!h) throw new Error(`etapa sem resposta no teste: ${label}`);
   const r = h(o, msg);
@@ -308,6 +347,7 @@ function setupFor(forge: TestForge) {
   fx.savedPath = process.env.PATH;
   process.env.PATH = `${bin}:${fx.savedPath}`;
   fx.handlers = defaults();
+  fx.prompts = [];
   for (let i = 0; i < 200; i++) script.push(dispatcher);
   calls.length = 0;
 }

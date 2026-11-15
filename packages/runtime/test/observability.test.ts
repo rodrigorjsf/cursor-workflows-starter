@@ -1,11 +1,11 @@
-// Testes offline da observabilidade (banco SQLite temporário, fake SDK): `npm test`.
+// Seam: the metrics database, offline: `runWorkflow` with the fake Cursor SDK writes a temporary SQLite database, which the tests read back through `observability/queries.js`.
 import assert from "node:assert/strict";
 import "./isolate-home.js";
 import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { calls, costConfig, script } from "./fake-sdk.js";
+import { calls, costConfig, script, stats } from "./fake-sdk.js";
 import { openDb } from "../src/observability/db.js";
 import { exportRows, markRun, reconcile, summary, toCsv } from "../src/observability/queries.js";
 import { outcomeClass } from "../src/runtime/outcome.js";
@@ -137,6 +137,22 @@ test("sem custo do Cursor: estimativa pela tabela pricing, com faixa de contexto
   db.close();
 });
 
+test("reconcile refuses to call the SDK while CURSOR_BACKEND_URL names an address that is not Cursor's: the key would go there", async () => {
+  Object.assign(costConfig, { raw: undefined });
+  const haiku = defineWorkflow({ meta: { name: "h", description: "h" }, defaults: { model: { id: "claude-haiku-5-5" }, retries: 0 }, run: (ctx) => ctx.agent("x") });
+  await runWorkflow(haiku, {}, { cwd, metricsDb: dbPath });
+  const db = await openDb(dbPath);
+  process.env.CURSOR_BACKEND_URL = "https://evil.example";
+  try {
+    const readsBefore = stats.usageReads;
+    await assert.rejects(reconcile(db), /CURSOR_BACKEND_URL is https:\/\/evil\.example/);
+    assert.equal(stats.usageReads, readsBefore, "Agent.getUsage was not called");
+  } finally {
+    delete process.env.CURSOR_BACKEND_URL;
+    db.close();
+  }
+});
+
 test("faixa de contexto e export anonimizado", async () => {
   await runWorkflow(wf, { n: 1 }, { cwd, metricsDb: dbPath });
   const db = await openDb(dbPath);
@@ -168,6 +184,8 @@ test("classe do resultado", () => {
   assert.equal(outcomeClass("finished", "tests-failed"), "failed");
   assert.equal(outcomeClass("finished"), "unknown");
   assert.equal(outcomeClass("finished", "seams-proposed"), "pending"); // aguarda aprovação, não é falha
+  assert.equal(outcomeClass("finished", "test-command-proposed"), "pending"); // the planner's test command waits for approval, it is no failure
+  assert.equal(outcomeClass("finished", "untrusted-author"), "pending"); // an outside author's issue waits for the user to read it, it is no failure
   assert.equal(outcomeClass("failed", "done"), "error");
 });
 
@@ -190,7 +208,7 @@ test("tokens como a API devolve: inputTokens já inclui leitura e escrita de cac
   db.exec(`INSERT INTO runs (exec_id, run_id, workflow, workflow_hash, started_at) VALUES ('e2', 'r2', 'w', 'h', '2026-11-10T00:00:00Z')`);
   db.prepare(`INSERT INTO attempts (attempt_id, exec_id, step_key, attempt, model_id, model_key, ok, steps, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, started_at)
               VALUES ('real', 'e2', 'k', 1, 'claude-haiku-5-5', 'claude-haiku-5-5', 1, 1, 3345, 32, 384, 0, '2026-11-10T00:00:00Z')`).run();
-  const a = db.prepare("SELECT prompt_tokens, avg_prompt_per_step, cost_cents FROM v_attempts WHERE attempt_id = 'real'").get() as Record<string, number>;
+  const a = db.prepare("SELECT prompt_tokens, avg_prompt_per_step, cost_cents FROM v_attempts WHERE attempt_id = 'real'").get() as { prompt_tokens: number; avg_prompt_per_step: number; cost_cents: number };
   assert.equal(a.prompt_tokens, 3345, "o cache não pode ser somado de novo ao input");
   assert.equal(a.avg_prompt_per_step, 3345);
   // Estimativa: input sem cache pela tarifa de input, cache read pela tarifa de cache read (Haiku 5.5 no Cursor: 0,10 / 0,01 / 0,50 por milhão).

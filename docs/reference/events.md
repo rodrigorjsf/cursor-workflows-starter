@@ -147,7 +147,7 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 
 ### `turn`
 
-Um turno do agente terminou (pode ter vários passos/chamadas ao modelo).
+Um turno do agente terminou. No SDK real o turno é o envio inteiro: um envio longo, com dezenas de tool calls, dá um só (medido em 2026-11-14, #37).
 
 Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 
@@ -331,6 +331,7 @@ Os tetos globais em vigor (o `caps` do arquivo global). `null` = sem teto.
 | `allowedSettingSources` | `SettingSource[] \| null` | sim | Camadas de configuração que uma etapa pode carregar; `null` libera todas. |
 | `allowedLocations` | `Array<"local" \| "cloud"> \| null` | sim | Onde uma etapa pode rodar; `null` libera todos. Sem a chave no arquivo global, só `local`: a nuvem é decisão do dono da máquina. |
 | `maxConcurrency` | `number \| null` | sim | Agentes simultâneos; `null` = sem teto. |
+| `maxRunningJobs` | `number \| null` | sim | Jobs que rodam ao mesmo tempo num repositório (`wf start`, `start_workflow`): um início além disso é recusado. Sem a chave no arquivo global, 3; `null` = sem teto. |
 | `requireSandbox` | `boolean \| null` | sim | `true` liga o sandbox do SDK em toda etapa, mesmo que o código do workflow o desligue; `null` deixa o código decidir. |
 
 ### EffectiveRole
@@ -355,6 +356,7 @@ As preferências das etapas na nuvem, depois das camadas.
 | Campo | Tipo | Obrigatório | Descrição |
 | --- | --- | --- | --- |
 | `remote` | `string` | sim | O remote do git para onde vão as branches de snapshot das etapas na nuvem. Padrão: `origin`. |
+| `allowPublicRemote` | `boolean` | sim | `true` deixa o snapshot ir para um remote público, ou para um que a pergunta ao GitHub (`gh repo view`; o `glab` não é consultado) não responde. Só o arquivo global liga. Padrão: `false`. |
 
 ### ConfigSource
 

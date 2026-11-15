@@ -4,7 +4,7 @@
 // record of its process to signal, and the terminal owns it. A run whose process died has nothing to signal, but the cloud
 // agents it left running are cancelled through the Cursor API (`cancelLeftCloudAgents`). A frozen run (its job's process is
 // there but stopped beating) shows as `failed`, yet its process still holds it: `cancelJob` kills that process (SIGKILL) and
-// then cancels the cloud agents the run left, as `wf cancel` does.
+// the commands it started (`job-children.ts`), then cancels the cloud agents the run left, as `wf cancel` does.
 import { cancelLeftCloudAgents } from "./cloud-cancel.js";
 import { type CancelResult, cancelJob, runningJobOf } from "./job-state.js";
 import { type RunViewStatus, readRun } from "./run-view.js";

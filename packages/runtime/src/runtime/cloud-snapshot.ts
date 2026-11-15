@@ -12,6 +12,12 @@
 // and fast-forwards the local worktree to it. The snapshot commit of a worktree that had changes becomes part of the local
 // history that way (it is what the agent built on), and the worktree ends clean at the agent's tree.
 //
+// Before anything is pushed the snapshot is checked, because what it holds never leaves a remote once it is there (deleting the
+// branch does not unpublish its commits: GitHub keeps them reachable by SHA, and forks keep them too). A snapshot that differs from HEAD,
+// which holds files the user has not committed, is scanned for secrets (secret-guard.ts), and its remote is asked whether it is public
+// (remote-visibility.ts): a public remote, or one that cannot be asked about, is refused unless the global config says
+// `cloud.allowPublicRemote`.
+//
 // A branch left behind (the process died between the push and the deletion, or the remote refused the deletion) is swept by
 // `wf gc` (`planSnapshots` in workflows/implement-issue/gc.ts). One a crash left behind is also deleted when the resumed run reattaches
 // to the step's agent: the event log keeps its name with the agent's id.
@@ -23,6 +29,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { errorText } from "./error-text.js";
+import { NETWORK_GIT_ENV } from "./git-transport.js";
+import { remoteVisibility } from "./remote-visibility.js";
+import { findSecretInChange } from "./secret-guard.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -32,6 +41,9 @@ export const SNAPSHOT_BRANCH_PREFIX = "wf/cloud-snapshot/";
 const NETWORK_TIMEOUT_MS = 5 * 60_000;
 /** How long each `git` that only works on the local repository may take. */
 const LOCAL_TIMEOUT_MS = 60_000;
+
+/** The snapshot was not pushed because of what it holds or where it would go (a secret, a public remote): the same on every attempt, so retrying does not change it. */
+export class SnapshotRefusedError extends Error {}
 
 /** A snapshot that is on the remote. */
 export interface PushedSnapshot {
@@ -107,9 +119,11 @@ const IDENTITY = { GIT_AUTHOR_NAME: "cursor-workflows", GIT_AUTHOR_EMAIL: "curso
  * Commits the state of the worktree `cwd` to the branch `branch` of `remote` and pushes it. Rejects with the reason when it
  * cannot (not a git repository, no such remote, no commit yet, the push is refused) and with the signal's reason when
  * `signal` aborts before the push starts; a failure leaves nothing on the remote. An abort that comes during the push does not
- * stop it: the snapshot that results is returned, and the caller (which sees the abort at once) deletes it.
+ * stop it: the snapshot that results is returned, and the caller (which sees the abort at once) deletes it. A snapshot that differs
+ * from HEAD is refused (`SnapshotRefusedError`) when it holds a secret, and when its remote is public or cannot be asked about, unless
+ * `allowPublicRemote` (the global config's `cloud.allowPublicRemote`) is set, which skips only the question about the remote.
  */
-export async function pushSnapshot({ cwd, remote, branch, signal }: { cwd: string; remote: string; branch: string; signal?: AbortSignal }): Promise<PushedSnapshot> {
+export async function pushSnapshot({ cwd, remote, branch, signal, allowPublicRemote = false }: { cwd: string; remote: string; branch: string; signal?: AbortSignal; allowPublicRemote?: boolean }): Promise<PushedSnapshot> {
   /** Runs a git command that tells the user something about their setup when it fails; an abort is never that. */
   const asked = (dir: string, args: string[], whenItFails: string): Promise<string> =>
     git(dir, args, { signal }).catch((err: unknown) => {
@@ -133,12 +147,41 @@ export async function pushSnapshot({ cwd, remote, branch, signal }: { cwd: strin
   const commit = tree === (await git(top, ["rev-parse", `${head}^{tree}`], { signal }))
     ? head
     : await git(top, ["commit-tree", tree, "-p", head, "-m", `wf: snapshot of the worktree for ${branch}`], { env: IDENTITY, signal });
+  // What differs from HEAD is what the user has not committed, and the only new thing a push would publish.
+  if (commit !== head) await refuseUnsafeSnapshot({ top, remote, repoUrl, head, commit, allowPublicRemote, signal });
   // The push is not cut by an abort that comes while it runs. A remote that has the objects goes on to accept the branch after its
   // client is gone, so a killed push can leave a branch that no one knows about; run to its end (the network timeout bounds it),
   // the push hands the branch to the caller, whose cleanup deletes it. A cancel during a push therefore waits for the push.
   signal?.throwIfAborted();
-  await git(top, ["push", "--quiet", "--no-verify", remote, `${commit}:refs/heads/${branch}`], { timeoutMs: NETWORK_TIMEOUT_MS });
+  // --no-verify: the branch is the engine's own and a throwaway, not a commit the user wrote, and a pre-push hook of the user's (a test
+  // run, a lint) would run on it for every cloud step, and could block the push that deletes it. The check a hook like gitleaks would do is
+  // `refuseUnsafeSnapshot`'s, above.
+  await git(top, ["push", "--quiet", "--no-verify", remote, `${commit}:refs/heads/${branch}`], { env: NETWORK_GIT_ENV, timeoutMs: NETWORK_TIMEOUT_MS });
   return { top, remote, repoUrl, branch, commit };
+}
+
+/**
+ * Throws `SnapshotRefusedError`, before anything is pushed, when the change the snapshot `commit` makes on `head` carries a secret, or
+ * when `remote` (at `repoUrl`) is public or cannot be asked about and `allowPublicRemote` is not set. The secret scan always runs: the
+ * opt-in is about a public repository, not about leaking a key.
+ */
+async function refuseUnsafeSnapshot({ top, remote, repoUrl, commit, head, allowPublicRemote, signal }: Pick<PushedSnapshot, "top" | "remote" | "repoUrl" | "commit"> & { head: string; allowPublicRemote: boolean; signal?: AbortSignal }): Promise<void> {
+  const secret = await findSecretInChange((...args) => git(top, args, { signal }), [head, commit]);
+  if (secret) {
+    throw new SnapshotRefusedError(
+      `the snapshot of the worktree holds ${secret}: nothing was pushed. A cloud step sends the worktree's uncommitted and untracked files to the remote "${remote}"; remove the secret, or add its file to .gitignore, and run the step again`,
+    );
+  }
+  if (allowPublicRemote) return;
+  const asked = await remoteVisibility(repoUrl, { timeoutMs: NETWORK_TIMEOUT_MS, signal });
+  signal?.throwIfAborted();
+  if (asked.kind === "known" && asked.visibility !== "PUBLIC") return;
+  const optIn = "set `cloud.allowPublicRemote` to true in the global config (~/.cursor-workflows/config.json) if that is what you want";
+  throw new SnapshotRefusedError(
+    asked.kind === "known"
+      ? `the remote "${remote}" (${repoUrl}) is public, and the snapshot holds the worktree's uncommitted and untracked files: deleting its branch afterwards does not unpublish them (GitHub keeps the commits reachable by SHA, and forks keep them too). Nothing was pushed. Point \`cloud.remote\` at a private remote, or ${optIn}`
+      : `could not tell whether the remote "${remote}" (${repoUrl}) is public (${asked.said}), and the snapshot holds the worktree's uncommitted and untracked files, which deleting its branch afterwards does not unpublish: nothing was pushed. Make \`gh\` able to answer (it is asked \`gh repo view\`, which works for a repository on GitHub only), or ${optIn}`,
+  );
 }
 
 /**
@@ -188,7 +231,8 @@ async function worktreeTree(top: string, signal?: AbortSignal): Promise<string> 
  * remote belongs to: the branch of an attempt that was interrupted is known only by its remote and name.
  */
 export async function deleteSnapshot(snapshot: Pick<PushedSnapshot, "top" | "remote" | "branch">): Promise<void> {
-  await git(snapshot.top, ["push", "--quiet", "--no-verify", snapshot.remote, "--delete", `refs/heads/${snapshot.branch}`], { timeoutMs: NETWORK_TIMEOUT_MS });
+  // --no-verify, as for the push: a hook of the user's must not run on, or block, the deletion of the engine's own throwaway branch.
+  await git(snapshot.top, ["push", "--quiet", "--no-verify", snapshot.remote, "--delete", `refs/heads/${snapshot.branch}`], { env: NETWORK_GIT_ENV, timeoutMs: NETWORK_TIMEOUT_MS });
 }
 
 /** Why a cloud agent's work could not be brought back into the worktree. */
@@ -226,7 +270,7 @@ export async function bringBack({ cwd, remote, branch, base, signal }: { cwd: st
   // A private ref: two steps in one repository must not meet on FETCH_HEAD.
   const fetched = `refs/wf/cloud-result/${randomUUID().slice(0, 8)}`;
   try {
-    await git(top, ["fetch", "--quiet", "--no-tags", remote, `+refs/heads/${branch}:${fetched}`], { signal, timeoutMs: NETWORK_TIMEOUT_MS }).catch((err: unknown) => {
+    await git(top, ["fetch", "--quiet", "--no-tags", remote, `+refs/heads/${branch}:${fetched}`], { env: NETWORK_GIT_ENV, signal, timeoutMs: NETWORK_TIMEOUT_MS }).catch((err: unknown) => {
       throw signal?.aborted ? err : new BringBackError(`could not fetch the cloud agent's branch ${branch} from ${remote} (${gitErrorLine(err)}): its work is not in the worktree`);
     });
     const tip = await git(top, ["rev-parse", `${fetched}^{commit}`], { signal });

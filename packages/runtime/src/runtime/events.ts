@@ -162,6 +162,8 @@ export interface EffectiveCaps {
   allowedLocations: Array<"local" | "cloud"> | null;
   /** Agentes simultâneos; `null` = sem teto. */
   maxConcurrency: number | null;
+  /** Jobs que rodam ao mesmo tempo num repositório (`wf start`, `start_workflow`): um início além disso é recusado. Sem a chave no arquivo global, 3; `null` = sem teto. */
+  maxRunningJobs: number | null;
   /** `true` liga o sandbox do SDK em toda etapa, mesmo que o código do workflow o desligue; `null` deixa o código decidir. */
   requireSandbox: boolean | null;
 }
@@ -190,6 +192,8 @@ export interface EffectiveRole {
 export interface EffectiveCloud {
   /** O remote do git para onde vão as branches de snapshot das etapas na nuvem. Padrão: `origin`. */
   remote: string;
+  /** `true` deixa o snapshot ir para um remote público, ou para um que a pergunta ao GitHub (`gh repo view`; o `glab` não é consultado) não responde. Só o arquivo global liga. Padrão: `false`. */
+  allowPublicRemote: boolean;
 }
 
 /** A configuração efetiva de um run: o que as camadas e os tetos globais decidiram para este workflow. */
@@ -315,7 +319,7 @@ export interface StepStartEvent extends EventBase, StepRef {
   promptChars: number;
 }
 
-/** Um turno do agente terminou (pode ter vários passos/chamadas ao modelo). */
+/** Um turno do agente terminou. No SDK real o turno é o envio inteiro: um envio longo, com dezenas de tool calls, dá um só (medido em 2026-11-14, #37). */
 export interface TurnEvent extends EventBase, StepRef {
   type: "turn";
   /** A tentativa a que o turno pertence (o `attemptId` do `step-start`). */

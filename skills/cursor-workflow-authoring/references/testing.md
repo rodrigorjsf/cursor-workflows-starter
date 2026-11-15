@@ -6,8 +6,8 @@ A workflow is delivered when the three items under "Before delivering" are met.
 
 Develop and test in the kit checkout: a workflow at `packages/runtime/workflows/<name>.ts` is typechecked and tested
 there; its test is `packages/runtime/test/<name>.test.ts`. The package's `tsconfig.test.json` swaps `@cursor/sdk` for a
-fake (`test/fake-sdk.ts`) at run time, so tests need no network and no account. `npm run typecheck` does not cover
-`.agents/workflows/` or the tests.
+fake (`test/fake-sdk.ts`) at run time, so tests need no network and no account. `npm run typecheck` covers the sources and
+the tests, not `.agents/workflows/`.
 
 Set `process.env.WF_METRICS = "off"` at the top of the test file (or pass `metricsDb: false` to `runWorkflow`) so the
 test does not write to the user's metrics database.
@@ -17,7 +17,13 @@ returned fields, the events. Do not assert on internal calls.
 
 ### The fake SDK
 
-Import `{ script, calls, stats, costConfig, resetCloud }` from `@cursor/sdk` in the test; the fake is substituted.
+Import `{ script, calls, stats, costConfig, resetCloud }` from `./fake-sdk.js` in the test. The typecheck resolves
+`@cursor/sdk` to the real package, so the fake's controls come from the fake's own module.
+
+The fake is checked against the real SDK. `npm run typecheck` compiles `test/fake-sdk.conformance.ts` against the real
+`@cursor/sdk`: every member the runtime uses (`Agent.create`, `Cursor.auth.login`, the error classes, ...) has to fit
+the real signature. An SDK upgrade that moves one of them, or a fake that drops or retypes one, fails the typecheck. When
+a workflow or the runtime starts to use another SDK member, add it to the fake and to the conformance file together.
 
 - `script.push(fn)` defines what each `send()` does, in order:
   - `() => ({ result: "text" })` simulates free text;

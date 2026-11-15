@@ -1,6 +1,9 @@
 // A unified diff of one file, in the shape `git diff` prints, so `wf init` can show what it changed without running git.
 
-type Op = { kind: " " | "-" | "+"; text: string };
+interface Op {
+  kind: " " | "-" | "+";
+  text: string;
+}
 
 /** The lines of a text, without the one a final newline ends. */
 const linesOf = (text: string | undefined): string[] => (text === undefined || text === "" ? [] : text.replace(/\n$/, "").split("\n"));

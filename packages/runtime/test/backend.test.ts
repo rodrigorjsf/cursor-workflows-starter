@@ -1,4 +1,4 @@
-// Seam 2, the AgentBackend interface: `runWorkflow` with a backend handed in through `RunOptions.backend`, so the engine is
+// Seam: the AgentBackend interface. `runWorkflow` with a backend handed in through `RunOptions.backend`, so the engine is
 // exercised without the Cursor SDK in the picture (the fake SDK is only there to prove it is never touched). The backend
 // takes the prompt, the step's resolved options and an abort signal, streams events through a callback and reports how the
 // attempt ended. Assertions are on the outcome, the replayed event log and what the backend was handed.
@@ -113,7 +113,10 @@ const usedTokens = (tokens: number) => ({ report: { usage: { inputTokens: tokens
 const turn = (tokens: number): AttemptEvent => ({ type: "turn", usage: { inputTokens: tokens - 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 } });
 const nextMacrotask = () => new Promise((resolve) => setImmediate(resolve));
 /** What a streaming stub saw of its attempt: the turns it emitted and why it was stopped. */
-type Seen = { turns: number; reason?: unknown };
+interface Seen {
+  turns: number;
+  reason?: unknown;
+}
 /** What a backend does for an attempt that streams turns of `tokens` tokens until it is aborted, as an agent that never finishes would. */
 const streamsUntilAborted =
   (tokens: number, seen: Seen = { turns: 0 }): Behaviour =>

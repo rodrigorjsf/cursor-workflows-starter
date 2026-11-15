@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import semver from "semver";
 import { REPO_CONFIG_FILE, repoConfigPath } from "./config/index.js";
+import { isRecord } from "./runtime/parse-json.js";
 
 const PACKAGE_JSON = join(import.meta.dirname, "..", "package.json");
 
@@ -50,7 +51,8 @@ function declaredRange(cwd: string): unknown {
   const path = repoConfigPath(cwd);
   if (!existsSync(path)) return undefined;
   try {
-    return (JSON.parse(readFileSync(path, "utf8")) as { kit?: unknown }).kit;
+    const config: unknown = JSON.parse(readFileSync(path, "utf8"));
+    return isRecord(config) ? config.kit : undefined;
   } catch {
     return undefined; // not JSON: the config check reports that, with its path
   }

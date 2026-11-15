@@ -1,0 +1,5 @@
+/* What a page shows when it fails (ErrorBoundary.tsx): the error and a way back. Tokens only, no colour of its own. */
+.crash { max-width: 40rem; margin: var(--space-4) auto; padding: var(--space-4); border: 1px solid var(--s-failed); border-radius: var(--radius-sm); color: var(--fg); background: var(--surface); font-family: var(--font-sans); }
+.crash h1 { margin: 0 0 var(--space-2); font-size: var(--text-md); color: var(--s-failed); }
+.crash pre { margin: 0 0 var(--space-3); padding: var(--space-2); overflow: auto; white-space: pre-wrap; background: var(--surface-muted); border-radius: var(--radius-sm); font-size: var(--text-xs); }
+.crash a { color: var(--accent); }

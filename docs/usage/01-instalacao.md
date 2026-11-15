@@ -19,10 +19,10 @@
 | Pacote | Uso |
 |---|---|
 | `@cursor/sdk` (fixado em `1.3.1`) | Criar agentes, enviar prompts, consultar custo. **Fixe a versão** e atualize de forma deliberada. O npm publica `1.3.1` (2026-11-03; ver [8.2](../research/verificacoes-locais.md)), mas as notas de versão do SDK listam `1.0.40` como a mais recente, sem data ([DOC](https://cursor.com/docs/release-notes/sdk)). Nenhuma página da doc chama o SDK de beta ou de GA |
-| `@modelcontextprotocol/sdk` | MCP server (stdio) para o Cursor IDE |
+| `@modelcontextprotocol/sdk` (`^1.32.2`) | MCP server (stdio) para o Cursor IDE, pelo `McpServer` e `registerTool` |
 | `ajv` | Validação de JSON Schema da saída estruturada |
 | `tsx` | Roda os `.ts` direto, sem build. O `mcp.json` aponta para `node_modules/.bin/tsx` (sem `npx`, para não baixar nada na hora) |
-| `zod` | Peer dependency do `@cursor/sdk` |
+| `zod` | Peer dependency do `@cursor/sdk` e do SDK MCP; o servidor MCP declara com ele o schema de entrada de cada tool |
 | `typescript`, `@types/node` (dev) | Typecheck |
 
 ## 3. Instalar
@@ -34,30 +34,58 @@ usa recebe depois os próprios arquivos, do `wf init` ([2.3](03-invocacao-no-cur
 
 Aponte qualquer agente de código para o guia, fixado numa tag:
 `https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/INSTALL-AGENT.md`. Ele checa a máquina,
-instala o kit, confere o login, roda o `wf init` no repositório atual e termina no `wf doctor`. O guia é público, está
+instala o kit, confere o login, pede que você confirme que o Privacy Mode está ligado (veja [§4](#4-login-e-modelos)), roda o
+`wf init` no repositório atual e termina no `wf doctor`. O guia é público, está
 em inglês (texto escrito para agentes) e não depende de nenhum outro documento. A tag que ele traz é sempre a versão do
 pacote: o `npm test` reprova se os dois divergirem, então uma versão nova só sai com o guia apontando para ela.
 
 ### Pelo instalador
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/scripts/install.sh -o /tmp/wf-install.sh
-bash /tmp/wf-install.sh --tag v0.4.0
+installer="$(mktemp)"
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/scripts/install.sh -o "$installer"
+bash "$installer" --tag v0.4.0
 ```
 
-Baixar o script para um arquivo, em vez de passá-lo direto ao `bash`, deixa você lê-lo antes de rodar. O instalador:
+Baixar o script para um arquivo, em vez de passá-lo direto ao `bash`, deixa você lê-lo antes de rodar. O `--proto '=https'` e o
+`--tlsv1.2` fazem o `curl` recusar um redirecionamento para `http` e uma conexão com TLS antigo (o `-L` do `-fsSL` segue
+redirecionamentos, e sem a opção o `curl` aceita um que desça para `http`), e o `mktemp` escolhe o arquivo: um caminho fixo e
+previsível em `/tmp` pode ser criado de antemão por outro usuário da máquina, e o `bash` rodaria o script dele. O instalador:
 
 | Passo | Resultado |
 |---|---|
-| Kit | Clona o repositório na tag em `~/.cursor-workflows/kit` (`WF_HOME` muda a pasta `~/.cursor-workflows`). Se já há um clone, busca as tags da origem dele e o move para a tag (um `--repo` dado de novo troca essa origem antes) |
+| Kit | Antes de clonar ou trocar de tag, confere a tag ([abaixo](#tag-movida-e-release-que-não-é-imutável)): a release dela no GitHub tem de ser imutável. Depois clona o repositório na tag em `~/.cursor-workflows/kit` (`WF_HOME` muda a pasta `~/.cursor-workflows`). Se já há um clone, confere antes de tudo que ele não tem mudanças locais (com mudanças, para: [Reinstalar o kit](#reinstalar-o-kit)), busca as tags da origem dele, sem `--force`, e o move para a tag (um `--repo` dado de novo troca essa origem antes) |
 | Node | Para antes de instalar qualquer coisa se o `node` do PATH for mais antigo que o `engines.node` do kit (22.13), dizendo as duas versões |
-| Dependências | `npm ci` na pasta do kit: a árvore exata do `package-lock.json` |
+| Dependências | `npm ci --ignore-scripts` na pasta do kit: a árvore exata do `package-lock.json`, sem rodar o script de instalação de nenhuma dependência (só o `esbuild` e o `fsevents` têm um; medido no Linux x64: o kit e os testes funcionam sem eles, e o macOS não foi medido) |
 | Comando `wf` | Escreve `~/.local/bin/wf`, um script que roda o CLI do kit instalado. Se a pasta não está no PATH, o instalador avisa e diz como corrigir (bash ou zsh: `export PATH` no `~/.profile`; fish: `fish_add_path`). Um `wf` que não é dele fica como está, com aviso |
 | Skills | Liga cada skill do kit (`run-workflow`, `cursor-workflow-authoring`, `skill-to-workflow`, `cursor-workflows-setup`) em `~/.claude/skills/`, com links simbólicos para `~/.cursor-workflows/kit/skills/`. O Claude Code lê essa pasta, e o Cursor também (compatibilidade). Uma pasta ou um link de mesmo nome que seja seu fica como está, com aviso |
 | Configuração global | Escreve `~/.cursor-workflows/config.json` com os tetos padrão **se o arquivo não existir**: 3.000.000 de tokens e 500 centavos por run, 600.000 tokens por etapa, simultaneidade 4, todos os modelos, todas as camadas de configuração menos `all`, só etapas locais ([6.2](../reference/config.md)). Um arquivo seu nunca é reescrito |
 
+O instalador roda com `umask 077`: o que ele cria (`~/.cursor-workflows/`, a configuração global, o kit) é só seu, e uma pasta ou um arquivo que já
+existe mantém o modo que tinha.
+
 Rodar de novo é seguro: o instalador refaz o que falta e não muda o que já está certo. Cada skill ligada passa pelo local
 fixo do kit, então o link continua valendo quando o kit troca de uma tag para outra.
+
+### Tag movida e release que não é imutável
+
+Quem consegue mover uma tag de release (um token roubado, uma sessão comprometida) faz toda instalação seguinte rodar o
+código dele. O instalador e o `wf upgrade` fecham essa porta de duas formas, antes de trocar o kit de lugar:
+
+- **Buscam as tags sem `--force`.** O git recusa sobrescrever uma tag que já existe no clone e mudou na origem
+  (`! [rejected] ... (would clobber existing tag)`), e a mensagem diz que a tag `moved upstream`. O kit fica onde estava.
+  Não instale até o dono do repositório explicar a mudança.
+- **Leem a release da tag e só seguem se ela for imutável.** Uma release imutável do GitHub trava a tag no commit dela. A
+  consulta é `https://api.github.com/repos/rodrigorjsf/cursor-workflows-starter/releases/tags/<tag>`, que não pede token, e o
+  campo `immutable` tem de ser `true`. Uma release que não é imutável (`is not immutable`), uma tag sem release
+  (`has no release for tag`) e uma chamada que falha, como a falta de rede (`could not read the release of`), são erros,
+  nunca um "pula a checagem". O checksum do `install.sh` não entra no `INSTALL-AGENT.md`: um commit não contém o próprio
+  hash, então a âncora é a release imutável.
+
+O `--allow-mutable-tag` (`install.sh --tag ... --allow-mutable-tag`, `wf upgrade --allow-mutable-tag`) pula só a consulta à
+release, e é a escolha explícita de quem instala de um fork com `--repo`: a consulta cobre só o repositório oficial, e um
+kit cuja origem é outro é recusado sem a flag (a resposta para uma tag de mesmo nome no repositório oficial nada diz sobre a do
+fork). A tag movida continua recusada com a flag.
 
 ### Atualizar: `wf upgrade`
 
@@ -72,9 +100,38 @@ arquivo seu. O stdout é `{ "upgraded", "from", "to", "tag" }`; o andamento vai 
 só diz isso. Depois de atualizar, rode `wf doctor` em cada repositório: um kit fora da faixa `kit` do repositório é recusado
 ([2.3](03-invocacao-no-cursor-ide.md#conferindo-o-ambiente-wf-doctor)).
 
-Ele recusa o que não é um kit instalado: um kit em modo de desenvolvimento (abaixo), um `wf` que roda de outra pasta, e a
-falta de rede (o kit continua na versão em que estava). Se o instalador falhar depois do checkout, a mensagem diz o
-comando para terminar: `bash ~/.cursor-workflows/kit/scripts/install.sh --refresh`.
+Ele recusa o que não é um kit instalado: um kit em modo de desenvolvimento (abaixo), um `wf` que roda de outra pasta, a
+falta de rede (o kit continua na versão em que estava), uma tag que se moveu e uma release que não é imutável
+(`wf upgrade --allow-mutable-tag` pula só a consulta à release; [veja acima](#tag-movida-e-release-que-não-é-imutável)). Recusa também um kit com mudanças locais, antes de buscar as tags
+ou mover o que for, mesmo que o kit já esteja na tag mais nova: o `git checkout` de uma tag nova mantém um arquivo editado que
+as duas tags compartilham e todo arquivo novo, e o `npm ci` do instalador lê um `.npmrc` que esteja na pasta, então uma etapa
+sem sandbox que escreveu no kit faria o instalador rodar o código dela. A mensagem é
+`the kit at <kit> has local changes: <lista>; reinstall it`, e o kit continua onde estava. Se o instalador falhar depois do
+checkout, a mensagem diz o comando para terminar: `bash ~/.cursor-workflows/kit/scripts/install.sh --refresh`.
+
+### Reinstalar o kit
+
+O `wf upgrade`, o instalador (`install.sh --tag` sobre um clone que já existe) e o `wf doctor` (verificação `kit`) mandam
+reinstalar o kit quando a pasta dele tem mudanças locais. A lista da mensagem usa os códigos do `git status --porcelain`: `M`
+(arquivo rastreado editado), `D` (apagado), `??` (arquivo novo) e `!!` (arquivo que o `.gitignore` ou o `.git/info/exclude`
+esconde). Só o `node_modules/` do próprio kit fica de fora, porque o `npm ci` o refaz. O `wf doctor` falha também quando o HEAD
+do kit não está exatamente na tag da versão do pacote (`v<versão>`), mesmo com a árvore limpa. Quem mexeu na pasta foi você,
+um `npm` ou uma etapa sem sandbox: leia a lista antes de apagar qualquer coisa, e depois reinstale.
+
+```bash
+mv ~/.cursor-workflows/kit ~/.cursor-workflows/kit.com-mudancas  # guarda o que mudou, para você ler
+installer="$(mktemp)"                                             # o instalador de novo, como em "Pelo instalador"
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/scripts/install.sh -o "$installer"
+bash "$installer" --tag v0.4.0
+wf doctor                                                         # a verificação `kit` deve passar
+```
+
+O `config.json` global e os links das skills ficam, porque os links passam pelo local fixo do kit. Depois de olhar o que mudou,
+apague `~/.cursor-workflows/kit.com-mudancas`.
+
+A verificação vê o que o git vê. Ela não vê o que está dentro de `.git/` (hooks e configuração do clone) nem o conteúdo do
+`node_modules/`: o `npm ci` refaz o `node_modules/` a cada reinstalação, e o resto é um limite do desenho, porque o kit mora
+numa pasta que o seu usuário, e portanto uma etapa sem sandbox, pode escrever ([SECURITY.md](../../SECURITY.md)).
 
 ### Modo de desenvolvimento
 
@@ -91,7 +148,8 @@ scripts/install.sh --dev  # ~/.cursor-workflows/kit passa a ser um link para est
 Com `--dev`, o comando `wf`, o servidor MCP dos repositórios e as skills globais rodam o seu código. O instalador usa
 `npm install` só se faltar o `node_modules` (o `npm ci` esvaziaria o seu). O `wf upgrade` recusa essa instalação, e o
 instalador não troca um modo pelo outro: para passar de uma tag para o modo de desenvolvimento, mova `~/.cursor-workflows/kit`
-para trás (e o inverso vale também).
+para trás (e o inverso vale também). O `wf doctor` informa essa instalação como de desenvolvimento e não confere a árvore nem a
+tag dela: um working copy tem mudanças por natureza.
 
 ## 4. Login e modelos
 
@@ -108,6 +166,12 @@ e pode ser aberta em outro dispositivo. Gere a URL só quando for concluir o log
 `whoami` é o primeiro teste do plano. No Free, o login funciona, mas `whoami` já responde
 `[plan_required] Cloud Agent is not available for free users. Please upgrade to Pro.`, e `models` dá o mesmo erro
 (medido em 2026-11-11).
+
+**Privacy Mode.** Com ele desligado, a Cursor pode guardar e treinar com o código, os prompts e a saída de comandos que cada etapa
+manda, e o SDK segue a mesma regra do IDE. O SDK não deixa o kit ler o modo: confirme que está ligado em *Cursor
+Settings → General* (conta individual) ou com o admin do time. O guia de instalação para e pergunta isso antes de configurar o
+repositório, e o `wf doctor` repete o lembrete na verificação `login`. O que o modo desligado permite, e por que o
+`caps.allowedModels` só deve listar modelos ZDR quando a retenção importa: [5.1](../operating/01-governanca-e-custos.md#políticas-de-admin-que-se-aplicam).
 
 Ajuste os modelos de cada papel na configuração JSON ou nas variáveis `WF_MODEL_*`
 ([2.2 · Configuração](02-configuracao-inicial.md), [6.2](../reference/config.md)); os defaults estão em `meta.roles` de
@@ -171,7 +235,8 @@ são os candidatos mais prováveis.
    IDE e a CLI bloqueiam o servidor que não está na lista ([DOC](https://cursor.com/docs/release-notes)). Então um
    membro pode precisar que o admin libere o servidor antes.
 3. Rode o `wf doctor` num terminal aberto pelo próprio IDE: ele confere o Node que o IDE usa, as dependências, o login, os
-   modelos, o CLI do forge do repositório (`gh` ou `glab`), o servidor MCP e a configuração
+   modelos, o CLI do forge do repositório (`gh` ou `glab`), o servidor MCP, a configuração e o sandbox, que a configuração
+   global do instalador exige em toda etapa (no Linux, com o `bubblewrap`)
    ([2.3](03-invocacao-no-cursor-ide.md#conferindo-o-ambiente-wf-doctor)).
    Sobre o Node: confira o que a IDE usa. O Cursor sobe o servidor com o `node` do PATH do próprio processo (o `tsx` do
    `mcp.json` começa com `#!/usr/bin/env node`), e um gerenciador de versões (mise, nvm) ativado pelo perfil do

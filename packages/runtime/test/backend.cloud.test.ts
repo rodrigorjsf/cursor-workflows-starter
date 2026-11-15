@@ -1,4 +1,4 @@
-// Seam 2, the AgentBackend interface, from the other side: the cloud backend called directly, the way the engine calls it,
+// Seam: the AgentBackend interface, from the other side. The cloud backend called directly, the way the engine calls it,
 // with the fake Cursor SDK underneath and a temporary bare repository as the remote. It holds the contract the engine
 // relies on (see backend.ts) for an agent that runs elsewhere: events streamed through the callback, an abort that cancels
 // the run in flight and reports the signal's reason, the usage read, the agent disposed, and the snapshot branch gone.
@@ -255,6 +255,41 @@ test("an agent that pushed to a branch of its own instead of the snapshot branch
   assert.match((outcome as { message: string }).message, /the cloud agent pushed to cursor\/own instead of the snapshot branch wf\/cloud-snapshot\/run-1\/[0-9a-f]{8}, so its work is not on the branch the worktree moves to; that branch stays on origin: delete it by hand/);
   assert.equal(existsSync(join(repo, "c.txt")), false);
   assert.deepEqual(remoteBranches(remote), ["cursor/own"], "the snapshot is deleted; the agent's own branch is not ours to delete");
+});
+
+test("a read-only step whose run says it pushed a branch is not unnoticed: the attempt warns, naming the branch and where it stays", async () => {
+  script.push((o) => {
+    git(remote, "branch", "cursor/own", o.cloud.repos[0].startingRef);
+    return { result: "ok", git: { branches: [{ repoUrl: o.cloud.repos[0].url, branch: "cursor/own" }] } };
+  });
+  const { result, events } = await attempt("p", options({ writes: false }));
+
+  assert.equal(outcomeOf(result).kind, "finished", "the answer of a step that read is still its answer");
+  const warnings = events.flatMap((e) => (e.type === "warning" ? [e.message] : []));
+  assert.equal(warnings.filter((m) => m.includes("pushed")).length, 1, warnings.join("\n"));
+  assert.match(warnings.find((m) => m.includes("pushed"))!, /a read-only cloud step pushed to cursor\/own, though it was told not to push: that branch stays on origin, delete it by hand/);
+  assert.deepEqual(remoteBranches(remote), ["cursor/own"], "the snapshot is deleted; the agent's own branch is not ours to delete");
+});
+
+test("a read-only step that pushed to the snapshot branch itself warns too, and says the branch goes with the snapshot", async () => {
+  script.push((o) => ({ result: "ok", git: { branches: [{ repoUrl: o.cloud.repos[0].url, branch: o.cloud.repos[0].startingRef }] } }));
+  const { events } = await attempt("p", options({ writes: false }));
+  const warning = events.flatMap((e) => (e.type === "warning" ? [e.message] : [])).find((m) => m.includes("pushed"));
+  assert.match(warning ?? "", /a read-only cloud step pushed to wf\/cloud-snapshot\/run-1\/[0-9a-f]{8}, though it was told not to push: it is the snapshot branch, deleted when the step ends/);
+});
+
+test("a read-only step that pushed nothing, or whose run says nothing about where it pushed, raises no warning about a push", async () => {
+  for (const git of [undefined, { branches: [] }, { branches: [{ repoUrl: "x" }] }]) {
+    script.push(() => ({ result: "ok", ...(git && { git }) }));
+    const { events } = await attempt("p", options({ writes: false }));
+    assert.deepEqual(events.flatMap((e) => (e.type === "warning" ? [e.message] : [])).filter((m) => m.includes("pushed")), [], JSON.stringify(git));
+  }
+});
+
+test("a read-only step that fails after pushing still warns: the push is not undone by the failure", async () => {
+  script.push((o) => ({ status: "error", result: "boom", git: { branches: [{ repoUrl: o.cloud.repos[0].url, branch: "cursor/own" }] } }));
+  const { events } = await attempt("p", options({ writes: false }));
+  assert.ok(events.some((e) => e.type === "warning" && e.message.includes("pushed to cursor/own")));
 });
 
 test("a run that reports the snapshot branch among the branches it pushed to, or none at all, is brought back as usual", async () => {

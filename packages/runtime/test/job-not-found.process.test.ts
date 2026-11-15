@@ -31,7 +31,10 @@ before(() => {
 });
 after(() => rmSync(sandbox, { recursive: true, force: true }));
 
-type Reply = { isError?: boolean; content: Array<{ text: string }> };
+interface Reply {
+  isError?: boolean;
+  content: Array<{ text: string }>;
+}
 
 test("wait_workflow, get_workflow_status and cancel_workflow flag a job that is not there as an error", { timeout: 30_000 }, async () => {
   const client = new Client({ name: "job-not-found-test", version: "0.0.0" });

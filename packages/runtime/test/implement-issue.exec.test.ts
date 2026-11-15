@@ -1,9 +1,9 @@
-// Seam 1 on the shipped workflow: `implement-issue` runs every command it needs (the tests of the TDD loop, `git`, `gh`)
+// Seam: the run, on the shipped workflow. `implement-issue` runs every command it needs (the tests of the TDD loop, `git`, `gh`)
 // through `ctx.exec`. A command never blocks the process, is killed at its timeout and shows in the run's event log as a
 // step node; a `gh` failure is an error, never "no PR". Runs `runWorkflow` with the fake SDK and the environment of
 // implement-issue.fixture.ts (fake gh, temp repo, real git and real `node --test`) and reads the replayed event log.
 import assert from "node:assert/strict";
-import { chmodSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import type { ContentEvent, ExecEndEvent, ExecStartEvent, WorkflowEvent } from "../src/runtime/events.js";
@@ -13,7 +13,7 @@ import implementIssue from "../workflows/implement-issue.js";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import { runnerConfigChanged } from "../workflows/implement-issue/tdd.js";
 import { writeRepoConfig } from "./config-fixtures.js";
-import { SUB_CODE, SUB_TEST, failForge, fx, forgeState, git, issue, onOrigin, run, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
+import { PLAN, SUB_CODE, SUB_TEST, failForge, fx, forgeState, git, issue, names, onOrigin, run, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
 
 beforeEach(setup);
 afterEach(teardown);
@@ -30,7 +30,8 @@ const outputOf = (events: WorkflowEvent[], start: ExecStartEvent) =>
 
 test("the test runs of the TDD loop are command nodes in the event log, each with its own output", async () => {
   issue(["complexity:low"]);
-  const r = await run({});
+  // The tap reporter, named: the runner's default is spec since Node 24 and tap before it, and the assertions below read tap lines.
+  const r = await run({ testCommand: "node --test --test-reporter=tap" });
   assert.equal(r.status, "finished", r.error);
   assert.equal(res(r).status, "done", JSON.stringify(res(r)));
 
@@ -137,6 +138,63 @@ test("a suite that was killed (not by its limit) is not a red: tests-killed, and
   issue(["complexity:low"]);
   const r = await run({ testCommand: "kill -9 $$" }); // what the OOM killer does to a runner that eats the memory
   assert.equal(res(r).status, "tests-killed", JSON.stringify(res(r)));
+});
+
+/** Runs `fn` with `secrets` in the environment of this process, and restores it. */
+async function withEnv(secrets: Record<string, string>, fn: () => Promise<void>): Promise<void> {
+  const saved = Object.fromEntries(Object.keys(secrets).map((name) => [name, process.env[name]]));
+  Object.assign(process.env, secrets);
+  try {
+    await fn();
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+}
+
+/** Fake secrets built at run time, so no literal in this file has the shape of a credential (gitleaks reads the file). */
+const fake = (what: string) => `${what}-${"x".repeat(24)}`;
+const SECRETS = { CURSOR_API_KEY: fake("cursor"), GH_TOKEN: fake("github") };
+
+test("the test command does not inherit a secret of the environment: `env` prints neither CURSOR_API_KEY nor GH_TOKEN", async () => {
+  issue(["complexity:low"]);
+  await withEnv({ ...SECRETS, DEPLOY_PASSWORD: fake("deploy"), NPM_CONFIG_REGISTRY: "https://registry.example/" }, async () => {
+    const r = await run({ testCommand: "env; node --test" });
+    assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+    const events = eventsOf(r.runId);
+    const baseline = execStarts(events).find((s) => s.label === "suite:baseline")!;
+    const printed = outputOf(events, baseline);
+    assert.match(printed, /NPM_CONFIG_REGISTRY=/, "the rest of the environment is still there");
+    for (const name of ["CURSOR_API_KEY", "GH_TOKEN", "DEPLOY_PASSWORD"]) assert.doesNotMatch(printed, new RegExp(name), `${name} reached the test command`);
+  });
+});
+
+test("the setup command gets the same scrubbed environment as the tests", async () => {
+  issue(["complexity:low"]);
+  await withEnv(SECRETS, async () => {
+    const r = await run({ setupCommand: "env" });
+    assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+    const events = eventsOf(r.runId);
+    const setup = execStarts(events).find((s) => s.label === "setup")!;
+    assert.match(outputOf(events, setup), /PATH=/, "the command ran and printed its environment");
+    for (const name of Object.keys(SECRETS)) assert.doesNotMatch(outputOf(events, setup), new RegExp(name), `${name} reached the setup command`);
+  });
+});
+
+test("the workflow's own gh and git calls still see GH_TOKEN: only the commands that run the target repository's code are scrubbed", async () => {
+  issue(["complexity:low"]);
+  const hook = join(fx.repo, ".git", "hooks", "pre-push");
+  writeFileSync(hook, `#!/bin/sh\nprintf '%s' "\${GH_TOKEN-unset}" > "${join(fx.root, "git-saw-token")}"\n`);
+  chmodSync(hook, 0o755);
+  await withEnv(SECRETS, async () => {
+    const r = await run({ openPr: true });
+    assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  });
+  assert.equal(readFileSync(join(fx.root, "git-saw-token"), "utf8"), SECRETS.GH_TOKEN, "git push ran its hook with the token");
+  const seen = forgeState().ghToken!;
+  assert.ok(seen.length > 0 && seen.every((s) => s === "set"), `gh calls without the token: ${seen.join(",")}`);
 });
 
 test("a failing suite is red even when the workflow itself runs under `node --test` (NODE_TEST_CONTEXT is not inherited)", async () => {
@@ -296,4 +354,146 @@ test("cancelling in the middle of a write step leaves the worktree as before the
   };
   const second = await run({}, first.runId);
   assert.equal(res(second).status, "done", JSON.stringify(res(second)));
+});
+
+// ── A test command the model chose runs only after a person saw it ─────────────────────
+
+/** The programs and arguments every `ctx.exec` call of the run started, from the `tool-call` content of each command node. */
+const execCalls = (events: WorkflowEvent[]) =>
+  events
+    .filter((e): e is ContentEvent => e.type === "content" && e.kind === "tool-call" && e.tool === "exec")
+    .map((e) => JSON.parse(e.text ?? "null") as { command: string; args: string[]; cwd: string });
+const ranAsSuite = (events: WorkflowEvent[], suiteCommand: string) => execCalls(events).some((c) => c.command === "bash" && c.args.join(" ") === `-c ${suiteCommand}`);
+/** Did any command of the run mention `text`, as the program or in an argument? The check behind "it never ran", wider than the exact suite line. */
+const mentioned = (events: WorkflowEvent[], text: string) => execCalls(events).some((c) => `${c.command} ${c.args.join(" ")}`.includes(text));
+/** Resumes a run with the args of a `next` line, as given: unlike `run`, it adds no default test command. */
+const resume = (args: Record<string, unknown>, runId: string) => runWorkflow(implementIssue, args as any, { cwd: fx.repo, runId });
+/** What the `next` line of a stopped run relaunches: the args after `--args` and the run id after `--resume`. */
+const relaunchOf = (next: string) => {
+  const m = /^npm run wf -- run implement-issue --args '(.*)' --resume (\S+)$/.exec(next);
+  assert.ok(m, `not a relaunch line: ${next}`);
+  return { args: JSON.parse(m[1]!.replace(/'\\''/g, "'")) as Record<string, unknown>, runId: m[2]! };
+};
+const PWNED_PLAN = { ...PLAN, testCommand: "touch PWNED" };
+
+test("MED with seams and no test command: the planner's command is proposed on the issue, not run", async () => {
+  issue(["complexity:medium"]);
+  fx.handlers.plan = (o) => submit(o, PWNED_PLAN);
+  const r = await run({ seams: ["x"], testCommand: undefined });
+  assert.equal(r.status, "finished", r.error);
+  assert.equal(res(r).status, "test-command-proposed", JSON.stringify(res(r)));
+
+  assert.ok(!mentioned(eventsOf(r.runId), "PWNED"), "the command the model wrote did not run");
+  assert.ok(!existsSync(join(fx.repo, "PWNED")) && !existsSync(worktreeOf(r.runId)), "no file PWNED, and no worktree was made for the run");
+  const comments = forgeState().comments;
+  assert.equal(comments.length, 1);
+  assert.ok(comments[0]!.includes("`touch PWNED`"), `the command is shown inside a code span: ${comments[0]}`);
+});
+
+test("the next line approves the stored plan: no seams in it, and resuming it runs the proposed command with no new planner call", async () => {
+  issue(["complexity:medium"]);
+  fx.handlers.plan = (o) => submit(o, PWNED_PLAN);
+  const first = await run({ seams: ["x"], testCommand: undefined });
+  assert.equal(res(first).status, "test-command-proposed", JSON.stringify(res(first)));
+
+  const { args, runId } = relaunchOf(res(first).next);
+  assert.equal(runId, first.runId);
+  assert.equal(args.approveSeams, true);
+  assert.ok(!("seams" in args), `the relaunch line carries no seams: ${JSON.stringify(args)}`);
+  assert.equal(args.testCommand, undefined, "and no test command either: the plan's is the one shown");
+  assert.ok(forgeState().comments[0]!.includes(res(first).next), "the issue comment holds the same line");
+
+  const plannerCalls = names().filter((n) => n === "plan").length;
+  const second = await resume(args, runId);
+  assert.equal(second.status, "finished", second.error);
+  assert.equal(names().filter((n) => n === "plan").length, plannerCalls, "the stored plan is used: the planner does not run again");
+  assert.ok(ranAsSuite(eventsOf(first.runId), "touch PWNED"), "the approved plan's command is the suite command");
+  assert.ok(existsSync(join(worktreeOf(first.runId), "PWNED")), "and it ran, in the run's worktree");
+  const comments = forgeState().comments;
+  assert.equal(comments.length, 2, "the resume posts the approval and no second test command comment");
+  assert.match(comments[1]!, /Seams approved/);
+});
+
+test("seams with a test command the user typed: that command runs, the planner's is ignored, and the run does not stop", async () => {
+  issue(["complexity:medium"]);
+  fx.handlers.plan = (o) => submit(o, PWNED_PLAN);
+  const r = await run({ seams: ["x"], testCommand: "node --test" });
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  const events = eventsOf(r.runId);
+  assert.ok(ranAsSuite(events, "node --test"), "the typed command is the suite command");
+  assert.ok(!mentioned(events, "PWNED"), "the planner's is never run");
+  assert.equal(forgeState().comments.length, 0, "nothing to approve, nothing posted");
+});
+
+test("HIGH follows the same rule: the judge's test command is proposed, not run, when the run has seams and no test command", async () => {
+  issue(["complexity:high"]);
+  const design = (o: any) => submit(o, { interface: "subtract(a, b)", usage: "subtract(5, 3)", hides: "-", dependencies: "-", tradeoffs: "-" });
+  for (const kind of ["minimal", "flexible", "common"]) fx.handlers[`design:${kind}`] = design;
+  fx.handlers.judge = (o) => submit(o, PWNED_PLAN);
+  const r = await run({ seams: ["x"], testCommand: undefined });
+  assert.equal(res(r).status, "test-command-proposed", JSON.stringify(res(r)));
+  assert.ok(!mentioned(eventsOf(r.runId), "PWNED"));
+  assert.ok(!existsSync(join(fx.repo, "PWNED")) && !existsSync(worktreeOf(r.runId)));
+  assert.ok(forgeState().comments[0]!.includes("`touch PWNED`"));
+  assert.equal(relaunchOf(res(r).next).args.seams, undefined);
+
+  const second = await resume(relaunchOf(res(r).next).args, r.runId);
+  assert.equal(second.status, "finished", second.error);
+  assert.equal(names().filter((n) => n === "judge").length, 1, "the judge does not run again");
+  assert.ok(ranAsSuite(eventsOf(r.runId), "touch PWNED"), "the approved plan's command runs");
+});
+
+test("LOW without a test command takes the kit's npm test: nothing proposed, nothing stops", async () => {
+  issue(["complexity:low"]);
+  const r = await run({ seams: ["x"], testCommand: undefined });
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  assert.ok(ranAsSuite(eventsOf(r.runId), "npm test"));
+  assert.equal(forgeState().comments.length, 0);
+});
+
+test("a planner that proposes no command (a blank one) is no proposal: the run takes npm test and does not stop", async () => {
+  issue(["complexity:medium"]);
+  fx.handlers.plan = (o) => submit(o, { ...PLAN, testCommand: "  " });
+  const r = await run({ seams: ["x"], testCommand: undefined });
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  const events = eventsOf(r.runId);
+  assert.ok(ranAsSuite(events, "npm test"));
+  assert.ok(!execCalls(events).some((c) => c.command === "bash" && c.args[1]?.trim() === ""), "no empty command was run");
+});
+
+test("a blank planner command: the seams comment shows the command that will run (npm test), not an empty span", async () => {
+  issue(["complexity:medium"]);
+  fx.handlers.plan = (o) => submit(o, { ...PLAN, testCommand: "  " });
+  const first = await run({ testCommand: undefined });
+  assert.equal(res(first).status, "seams-proposed", JSON.stringify(res(first)));
+  assert.ok(forgeState().comments[0]!.includes("\nTest command: `npm test`\n"), forgeState().comments[0]);
+  const second = await run({ testCommand: undefined, approveSeams: true }, first.runId);
+  assert.equal(res(second).status, "done", JSON.stringify(res(second)));
+  assert.ok(ranAsSuite(eventsOf(first.runId), "npm test"), "what ran is what the comment showed");
+});
+
+test("the same stopped run resumed with the same args stops again and posts the command once", async () => {
+  issue(["complexity:medium"]);
+  fx.handlers.plan = (o) => submit(o, PWNED_PLAN);
+  const first = await run({ seams: ["x"], testCommand: undefined });
+  const again = await run({ seams: ["x"], testCommand: undefined }, first.runId);
+  assert.equal(res(again).status, "test-command-proposed", JSON.stringify(res(again)));
+  assert.equal(names().filter((n) => n === "plan").length, 1, "the planner's answer comes from the journal");
+  const comments = forgeState().comments;
+  assert.equal(comments.filter((body) => body.includes("<!-- wf:implement-issue:test-command -->")).length, 1, "one test command comment per run");
+  assert.equal(comments.length, 2, "and the resume with seams is a decision of its own");
+  assert.match(comments[1]!, /Seams replaced/);
+});
+
+test("a run that proposed seams and is then resumed with seams still posts the test command: the two comments have their own markers", async () => {
+  issue(["complexity:medium"]);
+  fx.handlers.plan = (o) => submit(o, PWNED_PLAN);
+  const first = await run({ testCommand: undefined });
+  assert.equal(res(first).status, "seams-proposed", JSON.stringify(res(first)));
+  const second = await run({ seams: ["x"], testCommand: undefined }, first.runId);
+  assert.equal(res(second).status, "test-command-proposed", JSON.stringify(res(second)));
+  const comments = forgeState().comments;
+  assert.equal(comments.length, 3, "the seams, the decision to replace them, and the test command");
+  assert.match(comments[1]!, /Seams replaced/);
+  assert.ok(comments[2]!.includes("`touch PWNED`") && /Test command proposed/.test(comments[2]!));
 });

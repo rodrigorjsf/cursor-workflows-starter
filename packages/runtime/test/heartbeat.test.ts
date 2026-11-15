@@ -1,4 +1,4 @@
-// Seam 1 and 2: a running job keeps a heartbeat, and a job whose heartbeat is stale is reported as failed with its run id.
+// Seam: the run and the process. A running job keeps a heartbeat, and a job whose heartbeat is stale is reported as failed with its run id.
 // The in-process tests use the job record on disk and `readJob`; the last one runs a real child process.
 process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";

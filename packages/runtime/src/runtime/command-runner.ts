@@ -3,7 +3,9 @@
 // behind. The engine turns a call into a step node and the output into `content` events (`ctx.exec`).
 import { type ChildProcess, spawn } from "node:child_process";
 import type { ExecOutcome, OutputStream } from "./events.js";
+import { isSecretName } from "./redaction.js";
 import type { ExecResult } from "./workflow.js";
+import { errorText } from "./error-text.js";
 
 /** How much of a command's output a call hands back: the last characters of stdout and stderr, in arrival order. */
 export const TAIL_MAX_CHARS = 32_768;
@@ -19,10 +21,21 @@ export interface CommandSpec {
   cwd: string;
   /** Added to this process's own environment; a variable set to `undefined` is left out. */
   env?: Record<string, string | undefined>;
+  /**
+   * Leaves out of this process's own environment every variable whose name holds a secret (`isSecretName`: KEY, TOKEN, SECRET or
+   * PASSWORD), for a command that runs code the run does not trust. What `env` sets is the caller's choice and stays.
+   */
+  scrubSecrets?: boolean;
   /** The command is killed this long after it started. */
   timeoutMs: number;
   /** Aborting it kills the command. */
   signal?: AbortSignal;
+  /**
+   * Told the command's process group as soon as the command has started (never where there are no process groups: Windows);
+   * what it returns is called when the call ends. It must not throw. It lets a job record the groups it has live, for a
+   * cancel that kills the process before this runner can (`job-children.ts`).
+   */
+  onGroup?: (pgid: number) => () => void;
 }
 
 /** How a command ended. */
@@ -50,6 +63,12 @@ export function toExecResult(o: CommandOutcome): ExecResult {
 export const KILL_GRACE_MS = 2_000;
 /** After the process has ended, how long to wait for its pipes to close: a background process it left behind can hold them open. */
 const DRAIN_GRACE_MS = 1_000;
+
+/** The environment a command starts with: this process's (without its secrets when `scrubSecrets`), then `env`. */
+function environmentOf(spec: CommandSpec): NodeJS.ProcessEnv {
+  const own = spec.scrubSecrets ? Object.fromEntries(Object.entries(process.env).filter(([name]) => !isSecretName(name))) : process.env;
+  return { ...own, ...spec.env };
+}
 
 /** Each command runs in its own process group (not on Windows), so that a kill reaches what the command started too. */
 const OWN_GROUP = process.platform !== "win32";
@@ -79,15 +98,16 @@ export function runCommand(spec: CommandSpec, onOutput: (stream: OutputStream, t
     if (spec.signal?.aborted) return resolve(result("cancelled", null, null));
     let child: ChildProcess;
     try {
-      child = spawn(spec.command, spec.args, { cwd: spec.cwd, env: { ...process.env, ...spec.env }, stdio: ["ignore", "pipe", "pipe"], detached: OWN_GROUP });
+      child = spawn(spec.command, spec.args, { cwd: spec.cwd, env: environmentOf(spec), stdio: ["ignore", "pipe", "pipe"], detached: OWN_GROUP });
     } catch (err) {
-      return resolve(result("spawn-error", null, null, err instanceof Error ? err.message : String(err)));
+      return resolve(result("spawn-error", null, null, errorText(err)));
     }
     if (!exitHookInstalled) {
       exitHookInstalled = true;
       process.on("exit", () => running.forEach((c) => killTree(c, "SIGKILL")));
     }
     running.add(child);
+    const dropGroup = OWN_GROUP && child.pid !== undefined ? spec.onGroup?.(child.pid) : undefined;
 
     let outcome: ExecOutcome = "exit";
     let exited: { code: number | null; signal: NodeJS.Signals | null } | undefined;
@@ -99,6 +119,7 @@ export function runCommand(spec: CommandSpec, onOutput: (stream: OutputStream, t
       timers.forEach(clearTimeout);
       spec.signal?.removeEventListener("abort", onAbort);
       running.delete(child);
+      dropGroup?.();
       resolve(end);
     };
     const ended = () => result(outcome, exited?.code ?? null, exited?.signal ?? null);

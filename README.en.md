@@ -42,12 +42,16 @@ Requires Node 22.13 or newer, a paid Cursor plan, `git` and the authenticated CL
 [INSTALL-AGENT.md](INSTALL-AGENT.md). By hand:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/scripts/install.sh -o /tmp/wf-install.sh
-bash /tmp/wf-install.sh --tag v0.4.0   # the kit at the tag, the wf command and the global skills
+installer="$(mktemp)"
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/scripts/install.sh -o "$installer"
+bash "$installer" --tag v0.4.0   # the kit at the tag, the wf command and the global skills
 wf login                               # browser login; usage bills YOUR account
 wf init                                # in your repo: writes the kit's files, shows the diff, never commits
-wf doctor                              # checks Node, login, models, the forge CLI (gh or glab), the MCP server and the config
+wf doctor                              # checks Node, login, models, the forge CLI (gh or glab), the MCP server, the config, the SDK sandbox, the installed kit and WSL interop
 ```
+
+The kit cannot read your account's Privacy Mode: confirm it is on in Cursor Settings → General before you run a workflow
+([5.1](docs/operating/01-governanca-e-custos.md#políticas-de-admin-que-se-aplicam)).
 
 In the Cursor IDE, enable the `workflows` MCP server and type `/run-workflow implement-issue 123`
 ([2.1 §6](docs/usage/01-instalacao.md#6-habilitar-no-cursor-ide)). The cost caps come from a global config with default

@@ -4,6 +4,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { NETWORK_GIT_ENV } from "../../src/runtime/git-transport.js";
 import type { ExecOptions, ExecResult } from "../../src/runtime/workflow.js";
 
 /** `ctx.exec`. */
@@ -49,6 +50,14 @@ function failureMessage(line: string, r: ExecResult, timeoutMs: number | undefin
   if (r.timedOut) return `${line} timed out ${timeoutMs === undefined ? "(the workflow's execTimeoutMs)" : `after ${timeoutMs / 1000}s`}`;
   if (r.error) return `${line} could not start: ${r.error}`;
   const output = r.tail.trim().slice(-1000);
+  // Git's own sentence (`fatal: transport 'http' not allowed`), which git translates: a git in another language falls through to the generic message below, with git's text.
+  const blocked = /transport '([^']*)' not allowed/.exec(output);
+  if (blocked) {
+    return (
+      `${line} was refused: the ${blocked[1]} transport of the remote is not allowed. The workflow pushes and lists branches only over https, ssh or a local path: ` +
+      "a plain-text transport (http://, git://) or a remote helper (ext::) would send the credentials in the clear or run a command. Point the remote at an https:// or ssh URL (`git remote get-url --push origin` shows where a push goes, `git remote get-url origin` where a fetch does)"
+    );
+  }
   return `${line} ${r.exitCode === null ? "was killed" : `exited with code ${r.exitCode}`}${output ? `: ${output}` : ""}`;
 }
 
@@ -104,14 +113,14 @@ export class Commands {
     throw new CommandError("git", args, r, this.timeouts.localMs);
   }
 
-  /** `git push`: a network command. */
+  /** `git push`: a network command, over the transports of `NETWORK_GIT_ENV` only. */
   async push(cwd: string, ...args: string[]): Promise<void> {
-    await this.succeed("git", ["push", ...args], cwd, this.timeouts.networkMs);
+    await this.succeed("git", ["push", ...args], cwd, this.timeouts.networkMs, NETWORK_GIT_ENV);
   }
 
   /** The commit `branch` points at on the origin, or undefined when the origin has no such branch. A network command. */
   async remoteBranchHead(cwd: string, branch: string): Promise<string | undefined> {
-    const out = await this.succeedRead("git", ["ls-remote", "--heads", "origin", `refs/heads/${branch}`], cwd, this.timeouts.networkMs);
+    const out = await this.succeedRead("git", ["ls-remote", "--heads", "origin", `refs/heads/${branch}`], cwd, this.timeouts.networkMs, undefined, NETWORK_GIT_ENV);
     return out.trim().split(/\s+/)[0] || undefined;
   }
 
@@ -141,7 +150,7 @@ export class Commands {
    */
   async remoteOwnedHeads(cwd: string, remote = ORIGIN, prefix = WORKFLOW_BRANCH_PREFIX): Promise<Map<string, string>> {
     if (!(await this.gitIs(cwd, "config", "--get", `remote.${remote}.url`))) return new Map();
-    const out = await this.succeedRead("git", ["ls-remote", "--heads", remote, `refs/heads/${prefix}*`], cwd, this.timeouts.networkMs);
+    const out = await this.succeedRead("git", ["ls-remote", "--heads", remote, `refs/heads/${prefix}*`], cwd, this.timeouts.networkMs, undefined, NETWORK_GIT_ENV);
     const heads = new Map<string, string>();
     for (const line of out.split("\n")) {
       const [sha, ref] = line.trim().split(/\s+/);
@@ -174,7 +183,12 @@ export class Commands {
    * Returns its stdout, or undefined for "nothing found". Any other failure (an auth error, a network stall) is an error.
    */
   async forgeReadOrNothing(cli: string, cwd: string, nothing: RegExp, ...args: string[]): Promise<string | undefined> {
-    const r = await this.read(cli, args, cwd, this.timeouts.networkMs, FORGE_LABEL_WORDS);
+    return this.forgeReadOrNothingWith(cli, cwd, {}, nothing, ...args);
+  }
+
+  /** `forgeReadOrNothing` with variables added to the CLI's environment (`undefined` removes one), as `forgeReadWith`. */
+  async forgeReadOrNothingWith(cli: string, cwd: string, env: Record<string, string | undefined>, nothing: RegExp, ...args: string[]): Promise<string | undefined> {
+    const r = await this.read(cli, args, cwd, this.timeouts.networkMs, FORGE_LABEL_WORDS, env);
     if (r.ok) return r.stdout;
     if (r.exitCode === 1 && nothing.test(r.tail)) return undefined;
     throw new CommandError(cli, args, r, this.timeouts.networkMs);
@@ -184,8 +198,8 @@ export class Commands {
     return { cwd, ...(timeoutMs === undefined ? {} : { timeoutMs }), label: `${command} ${args.slice(0, labelWords).join(" ")}` };
   }
 
-  private async succeed(command: string, args: string[], cwd: string, timeoutMs: number | undefined): Promise<void> {
-    const r = await this.exec(command, args, this.options(command, args, cwd, timeoutMs));
+  private async succeed(command: string, args: string[], cwd: string, timeoutMs: number | undefined, env?: Record<string, string | undefined>): Promise<void> {
+    const r = await this.exec(command, args, { ...this.options(command, args, cwd, timeoutMs), ...(env === undefined ? {} : { env }) });
     if (!r.ok) throw new CommandError(command, args, r, timeoutMs);
   }
 

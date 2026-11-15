@@ -8,6 +8,7 @@ import { Ajv, type ValidateFunction } from "ajv";
 import type { ResultVia, StepLocation } from "../runtime/backend.js";
 import { userDir } from "../runtime/state.js";
 import type { ForgeName } from "../runtime/workflow.js";
+import { errorText } from "../runtime/error-text.js";
 
 /** Pointer into a JSON document (RFC 6901): `/workflows/implement-issue/roles/review`. */
 export type Pointer = string;
@@ -23,6 +24,8 @@ export interface ConfigCaps {
   allowedSettingSources?: SettingSource[] | null;
   allowedLocations?: StepLocation[] | null;
   maxConcurrency?: number | null;
+  /** Jobs that may run at once in one repository (`wf start`, `start_workflow`). Absent: 3; `null`: no cap. */
+  maxRunningJobs?: number | null;
   requireSandbox?: boolean | null;
 }
 
@@ -36,6 +39,11 @@ const KNOWN_FORGE_HOSTS: Readonly<Record<string, ForgeName>> = { "github.com": "
 export function knownForgeOf(host: string): ForgeName | undefined {
   const bare = bareHost(host);
   return Object.hasOwn(KNOWN_FORGE_HOSTS, bare) ? KNOWN_FORGE_HOSTS[bare] : undefined;
+}
+
+/** The host the kit knows `forge` by: the one `knownForgeOf` maps back to it (`github.com`, `gitlab.com`). */
+export function knownHostOf(forge: ForgeName): string {
+  return Object.entries(KNOWN_FORGE_HOSTS).find(([, known]) => known === forge)![0];
 }
 
 /** `host` without its `:port`: the host `knownForgeOf` matches, and the one a message about that match names. */
@@ -78,6 +86,8 @@ export interface DashboardPrefs {
 export interface CloudPrefs {
   /** The git remote that cloud steps' snapshot branches are pushed to. Default: `origin`. */
   remote?: string;
+  /** Global file only: push a snapshot to a remote that is public, or that `gh` cannot tell the visibility of. Default: false. */
+  allowPublicRemote?: boolean;
 }
 
 export interface ConfigFile {
@@ -142,7 +152,7 @@ export function loadConfigFile(path: string): LoadedConfig | undefined {
   try {
     data = JSON.parse(readFileSync(path, "utf8"));
   } catch (err) {
-    throw new ConfigError([{ ref: path, path: "", message: `invalid JSON: ${err instanceof Error ? err.message : String(err)}` }]);
+    throw new ConfigError([{ ref: path, path: "", message: `invalid JSON: ${errorText(err)}` }]);
   }
   const errors = validateConfigData(data);
   if (errors.length) throw new ConfigError(errors.map((e) => ({ ref: path, ...e })));

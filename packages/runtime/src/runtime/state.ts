@@ -1,9 +1,11 @@
 // Diretório de estado do runtime no repositório alvo (`.workflows/`): journal, jobs, logs, memo, worktrees.
 
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { PRIVATE_DIR } from "./state-files.js";
 
 /** Per-user directory of the kit (`~/.cursor-workflows`): metrics database, global runs index. `WF_HOME` overrides it (tests, CI). */
 export function userDir(): string {
@@ -32,10 +34,14 @@ export function ensureIgnored(cwd: string): void {
   if (!current.split("\n").includes(".workflows/")) appendFileSync(exclude, `${current.endsWith("\n") || !current ? "" : "\n"}.workflows/\n`);
 }
 
+/** Where the repo's run state lives, whether or not it exists: nothing is created. */
+export const stateRootIn = (cwd: string): string => join(cwd, ".workflows");
+
+/** A folder of the repo's run state (`.workflows/<parts>`), made when it is not there, for its user alone (`PRIVATE_DIR`): it holds the private source of the repo. */
 export function stateDir(cwd: string, ...parts: string[]): string {
   ensureIgnored(cwd);
-  const dir = join(cwd, ".workflows", ...parts);
-  mkdirSync(dir, { recursive: true });
+  const dir = join(stateRootIn(cwd), ...parts);
+  mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR });
   return dir;
 }
 
@@ -52,4 +58,9 @@ export function isPlainName(id: unknown): id is string {
 export function plainName(id: string, what: string): string {
   if (!isPlainName(id)) throw new Error(`invalid ${what} ${JSON.stringify(id)}: letters, digits, "_" and "-" only (it becomes a file name)`);
   return id;
+}
+
+/** A new run id: the workflow's name, with anything but letters, digits, "_" and "-" made a "-" (the id names the run's folder), and a random suffix. */
+export function newRunId(workflow: string): string {
+  return `${workflow.replace(/[^A-Za-z0-9_-]/g, "-")}-${randomUUID().slice(0, 8)}`;
 }

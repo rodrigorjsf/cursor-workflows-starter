@@ -120,13 +120,22 @@ export class GitLabApi {
   }
 
   async call<T = Record<string, unknown>>(method: string, path: string, body?: unknown): Promise<T> {
+    return (await (await this.send(method, path, body)).json()) as T;
+  }
+
+  /** A DELETE: GitLab answers 204 with no body, which `call` could not read as JSON. */
+  async remove(path: string): Promise<void> {
+    await this.send("DELETE", path);
+  }
+
+  private async send(method: string, path: string, body?: unknown): Promise<Response> {
     const response = await fetch(`${this.base}/api/v4${path}`, {
       method,
       headers: { "PRIVATE-TOKEN": this.token, "content-type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     if (!response.ok) throw new GitLabHttpError(response.status, `${method} ${path}: HTTP ${response.status} ${(await response.text()).slice(0, 300)}`);
-    return (await response.json()) as T;
+    return response;
   }
 
   /** Like `call` for a GET, but a 404 is `undefined`: the answer to "does it exist". */

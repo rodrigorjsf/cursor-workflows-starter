@@ -2,6 +2,10 @@
 
 **Status:** accepted · decided by the repo owner on 2026-11-12, while hardening [spec #5](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/5); supersedes [ADR-0006](0006-cloud-steps-as-built.md)
 
+**Amended:** 2026-11-14: what a cancel kills besides a frozen job's process (its `ctx.exec` commands and what the SDK's local agent started) is recorded in [ADR-0010](0010-detached-jobs-and-how-each-is-cancelled.md), which restates every cancel path; the rule here, that a cancel cancels the cloud agents, is unchanged.
+
+**Amended:** 2026-11-14: before a snapshot that differs from `HEAD` is pushed, the engine scans it for secrets (`secret-guard.ts`, the guard `implement-issue` runs on its commit) and asks `gh repo view` whether the remote is public, and refuses a public remote, or one that cannot be asked about (a GitLab remote, no network, no login), unless the global-only `cloud.allowPublicRemote` is `true`; the refusal is final for the step. A read-only step whose run reports that it pushed a branch gets a `warning` naming it. The snapshot, its branch and the way back are unchanged.
+
 ## Context
 
 [ADR-0006](0006-cloud-steps-as-built.md) recorded cloud steps as built. Two of its lifecycle statements stopped holding

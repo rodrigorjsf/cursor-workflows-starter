@@ -1,5 +1,6 @@
 // Shared by the dashboard's tests: a throwaway per-user home, throwaway repos with run directories written the way the
 // runtime writes them, and an HTTP client that can send any Host header.
+import { execFileSync } from "node:child_process";
 import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
@@ -89,11 +90,16 @@ export interface Reply {
   json: any;
 }
 
-/** One request to `url` (the server's origin); `host` replaces the Host header, `method` the verb, `headers` adds request headers. */
-export function http(url: string, path: string, opts: { host?: string; method?: string; headers?: Record<string, string> } = {}): Promise<Reply> {
+/**
+ * One request to `url` (the server's origin); `host` replaces the Host header, `method` the verb, `headers` adds request headers.
+ * `body` is sent as the request body: text as it is, anything else as JSON.
+ */
+export function http(url: string, path: string, opts: { host?: string; method?: string; headers?: Record<string, string>; body?: unknown } = {}): Promise<Reply> {
   const target = new URL(path, url);
+  const payload = opts.body === undefined ? undefined : typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body);
+  const framing = payload === undefined ? {} : { "content-type": "application/json", "content-length": String(Buffer.byteLength(payload)) };
   return new Promise((resolve, reject) => {
-    const req = request({ hostname: target.hostname, port: target.port, path: target.pathname + target.search, method: opts.method ?? "GET", headers: { ...(opts.host === undefined ? {} : { host: opts.host }), ...opts.headers } }, (res) => {
+    const req = request({ hostname: target.hostname, port: target.port, path: target.pathname + target.search, method: opts.method ?? "GET", headers: { ...(opts.host === undefined ? {} : { host: opts.host }), ...framing, ...opts.headers } }, (res) => {
       const chunks: Buffer[] = [];
       res.on("data", (c: Buffer) => chunks.push(c));
       res.on("end", () => {
@@ -108,8 +114,216 @@ export function http(url: string, path: string, opts: { host?: string; method?: 
       });
     });
     req.once("error", reject);
-    req.end();
+    req.end(payload);
   });
+}
+
+/** A workflow with args: `issue` is required, `note` is not, and nothing else is accepted. */
+export const ECHO_WORKFLOW = `export default {
+  meta: {
+    name: "echo",
+    description: "Echoes its args.",
+    whenToUse: "Only in tests.",
+    argsSchema: { type: "object", required: ["issue"], additionalProperties: false, properties: { issue: { type: "integer", minimum: 1 }, note: { type: "string" } } },
+  },
+  async run(ctx) { return { status: "done", args: ctx.args }; },
+};
+`;
+
+/** A workflow that declares no args. */
+export const PLAIN_WORKFLOW = `export default { meta: { name: "plain", description: "Takes no args." }, async run() { return { status: "done" }; } };\n`;
+
+/** A repo the runs index knows (a run of it that ended is registered), with each of `workflows` (file name to source) in its `.agents/workflows/`. */
+export function repoWithWorkflows(box: Sandbox, name: string, workflows: Record<string, string>): string {
+  const repo = box.repo(name);
+  mkdirSync(join(repo, ".agents", "workflows"), { recursive: true });
+  for (const [file, source] of Object.entries(workflows)) writeFileSync(join(repo, ".agents", "workflows", file), source);
+  writeRun(box.home, repo, { runId: `earlier-${name}0001`, workflow: "echo", startedAt: "2026-11-12T10:00:00.000Z", events: [{ type: "run-end", status: "finished" }] });
+  return repo;
+}
+
+/** A repo the runs index knows (as `repoWithWorkflows`, with no workflow of its own) that is a git repository whose `origin` is `origin`: what tells the runtime which forge hosts it. */
+export function repoWithOrigin(box: Sandbox, name: string, origin: string): string {
+  const repo = repoWithWorkflows(box, name, {});
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["remote", "add", "origin", origin], { cwd: repo });
+  return repo;
+}
+
+/**
+ * Writes the record of a job of `repo` (`.workflows/jobs/<jobId>.json`): the run it started and how (`start`, left out as an older kit's record has it).
+ * Its process is pid 1 and its last heartbeat long ago, unless `pid` says which process executes the job.
+ */
+export function writeJobRecord(repo: string, job: { jobId: string; runId: string; start?: unknown; pid?: number }): void {
+  const dir = join(repo, ".workflows", "jobs");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${job.jobId}.json`), JSON.stringify({ jobId: job.jobId, runId: job.runId, pid: job.pid ?? 1, heartbeat: "2026-01-10T10:00:00.000Z", ...(job.start === undefined ? {} : { start: job.start }) }));
+}
+
+/** Writes `.agents/workflows/config.json` of `repo`: the repo layer of the config. */
+export function writeRepoConfig(repo: string, config: unknown): void {
+  mkdirSync(join(repo, ".agents", "workflows"), { recursive: true });
+  writeFileSync(join(repo, ".agents", "workflows", "config.json"), JSON.stringify(config));
+}
+
+/** The variables a job process inherits from the test: no metrics database, no dashboard auto-start, and the tests' tsconfig, which swaps in the fake SDK. */
+export const JOB_ENV = { WF_METRICS: "off", WF_DASH_AUTOSTART: "off", TSX_TSCONFIG_PATH: join(import.meta.dirname, "..", "..", "runtime", "tsconfig.test.json") };
+
+/** How long to wait for a job's process, which has to load TypeScript and the runtime: seconds on a loaded machine. */
+export const JOB_WAIT = { timeoutMs: 60_000, intervalMs: 100 };
+
+/** Whether a process with this pid is there (signal 0 only asks). */
+export function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The record of a job of `repo`, as the runtime wrote it (`.workflows/jobs/<jobId>.json`). */
+export function jobRecordOf(repo: string, jobId: string): { pid: number; runId: string; start?: unknown } {
+  return JSON.parse(readFileSync(join(repo, ".workflows", "jobs", `${jobId}.json`), "utf8")) as { pid: number; runId: string; start?: unknown };
+}
+
+/** The pid of a job's process, read from its record, so a test that fails halfway does not leave the process running. */
+export function jobPidOf(repo: string, jobId: string): number {
+  return jobRecordOf(repo, jobId).pid;
+}
+
+/** What `GET /api/runs/<runId>` answers on the dashboard at `url`: the run's detail (`json`, undefined when the answer is not JSON). */
+export async function runDetail(url: string, runId: string): Promise<any> {
+  return (await http(url, `/api/runs/${runId}`)).json;
+}
+
+/** `POST /api/start` on the dashboard at `url`, with its CSRF token unless `headers` replaces the headers, and `body`. */
+export async function startRequest(url: string, body: unknown, headers?: Record<string, string>): Promise<Reply> {
+  const token = headers === undefined ? ((await http(url, "/api/csrf")).json.csrfToken as string) : "";
+  return http(url, "/api/start", { method: "POST", headers: headers ?? { "x-csrf-token": token }, body });
+}
+
+/** `POST path` on the dashboard at `url`, with its CSRF token unless `headers` replaces the headers, and `body` when the action takes one (text as it is, anything else as JSON): cancel and resume take none. */
+export async function postWithToken(url: string, path: string, headers?: Record<string, string>, body?: unknown): Promise<Reply> {
+  const token = headers === undefined ? ((await http(url, "/api/csrf")).json.csrfToken as string) : "";
+  return http(url, path, { method: "POST", headers: headers ?? { "x-csrf-token": token }, body });
+}
+
+/** A workflow of two steps, for the runs a resume is for: its second step hangs, when `hang` is set, until the run is cancelled or its process is killed. */
+export const RESUMABLE_WORKFLOW = `export default {
+  meta: {
+    name: "resumable",
+    description: "Two steps; the second hangs on args.hang.",
+    argsSchema: { type: "object", additionalProperties: false, properties: { hang: { type: "boolean" } } },
+  },
+  defaults: { model: { id: "m" } },
+  async run(ctx) {
+    await ctx.agent("one", { label: "one" });
+    await ctx.agent(ctx.args.hang ? "[fake:hang] two" : "two", { label: "two", retries: 0, timeoutMs: 120000 });
+    return { status: "done" };
+  },
+};
+`;
+
+/** The plan an `implement-issue` run stores when it stops to ask about its seams (`proposedPlan` of its progress file). */
+export const SEAMS_PLAN = {
+  seams: [{ name: "math.subtract", interface: "subtract(a, b): number", why: "the behaviour the issue asks for" }],
+  slices: [{ behavior: "subtract returns the difference", seam: "math.subtract", testIdea: "subtract(5, 3) is 2" }],
+  testCommand: "node --test",
+};
+
+/** Writes the progress file of a run (`.workflows/runs/<runId>/tdd-progress.json`) as `implement-issue` writes it: the plan it stopped at, and no slice done. */
+export function writeSeamsProgress(repo: string, runId: string, plan: unknown): void {
+  const dir = join(repo, ".workflows", "runs", runId);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "tdd-progress.json"), JSON.stringify({ slices: [], proposedPlan: plan }));
+}
+
+/**
+ * An `implement-issue` run that stopped to ask about its seams, started by the job `job-0001` whose record says `start`: its log ends
+ * `finished` with the result `stop`, and its progress file holds `plan`. Written the way the runtime writes them.
+ */
+export function seamsProposedRun(box: Sandbox, repo: string, runId: string, options: { start?: unknown; stop?: "seams-proposed" | "test-command-proposed"; plan?: unknown } = {}): void {
+  const stop = options.stop ?? "seams-proposed";
+  const plan = options.plan ?? SEAMS_PLAN;
+  writeRun(box.home, repo, {
+    runId,
+    workflow: "implement-issue",
+    startedAt: "2026-11-12T10:00:00.000Z",
+    jobId: "job-0001",
+    events: [{ type: "run-end", status: "finished", outcomeStatus: stop, result: { status: stop, runId, seams: SEAMS_PLAN.seams } }],
+  });
+  writeJobRecord(repo, { jobId: "job-0001", runId, ...("start" in options ? { start: options.start } : { start: { workflow: "implement-issue", args: { issue: 7 }, maxTokens: 500_000, maxCents: 200 } }) });
+  writeSeamsProgress(repo, runId, plan);
+}
+
+/**
+ * Stands in for `implement-issue` in a repo's `.agents/workflows/` (which shadows the kit's workflow of the name): it stops at the seams
+ * proposal as the real one does (its plan in the progress file, a result with that status), stops again at the planner's test command when
+ * given `seams` and no `testCommand`, and answers `done` with the args it was given once approved. It spends nothing.
+ */
+export const SEAMS_WORKFLOW = `import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+const PLAN = ${JSON.stringify({ ...SEAMS_PLAN, testCommand: "echo chosen-by-the-planner" })};
+const store = (ctx) => {
+  const dir = join(ctx.cwd, ".workflows", "runs", ctx.runId);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "tdd-progress.json"), JSON.stringify({ slices: [], proposedPlan: PLAN }));
+};
+export default {
+  meta: {
+    name: "implement-issue",
+    description: "Stops at its seams like implement-issue.",
+    argsSchema: {
+      type: "object",
+      required: ["issue"],
+      additionalProperties: false,
+      properties: { issue: { type: "number" }, testCommand: { type: "string" }, approveSeams: { type: "boolean" }, seams: { type: "array", items: { type: "string" } } },
+    },
+  },
+  async run(ctx) {
+    if (ctx.args.approveSeams) return { status: "done", args: ctx.args };
+    if (ctx.args.seams && ctx.args.testCommand !== undefined) return { status: "done", args: ctx.args };
+    store(ctx);
+    const status = ctx.args.seams ? "test-command-proposed" : "seams-proposed";
+    return { status, runId: ctx.runId, seams: PLAN.seams, ...(ctx.args.seams ? { testCommand: PLAN.testCommand } : {}) };
+  },
+};
+`;
+
+/** The events in a run's log, as parsed lines. Empty while the run has no log yet. */
+export function eventsOfRun(repo: string, runId: string): Array<{ type: string } & Record<string, any>> {
+  try {
+    return readFileSync(logPath(repo, runId), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as { type: string });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * What a test that starts real job processes needs: the environment those processes inherit (`JOB_ENV`), and the pids of the jobs it
+ * started, so that `restore()` kills what a test that failed halfway left running, and puts the environment back.
+ */
+export function jobProcesses(): { track(repo: string, jobId: string): void; restore(): void } {
+  const previous = Object.fromEntries(Object.keys(JOB_ENV).map((name) => [name, process.env[name]]));
+  Object.assign(process.env, JOB_ENV);
+  const pids: number[] = [];
+  return {
+    track: (repo, jobId) => void pids.push(jobPidOf(repo, jobId)),
+    restore() {
+      for (const pid of pids) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          /* the job ended on its own, which is what the tests wait for */
+        }
+      }
+      for (const [name, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    },
+  };
 }
 
 export interface Frame {
@@ -209,19 +423,58 @@ export function openStream(url: string, path: string, opts: { host?: string; hea
   });
 }
 
+/** What a fake CLI's test controls for `issue list` are: the issues it lists per label, and a failure it answers with instead. Kept in files in `dir`, which the fake's own process reads. */
+function issueListControls(dir: string) {
+  const issues = join(dir, "issues.json");
+  const failure = join(dir, "issue-list-failure.txt");
+  writeFileSync(issues, "{}");
+  return {
+    issues,
+    failure,
+    setIssues(label: string, list: Array<{ number: number; title: string }>): void {
+      writeFileSync(issues, JSON.stringify({ ...(JSON.parse(readFileSync(issues, "utf8")) as Record<string, unknown>), [label]: list }));
+    },
+    setFailure(message: string): void {
+      writeFileSync(failure, message);
+    },
+  };
+}
+
 export interface FakeGh {
   /** Pull requests the fake knows: `gh pr view <url>` answers with the state. A url not set answers "no pull requests found" and exits 1. */
   set(url: string, state: "OPEN" | "MERGED" | "CLOSED"): void;
+  /**
+   * The open issues `gh issue list --label=<label>` lists, in the order given (GitHub lists the newest first): printed the way the real gh
+   * printed its list (`GH_RECORDINGS`), with these numbers and titles. A label not set answers an empty list.
+   */
+  issues(label: string, list: Array<{ number: number; title: string }>): void;
+  /** Makes every `gh issue list` fail: `message` on stderr, exit code 1. */
+  failIssueList(message: string): void;
+  /** Makes every `gh issue list` wait, once started (and logged), until `releaseIssueList`: a gate, for asserting how many run at once. */
+  holdIssueList(): void;
+  releaseIssueList(): void;
   /** Every argument list `gh` was started with, in order. */
   calls(): string[][];
   /** Puts PATH back and removes the fake. */
   restore(): void;
 }
 
-/** A `gh` first on PATH for the length of the test, answering `gh pr view <url> --json state --jq .state` from the states set, and logging each start. */
+/**
+ * What the real gh 2.102.0 printed for `gh issue list` on a real GitHub repository, recorded by scripts/verify/record-gh-fixtures.ts:
+ * the fake accepts the argument list that was recorded (any label) and prints the recorded list's shape. A path, not a module: the fake
+ * runs as a process of its own.
+ */
+const GH_RECORDINGS = join(import.meta.dirname, "..", "..", "runtime", "test", "fixtures", "gh", "recordings.json");
+
+/**
+ * A `gh` first on PATH for the length of the test, answering `gh pr view <url> --json state --jq .state` from the states set and
+ * `gh issue list` from the issues set (any other command line exits 2), and logging each start.
+ */
 export function fakeGh(box: Sandbox): FakeGh {
   const dir = box.repo("fake-gh-bin");
   const states = join(dir, "states.txt");
+  const { issues, failure, setIssues, setFailure } = issueListControls(dir);
+  const hold = join(dir, "issue-list-hold");
   const log = join(dir, "calls.jsonl");
   writeFileSync(states, "");
   writeFileSync(log, "");
@@ -231,6 +484,21 @@ export function fakeGh(box: Sandbox): FakeGh {
 const fs = require("fs");
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + "\\n");
+if (args[0] === "issue" && args[1] === "list") {
+  const REC = JSON.parse(fs.readFileSync(${JSON.stringify(GH_RECORDINGS)}, "utf8")).recordings;
+  const form = (list) => list.map((a) => (a.startsWith("--label=") ? "--label=*" : a)).join(" ");
+  if (form(args) !== form(REC["issue-list"].args)) { process.stderr.write("unexpected gh command line: " + args.join(" ")); process.exit(2); }
+  // held by the test: a gate that opens when the test says so, not a delay
+  while (fs.existsSync(${JSON.stringify(hold)})) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  if (fs.existsSync(${JSON.stringify(failure)})) { process.stderr.write(fs.readFileSync(${JSON.stringify(failure)}, "utf8")); process.exit(1); }
+  const label = args.find((a) => a.startsWith("--label=")).slice("--label=".length);
+  const listed = JSON.parse(fs.readFileSync(${JSON.stringify(issues)}, "utf8"))[label] || [];
+  // the recorded list's first object is the shape of every one: the keys, their order and the form of the URL are gh's
+  const [shape] = JSON.parse(REC["issue-list"].stdout);
+  const printed = listed.map(({ number, title }) => ({ ...shape, number, title, url: shape.url.replace(/\\/issues\\/\\d+$/, "/issues/" + number) }));
+  process.stdout.write(listed.length === 0 ? REC["issue-list-empty"].stdout : JSON.stringify(printed) + "\\n");
+  process.exit(0);
+}
 const line = fs.readFileSync(${JSON.stringify(states)}, "utf8").split("\\n").find((l) => l.startsWith(args[2] + " "));
 if (!line) { process.stderr.write("no pull requests found for " + args[2]); process.exit(1); }
 process.stdout.write(line.split(" ")[1] + "\\n");
@@ -244,6 +512,10 @@ process.stdout.write(line.split(" ")[1] + "\\n");
       const kept = readFileSync(states, "utf8").split("\n").filter((l) => l && !l.startsWith(`${url} `));
       writeFileSync(states, [...kept, `${url} ${state}`].join("\n") + "\n");
     },
+    issues: setIssues,
+    failIssueList: setFailure,
+    holdIssueList: () => writeFileSync(hold, ""),
+    releaseIssueList: () => rmSync(hold, { force: true }),
     calls: () => readFileSync(log, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as string[]),
     restore() {
       process.env.PATH = previous;
@@ -252,6 +524,13 @@ process.stdout.write(line.split(" ")[1] + "\\n");
 }
 
 export interface FakeGlab {
+  /**
+   * The open issues `glab issue list --label=<label>` lists, in the order given (GitLab lists the newest first): printed the way the real
+   * glab printed its list (`GLAB_RECORDINGS`), with these numbers and titles. A label not set answers what glab printed for an empty list.
+   */
+  issues(label: string, list: Array<{ number: number; title: string }>): void;
+  /** Makes every `glab issue list` fail: `message` on stderr, exit code 1. */
+  failIssueList(message: string): void;
   /** Merge requests the fake knows: `glab api --hostname <host> projects/<path>/merge_requests/<n>` answers with a merge request of this state. A url not set answers "404 Not Found" and exits 1. */
   set(url: string, state: "opened" | "locked" | "merged" | "closed"): void;
   /** Every argument list `glab` was started with, in order, after `NAME=value` for each of `GITLAB_HOST` and the token variables it had. */
@@ -291,6 +570,7 @@ export function fakeGlab(box: Sandbox): FakeGlab {
   const dir = box.repo("fake-glab-bin");
   const configDir = box.repo("glab-config");
   const states = join(dir, "states.txt");
+  const { issues, failure, setIssues, setFailure } = issueListControls(dir);
   const log = join(dir, "calls.jsonl");
   writeFileSync(states, "");
   writeFileSync(log, "");
@@ -302,6 +582,23 @@ const args = process.argv.slice(2);
 // The variables that point glab at a host or carry a token come first in the log, as \`NAME=value\`.
 const env = ["GITLAB_HOST", "GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN", "OAUTH_TOKEN"].filter((k) => process.env[k] !== undefined).map((k) => k + "=" + process.env[k]);
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify([...env, ...args]) + "\\n");
+if (args[0] === "issue" && args[1] === "list") {
+  const REC = JSON.parse(fs.readFileSync(${JSON.stringify(GLAB_RECORDINGS)}, "utf8"));
+  const form = (list) => list.map((a) => (a.startsWith("--label=") ? "--label=*" : a)).join(" ");
+  if (form(args) !== form(REC.recordings["issue-list"].args)) { process.stderr.write("unexpected glab command line: " + args.join(" ")); process.exit(2); }
+  if (fs.existsSync(${JSON.stringify(failure)})) { process.stderr.write(fs.readFileSync(${JSON.stringify(failure)}, "utf8")); process.exit(1); }
+  const label = args.find((a) => a.startsWith("--label=")).slice("--label=".length);
+  const listed = JSON.parse(fs.readFileSync(${JSON.stringify(issues)}, "utf8"))[label] || [];
+  // the recorded GitLab's placeholder host is gitlab.com's, and its http:// URLs (the recording ran on plain http) are its https:// ones
+  const fill = (text) => text.split("http://" + REC.placeholders.host).join("https://gitlab.com").split(REC.placeholders.host).join("gitlab.com");
+  const recorded = REC.recordings[listed.length === 0 ? "issue-list-empty" : "issue-list"];
+  process.stderr.write(fill(recorded.stderr));
+  // the recorded list's first object is the shape of every one: GitLab's own fields, with the number and the title of the issue set on it
+  const [shape] = JSON.parse(fill(REC.recordings["issue-list"].stdout));
+  const printed = listed.map(({ number, title }) => ({ ...shape, id: 1000 + number, iid: number, title, web_url: shape.web_url.replace(/\\/\\d+$/, "/" + number) }));
+  process.stdout.write(listed.length === 0 ? fill(recorded.stdout) : JSON.stringify(printed) + (recorded.stdout.endsWith("\\n") ? "\\n" : ""));
+  process.exit(0);
+}
 const ROUTE = /^projects\\/([^/]+)\\/merge_requests\\/(\\d+)$/;
 const byFlag = args.length === 4 && args[0] === "api" && args[1] === "--hostname" && ROUTE.test(args[3]);
 const byEnv = args.length === 2 && args[0] === "api" && process.env.GITLAB_HOST !== undefined && ROUTE.test(args[1]);
@@ -330,6 +627,8 @@ process.stdout.write(JSON.stringify({ ...JSON.parse(onThisHost(recorded.stdout))
       const kept = readFileSync(states, "utf8").split("\n").filter((l) => l && !l.startsWith(`${url} `));
       writeFileSync(states, [...kept, `${url} ${state}`].join("\n") + "\n");
     },
+    issues: setIssues,
+    failIssueList: setFailure,
     calls: () => readFileSync(log, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as string[]),
     config(yaml) {
       writeFileSync(join(configDir, "config.yml"), yaml);

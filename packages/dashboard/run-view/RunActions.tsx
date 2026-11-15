@@ -1,11 +1,14 @@
 // The actions of the Run view's header: cancel a running or frozen run, cancel the cloud agents a run whose process is gone
-// left working, and copy the command that resumes one that stopped.
+// left working, resume one that stopped, and copy the command that resumes it from a terminal.
 import { useEffect, useRef, useState } from "react";
 import { copyText } from "./clipboard.js";
 import { ARGS_PLACEHOLDER, canResume, resumeCommand } from "./resume-command.js";
-import { cancelResult, cancelRun } from "./run-actions.js";
+import { cancelResult, cancelRun, resumeResult, resumeRun } from "./run-actions.js";
 import type { OfferedActions } from "./run-status.js";
 import type { ApiStatus, RunInfo } from "./use-run-events.js";
+import { useWaitForRunning } from "./use-wait-for-running.js";
+
+type ResumeState = { step: "idle" } | { step: "sending" } | { step: "started" } | { step: "failed"; message: string };
 
 type CancelState = { step: "idle" } | { step: "confirm" } | { step: "sending" } | { step: "done"; message: string } | { step: "failed"; message: string };
 
@@ -25,13 +28,18 @@ export function RunActions({ runId, status, offered, info, argsHash, onChanged }
   const [cancel, setCancel] = useState<CancelState>({ step: "idle" });
   const [copied, setCopied] = useState<"yes" | "no">();
   const [shown, setShown] = useState(false);
+  const [resume, setResume] = useState<ResumeState>({ step: "idle" });
 
   // A resume puts a cancelled run back to running: it can be cancelled again, so what the last cancel said is forgotten.
   const before = useRef(status);
   useEffect(() => {
     if (status === "running" && before.current !== "running") setCancel({ step: "idle" });
+    if (status !== before.current) setResume((state) => (state.step === "failed" ? { step: "idle" } : state)); // a refusal is about the state the run was in
     before.current = status;
   }, [status]);
+
+  // After a resume started a job, ask for the run's status until it shows `running`; if it never does (the job stopped at once), the button is offered again after a while.
+  useWaitForRunning({ waiting: resume.step === "started", running: status === "running", onChanged, onDone: () => setResume({ step: "idle" }) });
 
   const cloudOnly = !offered.cancelRun && offered.leftCloudAgents.length > 0;
   const send = async () => {
@@ -39,6 +47,13 @@ export function RunActions({ runId, status, offered, info, argsHash, onChanged }
     const outcome = await cancelRun(runId);
     onChanged();
     setCancel(cancelResult(outcome, cloudOnly));
+  };
+
+  const sendResume = async () => {
+    setResume({ step: "sending" });
+    const result = resumeResult(await resumeRun(runId));
+    onChanged();
+    setResume(result);
   };
 
   const command = info && canResume(status) ? resumeCommand({ workflow: info.workflow, runId, repo: info.repo, argsHash, start: info.start }) : undefined;
@@ -100,6 +115,21 @@ export function RunActions({ runId, status, offered, info, argsHash, onChanged }
       {(cancel.step === "done" || cancel.step === "failed") && (
         <span className={`cancel-result ${cancel.step}`} role={cancel.step === "failed" ? "alert" : "status"}>
           {cancel.message}
+        </span>
+      )}
+      {command !== undefined && !offered.frozen && resume.step !== "started" && (
+        <button type="button" className="btn" disabled={resume.step === "sending"} onClick={() => void sendResume()}>
+          {resume.step === "sending" ? "Resuming…" : "Resume run"}
+        </button>
+      )}
+      {resume.step === "started" && (
+        <span className="resume-result" role="status">
+          Resuming: a job over this run started; the page follows it.
+        </span>
+      )}
+      {resume.step === "failed" && (
+        <span className="resume-result failed" role="alert">
+          {resume.message}
         </span>
       )}
       {command !== undefined && (

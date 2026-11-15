@@ -1,9 +1,9 @@
-// Seam 2, the process: the `wf` CLI and the MCP server are spawned (against the fake Cursor SDK) in a temporary repo with
+// Seam: the process. The `wf` CLI and the MCP server are spawned (against the fake Cursor SDK) in a temporary repo with
 // a temporary home. Covers `wf config show`, and `start_workflow`: tighten-only overrides, the config re-read on every
 // call, and an unusable config refused up front with the field path.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";

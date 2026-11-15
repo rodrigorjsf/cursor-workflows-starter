@@ -1,11 +1,11 @@
-// Seam 2, the process: `wf init` is spawned (against the fake Cursor SDK) in a temporary repo with a temporary home, and
+// Seam: the process. `wf init` is spawned (against the fake Cursor SDK) in a temporary repo with a temporary home, and
 // the tests read what it prints and the files it leaves. Covers the MCP configs of both clients, the repo config, the
 // `.gitignore` entry, the `AGENTS.md` block (`--no-agents-md`, `--remove`), idempotence, the diff and the absence of a commit.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { after, before, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -110,7 +110,7 @@ async function toolsOfServer(server: { command: string; args: string[]; env?: Re
 
 test("both generated MCP configs start the kit's MCP server on the target repo, as the IDEs launch them", async () => {
   const repo = emptyRepo();
-  put(join(repo, ".agents", "workflows", "repo-local.mjs"), 'export default { meta: { name: "repo-local", description: "workflow of the target repo" } };\n');
+  put(join(repo, ".agents", "workflows", "repo-local.mjs"), 'export default { meta: { name: "repo-local", description: "workflow of the target repo" }, async run() { return "ok"; } };\n');
   assert.equal(init(repo).status, 0);
 
   // A user whose kit is installed at ~/.cursor-workflows/kit (here: a link to this checkout).
@@ -240,6 +240,19 @@ test("wf init creates AGENTS.md with a short block of the safety rules and a poi
   assert.ok(text.includes(GUIDE_URL), "pointer to the install guide");
 });
 
+test("the files wf init writes into the repo keep the ordinary mode, not the private one of run state", () => {
+  const repo = emptyRepo();
+  const umaskBefore = process.umask(0o022); // the children inherit it: a repo file is what the user's umask makes it
+  try {
+    assert.equal(init(repo).status, 0);
+  } finally {
+    process.umask(umaskBefore);
+  }
+  for (const file of ["AGENTS.md", ".mcp.json", join(".cursor", "mcp.json"), ".gitignore"]) {
+    assert.equal(statSync(join(repo, file)).mode & 0o777, 0o644, `${file} is readable by the repo's other users, like any file of the repo`);
+  }
+});
+
 test("wf init appends the block to an AGENTS.md that exists, after a blank line, keeping its content", () => {
   const repo = emptyRepo();
   put(join(repo, "AGENTS.md"), "# My repo\n\nRun `make test`.");
@@ -256,6 +269,58 @@ test("wf init writes through an AGENTS.md symlink to CLAUDE.md instead of replac
   assert.equal(init(repo).status, 0);
   assert.equal(readlinkSync(join(repo, "AGENTS.md")), "CLAUDE.md");
   assert.ok(read(repo, "CLAUDE.md").startsWith("# Guide\n\n" + BEGIN));
+});
+
+test("wf init refuses a file that is a symbolic link out of the repository, names it, writes nothing and leaves the target as it was", () => {
+  for (const file of [".gitignore", ".mcp.json", "AGENTS.md", ".cursor/mcp.json", ".agents/workflows/config.json"]) {
+    const repo = emptyRepo();
+    const outside = join(sandbox, `outside-${counter}.txt`);
+    put(outside, "# the user's own file\n");
+    mkdirSync(dirname(join(repo, file)), { recursive: true });
+    symlinkSync(relative(dirname(join(repo, file)), outside), join(repo, file));
+
+    const r = init(repo);
+    assert.notEqual(r.status, 0, `${file}: wf init went on`);
+    assert.ok(r.stderr.includes(file), `the message names ${file}: ${r.stderr}`);
+    assert.match(r.stderr, /outside the repository/);
+    assert.equal(readFileSync(outside, "utf8"), "# the user's own file\n", `${file}: the file the link leads to was written`);
+    assert.deepEqual(readdirSync(repo).filter((name) => name !== dirname(file).split("/")[0] && name !== file), [], `${file}: init wrote another file before it refused`);
+  }
+});
+
+test("wf init refuses a file whose folder is a symbolic link out of the repository", () => {
+  const repo = emptyRepo();
+  const elsewhere = join(sandbox, `elsewhere-${counter}`);
+  mkdirSync(elsewhere);
+  symlinkSync(elsewhere, join(repo, ".cursor"));
+
+  const r = init(repo);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes(".cursor/mcp.json"), r.stderr);
+  assert.deepEqual(readdirSync(elsewhere), [], "nothing was written through the link");
+});
+
+test("wf init --remove refuses an AGENTS.md that leads out of the repository too, and reads nothing from it", () => {
+  const repo = emptyRepo();
+  const outside = join(sandbox, `outside-${counter}.txt`);
+  put(outside, `before\n${BEGIN}\nthe block\n${END}\n`);
+  symlinkSync(relative(repo, outside), join(repo, "AGENTS.md"));
+
+  const r = init(repo, ["--remove"]);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes("AGENTS.md"), r.stderr);
+  assert.equal(r.stdout, "", "no diff of a file outside the repository");
+  assert.equal(readFileSync(outside, "utf8"), `before\n${BEGIN}\nthe block\n${END}\n`);
+});
+
+test("wf init replaces a link that leads nowhere with the file, and creates nothing outside the repository", () => {
+  const repo = emptyRepo();
+  const nowhere = join(sandbox, `nowhere-${counter}.txt`);
+  symlinkSync(relative(repo, nowhere), join(repo, ".gitignore"));
+
+  assert.equal(init(repo).status, 0);
+  assert.ok(!existsSync(nowhere), "init wrote through a dangling link");
+  assert.ok(read(repo, ".gitignore").includes(".workflows/"));
 });
 
 test("wf init --no-agents-md skips AGENTS.md: it neither creates it nor touches an existing one", () => {

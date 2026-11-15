@@ -62,12 +62,12 @@ MCP server e ao Cursor. Tem identidade própria (job id, run id, pid, heartbeat;
 `get_workflow_status` respondem é uma projeção do log de eventos do run. Um job termina `finished`, `failed` ou
 `cancelled` (`cancel_workflow`, `wf cancel`, Ctrl-C): cancelar um job em execução não é falhar (um job travado ou já
 terminado continua `failed`), e o run continua retomável.
-Retomar um run abre outro job sobre o mesmo run. Decisão em [ADR-0003](../adr/0003-detached-jobs.md).
+Retomar um run abre outro job sobre o mesmo run. Decisão em [ADR-0010](../adr/0010-detached-jobs-and-how-each-is-cancelled.md), que substitui o ADR-0003.
 _Evite_: tarefa, processo.
 
 **Travado** (*frozen*):
 O job cujo processo está vivo, é o do job, segura o lock do run (`run.lock`) e parou de mandar heartbeat. Aparece como
-`failed`, mas ainda executa o run: um cancelamento o mata com SIGKILL. Só esse caso é travado (`isFrozen`, em
+`failed`, mas ainda executa o run: um cancelamento o mata com SIGKILL, junto com os comandos de `ctx.exec` que ele tinha em andamento ([ADR-0010](../adr/0010-detached-jobs-and-how-each-is-cancelled.md)). Só esse caso é travado (`isFrozen`, em
 `packages/runtime/src/runtime/job-state.ts`).
 _Evite_: terminado (o processo de um job travado ainda está lá), morto.
 
@@ -80,6 +80,7 @@ _Evite_: travado.
 **Journal**:
 O `journal.jsonl` do run: o resultado de cada etapa que terminou, com a chave `hash(prompt + opções) + ocorrência`. É
 o que faz o resume pular as etapas prontas. Não registra o que aconteceu, só o que está pronto: isso é o log de eventos.
+A retenção apaga o resultado de cada linha do journal de um run velho e marca o run: ele não retoma mais.
 _Evite_: histórico, log.
 
 **Log de eventos** (*event log*):
@@ -114,7 +115,7 @@ _Evite_: MR fora da interface, change request.
 |---|---|
 | Workflow | `packages/runtime/workflows/*.ts` (embutidos) e `.agents/workflows/*.ts` (do repositório) |
 | Run | `<repo>/.workflows/runs/<runId>/`: `events.jsonl`, `journal.jsonl` e `run.lock` |
-| Job | `<repo>/.workflows/jobs/<jobId>.json` e `<jobId>.log` |
+| Job | `<repo>/.workflows/jobs/<jobId>.json`, `<jobId>.log` e, enquanto um comando de `ctx.exec` roda, `<jobId>.exec-group.<pgid>` (o grupo de processo dele, que o cancelamento de um job travado mata) |
 | Índice global de runs | `~/.cursor-workflows/runs.jsonl`: uma linha por run, de todos os repositórios |
 | Métricas | `~/.cursor-workflows/metrics.db`, um banco SQLite por usuário ([5.3](../operating/03-observabilidade.md)) |
 

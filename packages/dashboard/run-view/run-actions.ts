@@ -1,4 +1,6 @@
-// What the buttons of the Run view ask of the dashboard.
+// What the buttons of the Run view ask of the dashboard (cancel, resume, and the decision on proposed seams), and what the page says of what came of it.
+import { postAction } from "../app/dashboard-api.js";
+import { isRecord } from "../app/is-record.js";
 import { runApiPath } from "./location.js";
 
 /** What a cancel came to: the job's state and what was done (`note`), or why nothing was done (`error`). */
@@ -33,20 +35,36 @@ export function cancelResult(outcome: CancelOutcome, cloudOnly: boolean): { step
   return { step, message: sentence(note) };
 }
 
-/**
- * Cancels the run. The dashboard wants its CSRF token on every action: it hands the token to a script of its own origin, and
- * to no other. The token is read for each cancel, so a dashboard that was restarted since the page loaded still accepts it.
- */
+const optionalText = (value: unknown): boolean => value === undefined || typeof value === "string";
+const isCancelReply = (value: unknown): value is { status?: string; note?: string } => isRecord(value) && optionalText(value.status) && optionalText(value.note);
+const isResumeReply = (value: unknown): value is { jobId: string } => isRecord(value) && typeof value.jobId === "string";
+
+/** Cancels the run, through the same POST-with-token path every dashboard action takes (`postAction`). */
 export async function cancelRun(runId: string): Promise<CancelOutcome> {
-  try {
-    const tokenReply = await fetch("/api/csrf");
-    if (!tokenReply.ok) return { ok: false, error: `the dashboard answered ${tokenReply.status} to the token request` };
-    const { csrfToken } = (await tokenReply.json()) as { csrfToken: string };
-    const reply = await fetch(`${runApiPath(runId)}/cancel`, { method: "POST", headers: { "x-csrf-token": csrfToken } });
-    const body = (await reply.json().catch(() => ({}))) as { status?: string; note?: string; error?: string };
-    if (!reply.ok) return { ok: false, error: body.error ?? `the dashboard answered ${reply.status}` };
-    return { ok: true, status: body.status ?? "running", note: body.note ?? "" };
-  } catch (err) {
-    return { ok: false, error: `could not reach the dashboard: ${err instanceof Error ? err.message : String(err)}` };
-  }
+  const reply = await postAction(`${runApiPath(runId)}/cancel`, isCancelReply);
+  if (!reply.ok) return { ok: false, error: reply.error };
+  return { ok: true, status: reply.body.status ?? "running", note: reply.body.note ?? "" };
 }
+
+/** What a resume came to, a decision on proposed seams included (it is a resume with other args): the server started a job over the run, or says why not (`error`, its own sentence). */
+export type ResumeOutcome = { ok: true; jobId: string } | { ok: false; error: string };
+
+/** What the page shows after a resume or a decision on seams: `started` (the job is on its way, and the page waits for the run to be `running`), or why nothing was started. */
+export function resumeResult(outcome: ResumeOutcome): { step: "started" } | { step: "failed"; message: string } {
+  return outcome.ok ? { step: "started" } : { step: "failed", message: sentence(outcome.error) };
+}
+
+/** What a POST that resumes the run came to: the job it started (`jobId`), or the server's sentence. */
+async function resumed(path: string, body: unknown, origin?: string): Promise<ResumeOutcome> {
+  const reply = await postAction(path, isResumeReply, body, origin);
+  return reply.ok ? { ok: true, jobId: reply.body.jobId } : { ok: false, error: reply.error };
+}
+
+/** Resumes the run as a job, with the args, caps and overrides of its latest start (the server reads them from the job's record), through the same POST-with-token path as every action. */
+export const resumeRun = (runId: string, origin?: string): Promise<ResumeOutcome> => resumed(`${runApiPath(runId)}/resume`, undefined, origin);
+
+/** Approves the proposal whose digest `digest` is, which the page showed: resumes the run with the args and caps of its latest start plus `approveSeams: true`. A proposal that changed since is refused by the server. */
+export const approveSeams = (runId: string, digest: string, origin?: string): Promise<ResumeOutcome> => resumed(`${runApiPath(runId)}/seams/approve`, { digest }, origin);
+
+/** Replaces the proposed seams with `seams`: resumes the run with the args and caps of its latest start plus `seams`, and the run plans again with them. */
+export const replaceSeams = (runId: string, seams: string[], origin?: string): Promise<ResumeOutcome> => resumed(`${runApiPath(runId)}/seams/replace`, { seams }, origin);

@@ -9,8 +9,15 @@ import { buildRunGraph, isWork } from "../run-view/run-graph.js";
 import { type Box, type RunLayout, layoutRunGraph } from "../run-view/run-layout.js";
 import { groupEnd, groupStart, phase, runStart, stamp, step, stepStart, type Draft } from "./run-log.js";
 
-type Viewport = { x: number; y: number; zoom: number };
-type Pane = { width: number; height: number };
+interface Viewport {
+  x: number;
+  y: number;
+  zoom: number;
+}
+interface Pane {
+  width: number;
+  height: number;
+}
 
 /** The viewport React Flow's `fitView` gives a frame (`getViewportForBounds`): what it frames, centred, at the zoom it clamps. */
 function viewportOf(frame: FitViewOptions, layout: RunLayout, pane: Pane): Viewport {

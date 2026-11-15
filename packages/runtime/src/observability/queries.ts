@@ -1,12 +1,17 @@
 // Consultas de análise usadas por `wf stats`, pelo dashboard e pelo export.
 // Todas aceitam uma janela em dias. As views do schema servem para uso direto com o sqlite3.
 
+import { assertCursorEndpoints } from "../runtime/cursor-endpoints.js";
 import { type Db, write } from "./db.js";
 
 type Row = Record<string, unknown>;
+/** The tables `summary` answers, in the order `wf stats` prints them. */
+export type SummaryTable = "totals" | "workflows" | "models" | "contextBuckets" | "daily" | "waste" | "savings" | "attribution";
+/** The tables `exportRows` answers. */
+export type ExportTable = "runs" | "attempts" | "metrics";
 const since = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
 
-export function summary(db: Db, days = 30): Record<string, Row[]> {
+export function summary(db: Db, days = 30): Record<SummaryTable, Row[]> {
   const s = since(days);
   // Um `?` por uso da data de corte. Parâmetros numerados (`?1`) não funcionam no node:sqlite do Node 22.13 a 22.19.
   const q = (sql: string) => db.prepare(sql).all(...Array<string>((sql.match(/\?/g) ?? []).length).fill(s)) as Row[];
@@ -59,7 +64,7 @@ export function summary(db: Db, days = 30): Record<string, Row[]> {
 }
 
 /** Export para consolidar fora (BI, planilha, time). Anonimizado por padrão. */
-export function exportRows(db: Db, days: number, anonymize = true): Record<string, Row[]> {
+export function exportRows(db: Db, days: number, anonymize = true): Record<ExportTable, Row[]> {
   const s = since(days);
   const runs = db.prepare(`SELECT * FROM runs WHERE started_at >= ?`).all(s) as Row[];
   const attempts = db.prepare(`SELECT * FROM v_attempts WHERE started_at >= ?`).all(s) as Row[];
@@ -95,6 +100,7 @@ export function toCsv(rows: Row[]): string {
  * resultado conta quantos foram atualizados e quantos falharam.
  */
 export async function reconcile(db: Db, opts: { apiKey?: string } = {}): Promise<{ updated: number; failed: number }> {
+  assertCursorEndpoints(); // `Agent.getUsage` sends the key to the address in CURSOR_BACKEND_URL; a row-by-row failure below would hide that
   // Loaded here, not at the top of the module: `summary` is also the dashboard's, a process that stays up and has no use for the SDK (hundreds of MB).
   const { Agent } = await import("@cursor/sdk");
   const rows = db.prepare(`SELECT attempt_id, agent_id FROM v_unreconciled`).all() as Array<{ attempt_id: string; agent_id: string }>;

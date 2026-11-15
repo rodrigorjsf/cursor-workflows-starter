@@ -17,6 +17,7 @@ import { type ExecutionState, type RunCard, boundedPhase, latestCard, projectLat
 import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn } from "./run-store.js";
 import { type RunsIndexEntry, readRunsIndex } from "./runs-index.js";
 import type { UsageTotals } from "./workflow.js";
+import { errorText } from "./error-text.js";
 
 /** How a run stands: the status of its latest execution, or `missing` when its log cannot be read or projected (the repo or the run's directory is gone, or the log is damaged). */
 export type RunViewStatus = "running" | RunStatus | "missing";
@@ -100,7 +101,7 @@ function projectLog(log: string): Projected {
       ? { execution, executions: events.filter((e) => e.type === "run-start").length, phases: runPhases(events), card: latestCard(events), jobId }
       : { error: `no run-start in ${log}` };
   } catch (err) {
-    projected = { error: `could not read ${log}: ${err instanceof Error ? err.message : String(err)}` };
+    projected = { error: `could not read ${log}: ${errorText(err)}` };
   }
   if (stamp !== undefined) {
     projections.delete(log); // re-inserted: the Map's order is the order of the latest reads
@@ -177,6 +178,30 @@ export function listRuns(limit = 200): RunSummary[] {
     .map((entry) => {
       const { recent: _recent, result: _result, usage: _usage, ...summary } = detailOf(entry);
       return summary;
+    });
+}
+
+/** What a run of a workflow says about what it was started for: how its job was started, and the card its workflow set. */
+export interface RunOrigin {
+  runId: string;
+  /** How the run's job was started (its args); absent for a run with no job (`wf run` in a terminal), and for a record an older kit wrote. */
+  start?: JobStart;
+  /** The latest card of the run; absent while the workflow has set none. */
+  card?: RunCard;
+}
+
+/**
+ * Every run of `workflow` in `repo` that the runs index names (not only the newest ones `listRuns` reads), each with what says what
+ * it was started for. Only reads. A run whose log cannot be read has neither.
+ */
+export function runOriginsOf(repo: string, workflow: string): RunOrigin[] {
+  return indexedRuns()
+    .filter((entry) => entry.repo === repo && entry.workflow === workflow)
+    .map((entry) => {
+      const projected = projectLog(logOf(entry));
+      if ("error" in projected) return { runId: entry.runId };
+      const start = projected.jobId === undefined ? undefined : readJobStart(entry.repo, projected.jobId);
+      return { runId: entry.runId, ...(start === undefined ? {} : { start }), ...(projected.card === undefined ? {} : { card: projected.card }) };
     });
 }
 

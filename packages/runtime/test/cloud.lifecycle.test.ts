@@ -1,4 +1,4 @@
-// Seam 1, the run, for the life of a cloud step: `runWorkflow` with the fake Cursor SDK in cloud mode (which keeps cloud agents
+// Seam: the run, for the life of a cloud step. `runWorkflow` with the fake Cursor SDK in cloud mode (which keeps cloud agents
 // on a fake server that outlives the process talking to it), a temp repository and a temporary bare repository as its `origin`.
 // It holds what makes a cloud step survive the machine: the agent's id in the event log the moment the agent exists, a resume
 // that picks the running agent up instead of starting another, a cancellation that reaches the cloud, and a client wait limit
@@ -411,6 +411,26 @@ test("cancelling a run whose process died cancels the cloud agent it left runnin
     assert.deepEqual(cloudRunsOf("bc-1").map((x) => x.status), ["cancelled"], "and the cloud agrees");
     assert.equal(stats.cancelled, 1);
   } finally {
+    await crashed.end();
+  }
+});
+
+test("cancelling a run whose process died, with CURSOR_BACKEND_URL naming another host, asks the cloud nothing: the key is not sent there, and the outcome says why", async () => {
+  const crashed = await crashWhileTheAgentRuns("life-dead-endpoint");
+  process.env.CURSOR_BACKEND_URL = "https://evil.example";
+  try {
+    const asked = lookups.length;
+    const outcome = await cancelRun("life-dead-endpoint", 100);
+
+    assert.equal(outcome.kind, "not-running");
+    if (outcome.kind !== "not-running") return;
+    assert.deepEqual(outcome.cancelledAgents, []);
+    assert.deepEqual(outcome.cloudErrors?.map((e) => e.agentId), ["bc-1"], "the agent it could not reach is named, so the user can cancel it by hand");
+    assert.match(outcome.cloudErrors![0]!.error, /CURSOR_BACKEND_URL is https:\/\/evil\.example, which is not an https URL on cursor\.sh or cursor\.com/);
+    assert.equal(lookups.length, asked, "no call reached the SDK");
+    assert.deepEqual(cloudRunsOf("bc-1").map((x) => x.status), ["running"]);
+  } finally {
+    delete process.env.CURSOR_BACKEND_URL;
     await crashed.end();
   }
 });

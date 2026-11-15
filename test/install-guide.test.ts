@@ -33,21 +33,43 @@ test("the guide is pinned to the tag of the package version, in every command th
   const tags = new Set(GUIDE.match(/\bv\d+\.\d+\.\d+(?:-[\w.]+)?\b/g));
   assert.deepEqual([...tags], [TAG], "one tag in the whole guide, the package's version: bump the guide with the version");
   assert.ok(GUIDE.includes(`raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/${TAG}/scripts/install.sh`), "the installer is fetched from the tag, not from a branch");
-  assert.ok(GUIDE.includes(`install.sh --tag ${TAG}`), "the installer is told to install that tag");
+  assert.ok(GUIDE.includes(`bash "$installer" --tag ${TAG}`), "the installer is told to install that tag");
   assert.doesNotMatch(GUIDE, /\/(main|master|HEAD)\//, "no branch in a fetched URL");
 });
 
 test("the installer the guide fetches exists in the repo and takes the flags the guide uses", () => {
   assert.ok(existsSync(join(ROOT, "scripts", "install.sh")));
   const help = spawnSync("bash", [join(ROOT, "scripts", "install.sh"), "--help"], { encoding: "utf8" }).stdout;
-  for (const flag of new Set(GUIDE.match(/install\.sh (--[a-z-]+)/g)?.map((m) => m.split(" ")[1]))) assert.ok(help.includes(flag!), `install.sh --help does not list ${flag}`);
+  const flags = new Set(GUIDE.match(/"\$installer" (--[a-z-]+)/g)?.map((m) => m.split(" ")[1]));
+  assert.ok(flags.size > 0, "the guide runs the installer with a flag: this check has nothing to look at");
+  for (const flag of flags) assert.ok(help.includes(flag!), `install.sh --help does not list ${flag}`);
 });
 
-test("the guide runs install, login check, init, doctor, in that order, and every wf command in it exists", () => {
+// The script runs with the user's rights, so where it comes from and where it lands decide who else can write it first. curl follows a
+// redirect and, by default, accepts a plain-text one: `--proto` limits the protocols of the first request and of every redirect, so a
+// downgrade to http fails. `/tmp/wf-install.sh` was a path anyone on the machine could predict and plant before the download.
+const FETCH_DOCS = ["INSTALL-AGENT.md", "README.md", "README.en.md", "docs/usage/01-instalacao.md"];
+for (const file of FETCH_DOCS) {
+  test(`${file} downloads the installer over https only, with TLS 1.2 or newer, to a path mktemp chose`, () => {
+    const text = read(file);
+    const fetches = text.split("\n").filter((line) => /^curl .*scripts\/install\.sh/.test(line));
+    assert.ok(fetches.length > 0, `${file} no longer fetches the installer: this check has nothing to look at`);
+    for (const line of fetches) {
+      assert.match(line, / --proto '=https' /, `${file}: curl may follow a redirect to http: ${line}`);
+      assert.match(line, / --tlsv1\.2 /, `${file}: curl accepts a TLS version older than 1.2: ${line}`);
+      assert.match(line, / -o "\$installer"$/, `${file}: the script goes to the path in $installer: ${line}`);
+    }
+    assert.match(text, /^installer="\$\(mktemp\)"/m, `${file}: $installer is not made by mktemp`);
+    assert.doesNotMatch(text, /\/tmp\/wf-install\.sh/, `${file}: the installer still lands on a fixed, predictable path`);
+  });
+}
+
+test("the guide runs install, login check, Privacy Mode confirmation, init, doctor, in that order, and every wf command in it exists", () => {
   const sections = GUIDE.split(/^## /m).slice(1);
   const steps = [
-    [/^\d+\. Install the kit/, "install.sh --tag"],
+    [/^\d+\. Install the kit/, '"$installer" --tag'],
     [/^\d+\. Log in/, "wf whoami"],
+    [/^\d+\. Confirm Privacy Mode/, "Privacy Mode"],
     [/^\d+\. Set up the repo/, "wf init"],
     [/^\d+\. Run the doctor/, "wf doctor"],
   ] as const;
@@ -65,12 +87,31 @@ test("the guide runs install, login check, init, doctor, in that order, and ever
   for (const command of named) assert.ok(commands.includes(command), `the guide names wf ${command}, which the CLI does not have`);
 });
 
-test("step 4 relays wf init's Claude Code note: the setup skill that also says so comes in only after the install", () => {
+test("the repo setup step relays wf init's Claude Code note: the setup skill that also says so comes in only after the install", () => {
   const step = GUIDE.split(/^## /m).find((section) => /^\d+\. Set up the repo/.test(section));
   assert.ok(step, "no section 'Set up the repo'");
-  assert.ok(step.includes("`wf init: Claude Code reads"), "step 4 names the note by the prefix wf init prints");
-  assert.match(step, /\bstderr\b/, "step 4 says the note comes on stderr");
+  assert.ok(step.includes("`wf init: Claude Code reads"), "the step names the note by the prefix wf init prints");
+  assert.match(step, /\bstderr\b/, "the step says the note comes on stderr");
   assert.match(step.replace(/\s+/g, " "), /Done when[^.]*relayed/, "relaying the note is part of the step's Done when");
+});
+
+// The SDK exposes no way to read Privacy Mode (`Cursor.me()` has no such field), so the guide cannot check it: the user confirms it.
+test("between the login and the repo setup, the guide has the user confirm Privacy Mode, says where, and goes no further until they answer", () => {
+  const sections = GUIDE.split(/^## /m).slice(1);
+  const login = sections.findIndex((s) => /^\d+\. Log in/.test(s));
+  const setup = sections.findIndex((s) => /^\d+\. Set up the repo/.test(s));
+  assert.ok(login !== -1 && setup > login, "the guide has a login section before the repo setup");
+  const between = sections.slice(login + 1, setup);
+  assert.ok(between.some((s) => s.includes("Privacy Mode")), "no section between the login and the repo setup mentions Privacy Mode");
+  assert.ok(!sections.slice(0, login + 1).concat(sections.slice(setup)).some((s) => /^\d+\. Confirm Privacy Mode/.test(s)), "the confirmation is one step, between the login and the repo setup");
+  const step = between.find((s) => /^\d+\. Confirm Privacy Mode/.test(s));
+  assert.ok(step, "the step between the login and the repo setup is titled 'Confirm Privacy Mode'");
+  const flat = step.replace(/\s+/g, " ");
+  assert.match(flat, /Cursor Settings → General/, "the step says where an individual account finds the setting");
+  assert.match(flat, /team admin/, "the step says a team admin can enforce the setting");
+  assert.match(flat, /Ask the user to confirm that Privacy Mode is on/, "the agent asks: it cannot read the setting");
+  assert.match(flat, /Do not (?:go on|continue)[^.]*until/, "the step does not go on before the user answers");
+  assert.match(flat, /Done when the user has answered/, "the answer is the step's Done when");
 });
 
 test("the setup skill only names wf commands that exist", () => {
@@ -91,13 +132,19 @@ test("the guide lists the skills the kit ships and the default caps the installe
   }
 });
 
+test("the default global config turns the SDK sandbox on for every step, because a capped probe measured it (issue #62), and the guide says the installer does", () => {
+  const { caps } = JSON.parse(read("templates", "global-config.json")) as { caps: { requireSandbox?: boolean } };
+  assert.equal(caps.requireSandbox, true);
+  assert.ok(GUIDE.replace(/\s+/g, " ").includes("`requireSandbox: true`"), "the guide does not say the installer writes requireSandbox: true");
+});
+
 test("the default global config the installer copies is the first example of the shipped schema", () => {
   const schema = JSON.parse(read("packages", "runtime", "schema", "config.schema.json")) as { examples: unknown[] };
   assert.deepEqual(JSON.parse(read("templates", "global-config.json")), schema.examples[0]);
 });
 
 test("every document that tells a reader to fetch or install a tag names the package version's tag", () => {
-  const pins = /(?:cursor-workflows-starter\/(v\d[\w.-]*)\/|install\.sh --tag (v\d[\w.-]*))/g; // a real version: the placeholder vX.Y.Z is exempt
+  const pins = /(?:cursor-workflows-starter\/(v\d[\w.-]*)\/|(?:install\.sh|"\$installer") --tag (v\d[\w.-]*))/g; // a real version: the placeholder vX.Y.Z is exempt
   const found: string[] = [];
   for (const file of markdownFiles(ROOT)) {
     for (const m of read(file).matchAll(pins)) {
@@ -133,4 +180,38 @@ test("the installer clones the same repository the runtime links to, so one rena
   assert.equal(installer, `https://github.com/${KIT_REPO}.git`);
   assert.equal(kitFileUrl("INSTALL-AGENT.md", "0.3.0"), `https://github.com/${KIT_REPO}/blob/v0.3.0/INSTALL-AGENT.md`);
   assert.equal(kitFileUrl("a/b.json", "0.3.0", "raw"), `https://raw.githubusercontent.com/${KIT_REPO}/v0.3.0/a/b.json`);
+});
+
+test("no tag fetch of the installer or of wf upgrade forces over a moved tag, and both ask the releases API whether the release is immutable", () => {
+  for (const parts of [["scripts", "install.sh"], ["packages", "runtime", "src", "upgrade.ts"]]) {
+    const file = parts.join("/");
+    const lines = read(...parts).split("\n").filter((line) => !/^\s*(#|\/\/|\*|\/\*)/.test(line));
+    const tagFetches = lines.filter((line) => /\bfetch\b/.test(line) && /--tags\b/.test(line));
+    assert.ok(tagFetches.length > 0, `${file} no longer fetches the tags: this check has nothing to look at`);
+    for (const line of tagFetches) assert.doesNotMatch(line, /--force|\s-f\b|\+refs\/tags/, `${file} forces a tag fetch, which accepts a moved tag silently: ${line.trim()}`);
+    const text = lines.join("\n");
+    assert.match(text, /releases\/tags\//, `${file} never asks the releases API about the tag`);
+    assert.match(text, /\bimmutable\b/, `${file} never tests the release's immutable field`);
+  }
+});
+
+test("the guide quotes the start of the Privacy Mode reminder the doctor's passing login check prints, word for word", () => {
+  const quoted = "Privacy Mode cannot be read through the SDK";
+  assert.ok(GUIDE.includes(`\`${quoted}\``), `INSTALL-AGENT.md no longer quotes \`${quoted}\``);
+  assert.ok(read("packages", "runtime", "src", "doctor.ts").includes(`${quoted}: confirm it is on in Cursor Settings > General`), `the doctor no longer starts its reminder with "${quoted}"`);
+});
+
+test("the installer and wf upgrade say the same four things about a tag, and the guide quotes only words both say", () => {
+  const installer = read("scripts", "install.sh");
+  const upgrade = read("packages", "runtime", "src", "upgrade.ts");
+  const fragments = ["moved upstream since this kit fetched it", "is not immutable", "has no release for tag", "could not read the release of"];
+  for (const fragment of fragments) {
+    assert.ok(installer.includes(fragment), `scripts/install.sh no longer says "${fragment}"`);
+    assert.ok(upgrade.includes(fragment), `packages/runtime/src/upgrade.ts no longer says "${fragment}"`);
+  }
+  // What the guide tells an agent to look for in a tag error must be said by the code, word for word.
+  for (const quoted of ["moved upstream", "is not immutable", "has no release for tag", "could not read the release of"]) {
+    assert.ok(GUIDE.includes(`\`${quoted}\``), `INSTALL-AGENT.md no longer quotes \`${quoted}\``);
+    assert.ok(fragments.some((fragment) => fragment.startsWith(quoted)), `\`${quoted}\` is not the start of a message the code prints`);
+  }
 });

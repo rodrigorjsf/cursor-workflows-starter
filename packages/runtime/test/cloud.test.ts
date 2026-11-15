@@ -1,4 +1,4 @@
-// Seam 1, the run, for a step that runs in the cloud: `runWorkflow` with the fake Cursor SDK in cloud mode, a temp repository
+// Seam: the run, for a step that runs in the cloud. `runWorkflow` with the fake Cursor SDK in cloud mode, a temp repository
 // and a temporary bare repository as its `origin`. The config files are written to disk; the assertions are on the outcome,
 // the agent the SDK was asked for, the replayed event log and the git state of the worktree and of the remote.
 process.env.WF_METRICS = "off";
@@ -12,6 +12,7 @@ import { runWorkflow } from "../src/runtime/engine.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { clearConfig, configWorkflow, runStartOf, writeGlobalConfig, writeRepoConfig } from "./config-fixtures.js";
 import { addRemote, git, remoteBranches, remoteFiles, repoWithRemote, worktreeState } from "./cloud-fixtures.js";
+import { fakeVisibilityGh } from "./fake-gh-visibility.js";
 
 const root = join(import.meta.dirname, ".tmp", `cloud-${process.pid}`);
 const cwd = join(root, "repo");
@@ -94,7 +95,7 @@ test("the snapshot goes to the remote the cloud.remote preference names (the ori
   writeGlobalConfig({ caps: { allowedLocations: ["local", "cloud"] }, workflows: { cfg: { roles: { review: { location: "cloud" } } } } });
   const byDefault = await where();
   assert.deepEqual([byDefault.seen.origin.length, byDefault.seen.fork.length, byDefault.seen.url], [1, 0, "https://example.invalid/origin/repo"]);
-  assert.deepEqual(runStartOf(logOf(byDefault.run.runId)).config.cloud, { remote: "origin" });
+  assert.deepEqual(runStartOf(logOf(byDefault.run.runId)).config.cloud, { remote: "origin", allowPublicRemote: false });
 
   writeGlobalConfig({ caps: { allowedLocations: ["local", "cloud"] }, cloud: { remote: "fork" }, workflows: { cfg: { roles: { review: { location: "cloud" } } } } });
   const global = await where();
@@ -106,6 +107,38 @@ test("the snapshot goes to the remote the cloud.remote preference names (the ori
   assert.deepEqual([repo.seen.origin.length, repo.seen.fork.length], [1, 0], "the repo file wins over the global one");
   assert.equal(runStartOf(logOf(repo.run.runId)).provenance["/cloud/remote"]?.layer, "repo");
   assert.deepEqual([remoteBranches(remote), remoteBranches(fork)], [[], []], "every snapshot was deleted");
+});
+
+test("a snapshot that differs from HEAD is not pushed to a public remote, and only the global file can allow it: a repo file's cloud.allowPublicRemote is a violation with no effect", async () => {
+  const asked = fakeVisibilityGh(root, "PUBLIC");
+  try {
+    writeGlobalConfig({ caps: { allowedLocations: ["local", "cloud"] }, workflows: { cfg: { roles: { review: { location: "cloud" } } } } });
+    writeRepoConfig(cwd, { cloud: { allowPublicRemote: true } });
+    writeFileSync(join(cwd, "a.txt"), "a, edited\n");
+    const wf = configWorkflow((ctx) => ctx.agent<string>("look", { role: "review", label: "look", tools: [...READ], retries: 3 }));
+    const refused = await runWorkflow(wf, {}, { cwd });
+
+    assert.equal(refused.status, "failed");
+    assert.match(refused.error!, /cloud snapshot: the remote "origin" \(https:\/\/example\.invalid\/origin\/repo\) is public/);
+    assert.match(refused.error!, /cloud\.allowPublicRemote/);
+    assert.equal(calls.length, 0, "no cloud agent was created, and the refusal is not retried");
+    assert.equal(asked.asked().length, 1, "asked once: a refusal that cannot change is not retried");
+    assert.deepEqual(remoteBranches(remote), []);
+    const start = runStartOf(logOf(refused.runId));
+    assert.equal(start.config.cloud.allowPublicRemote, false);
+    assert.deepEqual(start.violations.map((v) => [v.layer, v.path, v.requested, v.applied]), [["repo", "/cloud/allowPublicRemote", true, false]]);
+
+    // The same run, with the owner's own file allowing it.
+    writeGlobalConfig({ caps: { allowedLocations: ["local", "cloud"] }, cloud: { allowPublicRemote: true }, workflows: { cfg: { roles: { review: { location: "cloud" } } } } });
+    script.push(() => ({ result: "ok" }));
+    const allowed = await runWorkflow(wf, {}, { cwd });
+    assert.equal(allowed.status, "finished", allowed.error);
+    assert.equal(runStartOf(logOf(allowed.runId)).config.cloud.allowPublicRemote, true);
+    assert.equal(asked.asked().length, 1, "the owner said it does not matter: gh is not asked again");
+    assert.deepEqual(remoteBranches(remote), [], "the snapshot was deleted when the step ended");
+  } finally {
+    asked.restore();
+  }
 });
 
 test("a remote that does not exist fails the step before any agent is created, naming the remote", async () => {

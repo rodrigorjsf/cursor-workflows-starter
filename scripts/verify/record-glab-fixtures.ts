@@ -1,9 +1,10 @@
 // WHAT: Runs the real `glab` against a running GitLab for every command and API route the runtime uses (the forge module,
-//   packages/runtime/workflows/implement-issue/forge.ts, with and without a `repo` argument; the `wf doctor` login check; and the
+//   packages/runtime/workflows/implement-issue/forge.ts, with and without a `repo` argument, the Backlog's issue list and the author gate's `members/all`
+//   route (for an owner, a developer, a reporter and an account that is no member); the `wf doctor` login check; and the
 //   dashboard's merge request by URL, packages/runtime/src/runtime/pr-by-url.ts; `glab api` both with `GITLAB_HOST=<host:port>` and
 //   with `--hostname <host>`, the form a host with no port gets), and writes what glab printed,
 //   scrubbed of the token, the root password and the local host, to packages/runtime/test/fixtures/glab/recordings.json.
-//   The fake `glab` of the offline tests reads that file. It makes its own group, project, issues and merge request.
+//   The fake `glab` of the offline tests reads that file. It makes its own group, project, users, issues and merge request.
 // WHY: the GitLab code paths are tested offline against a fake `glab`; the outputs of that fake must be what a real glab
 //   prints for a real GitLab, not what someone wrote down from the docs (ADR-0009).
 // WHEN: through scripts/verify/gitlab-e2e.sh, which starts the GitLab, makes the token and removes the container after.
@@ -12,6 +13,7 @@
 //   GITLAB_E2E_IMAGE=<image> GITLAB_E2E_SCRATCH=<empty dir> npx tsx scripts/verify/record-glab-fixtures.ts`, with the glab of
 //   mise.toml on the PATH. Prints where it wrote; exits 1 and writes nothing when a recording still holds a secret.
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { prStateOfUrl } from "../../packages/runtime/src/runtime/pr-by-url.js";
@@ -85,6 +87,16 @@ const MR_REPO_BRANCH = "wf/issue-1-recorded-repo";
 const PORTLESS_HOST = HOST_PLACEHOLDER;
 /** A second issue with more comments than one page of GitLab's notes API holds (20), to record how glab joins the pages. */
 const MANY_COMMENTS = 25;
+/**
+ * The other people the author gate (`Forge.authorStanding`) asks about, each with an issue made as them (GitLab keeps the author of an
+ * issue): a Developer and a Reporter of the project, and a stranger, who was a Reporter when the issue was opened and is no member any more
+ * (GitLab answers for them as for an account that never was). Issue #1, made by the root user, who owns the group the project is in, is the owner's.
+ */
+const AUTHORS = {
+  developer: { username: "wf-developer", accessLevel: 30, member: true, issue: 4 },
+  reporter: { username: "wf-reporter", accessLevel: 20, member: true, issue: 5 },
+  stranger: { username: "wf-stranger", accessLevel: 20, member: false, issue: 6 },
+} as const;
 
 /** The glab that wraps the real one: it runs it, keeps what it printed beside the call, and prints the same. The runtime's own code calls it by name. */
 const WRAPPER = `#!/usr/bin/env node
@@ -134,13 +146,13 @@ class Recorder {
     };
   }
 
-  /** Runs `step`, which has to make exactly one glab call, and keeps that call as the recording `name`. */
-  private async record<T>(name: string, step: () => Promise<T>): Promise<T> {
+  /** Runs `step`, which has to make `expected` glab calls (one by default), and keeps the last one as the recording `name`. */
+  private async record<T>(name: string, step: () => Promise<T>, expected = 1): Promise<T> {
     const before = readdirSync(this.recordDir).length;
     const result = await step();
     const calls = readdirSync(this.recordDir).slice(before);
-    if (calls.length !== 1) throw new Error(`${name}: expected one glab call, found ${calls.length}`);
-    this.recordings[name] = JSON.parse(readFileSync(join(this.recordDir, calls[0]!), "utf8")) as Recording;
+    if (calls.length !== expected) throw new Error(`${name}: expected ${expected} glab call${expected === 1 ? "" : "s"}, found ${calls.length}`);
+    this.recordings[name] = JSON.parse(readFileSync(join(this.recordDir, calls.at(-1)!), "utf8")) as Recording;
     return result;
   }
 
@@ -163,6 +175,9 @@ class Recorder {
     await api.call("POST", `${base}/issues/${issue.iid}/notes`, { body: "A first comment, written before the recording." });
     const many = await api.call<{ iid: number }>("POST", `${base}/issues`, { title: "Recorded issue with many comments" });
     for (let i = 1; i <= MANY_COMMENTS; i++) await api.call("POST", `${base}/issues/${many.iid}/notes`, { body: `Comment ${i}` });
+    // A third issue, made last and with the backlog label from the start (no system note), so a list of that label holds two issues in the order GitLab gives.
+    await api.call("POST", `${base}/issues`, { title: "Another recorded issue, ready for an agent", labels: "ready-for-agent" });
+    await this.seedAuthors(project.id);
 
     const auth = basicAuthOf(this.env.token);
     const remote = `${this.env.url}/${GROUP}/${PROJECT}.git`;
@@ -182,6 +197,22 @@ class Recorder {
     // The login and the configuration above are glab calls of the setup, not recordings.
     rmSync(this.recordDir, { recursive: true, force: true });
     mkdirSync(this.recordDir);
+  }
+
+  /** The users of `AUTHORS`, each with the issue they opened in the project, made with a token of their own (the root user's `api` token cannot open an issue as another user). */
+  private async seedAuthors(projectId: number): Promise<void> {
+    const expires = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+    for (const { username, accessLevel, member, issue } of Object.values(AUTHORS)) {
+      const user = await this.api.call<{ id: number }>("POST", "/users", { username, name: username, email: `${username}@example.com`, password: randomBytes(24).toString("base64url"), skip_confirmation: true });
+      await this.api.call("POST", `/projects/${projectId}/members`, { user_id: user.id, access_level: accessLevel });
+      const { token } = await this.api.call<{ token: string }>("POST", `/users/${user.id}/personal_access_tokens`, { name: `wf-${username}`, scopes: ["api"], expires_at: expires });
+      const asUser = new GitLabApi(this.env.url, token);
+      // GitLab gives a new member access to the project in the background: until then the project is a 404 for them.
+      await until(`${username} can see the project`, async () => ((await asUser.find(`/projects/${projectId}`)) ? true : undefined), 60_000, 1_000);
+      const opened = await asUser.call<{ iid: number }>("POST", `/projects/${projectId}/issues`, { title: `Recorded issue of ${username}` });
+      if (opened.iid !== issue) throw new Error(`the issue of ${username} is #${opened.iid}, the recorder expected #${issue}`);
+      if (!member) await this.api.remove(`/projects/${projectId}/members/${user.id}`);
+    }
   }
 
   /**
@@ -208,6 +239,9 @@ class Recorder {
     // GitLab notes the merge request on the issue it mentions, a little after it is opened: that is its system note.
     await this.waitForSystemNote();
     await this.record("issue-view", () => forge.issue(cwd, 1));
+    // The dashboard's Backlog: the open issues that carry a label (issues 1 and 3 do, issue 2 does not), and a label no issue carries.
+    await this.record("issue-list", () => forge.listIssues(cwd, "ready-for-agent"));
+    await this.record("issue-list-empty", () => forge.listIssues(cwd, "no-issue-has-this-label"));
     await this.record("issue-notes", () => forge.issueComments(cwd, 1));
     await this.record("issue-notes-two-pages", () => forge.issueComments(cwd, 2));
     writeFileSync(bodyFile, "A comment the workflow posted.\n");
@@ -232,9 +266,21 @@ class Recorder {
     const portlessState = await this.record("mr-api-hostname", () => this.inGlabEnv(() => prStateOfUrl(portlessUrl)));
     if (portlessState !== "OPEN") throw new Error(`mr-api-hostname: the dashboard read ${portlessState ?? "no state"} for ${portlessUrl}, not OPEN`);
 
+    // The author gate: the issue names its author (the `issue-view` call, not recorded again), and GitLab says what the author is in the
+    // project (the recorded call): a member the project inherits from its group, direct members, and an account that is no member.
+    const standing = async (name: string, issue: number, repo?: string) => this.record(name, () => forge.authorStanding(cwd, issue, repo), 2);
+    const owner = await standing("author-owner", 1);
+    const asDeveloper = await standing("author-developer", AUTHORS.developer.issue);
+    const asReporter = await standing("author-reporter", AUTHORS.reporter.issue);
+    const asStranger = await standing("author-stranger", AUTHORS.stranger.issue);
+    const verdicts = [owner, asDeveloper, asReporter, asStranger].map((s) => `${s.association}: ${s.trusted ? "trusted" : "stranger"}`);
+    const expected = ["Owner (50): trusted", "Developer (30): trusted", "Reporter (20): stranger", "not a member: stranger"];
+    if (verdicts.join("; ") !== expected.join("; ")) throw new Error(`the author gate read ${verdicts.join("; ")} on the recorded GitLab, not ${expected.join("; ")}`);
+
     // The forge module with a `repo` argument, as a cross-repository run calls it: the project's URL.
     const named = `${this.env.url}/${GROUP}/${PROJECT}`;
     await this.record("issue-view-repo", () => forge.issue(cwd, 1, named));
+    await standing("author-owner-repo", 1, named);
     await this.record("repo-view-repo", () => forge.repoUrl(cwd, named));
     await this.record("repo-view-hostname", () => forge.repoUrl(cwd, `http://${PORTLESS_HOST}/${GROUP}/${PROJECT}`));
     // Last, so that the notes recorded above hold one merge request: this one mentions no issue.

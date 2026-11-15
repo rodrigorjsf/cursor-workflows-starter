@@ -1,6 +1,7 @@
 // The state of the jobs of a repo, read from disk, and the cancellation of a job: everything about a job that does not need
 // the engine. The dashboard cancels a run through this module (`observe`), so it must stay free of the engine and, with it,
-// of the Cursor SDK: `jobs.ts` adds what starts a job. See there for what a job is.
+// of the Cursor SDK: `job-spawn.ts` adds what starts a job, and `jobs.ts` what runs one. See there for what a job is.
+// What a cancel does to a running, a frozen and a dead job is ADR-0010.
 //
 // The job record (`.workflows/jobs/<jobId>.json`) holds the job's identity (job id, run id, pid and heartbeat) and only the
 // facts the job's process cannot put in the run's log (ADR-0008): how the job was started (args and limit flags), so a resume
@@ -11,19 +12,26 @@
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
+import { z } from "zod";
 import type { LimitOverrides } from "../config/index.js";
 import { cancelLeftCloudAgents, leftAgentsNote } from "./cloud-cancel.js";
 import type { RunStatus } from "./events.js";
 import { type ExecutionState, type Ledger, projectExecution, replayLedger, resumeHint, withRatio } from "./projection.js";
+import { killFrozenJob } from "./job-children.js";
 import { commandLineHas, isAlive } from "./pid.js";
 import { eventLogPath, readEventLog, runLockHolder } from "./run-store.js";
 import { isPlainName, stateDir } from "./state.js";
+import { tryParseJson } from "./parse-json.js";
 import { writeFileAtomic } from "./state-files.js";
+import { errorText } from "./error-text.js";
 
 /** How a job was started: what `wf start` (or `start_workflow`) was given, which a resume of its run gives again. */
 export interface JobStart {
-  /** The workflow's args. */
-  args: unknown;
+  /** The workflow's `meta.name`. Absent in records an older kit wrote. */
+  workflow?: string;
+  /** The workflow's args. Absent when the job was started with none (a JSON file does not keep an undefined). */
+  args?: unknown;
   /** The flag layer of the config (`--max-cents`, `--max-tokens`). */
   maxCents?: number;
   maxTokens?: number;
@@ -53,6 +61,28 @@ export interface JobRecord {
    */
   killedByCancel?: string;
 }
+
+const LIMIT_OVERRIDES = z.looseObject({
+  maxTokens: z.number().nullable().optional(),
+  maxTokensPerStep: z.number().nullable().optional(),
+  maxCents: z.number().nullable().optional(),
+  concurrency: z.number().optional(),
+});
+
+/**
+ * What a job record holds, as the runtime writes it. A record is read to decide whether a job's process is alive and what a
+ * resume repeats (caps included), so a field of another type makes the whole file not a record, never a `start` quietly dropped.
+ * A field a newer kit adds is kept.
+ */
+const JOB_RECORD: z.ZodType<JobRecord> = z.looseObject({
+  jobId: z.string(),
+  runId: z.string(),
+  pid: z.number(),
+  heartbeat: z.string(),
+  refused: z.string().optional(),
+  start: z.looseObject({ workflow: z.string().optional(), args: z.unknown().optional(), maxCents: z.number().optional(), maxTokens: z.number().optional(), overrides: LIMIT_OVERRIDES.optional() }).optional(),
+  killedByCancel: z.string().optional(),
+});
 
 /** What `wf status`, `wf jobs`, `get_workflow_status` and `wait_workflow` return: the record plus the projection of the log. */
 export interface JobState {
@@ -108,12 +138,14 @@ export function jobLogPath(cwd: string, jobId: string): string {
  */
 function parseJobRecord(file: string): JobRecord | undefined {
   if (!existsSync(file)) return undefined;
+  let text: string;
   try {
-    const record = JSON.parse(readFileSync(file, "utf8")) as JobRecord | null;
-    return isPlainName(record?.runId) ? record : undefined;
+    text = readFileSync(file, "utf8");
   } catch {
     return undefined;
   }
+  const record = tryParseJson(text, JOB_RECORD);
+  return record !== undefined && isPlainName(record.runId) ? record : undefined;
 }
 
 /** How job `jobId` of `repo` was started, from its record. Only reads: nothing is created. Undefined when the id is not a plain name, or the record is not there or has no `start`. */
@@ -255,6 +287,31 @@ export function runningJobOf(cwd: string, runId: string): JobState | undefined {
   return undefined;
 }
 
+/**
+ * Why a new job of `workflow` with `args` may not start in `cwd` now, or undefined when it may: a job that runs the same workflow
+ * with the same args is already running (a looping agent that calls `start_workflow` again and again would pay for each copy), or
+ * `maxRunningJobs` jobs (the `caps.maxRunningJobs` cap; `null` for none) already run. A job runs while its process is there and
+ * beating and its run has not ended: a frozen one, which `readJob` reports as failed, does not count. Only reads; the check and
+ * the job record that follows it must not be split by an `await`, or two starts of one process can both pass. Between processes there
+ * is no lock: two starts at the same instant (two chats' MCP servers, the CLI and the dashboard) can both pass, so this is a rate limit and
+ * not a barrier (SECURITY.md says so).
+ */
+export function jobRefusal(cwd: string, workflow: string, args: unknown, maxRunningJobs: number | null): string | undefined {
+  const dir = jobsDirIn(cwd);
+  if (!existsSync(dir)) return undefined;
+  const running: JobRecord[] = [];
+  for (const file of readdirSync(dir)) {
+    const record = file.endsWith(".json") ? parseJobRecord(join(dir, file)) : undefined;
+    if (record && isAlive(record.pid) && inspect(cwd, record).liveness === "alive") running.push(record);
+  }
+  const same = running.find((r) => r.start?.workflow === workflow && isDeepStrictEqual(r.start.args, args));
+  if (same) return `job ${same.jobId} already runs workflow ${workflow} with the same args (run ${same.runId}): wait for it (\`wf wait ${same.jobId}\`, \`wait_workflow\`) instead of starting it again`;
+  if (maxRunningJobs !== null && running.length >= maxRunningJobs) {
+    return `${running.length} ${running.length === 1 ? "job is" : "jobs are"} already running in this repository (caps.maxRunningJobs is ${maxRunningJobs}): wait for one to end, or cancel it, before starting another`;
+  }
+  return undefined;
+}
+
 /** Writes the record. Only the `JobRecord` fields reach the disk, even when `record` is a `JobState`: never the projection. */
 export function writeJob(cwd: string, record: JobRecord): void {
   const { jobId, runId, pid, heartbeat, refused, start, killedByCancel } = record;
@@ -278,7 +335,8 @@ export interface CancelResult extends JobState {
  * writes the run's end and exits) and waits up to `timeoutMs` for the job to leave `running`. A process that has stopped
  * answering (its heartbeat is stale, so the job already shows as failed) cannot handle a signal: it is killed, which frees
  * the run for a resume but cannot revert the step, and its record is marked (`killedByCancel`) so the resume does not take
- * that end for a crash; once it is gone, the cloud agents its run left running are cancelled
+ * that end for a crash. The commands it started outlive a killed process, so they are killed with it (`killFrozenJob`,
+ * `job-children.ts`). Once the process is gone, the cloud agents its run left running are cancelled
  * through the Cursor API, and a resume afterwards starts a new agent in place of each, at new cost. A job whose process
  * already ended gets no signal: those agents are cancelled the same way. So does a job whose pid another process got: the
  * job's process ended, and the other process is left alone. Either way the job stays `failed`, its run's end never written.
@@ -301,9 +359,11 @@ export async function cancelJob(cwd: string, jobId: string, timeoutMs: number): 
   }
   const signal = liveness === "silent" ? "SIGKILL" : "SIGTERM";
   try {
-    process.kill(record.pid, signal);
+    // A killed process cannot stop the commands it started (its exit hook does not run): the kill takes them along.
+    if (signal === "SIGKILL") killFrozenJob(jobsDirIn(cwd), record.jobId, record.pid);
+    else process.kill(record.pid, signal);
   } catch (err) {
-    return { ...before, note: `could not signal process ${record.pid}: ${err instanceof Error ? err.message : String(err)}` };
+    return { ...before, note: `could not signal process ${record.pid}: ${errorText(err)}` };
   }
   // The killed process writes no run end and runs no code again (not even its heartbeat): the record says the cancel killed
   // it, so a resume tells this end from a crash (`wasKilledByCancel`). Written now, not once the process is gone: a process

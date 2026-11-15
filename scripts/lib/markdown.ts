@@ -1,9 +1,9 @@
-// WHAT: Shared Markdown helpers for the maintainer scripts: list the repo's .md files and read links, headings and
-//   Mermaid blocks from one while ignoring fenced code and inline code.
+// WHAT: Shared Markdown helpers for the maintainer scripts and the doc tests: list the repo's .md files, read links,
+//   headings and Mermaid blocks from one while ignoring fenced code and inline code, and cut a level-2 section out of one.
 // WHY: scripts/check-docs.ts and scripts/check-mermaid.ts both need the same fence-aware reading; one copy keeps them
 //   agreeing on what counts as a link, a heading or a diagram.
-// WHEN: imported by those scripts; not run on its own.
-// HOW: `import { markdownFiles, parseMarkdown } from "./lib/markdown.js"`.
+// WHEN: imported by those scripts and by the tests that read a document section by section; not run on its own.
+// HOW: `import { markdownFiles, parseMarkdown, sectionOf } from "./lib/markdown.js"`.
 import { readdirSync } from "node:fs";
 import { join, posix } from "node:path";
 
@@ -148,6 +148,15 @@ function renderedText(markup: string): string {
     .replace(/[*~]/g, "")
     .replace(/(^|[^\p{L}\p{N}])_+([^_]+?)_+(?![\p{L}\p{N}])/gu, "$1$2") // _emphasis_, but not snake_case
     .trim();
+}
+
+/** The text of the level-2 section called `title`, up to the next level-2 or higher heading; undefined when there is none. */
+export function sectionOf(markdown: string, title: string): string | undefined {
+  const { headings } = parseMarkdown(markdown);
+  const at = headings.findIndex((h) => h.level === 2 && h.text === title);
+  if (at === -1) return undefined;
+  const next = headings.slice(at + 1).find((h) => h.level <= 2);
+  return markdown.split("\n").slice(headings[at]!.line, next ? next.line - 1 : undefined).join("\n");
 }
 
 /** GitHub's heading id: lowercase, punctuation dropped, spaces to hyphens. Repeats get -1, -2... (see `anchorsOf`). */

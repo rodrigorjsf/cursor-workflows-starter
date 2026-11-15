@@ -7,6 +7,7 @@
     "allowedModels": null,
     "allowedSettingSources": ["project", "user", "team", "mdm", "plugins"],
     "allowedLocations": ["local"],
-    "maxConcurrency": 4
+    "maxConcurrency": 4,
+    "requireSandbox": true
   }
 }

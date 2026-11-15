@@ -98,8 +98,8 @@ próprios e não seguem mais `WF_MODEL_MED`/`WF_MODEL_HIGH`.
 
 Como funciona:
 
-- **O teto de tokens vale durante a etapa, no fim de cada turno.** O SDK reporta o uso de cada turno do agente no
-  evento `turn-ended`. A cada um, o engine compara com dois tetos: o da etapa (`maxTokensPerStep` do papel, do glob
+- **O teto de tokens vale durante a etapa, mas só no fim de cada envio.** O SDK reporta o uso de cada turno do agente no
+  evento `turn-ended`, e o turno é o `send` inteiro (medido, abaixo). A cada um, o engine compara com dois tetos: o da etapa (`maxTokensPerStep` do papel, do glob
   de label, do workflow ou do arquivo global; conta todas as tentativas da etapa) e o do run (o gasto que o log já
   registra, resumes inclusive, mais os turnos em andamento de todas as etapas). Passou de um deles (estritamente
   acima), o run do agente é cancelado na hora e a tentativa falha com `errorKind: "budget"`, sem nova tentativa.
@@ -108,18 +108,24 @@ Como funciona:
   - O teto do **run** cancela todas as etapas ativas, nenhuma etapa nova começa, e o run termina com
     `Token cap reached: 500 of 450.` Isso vale mesmo que o código do workflow capture o erro da etapa e siga
     adiante: o run termina `failed`. O run espera as etapas canceladas fecharem a conta (até 30 s), então o
-    `run-end` é o último evento do log e os tokens delas entram no total.
+    `run-end` é o último evento do log e os tokens delas entram no total, desde que o `getUsage()` os leia (veja a
+    ultrapassagem, abaixo).
   - Uma etapa que já gastou todo o seu teto numa tentativa que falhou (`>=`, como no teto do run) não ganha nova
     tentativa: nenhum agente é criado.
-  - A ultrapassagem é de **no máximo um turno por etapa ativa**. Quanto vale um turno depende do SDK: ele reporta o
-    uso só no fim do turno, e medimos 1 `send` = 1 `turn-ended` ([8.2](../research/verificacoes-locais.md)
-    §6), então um turno pode ser o laço inteiro do agente. O teto corta entre os turnos (a cada re-prompt de schema, a
-    cada etapa em paralelo); dentro de um turno, só o `timeoutMs` de cada envio freia. Etapa sem uso reportado no
-    `turn-ended` não é cortada ao vivo.
+  - A ultrapassagem é de **no máximo um envio por etapa ativa**, e um envio é o laço inteiro do agente. Medido em
+    2026-11-14 ([8.2 §15](../research/verificacoes-locais.md)): uma etapa local que escreve, com 31 tool calls, deu
+    **1** `turn-ended`, no fim, depois de 267.526 tokens, e o `token-delta` do SDK não soma ao uso (passa do
+    `outputTokens` e cobre menos de 5% do total), então nada informa o uso no meio do envio. Dentro dele, só o
+    `timeoutMs` de cada envio freia. O teto corta entre os envios (a cada re-prompt de schema, a cada etapa em
+    paralelo): quando o envio de uma etapa termina e passa do teto do run, o motor chama o `Run.cancel()` dos envios das
+    outras etapas ativas, e o SDK para um envio no meio em milissegundos (3 ms medidos com o `Run.cancel()` chamado
+    direto, sem o motor no meio). Mas um envio cortado no meio não reporta uso: o `RunResult.usage` veio ausente e
+    nenhum `turn-ended` chegou, então, numa conta em que o `getUsage()` falha (a medida), os tokens desses envios
+    ficam fora do total do run. Etapa sem uso reportado no `turn-ended` não é cortada ao vivo.
   - O teto em centavos continua checado só **antes** de cada tentativa: o custo só chega depois da etapa.
   Medido em 2026-11-11, antes do teto ao vivo: com `--max-tokens 300000`, o `implement-issue` gastou 344.376 tokens.
   A `corrigir-1` começou com 74,9 mil gastos e sozinha usou 269 mil ([8.2 §9](../research/verificacoes-locais.md)).
-  O teto ao vivo foi testado só com o SDK falso; quantos `turn-ended` o SDK real emite numa etapa longa ainda não foi medido (#37). Para tetos apertados, use `concurrency` baixa e um `timeoutMs` curto
+  Os testes do teto ao vivo usam o SDK falso; o número de `turn-ended` do SDK real numa etapa longa foi medido em 2026-11-14 (1 por envio, #37). Para tetos apertados, use `concurrency` baixa e um `timeoutMs` curto
   nas etapas que escrevem (o exemplo usa 30 min; sem valor na etapa, o engine usa 20 min).
 - O teto em centavos depende do custo que o `getUsage()` devolve. O Premium testado não devolveu custo nenhum
   (abaixo), e aí só o teto de tokens protege.
@@ -206,12 +212,15 @@ Para isolar os agentes das regras do repositório (por exemplo, num repositório
 `settingSources` sem `"project"` em `RunOptions`. Só `[]` corta também as skills, e aí saem os hooks do time e do
 MDM.
 
-> **Sandbox (`sandbox: true`):** liga o `local.sandboxOptions.enabled` do SDK. **Não foi testado neste kit.** No
-> Linux ele exige `bubblewrap`; sem ele, o SDK lança `ConfigurationError`. Segundo a doc, ele restringe as chamadas
-> de shell e os processos que elas disparam: escrita só no cwd, em diretórios temporários e nos caminhos do
-> `sandbox.json`; leitura **não** restrita; rede de saída negada, salvo os hosts listados em `.cursor/sandbox.json`
-> (ou `~/.cursor/sandbox.json`) ([DOC](https://cursor.com/docs/sdk/typescript#sandbox-options)). A doc não diz que
-> ele restringe as tools `edit` e `write`. Não o trate como mitigação comprovada
+> **Sandbox (`sandbox: true`):** liga o `local.sandboxOptions.enabled` do SDK. Medido em 2026-11-14, no Linux x64 (WSL2), com
+> `@cursor/sdk@1.3.1` e `composer-2.5` ([8.2 §16](../research/verificacoes-locais.md)): a rede de saída é negada, salvo os hosts
+> do `.cursor/sandbox.json` (ou do `~/.cursor/sandbox.json`, [DOC](https://cursor.com/docs/sdk/typescript#sandbox-options)); o shell não escreve fora do repositório, e a tool
+> `edit` não criou o arquivo fora dele; e a leitura do `~/.cursor/sdk/auth.json` só é recusada quando o `.cursor/sandbox.json` do
+> repositório tem `readBoundary: "workspace"` (o `~/.cursor/sandbox.json` não foi medido): sem essa chave, a etapa lê a chave do
+> Cursor. A configuração global que o instalador grava liga o sandbox em toda etapa
+> (`caps.requireSandbox: true`), então uma etapa que baixa pacotes falha até você listar os hosts. No Linux o SDK exige
+> `bubblewrap` ou um kernel com Landlock (nesta máquina o sandbox impôs as regras pelo Landlock, sem `bwrap` utilizável); o
+> `wf doctor` pede o `bubblewrap` e diz se o `readBoundary` está posto. macOS e Windows não foram medidos
 > ([5.1 · Segurança](../operating/01-governanca-e-custos.md#segurança)).
 
 > **Recursão:** com `"project"`, o SDK sobe os servidores do `.cursor/mcp.json` para a etapa **sem repassar o

@@ -1,4 +1,4 @@
-// Seam 2 on `wf gc`: the `wf` CLI as a child process, against a temporary repo with a bare origin, real git and the fake gh
+// Seam: the process, on `wf gc`. The `wf` CLI as a child process, against a temporary repo with a bare origin, real git and the fake gh
 // of implement-issue.fixture.ts. The runs it cleans up are real: they are made by `runWorkflow` with the fake Cursor SDK,
 // so the worktrees, the branches, the pushes and the run state are what the workflow leaves behind. What happened on GitHub
 // (a PR merged or closed) is set in the fake gh; what happened to a run in the past (a failure N days ago) is set in its event log.
@@ -16,7 +16,7 @@ import { runWorkflow } from "../src/runtime/engine.js";
 import { tryAcquireRunLock } from "../src/runtime/run-store.js";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import implementIssue from "../workflows/implement-issue.js";
-import { type GcPlan, applyGc, directCommands, planGc } from "../workflows/implement-issue/gc.js";
+import { applyGc, directCommands, planGc } from "../workflows/implement-issue/gc.js";
 import { branchOf, failForge, fx, forgeState, git, issue, originBranches, run, setPrState, setup, teardown, worktreeOf } from "./implement-issue.fixture.js";
 import { type GcOutput, age, delivered, editRecord, failedRun, gc, localBranches, stillThere } from "./implement-issue.gc.fixture.js";
 
@@ -62,6 +62,28 @@ test("gc asks for the PR state in the repository the run delivered to (its --rep
   assert.ok(stateCalls.length > 0, "gc asked for the PR state");
   for (const c of stateCalls) assert.deepEqual(c.slice(c.indexOf("--repo"), c.indexOf("--repo") + 2), ["--repo", "acme/fx"], c.join(" "));
   assert.deepEqual(stillThere(result), { worktree: false, localBranch: false, originBranch: false });
+});
+
+// The progress record is a file in the repository's `.workflows/` (a cloned repository can bring one): the `repo` it names goes to the forge's
+// CLI as `--repo`, which sends its token to that host. gc applies the same rule as the workflow's own `repo` argument.
+test("gc does not ask a host the config does not allow for the PR state: a progress record that names another host keeps its run, with the reason", async () => {
+  const r = await run({ openPr: true, repo: "acme/fx" });
+  const result = r.result as { status: string; branch: string; worktree: string };
+  assert.equal(result.status, "done", JSON.stringify(result));
+  setPrState(result.branch, "MERGED");
+  editRecord(r.runId, (record) => void (record.repo = "evil.example/acme/fx"));
+  const asked = forgeState().calls.length;
+
+  const out = gc();
+  assert.equal(out.status, 1, "an error in the plan is an exit code 1");
+  assert.deepEqual(forgeState().calls.slice(asked).filter((c) => c.some((word) => word.includes("evil.example"))), [], "no forge call carries the host");
+  assert.ok(out.out.errors.some((e) => e.includes(r.runId) && /evil\.example.*repoHosts/s.test(e)), out.out.errors.join("\n"));
+  assert.deepEqual(stillThere(result), { worktree: true, localBranch: true, originBranch: true }, "a run whose PR state cannot be read is kept");
+
+  writeRepoConfig(fx.repo, { workflows: { "implement-issue": { settings: { repoHosts: ["evil.example"] } } } });
+  const allowed = gc();
+  assert.equal(allowed.status, 0, allowed.stderr);
+  assert.deepEqual(stillThere(result), { worktree: false, localBranch: false, originBranch: false }, "the host is the user's now: the PR state is asked, and the merged run is cleaned up");
 });
 
 test("a run that failed more than gcFailedAfterDays ago is cleaned up; one that failed more recently stays, and the days come from the config", async () => {

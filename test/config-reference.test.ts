@@ -1,4 +1,4 @@
-// Seam 3, the docs: the config reference page (chapter 6.2) is generated from the shipped JSON Schema, and `npm test`
+// Seam: the docs. The config reference page (chapter 6.2) is generated from the shipped JSON Schema, and `npm test`
 // fails when the committed page drifts from it. Regenerate with `npm run docs:config`.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

@@ -105,11 +105,12 @@ export interface AgentCallOptions {
   /** Re-prompts quando o agente não chama `submit_result` ou envia JSON inválido. Default 2. */
   schemaRetries?: number;
   /**
-   * Liga o sandbox local do SDK (`local.sandboxOptions.enabled`). Pela doc do SDK, ele restringe as chamadas de shell
-   * e os processos que elas iniciam: escrita só no cwd, em diretórios temporários e nos caminhos do `sandbox.json`;
-   * **leitura não é restringida**; rede negada exceto a allowlist de `.cursor/sandbox.json`. A doc não diz se cobre
-   * as tools `edit`/`write`. No Linux exige `bubblewrap` (sem ele o SDK lança ConfigurationError). Não testado neste
-   * kit. Testes que baixam pacotes podem falhar com ele ligado.
+   * Runs this step in the SDK's local sandbox (`local.sandboxOptions.enabled`). Measured on Linux x64 (2026-11-14, SDK 1.3.1,
+   * docs/research/verificacoes-locais.md §16): outbound network is denied except the hosts of `.cursor/sandbox.json`, the shell
+   * cannot write outside `cwd` (the `edit` tool did not create a file there either), and a read of `~/.cursor/sdk/auth.json` is refused only
+   * when the repository's `.cursor/sandbox.json` sets `readBoundary: "workspace"` (the user's `~/.cursor/sandbox.json` was not measured). Linux needs bubblewrap or a kernel with Landlock. A step that
+   * downloads packages fails with it on, unless the hosts are listed. The installer's global config sets `caps.requireSandbox`,
+   * which turns it on for every step whatever this says.
    */
   sandbox?: boolean;
   /**
@@ -154,6 +155,13 @@ export interface ExecOptions {
   cwd?: string;
   /** Environment variables added to this process's own. A variable set to `undefined` is removed from the command's environment. */
   env?: Record<string, string | undefined>;
+  /**
+   * Start the command without the variables of this process's environment whose name holds a secret (KEY, TOKEN, SECRET or
+   * PASSWORD, in any case: the names the log's redactor treats as secrets), such as `CURSOR_API_KEY` and `GH_TOKEN`. Use it for a
+   * command that runs code the run does not trust (a test suite, a setup script of the target repository): code an agent
+   * just wrote inherits nothing it could send away. What `env` sets stays, and the log's redaction is unchanged. Default: false.
+   */
+  scrubSecrets?: boolean;
 }
 
 /** What a `ctx.exec` call hands back. A command that fails, times out or cannot start is a result: the workflow decides what it means. */

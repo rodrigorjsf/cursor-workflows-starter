@@ -48,7 +48,7 @@ test("the Runs table and the Board write a cost and a count the same way", () =>
   const run = { runId: "ship-feature-1", workflow: "ship-feature", repo: "/r/web-app", startedAt: "2026-11-12T10:00:00.000Z", finishedAt: "2026-11-12T10:03:05.000Z", status: "finished", spentCents: 1234.5 };
   assert.match(textOf(render(RunsTable, { runs: [run] as never })), /\$12\.35/);
   const card: BoardCard = { runId: "ship-feature-1", workflow: "ship-feature", repo: "/r/web-app", startedAt: run.startedAt, finishedAt: run.finishedAt, status: "finished", column: "done", spentCents: 1234.5 } as never;
-  const board = textOf(render(WorkflowBoard, { board: { workflow: "ship-feature", columns: [{ key: "done", title: "Done", kind: "done" }], cards: [card] } as never }));
+  const board = textOf(render(WorkflowBoard, { board: { workflow: "ship-feature", columns: [{ key: "done", title: "Done", kind: "done" }], cards: [card] } as never, onRun: () => undefined }));
   assert.match(board, /\$12\.35/);
 });
 

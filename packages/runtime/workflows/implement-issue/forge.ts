@@ -1,5 +1,6 @@
-// The forge seam (ADR-0009): everything `implement-issue` and `wf gc` ask of the service that hosts the repository (read an
-// issue, list and post its comments, open a PR, find a branch's PR and its state, name a repository), behind one interface.
+// The forge seam (ADR-0009): everything `implement-issue`, `wf gc` and the dashboard's Backlog (`backlog.ts`) ask of the service
+// that hosts the repository (read an issue and how its author stands to the repository, list the issues of a label, list and post
+// an issue's comments, open a PR, find a branch's PR and its state, name a repository), behind one interface.
 // This file is the only one that names a forge's CLI (`test/forge-seam.test.ts` enforces it): GitHub through `gh`, GitLab through
 // `glab`, and `glab api` (the REST API) where glab's own commands fall short. Every call goes through `Commands`, so its timeout,
 // its `CommandError` and its node in the run's log are those of every other command the workflow runs.
@@ -10,11 +11,14 @@
 // the forge a record names, never one detected again, and a record without the field is GitHub (`forgeNameOf`), as every run before
 // the field existed was.
 // What a forge makes of the text a model wrote for it (GitLab runs quick actions) is here too: `neutralizeGitlabText`.
-// `wf doctor` reads the forge of the cwd's origin (`forgeOfOrigin`) and what to ask the CLI to know it is logged in (`loginOf`).
+// `wf doctor` reads the forge of the cwd's origin (`forgeOfOrigin`) and what to ask the CLI to know it is logged in, and, for GitHub, what
+// its token can do (`loginOf`).
 import { readFileSync } from "node:fs";
+import { z } from "zod";
 import { FORGE_TITLES, knownForgeOf } from "../../src/config/file.js";
 import { type PrState, prStateOfMr } from "../../src/runtime/forge-pr-state.js";
 import { type GlabHost, glabApiHost } from "../../src/runtime/glab-host.js";
+import { checkShape, parseJson } from "../../src/runtime/parse-json.js";
 import type { ForgeName } from "../../src/runtime/workflow.js";
 import type { Commands } from "./commands.js";
 
@@ -31,6 +35,25 @@ export interface ForgeIssue {
   labels: Array<{ name: string }>;
 }
 
+/** An issue as a list shows it: enough to name it and to link to it. */
+export interface ForgeIssueRef {
+  number: number;
+  title: string;
+  /** The address of the issue's page on the forge. */
+  url: string;
+}
+
+/** How a forge relates the author of an issue to the repository: whether the author is a stranger to it. */
+export interface AuthorStanding {
+  /** The forge's own word for it, shown to the person who decides: GitHub's `author_association` (`OWNER`, `CONTRIBUTOR`, `NONE`...), GitLab's access level (`Developer (30)`, or `not a member`). */
+  association: string;
+  /** The author is no stranger: whoever the forge's `trusts` names. */
+  trusted: boolean;
+}
+
+/** The most issues one `listIssues` reads: a backlog longer than this is not one an agent works through. */
+export const ISSUE_LIST_LIMIT = 100;
+
 /** A PR to open: from `branch`, with `title`, the text of the file `bodyFile` as its description, in `repo` (absent: the repository of the cwd). */
 export interface NewPr {
   branch: string;
@@ -42,8 +65,14 @@ export interface NewPr {
 /** What the workflow asks of a forge. `repo` (`owner/repo`, `group/sub/project`, or a repository URL): where the issue or the PR lives; absent, the repository of `cwd`. */
 export interface Forge {
   readonly name: ForgeName;
+  /** Who the forge's author rule trusts, for the sentence that tells the user why a run stopped: `the repository's owner, a member of its organization or a collaborator`. */
+  readonly trusts: string;
   /** The issue `number`. */
   issue(cwd: string, number: number, repo?: string): Promise<ForgeIssue>;
+  /** How the author of the issue `number` stands to the repository. Reads only. A failure is an error, never "trusted". */
+  authorStanding(cwd: string, number: number, repo?: string): Promise<AuthorStanding>;
+  /** The open issues that carry `label`, the way the forge lists them (newest first), at most `ISSUE_LIST_LIMIT`. Reads only: nothing is created. */
+  listIssues(cwd: string, label: string): Promise<ForgeIssueRef[]>;
   /** The bodies of the issue's comments, all of them. */
   issueComments(cwd: string, number: number, repo?: string): Promise<string[]>;
   /** Posts the text of the file `bodyFile` as a comment on the issue. */
@@ -71,9 +100,9 @@ export interface RemoteName {
 }
 
 /** The host to name to a forge's CLI: the web host, with its port when the URL is an http one that has it (an ssh remote's port is not the web port). */
-const webHost = (remote: RemoteName): string => (remote.web && remote.port ? `${remote.host}:${remote.port}` : remote.host);
+export const webHost = (remote: RemoteName): string => (remote.web && remote.port ? `${remote.host}:${remote.port}` : remote.host);
 
-const trimmedPath = (path: string): string => path.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/, "");
+export const trimmedPath = (path: string): string => path.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\.git$/, "");
 
 /** The host and path of a git remote URL (`https://…`, `ssh://…` or scp-like `git@host:path`); undefined for text that names no host: a local path, `owner/repo`, `group/sub/project`. */
 export function parseRemote(text: string): RemoteName | undefined {
@@ -135,6 +164,21 @@ export async function detectForge(commands: Commands, cwd: string, forges: Reado
   return forgeOfOrigin(await commands.remoteUrl(cwd), forges).forge;
 }
 
+/**
+ * What `wf doctor` asks about the token a forge's CLI uses, for a forge whose CLI can show what the token may do (GitHub: a classic
+ * token's scopes come back in a response header). The CLI's name and commands are written here and nowhere else (ADR-0009).
+ */
+export interface ForgeToken {
+  /** The arguments that print the response headers of the logged-in user's own profile, where the scopes are, and none of its body. */
+  scopesArgs: string[];
+  /** The environment variables the CLI takes a token from for this host: a token set in one of them is used instead of the stored login. */
+  envNames: readonly string[];
+  /** The command that prints the stored login's token: whatever a step can run, it can read the token with this. */
+  printCommand: string;
+  /** The command that removes `scopes` from the stored login. It cannot narrow a token that comes from `envNames`. */
+  removeScopesCommand(scopes: readonly string[]): string;
+}
+
 /** How a forge's CLI is asked whether the user is logged in, and what to tell the user when it is not (`wf doctor`). */
 export interface ForgeLogin {
   /** The forge and where it is, for the report: `GitHub at github.com`, `GitLab at git.example.com`. */
@@ -146,11 +190,27 @@ export interface ForgeLogin {
   installHint: string;
   /** The command that logs in; the hint when the CLI says the user is not. */
   loginCommand: string;
+  /** What to ask about the token the CLI uses; absent for a forge whose CLI cannot say what its token may do. */
+  token?: ForgeToken;
 }
 
-/** Per forge: its CLI, and where to get that CLI. A total record: a forge added to `ForgeName` is a compile error here. */
-const FORGE_CLIS: Readonly<Record<ForgeName, { cli: string; source: string }>> = {
-  github: { cli: "gh", source: "the GitHub CLI (https://cli.github.com)" },
+/** The hosts `gh` reads `GH_TOKEN` and `GITHUB_TOKEN` for: github.com, a subdomain of ghe.com and github.localhost. Any other host is an Enterprise Server one, read through the `*_ENTERPRISE_TOKEN` variables (`gh help environment`). */
+const takesGhToken = (host?: string): boolean => host === undefined || host === "github.com" || host === "github.localhost" || host.endsWith(".ghe.com");
+
+/** GitHub's token: `gh api -i --silent user` prints the headers, among them the `X-OAuth-Scopes` of a classic token and none for a fine-grained one. */
+function githubToken(cli: string, host?: string): ForgeToken {
+  const onHost = host === undefined ? [] : ["--hostname", host];
+  return {
+    scopesArgs: ["api", ...onHost, "-i", "--silent", "user"],
+    envNames: takesGhToken(host) ? ["GH_TOKEN", "GITHUB_TOKEN"] : ["GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"],
+    printCommand: `${cli} auth token`,
+    removeScopesCommand: (scopes) => [cli, "auth", "refresh", "--remove-scopes", scopes.join(","), ...onHost].join(" "),
+  };
+}
+
+/** Per forge: its CLI, where to get that CLI, and, where the CLI can say what its token may do, how to ask. A total record: a forge added to `ForgeName` is a compile error here. */
+const FORGE_CLIS: Readonly<Record<ForgeName, { cli: string; source: string; token?: (cli: string, host?: string) => ForgeToken }>> = {
+  github: { cli: "gh", source: "the GitHub CLI (https://cli.github.com)", token: githubToken },
   gitlab: { cli: "glab", source: "the GitLab CLI (https://gitlab.com/gitlab-org/cli)" },
 };
 
@@ -159,7 +219,7 @@ const FORGE_CLIS: Readonly<Record<ForgeName, { cli: string; source: string }>> =
  * `auth status` with no host fails for a login of another host that has expired. No host (a local-path origin) asks every host.
  */
 export function loginOf(forge: ForgeName, host?: string): ForgeLogin {
-  const { cli, source } = FORGE_CLIS[forge];
+  const { cli, source, token } = FORGE_CLIS[forge];
   const name = FORGE_TITLES[forge];
   const onHost = host === undefined ? [] : ["--hostname", host];
   const loginCommand = [cli, "auth", "login", ...onHost].join(" ");
@@ -169,6 +229,7 @@ export function loginOf(forge: ForgeName, host?: string): ForgeLogin {
     args: ["auth", "status", ...onHost],
     installHint: `Install ${source} and run \`${loginCommand}\`, in the environment that starts the IDE.`,
     loginCommand,
+    ...(token ? { token: token(cli, host) } : {}),
   };
 }
 
@@ -187,20 +248,69 @@ export function createForge(name: string, commands: Commands): Forge {
   throw new Error(`forge ${JSON.stringify(name)} (named by the run's record): this version of the kit does not know it. Upgrade the kit`);
 }
 
+/**
+ * What each forge CLI prints, as far as the kit reads it (every other field is left as it came). The answers are data from a service the
+ * kit does not control, so each read is checked against these, and an answer of another shape is an error naming the command and the field
+ * (`parse-json.ts`). The glab fields are the ones in the output recorded from the real CLI (`test/fixtures/glab/recordings.json`); gh's are the
+ * ones of the real `gh` 2.102.0 on 2026-11-14 (`issue view --json number,title,body,labels` and `--json comments` on this repository's own
+ * issues, read-only) and of the recorded `issue list` (`test/fixtures/gh/recordings.json`).
+ */
+const GITHUB_ISSUE = z.looseObject({ number: z.number(), title: z.string(), body: z.string(), labels: z.array(z.looseObject({ name: z.string() })) });
+const GITHUB_ISSUE_REFS = z.array(z.looseObject({ number: z.number(), title: z.string(), url: z.string() }));
+const GITHUB_COMMENTS = z.looseObject({ comments: z.array(z.looseObject({ body: z.string() })) });
+const GITLAB_ISSUE = z.looseObject({ iid: z.number(), title: z.string(), description: z.string().nullable().optional(), labels: z.array(z.string()).optional() });
+const GITLAB_ISSUE_REFS = z.array(z.looseObject({ iid: z.number(), title: z.string(), web_url: z.string() }));
+/** One array per page (`jsonValues`): `glab api --paginate` prints all the pages as one array, or one array per page. */
+const GITLAB_NOTE_PAGES = z.array(z.array(z.looseObject({ body: z.string(), system: z.boolean().optional() })));
+const GITLAB_PROJECT = z.looseObject({ web_url: z.string() });
+/** The author an issue names, and a member of a project (`projects/<project>/members/all/<id>`: the members a project has itself and inherits from its groups). */
+const GITLAB_ISSUE_AUTHOR = z.looseObject({ author: z.looseObject({ id: z.number() }) });
+const GITLAB_MEMBER = z.looseObject({ access_level: z.number() });
+const GITLAB_MR = z.looseObject({ web_url: z.string(), state: z.string() });
+const GITLAB_MR_PAGES = z.array(z.array(GITLAB_MR));
+type GitlabMr = z.infer<typeof GITLAB_MR>;
+
 const NO_PR_FOUND = /no pull requests? found/i;
+/** The `author_association` values of an author who is no stranger: the owner, a member of the owning organization, a collaborator. Every other value, one GitHub adds later included, is a stranger's. */
+const TRUSTED_ASSOCIATIONS: ReadonlySet<string> = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
+/** GitLab's answer to a user that is no member of the project: `glab: 404 Not found (HTTP 404)` (recorded from a real GitLab). Another 404, such as `404 Project Not Found`, is a failure. */
+const GITLAB_NOT_A_MEMBER = /\b404 Not found\b/i;
+/** GitLab's access levels by number (its "Roles and permissions" page). The lowest one that is no stranger is Developer: who may push code to the project; Reporter and below only read it or triage it. */
+const GITLAB_ACCESS_LEVELS: Readonly<Record<number, string>> = { 5: "Minimal access", 10: "Guest", 15: "Planner", 20: "Reporter", 30: "Developer", 40: "Maintainer", 50: "Owner" };
+const GITLAB_TRUSTED_ACCESS_LEVEL = 30;
 const repoFlag = (repo: string | undefined): string[] => (repo ? ["--repo", repo] : []);
 
 /** GitHub, through `gh`. */
 class GithubForge implements Forge {
   readonly name = "github";
+  readonly trusts = "the repository's owner, a member of its organization or a collaborator";
   constructor(private readonly commands: Commands) {}
 
   async issue(cwd: string, number: number, repo?: string): Promise<ForgeIssue> {
-    return JSON.parse(await this.gh(cwd, "issue", "view", String(number), ...repoFlag(repo), "--json", "number,title,body,labels")) as ForgeIssue;
+    return parseJson(await this.gh(cwd, "issue", "view", String(number), ...repoFlag(repo), "--json", "number,title,body,labels"), GITHUB_ISSUE, `gh issue view ${number}`);
+  }
+
+  async authorStanding(cwd: string, number: number, repo?: string): Promise<AuthorStanding> {
+    // `gh issue view --json` has no author association (gh 2.102 rejects the field): the REST issue has it. `gh api` asks github.com
+    // unless `--hostname` says otherwise, so the host of the repository goes there: the one `repo` names (a URL, or `HOST/OWNER/REPO`),
+    // else the one of the cwd's `origin`, whose repository gh fills into `{owner}/{repo}`. A plain `OWNER/REPO` names no host, and gh
+    // takes its default one for it, as `gh issue view --repo` does.
+    const where = repo === undefined ? { host: originHost(await this.commands.remoteUrl(cwd)), path: "{owner}/{repo}" } : githubRepoOf(repo);
+    if (!/^(?:\{owner\}\/\{repo\}|[\w.-]+\/[\w.-]+)$/.test(where.path)) throw new Error(`repo argument ${JSON.stringify(repo)} is not a GitHub repository, so the issue's author cannot be looked up: pass owner/name or the repository's URL, or allowExternalAuthor: true after reading the issue`);
+    const route = `repos/${where.path}/issues/${number}`;
+    const association = (await this.gh(cwd, "api", ...(where.host === undefined ? [] : ["--hostname", where.host]), route, "--jq", ".author_association")).trim();
+    if (!/^[A-Z_]+$/.test(association)) throw new Error(`gh api ${route}: unexpected author_association ${JSON.stringify(association.slice(0, 40))}: pass allowExternalAuthor: true after reading the issue`);
+    return { association, trusted: TRUSTED_ASSOCIATIONS.has(association) };
+  }
+
+  async listIssues(cwd: string, label: string): Promise<ForgeIssueRef[]> {
+    // `--label=<label>`, one argument: a label that starts with `-` is still a value
+    return parseJson(await this.gh(cwd, "issue", "list", "--state", "open", `--label=${label}`, "--limit", String(ISSUE_LIST_LIMIT), "--json", "number,title,url"), GITHUB_ISSUE_REFS, "gh issue list");
   }
 
   async issueComments(cwd: string, number: number, repo?: string): Promise<string[]> {
-    const { comments } = JSON.parse(await this.gh(cwd, "issue", "view", String(number), ...repoFlag(repo), "--json", "comments")) as { comments: Array<{ body: string }> };
+    const { comments } = parseJson(await this.gh(cwd, "issue", "view", String(number), ...repoFlag(repo), "--json", "comments"), GITHUB_COMMENTS, `gh issue view ${number} comments`);
     return comments.map((c) => c.body);
   }
 
@@ -331,6 +441,19 @@ export function neutralizeGitlabText(text: string): string {
 
 /** The path of a repository as the REST API takes it, from what the `repo` argument holds: `group/sub/project`, or a URL of it. */
 const repoPathOf = (repo: string): string => parseRemote(repo)?.path ?? trimmedPath(repo.trim());
+/** The host to name to `gh api` for the repository of a git remote URL: github.com when the remote names none (no `origin`, a local path), as for every other use of such an origin (`forgeOfOrigin`). */
+const originHost = (url: string | undefined): string => {
+  const remote = url === undefined ? undefined : parseRemote(url);
+  return remote === undefined ? "github.com" : webHost(remote);
+};
+/** Where a `repo` argument is, as `gh` takes it: `OWNER/REPO` (no host), `HOST/OWNER/REPO` (the first segment is a host: an owner has no dot) or the repository's URL. */
+function githubRepoOf(repo: string): { host?: string; path: string } {
+  const named = parseRemote(repo);
+  if (named) return { host: webHost(named), path: repoPathOf(repo) };
+  const prefixed = /^([^/]+\.[^/]+)\/(.+)$/.exec(repo.trim());
+  return prefixed ? { host: prefixed[1]!, path: trimmedPath(prefixed[2]!) } : { path: repoPathOf(repo) };
+}
+
 /** `glab api` takes the host of a request apart from its path: the one a URL `repo` names (with its port, when the URL is a web one; `glabApiHost`), else the cwd's own. */
 function apiHost(repo: string | undefined): GlabHost {
   const named = repo === undefined ? undefined : parseRemote(repo);
@@ -338,6 +461,16 @@ function apiHost(repo: string | undefined): GlabHost {
 }
 /** `projects/<repository>` in the REST API: `repo`'s path, or glab's placeholder for the repository of the cwd. */
 const projectOf = (repo: string | undefined): string => `projects/${repo ? encodeURIComponent(repoPathOf(repo)) : ":fullpath"}`;
+
+/**
+ * The pages of a paginated `glab api` answer, each an array, checked against `schema`: an answer that is not a list (an error object
+ * where the pages should be) is an error that says so, named `source`.
+ */
+function pagesOf<S extends z.ZodType>(text: string, schema: S, source: string): z.output<S> {
+  const pages = jsonValues(text);
+  if (!pages.every(Array.isArray)) throw new Error(`${source}: expected a list`);
+  return checkShape(pages, schema, source);
+}
 
 /**
  * The JSON arrays and objects `text` holds, one after the other: `glab api --paginate` 1.130.0 prints one array for all the pages
@@ -365,29 +498,37 @@ function jsonValues(text: string): unknown[] {
   return values;
 }
 
-interface GitlabMr {
-  web_url: string;
-  state: string;
-}
-
 /** GitLab, through `glab`. */
 class GitlabForge implements Forge {
   readonly name = "gitlab";
+  readonly trusts = "a member of the project with Developer access or above";
   constructor(private readonly commands: Commands) {}
 
   async issue(cwd: string, number: number, repo?: string): Promise<ForgeIssue> {
-    const issue = JSON.parse(await this.glab(cwd, "issue", "view", String(number), ...repoFlag(repo), "--output", "json")) as {
-      iid: number;
-      title: string;
-      description?: string | null;
-      labels?: string[];
-    };
+    const issue = parseJson(await this.glab(cwd, "issue", "view", String(number), ...repoFlag(repo), "--output", "json"), GITLAB_ISSUE, `glab issue view ${number}`);
     return { number: issue.iid, title: issue.title, body: issue.description ?? "", labels: (issue.labels ?? []).map((name) => ({ name })) };
   }
 
+  async authorStanding(cwd: string, number: number, repo?: string): Promise<AuthorStanding> {
+    // GitLab has no `author_association`: the issue names its author by id (read again here, not kept from `issue()`: the forge holds no
+    // state between calls), and `members/all` says what the author is in the project, the members it has itself and the ones it inherits
+    // from its groups. GitLab answers 404 for an account that is no member: a stranger.
+    const { author } = parseJson(await this.glab(cwd, "issue", "view", String(number), ...repoFlag(repo), "--output", "json"), GITLAB_ISSUE_AUTHOR, `glab issue view ${number} author`);
+    const host = apiHost(repo);
+    const member = await this.commands.forgeReadOrNothingWith("glab", cwd, host.env, GITLAB_NOT_A_MEMBER, "api", ...host.args, `${projectOf(repo)}/members/all/${author.id}`);
+    if (member === undefined) return { association: "not a member", trusted: false };
+    const { access_level: level } = parseJson(member, GITLAB_MEMBER, `glab api project member ${author.id}`);
+    return { association: `${GITLAB_ACCESS_LEVELS[level] ?? "access level"} (${level})`, trusted: level >= GITLAB_TRUSTED_ACCESS_LEVEL };
+  }
+
+  async listIssues(cwd: string, label: string): Promise<ForgeIssueRef[]> {
+    // glab lists the open issues unless told otherwise, one page of `--per-page` (the first 100, newest first), as the REST API's own objects.
+    const issues = parseJson(await this.glab(cwd, "issue", "list", `--label=${label}`, "--per-page", String(ISSUE_LIST_LIMIT), "--output", "json"), GITLAB_ISSUE_REFS, "glab issue list");
+    return issues.map((issue) => ({ number: issue.iid, title: issue.title, url: issue.web_url }));
+  }
+
   async issueComments(cwd: string, number: number, repo?: string): Promise<string[]> {
-    const pages = jsonValues(await this.api(cwd, repo, "--paginate", `${projectOf(repo)}/issues/${number}/notes`));
-    const notes = pages.flat() as Array<{ body: string; system?: boolean }>;
+    const notes = pagesOf(await this.api(cwd, repo, "--paginate", `${projectOf(repo)}/issues/${number}/notes`), GITLAB_NOTE_PAGES, "glab api issue notes").flat();
     return notes.filter((note) => !note.system).map((note) => note.body);
   }
 
@@ -418,7 +559,7 @@ class GitlabForge implements Forge {
   }
 
   async repoUrl(cwd: string, repo?: string): Promise<string> {
-    const project = JSON.parse(await this.api(cwd, repo, projectOf(repo))) as { web_url: string };
+    const project = parseJson(await this.api(cwd, repo, projectOf(repo)), GITLAB_PROJECT, "glab api project");
     return project.web_url.trim();
   }
 
@@ -429,9 +570,7 @@ class GitlabForge implements Forge {
    */
   private async latestMr(cwd: string, branch: string, repo?: string): Promise<GitlabMr | undefined> {
     const query = `source_branch=${encodeURIComponent(branch)}&order_by=created_at&sort=desc&per_page=100`;
-    const pages = jsonValues(await this.api(cwd, repo, "--paginate", `${projectOf(repo)}/merge_requests?${query}`));
-    if (!pages.every(Array.isArray)) throw new Error(`glab api merge_requests (${branch}): expected a list`);
-    const mrs = pages.flat() as GitlabMr[];
+    const mrs: GitlabMr[] = pagesOf(await this.api(cwd, repo, "--paginate", `${projectOf(repo)}/merge_requests?${query}`), GITLAB_MR_PAGES, `glab api merge_requests (${branch})`).flat();
     return mrs.find((mr) => prStateOfMr(mr.state) === "OPEN") ?? mrs[0];
   }
 

@@ -17,7 +17,7 @@ O objetivo é responder com dados:
 ## 1. Começo rápido
 
 ```bash
-npm run wf -- run implement-issue --cwd ../meu-repo --args '{"issue":12}'   # grava métricas automaticamente
+npm run wf -- run implement-issue --cwd ../meu-repo --args '{"issue":12}' --max-cents 100 --max-tokens 2000000   # grava métricas automaticamente
 npm run stats                         # resumo dos últimos 30 dias no terminal
 npm run dash                          # http://127.0.0.1:4317
 npm run wf -- metrics export --days 90 --format csv --out ./metrics-export   # anonimizado por padrão
@@ -43,7 +43,7 @@ Configuração por variáveis de ambiente:
 | **Custo bruto** (`raw_cents`) | `getUsage().cost.rawCostCents` [PKG] | Custo de tokens do modelo **sem descontos** [DOC](https://cursor.com/docs/sdk/typescript#agentgetusage). É o **sinal principal** de eficiência quando vem, com limites: vale **0 em uso cobrado por request** (planos legados por request e alguns Enterprise por request) [DOC](https://cursor.com/docs/sdk/typescript#agentgetusage); fica vazio (NULL) quando o `getUsage()` falha, como no `403 feature_unavailable` de agentes locais, e aí `v_attempts` cai na estimativa da tabela `pricing` (`cost_source`, §3). Foi o caso de toda tentativa num Premium [TESTE](../research/verificacoes-locais.md). Que ele fica acima de 0 no uso incluído no plano é inferência, a doc não diz isso [I] |
 | Custo cobrado (`charged_cents`) | `getUsage().cost.chargedCents` [PKG] | **0 para uso incluído no plano**, BYOK e créditos [DOC](https://cursor.com/docs/sdk/typescript#agentgetusage). Por isso não é o sinal principal |
 | Custo por grupo de uso do Cursor | `getUsage().runs[]` → `usage_runs` [PKG] | Guardado como veio. **Não** é ligado aos turnos por posição, porque não há id em comum |
-| Turnos, passos, tool calls por nome, compactações | `onDelta`: `turn-ended`, `step-completed`, `tool-call-started`, `summary-completed` [PKG] | `turn-ended` cobre **um turno inteiro do agente**, com vários passos. Um `step-completed` pode agrupar várias tools e várias chamadas ao modelo: 1 `send` que leu 4 arquivos gerou 4 tool calls, 2 `thinking-completed` e **1** `step-completed` [TESTE](../research/verificacoes-locais.md) |
+| Turnos, passos, tool calls por nome, compactações | `onDelta`: `turn-ended`, `step-completed`, `tool-call-started`, `summary-completed` [PKG] | `turn-ended` cobre **um turno inteiro do agente**, com vários passos, e o turno é o `send` inteiro: uma etapa longa que escreve, com 31 tool calls, deu 1 só ([8.2 §15](../research/verificacoes-locais.md)). Um `step-completed` pode agrupar várias tools e várias chamadas ao modelo: 1 `send` que leu 4 arquivos gerou 4 tool calls, 2 `thinking-completed` e **1** `step-completed` [TESTE](../research/verificacoes-locais.md) |
 | Re-prompts de schema, tentativas, tipo de erro, duração | runtime | `error_kind`: timeout, run-error, schema, rate-limit, budget (cancelada por passar do teto de tokens da etapa ou do run), cancelled, exception |
 | Modelo e parâmetros | `ModelSelection` [DOC](https://cursor.com/docs/sdk/typescript#modelselection) | `model_key` = id + params ordenados, mais `max` quando há `maxMode` (ex.: `grok-4.7[reasoning_effort=high]`), então esforço e contexto viram "braços" distintos. O `maxMode` aparece nas [notas de versão do SDK](https://cursor.com/docs/release-notes/sdk), não na referência do `ModelSelection`. O banco grava o modelo **pedido**. O ID resolvido (`RunResult.model`: alias `composer` → `composer-2.5`; com `default`, o Auto, volta `default` [TESTE](../research/verificacoes-locais.md)) só sai no evento `step-end`, como `resolvedModel`, e não vai para o banco |
 | Resultado do run | `result.status` do workflow + `ctx.metric()` | `outcome_class`: delivered, pending, failed, error, cancelled, unknown |
@@ -225,8 +225,12 @@ O dashboard é um servidor local, um só por usuário, para os runs de **todos**
 `packages/dashboard/` (as dependências dele nunca entram no runtime) e lê dois lugares: o índice global de runs
 (`~/.cursor-workflows/runs.jsonl`, que aponta o repositório de cada run) e, por run, o log de eventos
 (`<repositório>/.workflows/runs/<runId>/events.jsonl`); mais o banco de métricas, em modo leitura. Ele nunca escreve nos
-arquivos dos runs. A única ação dele é [cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume), pelo mesmo caminho do
-`wf cancel`.
+arquivos dos runs. Para o [Backlog](#o-backlog) ele também pergunta ao forge de cada repositório (`gh`, `glab`) quais issues
+estão prontas. Tem quatro ações: [iniciar um workflow](#iniciar-um-workflow) num repositório que ele já conhece (o que
+escreve é só o registro do job, em `.workflows/jobs/`, como o `wf start` faz),
+[retomar um run parado](#cancelar-um-run-e-copiar-o-comando-de-resume), [decidir as seams](#decidir-as-seams-de-um-run-do-implement-issue)
+que um run do `implement-issue` propôs (as duas só iniciam um job novo sobre o run) e
+[cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume), pelo mesmo caminho do `wf cancel`.
 
 **Como abrir.** O `start_workflow` garante que o dashboard está rodando (inicia um processo destacado se nada responde
 na porta) e devolve `dashboardUrl`, o link da página do run, ao lado do `jobId`; a skill `run-workflow` abre o link no navegador embutido do
@@ -240,18 +244,25 @@ servidor `workflows`. Um dashboard que já está de pé continua sendo informado
 em `~/.cursor-workflows/dashboard.pid` e a saída em `dashboard.log`; `kill $(jq -r .pid ~/.cursor-workflows/dashboard.pid)`
 o encerra.
 
-**API JSON** (`GET`; a única ação é o `POST` de cancelar um run):
+**API JSON** (`GET`; as únicas ações são os `POST` de iniciar um workflow e de cancelar um run):
 
 | Rota | Resposta |
 |---|---|
 | `/api/runs?limit=` | `{runs}`: os runs de todos os repositórios, do mais novo ao mais antigo (até 200, no máximo 1000), cada um com `status` (`running`, `finished`, `failed`, `cancelled` ou `missing`), `repo`, `workflow`, `phase`, `phases`, `outcome`, `card`, `startedAt`, `finishedAt`, `error`, `executions` e o gasto |
 | `/api/board?limit=` | `{boards}`: um quadro por workflow, com as `columns` e os `cards` (um por run), cada card já na coluna do estado do run: veja [O quadro](#o-quadro-board) |
-| `/api/runs/<runId>` | o mesmo run com `recent` (as últimas linhas de andamento), `result` e `usage` |
+| `/api/backlog` | `{workflow, cards, errors}`: o Backlog dos repositórios que o índice conhece: as issues abertas com a label de pronta e sem run (`cards`: `repo`, `issue`, `title` e `url`, da issue de número menor para a maior em cada repositório), e os repositórios cujo forge não respondeu (`errors`: `repo` e `error`); `workflow` é o que o botão "run" de um card inicia. Veja [O Backlog](#o-backlog) |
+| `/api/runs/<runId>` | o mesmo run com `recent` (as últimas linhas de andamento), `result` e `usage`; e `seamsProposal` (`stop`, `seams`, `slices`, `testCommand` e `digest`) quando o run é do `implement-issue` e parou numa proposta que espera uma decisão: veja [Decidir as seams](#decidir-as-seams-de-um-run-do-implement-issue) |
 | `/api/runs/<runId>/events` | stream de eventos (SSE) do log do run, ao vivo: veja [Acompanhar um run ao vivo](#acompanhar-um-run-ao-vivo) |
 | `/runs/<runId>` | a página do run: o grafo ao vivo, veja [Ver um run como grafo](#ver-um-run-como-grafo) (HTML, com o script e o estilo em `/assets/…`) |
 | `/api/runs/<runId>/steps/<stepId>/content` | o conteúdo de uma etapa: prompt, mensagens do agente, chamadas de tool e saída de comandos |
-| `/api/csrf` | `{csrfToken}`: o token que o `POST` de cancelar exige |
-| `POST /api/runs/<runId>/cancel` | cancela o job que executa o run (cabeçalho `X-CSRF-Token`); num run travado, encerra o processo com `SIGKILL` e cancela pela API da Cursor os cloud agents que o run deixou rodando; num run que não está executando, cancela por essa API os cloud agents que o processo morto deixou rodando e responde `200` com um `note`, ou `409` se não havia nada a cancelar: veja [Cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume) |
+| `/api/csrf` | `{csrfToken}`: o token que os `POST` de iniciar, de retomar, de decidir as seams e de cancelar exigem |
+| `/api/repos` | `{repos}`: os repositórios em que o dashboard inicia um workflow: os que o índice global de runs conhece e cuja pasta ainda existe, o de run mais recente primeiro |
+| `/api/workflows?repo=<caminho>` | `{repo, workflows, broken}`: os workflows que o runtime lista para o repositório (cada um com `name`, `description`, `whenToUse`, `argsSkeleton` e `optionalArgs`) e os arquivos de workflow que não carregaram, com o erro; `404` para um repositório que o índice não conhece |
+| `POST /api/start` | inicia um workflow como job (cabeçalho `X-CSRF-Token`; corpo `{repo, workflow, args, maxTokens, maxCents}`) e responde `202` com `{jobId, runId, repo, workflow}`, mais `violations` quando um teto global cortou o pedido; as recusas estão em [Iniciar um workflow](#iniciar-um-workflow) |
+| `POST /api/runs/<runId>/cancel` | cancela o job que executa o run (cabeçalho `X-CSRF-Token`); num run travado, encerra o processo com `SIGKILL`, mata os comandos de `ctx.exec` que ele tinha em andamento e cancela pela API da Cursor os cloud agents que o run deixou rodando; num run que não está executando, cancela por essa API os cloud agents que o processo morto deixou rodando e responde `200` com um `note`, ou `409` se não havia nada a cancelar: veja [Cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume) |
+| `POST /api/runs/<runId>/resume` | retoma um run `failed` ou `cancelled` como job, com os args, os tetos e os `overrides` do último start dele (cabeçalho `X-CSRF-Token`, sem corpo: o servidor lê tudo do registro do job) e responde `202` com `{jobId, runId}`, mais `violations` quando um teto global cortou o pedido; as recusas estão em [Retomar um run](#cancelar-um-run-e-copiar-o-comando-de-resume) |
+| `POST /api/runs/<runId>/seams/approve` | aprova a proposta que um run do `implement-issue` espera: retoma o run como job, com os args, os tetos e os `overrides` do último start dele mais `approveSeams: true` (cabeçalho `X-CSRF-Token`; corpo `{digest}`, o `digest` que a proposta trouxe) e responde `202` com `{jobId, runId}`, mais `violations` quando um teto global cortou o pedido; as recusas estão em [Decidir as seams](#decidir-as-seams-de-um-run-do-implement-issue) |
+| `POST /api/runs/<runId>/seams/replace` | troca as seams da proposta pelas que você escreveu: retoma o run como job com os mesmos args, tetos e `overrides` mais `seams: [...]` (cabeçalho `X-CSRF-Token`; corpo `{seams}`, uma lista de texto não vazia) e responde `202` como o de cima |
 | `/api/summary?days=` | o resumo de métricas dos painéis abaixo |
 | `/api/health` | `{app, pid}`: como quem chama sabe que é o dashboard que responde na porta |
 
@@ -370,7 +381,7 @@ No cabeçalho da página do run:
   mesmo caminho do `wf cancel` e do `cancel_workflow` (`cancelJob`). Num run em andamento, é um `SIGTERM` ao processo do
   job, que cancela os agentes, desfaz a etapa de escrita em curso e escreve o fim do run como `cancelled`; o cartão vai para
   a coluna Cancelled quando o log o registra. Num run travado, é um `SIGKILL`: nada é desfeito, o run segue `failed` (o
-  cartão fica em Failed) e os cloud agents que ele deixou rodando são cancelados, como diz o item do run travado. Se o job
+  cartão fica em Failed), os comandos que o processo tinha em andamento morrem com ele e os cloud agents que ele deixou rodando são cancelados, como diz o item do run travado. Se o job
   demora mais do que a espera (20 s) para parar, a resposta diz que ele ainda está parando. Um run que não foi iniciado como job (`wf run`
   num terminal) não tem processo registrado para sinalizar: o dashboard responde `409` e diz para dar Ctrl-C naquele terminal.
 - **Cancel cloud agent** (**Cancel N cloud agents** quando são vários; num run `failed` cujo processo não existe mais, com
@@ -385,14 +396,33 @@ No cabeçalho da página do run:
 - **Um run travado** (o processo do job vivo, mas sem heartbeat há mais de 30 s) aparece como `failed`, com o erro
   `no heartbeat for <N>s`, embora o processo ainda segure o lock. A rota acha esse job (`cancelRun` procura o processo que
   ainda segura um run `failed`) e o entrega ao `cancelJob`, que encerra o processo com `SIGKILL`, sem desfazer a etapa em
-  curso, e depois cancela pela API da Cursor os cloud agents que o run deixou rodando, como o `wf cancel` faz. O run segue
+  curso, mata os comandos de `ctx.exec` que ele tinha em andamento (um `sleep` ou um teste longo não sobrevive ao
+  cancelamento) e depois cancela pela API da Cursor os cloud agents que o run deixou rodando, como o `wf cancel` faz. O run segue
   `failed` e retomável, e a nota começa com `process <pid> had no heartbeat and was killed (SIGKILL)` e nomeia os agentes
   cancelados; um resume depois disso cria agentes novos, que custam de novo
   ([ADR-0007](../adr/0007-cancel-stops-cloud-agents.md)). O botão desse run é o **Cancel run**, com ou sem etapa na nuvem:
   a página o oferece quando o erro da API começa com `no heartbeat for`, e mostra a nota no lugar dele. Enquanto o processo
-  segura o lock, o **Copy resume command** leva a um `already running`: cancele antes de retomar. Quando a nota diz que um
+  segura o lock, o **Copy resume command** leva a um `already running` e o **Resume run** não aparece: cancele antes de retomar. Quando a nota diz que um
   agente não foi alcançado ou que o processo ainda não saiu, a página a mostra como falha e mantém o botão, para cancelar
   de novo. Fora do dashboard, `wf cancel <jobId>` (o `wf jobs` lista os jobs do repositório) faz o mesmo.
+- **Resume run** (num run `failed` ou `cancelled`, ao lado de **Copy resume command**) retoma o run como job, sem o terminal:
+  `POST /api/runs/<runId>/resume`, atrás do mesmo token CSRF e das mesmas checagens de origem do cancelamento. O navegador não
+  manda nada além do id do run. O servidor lê o registro do job da última execução (`.workflows/jobs/<jobId>.json`, campo
+  `start`) e inicia um job novo sobre o mesmo run (`wf start --resume`) com os mesmos args, os mesmos tetos e os mesmos
+  `overrides`, pelo mesmo caminho do [Iniciar um workflow](#iniciar-um-workflow): o repositório é o que o índice global de
+  runs dá ao run, o workflow tem de estar na lista do runtime e os args têm de passar no `argsSchema`, e os tetos globais
+  continuam valendo por cima. As etapas que terminaram vêm do journal, sem repetir. Como o orçamento de um run acumula entre
+  as execuções, um run que parou por teto precisa de um teto maior: retome-o pelo comando que o botão abaixo copia, com o
+  novo `--max-cents` ou `--max-tokens`. A resposta `202` não espera o job: a página pergunta pelo status do run a cada segundo
+  (por até 30 s) até ele mostrar `running` e passa a segui-lo como a qualquer run em andamento. As recusas trazem `{error}` com uma frase:
+
+  | Status | Quando |
+  |---|---|
+  | `403` | o token CSRF falta ou está errado, ou o pedido declara outra origem |
+  | `404` | o índice global de runs não conhece o run |
+  | `409` | o run não está parado (`running`, `finished` ou `missing`); o run está travado (`failed`, mas o processo dele ainda o segura: cancele antes); o run saiu da retenção (o journal dele foi esvaziado, e a frase é a do motor, `run <id> cannot be resumed: the retention policy deleted the step results its journal held…`: inicie um run novo); nenhum registro de job diz como ele começou (um `wf run` num terminal, ou um job de um kit antigo: a frase manda retomar pelo terminal, com o comando copiado); o repositório já não lista o workflow, os args já não passam no `argsSchema`, o kit está fora da faixa do repositório, a configuração dele não é utilizável, ou outro job já roda o mesmo workflow com os mesmos args |
+
+  O botão só aparece num run `failed` ou `cancelled` que não está travado.
 - **Copy resume command** (num run `failed` ou `cancelled`) copia
   `wf start <workflow> --args '<args>' --resume <runId> --cwd <repositório>`, com os mesmos `--max-cents`, `--max-tokens` e
   `--overrides` do start. O registro do job da última execução (`.workflows/jobs/<jobId>.json`, campo `start`) guarda os
@@ -403,19 +433,64 @@ No cabeçalho da página do run:
   de `{}`, e o comando já sai com `--args '{}'`. Nesse caso um aviso ao lado do campo lembra de repor os tetos.
   O comando aparece num campo de texto, para copiar à mão quando o navegador não deixa escrever na área de transferência.
 
-O cancelamento exige o token CSRF (veja [Segurança](#segurança-do-dashboard)): a página lê o token em `/api/csrf` a cada
-cancelamento e o manda em `X-CSRF-Token`.
+O cancelamento, o resume e a decisão sobre as seams exigem o token CSRF (veja [Segurança](#segurança-do-dashboard)): a página lê o token em `/api/csrf` a
+cada ação e o manda em `X-CSRF-Token`.
 
 A página do run tem um app à parte (React, React Flow e elkjs), empacotado junto com o app principal quando o dashboard
 sobe e guardado no mesmo cache por hash (veja [O app](#o-app)): `/assets/run.<hash>.js` e `.css`, com cache de um ano.
 
+### Decidir as seams de um run do implement-issue
+
+Um run MED ou HIGH do `implement-issue` que não recebeu `seams` planeja, comenta a proposta na issue e para com o resultado
+`seams-proposed`; um run que recebeu `seams` e nenhum `testCommand` para com `test-command-proposed`, porque um comando que um
+modelo escreveu só roda depois de uma pessoa vê-lo
+([4.1 §Checkpoint em dois runs](../authoring/01-escrevendo-workflows.md#checkpoint-em-dois-runs)). O run termina `finished`, e a coluna **Awaiting approval** do quadro o mostra. Na página dele o dashboard mostra
+o painel **Seams proposed** (ou **Test command proposed**): as seams (nome, interface e por quê), as fatias e o comando de
+teste que o run executa depois da aprovação (o `testCommand` que você digitou ao iniciar, senão o do planejador, senão
+`npm test`), tudo como texto, e dois botões. Não há botão de rejeitar: uma proposta que ninguém aprova simplesmente não é retomada.
+
+- **Approve** retoma o run exatamente como o `wf start --resume` com `approveSeams: true`: `POST /api/runs/<runId>/seams/approve`,
+  com o `digest` da proposta que a página mostrou. O servidor retoma o run com os args, os tetos e os `overrides` do registro do
+  job da última execução, mais `approveSeams: true` (num run parado em `test-command-proposed`, sem as `seams` do primeiro start,
+  como a linha de relançamento do próprio workflow), e o run executa o plano guardado, sem planejar de novo.
+- **Replace seams** abre uma caixa, uma seam por linha (linhas em branco somem, cada linha é aparada). Uma lista vazia é recusada
+  na própria caixa, com uma mensagem ao lado do campo, e o servidor a recusa também (`400`). `POST /api/runs/<runId>/seams/replace`
+  retoma o run com os mesmos args, tetos e `overrides` mais `seams: [...]`, e o run planeja de novo com elas. Sem `testCommand`, o
+  novo plano para em `test-command-proposed`, com o comando do planejador para você ver: o painel volta, para essa proposta.
+
+O dashboard não comenta na issue: quem registra a decisão é o próprio workflow, ao retomar com `approveSeams` ou `seams`
+(`Seams approved for the implement-issue run <runId>` ou `Seams replaced ...`), de qualquer superfície que a decisão tenha vindo (o chat, o terminal ou o dashboard; veja
+[4.1 §Checkpoint em dois runs](../authoring/01-escrevendo-workflows.md#checkpoint-em-dois-runs)). O plano que o painel mostra vem do
+arquivo de progresso do run (`.workflows/runs/<runId>/tdd-progress.json`, o `proposedPlan` que o workflow guardou ao parar) e
+o painel só aparece quando o último resultado do run diz que ele espera uma decisão: um run que já seguiu não tem proposta.
+
+Um run que nenhum job iniciou (`wf run` num terminal) ou cujo registro do job não diz como começou (uma versão antiga do kit) não
+tem args para repetir: a página mostra a proposta (`decidable: false` no `seamsProposal`), sem os botões, e manda decidir pelo terminal, com a
+linha de relançamento do comentário da issue; o comando de teste que ela mostra é o do planejador, porque um `testCommand` digitado
+no terminal não é conhecido ali. A rota recusa essa decisão com `409`, como a tabela abaixo diz.
+
+O `digest` é o hash do que a página mostrou (o tipo de parada, as seams, as fatias e o comando de teste). O plano pode mudar entre
+a página e o clique (outro resume, um novo planejamento), e quem leu um plano não pode aprovar outro, cujo comando de teste roda
+por `bash -c`: um `digest` que não bate com a proposta de agora é recusado (`409`), e a página manda recarregar. A troca de seams não
+precisa de `digest`: ela só executa o que você escreveu. As recusas trazem `{error}` com uma frase:
+
+| Status | Quando |
+|---|---|
+| `403` | o token CSRF falta ou está errado, ou o pedido declara outra origem |
+| `400` | o corpo não é um objeto JSON (ou é maior que 64 KiB); na aprovação, falta o `digest` ou ele não é texto; na troca, `seams` não é uma lista de texto ou não sobra nenhuma seam depois de tirar as linhas em branco |
+| `404` | o índice global de runs não conhece o run |
+| `409` | o run não espera decisão alguma (não é do `implement-issue`, não parou numa proposta, ou já seguiu: o segundo clique de um clique duplo cai aqui); a proposta mudou desde que a página a mostrou (só a aprovação); o run não foi iniciado como job, ou o registro do job dele não diz como começou (`wf run` num terminal: decida pelo terminal, com a linha de relançamento do comentário da issue); o run saiu da retenção; ou o início recusa o workflow, os args ou a configuração, como no [Iniciar um workflow](#iniciar-um-workflow) |
+
+A resposta `202` não espera o job: a página pergunta pelo status do run a cada segundo (por até 30 s) até ele mostrar `running`.
+
 ### O app
 
 A página inicial (`/`) é um só app, em React, com três menus (o menu é o `#` do endereço: `#/runs`, `#/board`,
-`#/metrics`; sem `#`, abre o Board):
+`#/metrics`; sem `#`, abre o Board) e, na barra de cima, o botão **Start**, que abre o painel de
+[Iniciar um workflow](#iniciar-um-workflow):
 
 - **Runs:** os runs de todos os repositórios, do mais novo ao mais antigo, com status, fase, duração e custo;
-- **Board:** o quadro, descrito abaixo;
+- **Board:** o quadro, descrito abaixo, com o [Backlog](#o-backlog) na frente do quadro do `implement-issue`;
 - **Metrics:** o painel de custo e eficiência (a tela abaixo), em inglês como o resto do app e com os números no mesmo
   formato das outras telas.
 
@@ -439,17 +514,58 @@ dashboard não sobe e diz o motivo.
 - **Painel 4:** desperdício e economia;
 - **Tabela de modelos.**
 
+### Iniciar um workflow
+
+O botão **Start**, na barra de cima de todos os menus do app, abre o painel que inicia um workflow sem o chat nem um
+terminal. O painel pede:
+
+- **Repositório:** só um que o índice global de runs conhece, isto é, um em que algum run já foi iniciado e cuja pasta ainda
+  existe. Quem resolve a lista é o servidor, não o navegador: um caminho livre deixaria o navegador rodar código em qualquer
+  pasta. Para um repositório novo, o primeiro run sai pelo chat ou por `wf start`.
+- **Workflow:** só um que o runtime lista para aquele repositório (os do kit, os de `.agents/workflows/` e os de
+  `$WORKFLOWS_DIR`, o que o `list_workflows` mostra ao chat). Um arquivo de workflow que não carrega fica de fora e aparece
+  numa nota, com o caminho. Para listar, o dashboard importa os arquivos de workflow do repositório no próprio processo, como
+  o servidor MCP faz, e importa de novo o que mudou desde a última vez.
+- **Args:** uma caixa de JSON já preenchida com um esqueleto do `argsSchema` do workflow: cada campo obrigatório com um
+  valor em branco do tipo dele (`""`, `0`, `false`, `[]`, `{}`, ou o `default` do schema), ou `{}` quando o workflow não
+  declara schema. O branco é de propósito um valor que o schema recusa quando tem mínimo ou tamanho: um campo que ninguém
+  preencheu falha na validação, em vez de iniciar um run sobre um valor inventado. Os campos opcionais ficam de fora e são
+  nomeados embaixo da caixa. Não há formulário gerado. O servidor valida os args com o mesmo Ajv do motor, e o erro, que
+  nomeia o campo (`invalid args: data/issue must be integer`), aparece no painel sem que nada comece.
+- **Tetos:** `maxTokens` e `maxCents` são obrigatórios, para que um clique nunca inicie um run sem teto. Os tetos globais da
+  configuração continuam valendo por cima (a resposta traz em `violations` o que eles cortaram).
+
+Iniciar é um `POST /api/start`, atrás do mesmo token CSRF e das mesmas checagens de origem do cancelamento. O job é o do
+`wf start` (um processo destacado, `spawnJob`), então fechar o dashboard não o interrompe. A resposta `202` traz o `runId`, e
+a página abre o Run view do run, que espera o run aparecer no índice; o card dele aparece no Board a seguir. As recusas
+trazem `{error}` com uma frase que diz o motivo, e nada é criado no repositório:
+
+| Status | Quando |
+|---|---|
+| `403` | o token CSRF falta ou está errado, ou o pedido declara outra origem |
+| `400` | o corpo não é um objeto JSON (ou é maior que 256 KiB); falta `repo` ou `workflow`; `maxTokens` ou `maxCents` falta, não é um número ou não é maior que 0; os args não são um objeto ou não passam no `argsSchema` |
+| `404` | o repositório não está no índice global de runs; o repositório não lista o workflow (a frase diz quais lista) |
+| `409` | o runtime recusa o início: o pedido veio de dentro de uma etapa de workflow, o kit está fora da faixa `kit` do repositório ou a configuração dele não é utilizável |
+
+O botão "run" de um card do [Backlog](#o-backlog) abre este mesmo painel já preenchido (o repositório do card, o workflow
+`implement-issue` e os args `{"issue": <n>}`); só os tetos ficam para quem clica dar, e vale tudo o que está acima.
+
+Retomar um run parado é o botão **Resume run** do [Run view](#cancelar-um-run-e-copiar-o-comando-de-resume); aprovar ou trocar as
+seams que um run do `implement-issue` propôs é o painel do mesmo Run view, em [Decidir as seams](#decidir-as-seams-de-um-run-do-implement-issue).
+
 ### O quadro (Board)
 
 O Board é um kanban com **um quadro por workflow** (o do run mais novo primeiro) e um cartão por run. As colunas de um
 quadro são as fases do workflow, na ordem em que ele as declara em `meta.phases` (o `run-start` do log as traz em
-`phases`; um log de uma versão antiga, sem isso, usa as fases que os runs percorreram), e depois quatro colunas fixas. Um
+`phases`; um log de uma versão antiga, sem isso, usa as fases que os runs percorreram), e depois quatro colunas fixas. O
+quadro do `implement-issue` tem ainda uma coluna na frente, o [Backlog](#o-backlog), que a página acrescenta: as issues
+prontas que ainda não têm run (um workflow sem run algum ganha, por isso, um quadro só com essa coluna). Um
 workflow que não declara nem percorre fase alguma tem uma coluna só, `Running`. Cada run fica na coluna do seu estado:
 
 | Estado do run | Coluna |
 |---|---|
 | rodando | a fase em que está (a primeira, antes de entrar em alguma) |
-| terminou e o workflow devolveu `seams-proposed` ou `pending` | **Awaiting approval** |
+| terminou e o workflow devolveu `seams-proposed`, `test-command-proposed`, `untrusted-author` ou `pending` | **Awaiting approval** |
 | terminou entregue (`done`, `ok`…) ou com um resultado que não diz um status | **Done** |
 | terminou com outro status (`tests-failed`, `baseline-red`…) | **Failed** |
 | terminou com erro, estourou o teto, ou o processo morreu ou travou sem terminá-lo | **Failed** |
@@ -487,13 +603,58 @@ Só a URL exata vai ao CLI, e só de um host permitido: `github.com` (`gh`), `gi
 nunca os tokens, e não o registra em lugar nenhum. Um link de outro host, com caminho a mais, `?query`, `#fragmento`,
 `http:` ou número malformado, e um link de issue ficam sem estado.
 
+### O Backlog
+
+O Board mostra o ciclo inteiro de uma issue. Na frente do quadro do `implement-issue` fica a coluna **Backlog**, com as issues
+que estão prontas e ninguém começou, e um botão **run** em cada card:
+
+- **Quais issues:** as abertas que têm a label de pronta, **e nenhum run**. A label é `ready-for-agent`, e o ajuste
+  `backlogLabel` do `implement-issue` a troca, no arquivo de configuração do repositório
+  (`workflows.implement-issue.settings.backlogLabel`; [6.2](../reference/config.md)); só uma label, sem vírgula, porque o
+  forge leria duas. Uma issue tem run quando um run do `implement-issue` foi iniciado para ela, qualquer que tenha sido o fim
+  do run: o `issue` dos args do job (que está no registro do job desde o primeiro instante, então a issue sai do Backlog
+  antes de o run escolher o tier) ou, num run sem job (`wf run` num terminal), o `#<n>` do cartão dele. Um run com `repo` nos
+  args, quando o `repo` não é este repositório (a URL, `dono/repo` ou `host/dono/repo`, em qualquer caixa), é de uma issue de
+  outro e não tira do Backlog a de mesmo número deste; um que nomeia este repositório tira, como o lock da issue já trata. O
+  cartão de um run sem job não diz de que repositório é a issue, então um `wf run` numa issue de outro repositório tira do
+  Backlog a de mesmo número. Os cards ficam em ordem de número.
+- **Quais repositórios:** os que o índice global de runs conhece e cuja pasta ainda existe, como os runs do quadro.
+- **Como são lidas:** pelo forge seam do runtime ([ADR-0009](../adr/0009-forge-seam-github-and-gitlab.md)), então GitHub e
+  GitLab valem igual: `gh issue list --state open --label=<label> --limit 100 --json number,title,url` ou
+  `glab issue list --label=<label> --per-page 100 --output json`, rodados na pasta do repositório, com o forge do `origin` (ou
+  o que a chave `forges` declara) e o login do usuário. São as primeiras 100, e no máximo quatro repositórios são perguntados ao mesmo tempo. Um repositório sem remote `origin`
+  não tem forge a perguntar: não lista nada, e isso não é erro. A resposta de cada repositório, a lista ou o erro,
+  é guardada por **60 segundos**: um segundo pedido nesse tempo não chama o forge de novo. As issues que têm run, não: elas
+  são vistas a cada pedido, e um run recém-iniciado tira a issue da coluna na hora.
+- **Quando o forge falha:** a coluna mostra o motivo daquele repositório (sem o CLI, sem login, sem rede, host sem forge
+  declarado, configuração inválida), e os outros repositórios continuam listando. O quadro não depende disso: o Backlog tem a
+  própria consulta, `GET /api/backlog`, a cada 5 segundos, e é ela que espera o forge; os runs do quadro vêm de
+  `GET /api/board`, que nunca espera.
+- **O botão run** abre o painel de [Iniciar um workflow](#iniciar-um-workflow) com o repositório do card, `implement-issue` e
+  `{"issue": <n>}`, e o início sai pelo `POST /api/start`, com os mesmos tetos obrigatórios e as mesmas recusas. A issue sai
+  da coluna assim que o run existe.
+
 ### Segurança do dashboard
 
 - escuta só em `127.0.0.1`;
 - recusa `Host` diferente de `127.0.0.1` e `localhost` (proteção contra DNS rebinding);
-- aceita `GET` e `HEAD`, e um único `POST`, o de cancelar um run: ele exige o token CSRF (`/api/csrf`, um valor aleatório por
-  processo do dashboard, comparado em tempo constante, que só um script lendo uma resposta desta origem consegue ter) e
-  recusa um pedido que declare outra origem (`Origin` ou `Sec-Fetch-Site`); os outros métodos e as outras rotas dão `405`;
+- aceita `GET` e `HEAD`, e cinco `POST`, o de iniciar um workflow, o de retomar um run, o de aprovar as seams, o de trocar as seams e o de cancelar um run: os cinco passam pela mesma porta, que
+  exige o token CSRF (`/api/csrf`, um valor aleatório por processo do dashboard, comparado em tempo constante, que só um
+  script lendo uma resposta desta origem consegue ter) e recusa um pedido que declare outra origem (`Origin` ou
+  `Sec-Fetch-Site`) antes de ler o corpo; os outros métodos e as outras rotas dão `405`;
+- só inicia um workflow num repositório que o índice global de runs conhece e só um workflow que o runtime lista para ele, os
+  dois resolvidos no servidor (um caminho ou um nome que o navegador mande e que não esteja lá é recusado), com os dois
+  tetos de custo e de tokens obrigatórios; um corpo de início maior que 256 KiB é recusado sem ser guardado. Listar os
+  workflows de um repositório importa os arquivos dele no processo do dashboard, o que roda o código de nível superior
+  desses arquivos, como o servidor MCP já faz para o repositório dele; o de retomar só vale para um run que o índice conhece,
+  na pasta que o índice dá a ele, e começa pelo que o registro do job do próprio run diz (nada do que o navegador manda além
+  do id), pelas mesmas checagens do início; os de decidir as seams só valem para um run que espera uma decisão (o último resultado
+  dele é uma proposta e o arquivo de progresso guarda o plano), retomam pelo mesmo caminho do de retomar, e a aprovação nomeia a
+  proposta que a página mostrou (`digest`), para que um plano que mudou nesse meio-tempo, com outro comando de teste, não seja aprovado sem ser visto;
+- lê o Backlog só dos repositórios que o índice global de runs conhece, e só pelo `gh` e pelo `glab`, com argumentos fixos e
+  sem shell, na pasta do repositório, com o login do usuário (a label vem da configuração do repositório, validada pelo
+  esquema, e vai em um argumento só, `--label=<label>`); o título de uma issue é texto na página, nunca HTML, e o link de um
+  card só abre quando é `http:` ou `https:`;
 - não envia cabeçalhos CORS;
 - abre o banco em modo leitura;
 - não carrega nada de fora: os apps web são empacotados localmente, sem CDN, sem fontes nem imagens remotas, e funcionam
@@ -539,8 +700,9 @@ return { status: "tests-failed", ... };      // qualquer outro status = o workfl
 - run cancelado (`wf cancel`, `cancel_workflow`, Ctrl-C) → `cancelled`;
 - run que lançou erro ou estourou o teto → `error`;
 - `status` em `done/delivered/ok/success/succeeded` → `delivered`;
-- `status` em `seams-proposed/pending` → `pending`: o run parou esperando a decisão de alguém (como a aprovação das
-  seams do `implement-issue`), o que não é entrega nem falha;
+- `status` em `seams-proposed/test-command-proposed/untrusted-author/pending` → `pending`: o run parou esperando a decisão de
+  alguém (como a aprovação das seams ou do comando de teste do `implement-issue`, ou a leitura de uma issue de autor de
+  fora), o que não é entrega nem falha;
 - outro `status` → `failed`;
 - sem `status` → `unknown`.
 
@@ -574,14 +736,30 @@ Para validar a entrega depois, por exemplo quando o PR é aceito ou recusado, us
     entrega do `implement-issue` (JWT, `Bearer`, a senha ou o token numa URL): o workflow pode rodar o que a etapa
     devolve, e um comando de teste como `DATABASE_URL=postgres://u:senha@localhost/db npm test` não pode chegar a ele
     com `[REDACTED]`. Esses formatos ficam em claro no journal e no memo, e continuam redigidos no log de eventos e no que o
-    `implement-issue` publica no forge, GitHub ou GitLab (o comentário das seams e o corpo do PR passam inteiros pelo redator). É um esforço, não uma garantia: um segredo de outro
+    `implement-issue` publica no forge, GitHub ou GitLab (os comentários das seams, a proposta e a decisão, e o corpo do PR passam inteiros pelo redator). É um esforço, não uma garantia: um segredo de outro
     formato, numa variável com outro nome, passa;
   - cada texto é cortado em 32768 caracteres (`truncated` e `chars` dizem o quanto havia);
   - **retenção:** ao iniciar um run, o `text` dos runs do repositório fora dos 30 mais recentes (contando o que
-    começa) ou sem atividade há mais de 14 dias é apagado. O evento fica, com tipo, ids e tamanho. O journal não
-    entra: é o estado do resume. O `result` do `run-end` (o que o workflow devolveu) também não é conteúdo de etapa e
-    fica, mas passa pela redação como todo evento. `RunOptions.retention` muda os limites (`null` desliga um deles).
+    começa) ou sem atividade há mais de 14 dias é apagado. O evento fica, com tipo, ids e tamanho. O `result` do
+    `run-end` (o que o workflow devolveu) também não é conteúdo de etapa e fica, mas passa pela redação como todo evento.
+    O journal e o memo guardam o resultado de cada etapa, que também é código privado, e passam pela mesma retenção:
+    - **journal:** num run fora dela, o `result` de cada linha do journal é apagado. A linha fica, com a chave, o rótulo,
+      o modelo, os custos e `pruned: true`. Um journal sem os resultados não serve mais para retomar, então o run fica
+      marcado e o `--resume` (ou o `resumeRunId`) dele é recusado, antes de qualquer etapa, com
+      `run <id> cannot be resumed: the retention policy deleted the step results its journal held…`: rodar de novo todas as
+      etapas as cobraria de novo. Um run que não concluiu nenhuma etapa não tem resultado a perder e continua retomável;
+    - **memo:** a entrada com mais de 14 dias desde a última gravação é apagada (a etapa só roda de novo). O memo é do
+      repositório, não de um run, então só o limite de dias vale para ele.
+
+    `RunOptions.retention` muda os limites (`null` desliga um deles).
 - **Permissões:** pasta `0700`, arquivo `0600`.
+- **Permissões do estado dos runs (`.workflows/`):** o runtime cria `.workflows/` e as pastas dentro dela com `0700` e os
+  arquivos com `0600` (log de eventos, journal, trava do run, memo, registro e log de cada job), qualquer que seja o
+  `umask` do usuário: o log e o journal guardam código privado do repositório. `.workflows/worktrees/` fica de fora,
+  porque o código lá mantém os modos do git. O modo vale só quando o arquivo ou a pasta nasce: o runtime nunca chama `chmod`, e uma pasta ou
+  um log que já existe mantém o modo que tinha. Um arquivo que o runtime reescreve inteiro (o registro de um job, o log que a
+  retenção poda) é um arquivo novo e nasce `0600`: o modo só se aperta. O `wf doctor` (verificação `state`) avisa de uma `.workflows/` que o grupo ou os outros alcançam e
+  dá o `chmod 700`. O instalador roda com `umask 077`, então `~/.cursor-workflows/` também nasce `0700`.
 - **Export anonimizado por padrão:** sem nome de repositório, sem `agent_id`, sem prompt, com erros redigidos. Use
   `--no-anonymize` só para análise local.
 - **Consolidação do time (V1):** cada pessoa roda `wf metrics export` e o time junta os CSVs num BI. A atribuição

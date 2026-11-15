@@ -182,9 +182,12 @@ forgeTest("a repo argument that is a URL on another host decides the forge by th
   assert.equal(forgeState().wrongCli, undefined, `the CLI of the origin's forge (${forge}) was never run`);
 });
 
+/** A repository path as the forge has it: GitHub's is owner/name, GitLab's may run through subgroups. */
+const projectOf = (forge: TestForge) => (forge === "github" ? "owner/project" : "group/sub/project");
+
 forgeTest("a repo argument without a host leaves the forge to the origin's host", async (forge) => {
   issue(["complexity:medium"]);
-  const r = await run({ repo: "group/sub/project" });
+  const r = await run({ repo: projectOf(forge) });
   assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
   assert.equal(progressOf(r.runId).forge, forge);
   assert.equal(forgeState().wrongCli, undefined);
@@ -192,7 +195,8 @@ forgeTest("a repo argument without a host leaves the forge to the origin's host"
 
 forgeTest("a repo argument on a host nobody declared fails before any step, naming that host and the `forges` key; declared, its forge answers", async (forge) => {
   issue(["complexity:medium"]);
-  const url = "https://git.example.com/group/sub/project";
+  const other = OTHER[forge];
+  const url = `https://git.example.com/${projectOf(other)}`;
   const r = await run({ repo: url });
   assert.equal(r.status, "failed", JSON.stringify(r.result));
   assert.match(r.error!, /git\.example\.com/);
@@ -200,7 +204,6 @@ forgeTest("a repo argument on a host nobody declared fails before any step, nami
   assert.match(r.error!, /repo/, "it says the argument named the host, not the origin");
   assertNothingStarted("an undeclared host in the repo argument");
 
-  const other = OTHER[forge];
   writeRepoConfig(fx.repo, { forges: { "git.example.com": other } });
   answerWith(other);
   const declared = await run({ repo: url });
@@ -265,7 +268,7 @@ forgeTest(
     await run({});
     const calls = forgeState().calls;
     assert.deepEqual(calls[0], ["issue", "view", "7", "--output", "json"]);
-    assert.deepEqual(calls.find((c) => c[0] === "api" && !c.includes("POST")), ["api", "--paginate", "projects/:fullpath/issues/7/notes"]);
+    assert.deepEqual(calls.find((c) => c[0] === "api" && !c.includes("POST") && c.some((arg) => arg.endsWith("/notes"))), ["api", "--paginate", "projects/:fullpath/issues/7/notes"]);
   },
   ["gitlab"],
 );

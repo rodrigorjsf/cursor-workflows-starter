@@ -1,6 +1,6 @@
-// The runtime's messages are English: what it prints, returns or throws reaches agents (the MCP tools, the `wf` CLI, `wf doctor`,
-// `wf init`, `wf upgrade`), and agent-facing text is English. Scans every string literal and template text in
-// packages/runtime/src with the TypeScript parser, so comments are not read.
+// Seam: the runtime's source files, read with the TypeScript parser. The runtime's messages are English: what it prints, returns
+// or throws reaches agents (the MCP tools, the `wf` CLI, `wf doctor`, `wf init`, `wf upgrade`), and agent-facing text is English.
+// Scans every string literal and template text in packages/runtime/src, so comments are not read.
 //
 // Comments follow their own rule, which this check does not enforce: a new comment is English, even in a file whose older
 // comments are pt-BR; those older comments are not translated. Sources the book renders keep pt-BR: the JSDoc of

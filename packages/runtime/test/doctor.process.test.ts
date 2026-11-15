@@ -1,17 +1,22 @@
 // Seam: the process. `wf doctor` is spawned (against the fake Cursor SDK) in a temporary repo with a temporary home, as
 // the IDE's environment would be: the kit sits at ~/.cursor-workflows/kit, the repo has the MCP configs `wf init` writes,
-// and `gh`, `glab` and `node` are whatever the PATH of the process says (git is the real one). The tests read the report,
-// the exit code and the messages; they never import the doctor.
+// and `gh`, `glab` and `node` are whatever the PATH of the process says (git is the real one). The fake `gh` answers `gh api -i --silent user`
+// from the recording of the real one (packages/runtime/test/fixtures/gh/recordings.json), setting only the scopes header. The `host` check
+// reads the WSL interop files the kernel exposes: every run points it at files of the test's own (`WF_DOCTOR_WSL_INTEROP_FILES`), so the
+// machine the suite runs on, WSL or not, never decides a result. The tests read the report, the exit code and the messages; they never
+// import the doctor.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { after, before, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { GH_RECORDINGS_PATH, type GhRecordingsFile, TOKEN_SCOPES_RECORDING } from "../../../scripts/verify/record-gh-fixtures.js";
 import { type Recording, recorded } from "./glab-recordings.js";
 import { copyKit } from "./kit-copy.js";
+import { KIT_TAMPERING, PLANTED_NPMRC, git as gitIn, makeOrigin } from "./kit-origin.js";
 
 const PACKAGE = join(import.meta.dirname, "..");
 const KIT_ROOT = join(PACKAGE, "..", "..");
@@ -63,6 +68,7 @@ function env(bins: string[], extra: Record<string, string> = {}, userHome = home
     TSX_TSCONFIG_PATH: join(kit, "packages", "runtime", "tsconfig.test.json"),
     WF_METRICS: "off",
     WF_DASH_AUTOSTART: "off", // the tests must not leave a dashboard behind
+    WF_DOCTOR_WSL_INTEROP_FILES: join(sandbox, "no-wsl-interop"), // a file that is not there: the host is not WSL, whatever the machine running the suite is
     ...extra,
   };
 }
@@ -99,15 +105,60 @@ function homeWithConfig(config: unknown): string {
   return userHome;
 }
 
+interface FakeGhOptions {
+  /** The value of the `X-Oauth-Scopes` header in the recorded answer to `gh api -i --silent user`: a classic token's scopes. `null` leaves the header out, as GitHub does for a fine-grained token. Default: `repo`, the scope the kit needs. */
+  scopes?: string | null;
+  /** Makes `gh api` fail with this on stderr and nothing on stdout, as a gh that cannot reach GitHub does. */
+  apiFails?: string;
+  /** Makes `gh api` print the recorded headers without the scopes header and exit 1 with nothing on stderr: an answer that is an error and says nothing about why. */
+  apiFailsWithHeaders?: true;
+  /** A token this gh holds: `auth status` prints it, and `auth token` answers with it, as `gh auth status --show-token` and `gh auth token` would. */
+  token?: string;
+}
+
+const shellQuoted = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`;
+
+/**
+ * The shell that makes a fake `gh` answer `gh api -i --silent user` as the real one did when it was recorded: the recorded
+ * headers with only the scopes header set, for the host of any `--hostname` (or none), and a refusal of any other command line.
+ */
+function fakeGhApi({ scopes = "repo", apiFails, apiFailsWithHeaders }: FakeGhOptions): string[] {
+  if (apiFails !== undefined) return [`printf '%s\\n' ${shellQuoted(apiFails)} >&2`, "exit 1"];
+  const recording = (JSON.parse(readFileSync(GH_RECORDINGS_PATH, "utf8")) as GhRecordingsFile).recordings[TOKEN_SCOPES_RECORDING];
+  assert.ok(recording, `${GH_RECORDINGS_PATH} has no "${TOKEN_SCOPES_RECORDING}" recording: run scripts/verify/record-gh-fixtures.ts`);
+  const stdout = scopes === null || apiFailsWithHeaders ? recording.stdout.replace(/^X-Oauth-Scopes:.*\r?\n/m, "") : recording.stdout.replace(/^X-Oauth-Scopes:.*$/m, `X-Oauth-Scopes: ${scopes}`);
+  assert.notEqual(stdout, recording.stdout, "the recording has an X-Oauth-Scopes header to set");
+  const host = recording.args.indexOf("--hostname");
+  const withHost = `"${recording.args.slice(0, host + 1).join(" ")} "*" ${recording.args.slice(host + 2).join(" ")}"`;
+  const withoutHost = `"${recording.args.filter((_, at) => at !== host && at !== host + 1).join(" ")}"`;
+  return [
+    'case "$*" in',
+    `  ${withHost} | ${withoutHost}) printf '%s' ${shellQuoted(stdout)}; exit ${apiFailsWithHeaders ? 1 : 0} ;;`,
+    "esac",
+    'echo "gh: not the command line that was recorded: $*" >&2',
+    "exit 1",
+  ];
+}
+
 /**
  * A forge CLI that logs its arguments, then answers `auth status` as a logged-in user would. `said` makes it a logged-out one: a string
- * is what it prints on stderr before it exits 1, and a recording is the real glab's answer (its stderr and its exit code).
+ * is what it prints on stderr before it exits 1, and a recording is the real glab's answer (its stderr and its exit code). The `gh`
+ * answers `api` from the recording of the real one (`options`).
  */
-function fakeForgeCli(name: "gh" | "glab", said?: string | Recording): { dir: string; calls: () => string[] } {
+function fakeForgeCli(name: "gh" | "glab", said?: string | Recording, options: FakeGhOptions = {}): { dir: string; calls: () => string[] } {
   const log = join(sandbox, `${name}-${++counter}.log`);
   const answer = typeof said === "string" ? { exitCode: 1, stderr: `${said}\n` } : (said ?? { exitCode: 0, stderr: "" });
-  const quoted = `'${answer.stderr.replaceAll("'", `'\\''`)}'`; // printf is a builtin: the PATH of a doctor run holds no `cat`
-  const dir = fakeBin(name, `echo "$*" >> "${log}"\nprintf '%s' ${quoted} >&2\nexit ${answer.exitCode}`);
+  const quoted = shellQuoted(answer.stderr); // printf is a builtin: the PATH of a doctor run holds no `cat`
+  const { token } = options;
+  const script = [
+    `echo "$*" >> "${log}"`,
+    ...(token === undefined ? [] : [`if [ "$1 $2" = "auth token" ]; then printf '%s\\n' ${shellQuoted(token)}; exit 0; fi`]),
+    ...(name === "gh" ? ['if [ "$1" = api ]; then', ...fakeGhApi(options), "fi"] : []),
+    ...(token === undefined ? [] : [`printf '%s\\n' ${shellQuoted(`  - Token: ${token}`)}`]),
+    `printf '%s' ${quoted} >&2`,
+    `exit ${answer.exitCode}`,
+  ].join("\n");
+  const dir = fakeBin(name, script);
   return { dir, calls: () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []) };
 }
 
@@ -154,7 +205,7 @@ function wf(repo: string, args: string[], { bins = [ghLoggedIn], env: extra, kit
 
 interface Check {
   id: string;
-  status: "pass" | "fail";
+  status: "pass" | "warn" | "fail";
   message: string;
   hint?: string;
 }
@@ -169,14 +220,14 @@ const checkOf = (report: Report, id: string): Check => {
   return check;
 };
 
-test("on a healthy setup every check passes: exit 0, and --json lists the eight checks in a fixed order, none with a hint", () => {
+test("on a healthy setup every check passes: exit 0, and --json lists the eleven checks in a fixed order, none with a hint", () => {
   const r = doctor(repoCopy());
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const report = reportOf(r);
   assert.equal(report.ok, true);
   assert.deepEqual(
     report.checks.map((c) => c.id),
-    ["node", "dependencies", "login", "models", "forge", "mcp-server", "config", "kit-version"],
+    ["node", "dependencies", "endpoints", "login", "models", "forge", "mcp-server", "config", "kit-version", "sandbox", "kit", "state", "host"],
   );
   for (const c of report.checks) assert.ok(c.status === "pass" && c.hint === undefined, `${c.id}: ${c.message}`);
   assert.equal(r.stderr, "", "the doctor writes its report to stdout and nothing to stderr");
@@ -186,7 +237,7 @@ test("without --json the report is text, one block per check with the fix hint u
   const healthy = doctor(repoCopy(), { args: [] });
   assert.equal(healthy.status, 0, healthy.stdout + healthy.stderr);
   assert.match(healthy.stdout, /\[ok\]\s+Node\.js: v\d+/);
-  assert.match(healthy.stdout, /All good: 8 checks passed\./);
+  assert.match(healthy.stdout, /All good: 13 checks passed\./);
 
   // Logged out and no gh in a GitHub repository: login, models (no catalog without a login) and forge fail.
   const r = doctor(gitRepoCopy("https://github.com/acme/widgets.git"), { args: [], bins: [], env: { FAKE_SDK_LOGGED_OUT: "1" } });
@@ -196,7 +247,95 @@ test("without --json the report is text, one block per check with the fix hint u
   assert.match(r.stdout, /\[FAIL\]\s+Cursor SDK login: /);
   assert.match(r.stdout, /how to fix: Log in with `wf login`/);
   assert.match(r.stdout, /\[FAIL\]\s+Forge CLI: /);
-  assert.match(r.stdout, /3 of 8 checks failed\./);
+  assert.match(r.stdout, /3 of 13 checks failed\./);
+});
+
+/** A repo with a `.workflows/` folder of mode `mode`, as an older kit (or a loose umask) leaves it. */
+function repoWithStateFolder(mode: number): string {
+  const repo = repoCopy();
+  mkdirSync(join(repo, ".workflows", "runs"), { recursive: true });
+  chmodSync(join(repo, ".workflows"), mode); // `mkdirSync`'s own mode is narrowed by the umask: set it
+  return repo;
+}
+
+test("a .workflows folder that other users can reach makes the state check warn, naming its mode and the fix; the doctor still passes", () => {
+  for (const mode of [0o755, 0o750, 0o711]) {
+    const repo = repoWithStateFolder(mode);
+    const r = doctor(repo);
+    assert.equal(r.status, 0, `${mode.toString(8)}: ${r.stdout}${r.stderr}`);
+    const state = checkOf(reportOf(r), "state");
+    assert.equal(state.status, "warn", mode.toString(8));
+    assert.ok(state.message.includes(join(repo, ".workflows")), state.message);
+    assert.ok(state.message.includes(mode.toString(8)), `the message names the mode ${mode.toString(8)}: ${state.message}`);
+    assert.match(state.hint ?? "", /chmod 700 /);
+    assert.ok(state.hint?.includes(join(repo, ".workflows")), "the hint names the folder to fix");
+  }
+});
+
+test("a private .workflows folder, and a repo that has none yet, pass the state check; the check creates nothing", () => {
+  const private0700 = checkOf(reportOf(doctor(repoWithStateFolder(0o700))), "state");
+  assert.equal(private0700.status, "pass");
+  assert.equal(private0700.hint, undefined);
+
+  const fresh = repoCopy();
+  const none = checkOf(reportOf(doctor(fresh)), "state");
+  assert.equal(none.status, "pass");
+  assert.match(none.message, /no run state/);
+  assert.equal(existsSync(join(fresh, ".workflows")), false, "a read-only check does not make the folder it looks for");
+});
+
+/** The hooks and MCP servers a cloned repository can bring: the three files a step that loads the project's settings runs code from. */
+function withRepoCode(repo: string): void {
+  put(join(repo, ".cursor", "hooks.json"), { version: 1, hooks: { beforeShellExecution: [{ command: "./hooks/audit.sh" }], afterFileEdit: [{ command: "node scripts/after-edit.mjs --fix" }] } });
+  put(join(repo, ".claude", "settings.json"), { hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "python3 .claude/guard.py" }] }] } });
+  const mcp = JSON.parse(readFileSync(join(repo, ".cursor", "mcp.json"), "utf8")) as { mcpServers: Record<string, unknown> };
+  mcp.mcpServers.docs = { command: "npx", args: ["-y", "@example/docs-server", "--root", "."] };
+  put(join(repo, ".cursor", "mcp.json"), mcp);
+}
+
+test("a repository whose settings run code makes the config check warn, listing every hook and MCP server command and not the kit's own server; the doctor still passes", () => {
+  const repo = repoCopy();
+  withRepoCode(repo);
+  const r = doctor(repo);
+  assert.equal(r.status, 0, "a warning does not fail the doctor");
+  const report = reportOf(r);
+  assert.equal(report.ok, true);
+
+  const config = checkOf(report, "config");
+  assert.equal(config.status, "warn", config.message);
+  for (const listed of [
+    ".cursor/hooks.json (beforeShellExecution): ./hooks/audit.sh",
+    ".cursor/hooks.json (afterFileEdit): node scripts/after-edit.mjs --fix",
+    ".claude/settings.json (PreToolUse): python3 .claude/guard.py",
+    '.cursor/mcp.json (MCP server "docs"): npx -y @example/docs-server --root .',
+  ]) {
+    assert.ok(config.message.includes(listed), `${listed} is not in: ${config.message}`);
+  }
+  assert.ok(!config.message.includes("tsx"), `the kit's own workflows server is not listed: ${config.message}`);
+  assert.ok(!config.message.includes('MCP server "workflows"'));
+  assert.match(config.message, /settingSources/);
+  assert.match(config.hint ?? "", /caps\.allowedSettingSources/);
+  assert.match(config.hint ?? "", /SECURITY\.md/);
+  for (const other of report.checks.filter((c) => c.id !== "config")) assert.equal(other.status, "pass", `${other.id}: ${other.message}`);
+});
+
+test("without code in the repository's settings, or when the global caps keep the project's settings out, the config check passes", () => {
+  assert.equal(checkOf(reportOf(doctor(repoCopy())), "config").status, "pass", "nothing but the kit's own server");
+
+  const repo = repoCopy();
+  withRepoCode(repo);
+  const withoutProject = homeWithConfig({ caps: { allowedSettingSources: ["user", "team", "mdm", "plugins"] } });
+  const config = checkOf(reportOf(doctor(repo, { home: withoutProject })), "config");
+  assert.equal(config.status, "pass", `"project" is not an allowed setting source, so a step never loads these files: ${config.message}`);
+});
+
+test("a hooks file that is not JSON is skipped, not a crash", () => {
+  const repo = repoCopy();
+  put(join(repo, ".cursor", "hooks.json"), "{ not json");
+  put(join(repo, ".claude", "settings.json"), JSON.stringify({ hooks: "nothing" }));
+  const r = doctor(repo);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(checkOf(reportOf(r), "config").status, "pass");
 });
 
 test("wf doctor --json reports an unusable repo config with its file and field path and a fix hint, and exits non-zero", () => {
@@ -258,11 +397,17 @@ test("a repo with no MCP server entry for the kit fails the dependencies check a
   assert.match(missing.hint ?? "", /wf init/);
 });
 
-test("the login check names the key it authenticated with, and a logged-out SDK fails with how to log in, without echoing the API key", () => {
+test("the login check names the key it authenticated with and reminds the user that Privacy Mode cannot be read through the SDK, and a logged-out SDK fails with how to log in, without echoing the API key", () => {
   const repo = repoCopy();
   const loggedIn = checkOf(reportOf(doctor(repo)), "login");
   assert.equal(loggedIn.status, "pass", loggedIn.message);
   assert.match(loggedIn.message, /fake-key/);
+  // The SDK has no way to read the mode (`Cursor.me()` carries no such field), so a passing login can only remind.
+  assert.ok(
+    loggedIn.message.includes("Privacy Mode cannot be read through the SDK: confirm it is on in Cursor Settings > General"),
+    `the passing login check carries the Privacy Mode reminder: ${loggedIn.message}`,
+  );
+  assert.equal(loggedIn.hint, undefined, "a reminder is part of the message: a passing check has no hint");
   assert.doesNotMatch(loggedIn.message, /dev@example\.com/); // the account's email stays out of a report that may end up in a chat or an issue
 
   // The fake SDK fails like a rejected key does: with a message that carries the key it was given.
@@ -270,9 +415,66 @@ test("the login check names the key it authenticated with, and a logged-out SDK 
   const r = doctor(repo, { env: { FAKE_SDK_LOGGED_OUT: "1", CURSOR_API_KEY: secret } });
   const loggedOut = checkOf(reportOf(r), "login");
   assert.equal(loggedOut.status, "fail");
+  assert.doesNotMatch(loggedOut.message, /Privacy Mode/, "a failed login says why it failed, not the reminder");
   assert.match(loggedOut.hint ?? "", /wf login/);
   assert.match(loggedOut.hint ?? "", /CURSOR_API_KEY/);
   assert.ok(!r.stdout.includes(secret) && !r.stderr.includes(secret), "the key must not appear in the report");
+});
+
+// The SDK sends the API key to the address in CURSOR_BACKEND_URL (and CURSOR_WEBSITE_URL for login) with no check of its own. The
+// `endpoints` check is the kit's: an https URL on cursor.sh or cursor.com, or nothing. Until it passes, the checks that call the SDK
+// (login, models) do not run, because running them is what would send the key.
+test("the endpoints check passes with CURSOR_BACKEND_URL unset or a Cursor https address, and fails for http or another host, naming the variable and what is accepted", () => {
+  const repo = repoCopy();
+  const unset = checkOf(reportOf(doctor(repo)), "endpoints");
+  assert.equal(unset.status, "pass", unset.message);
+  assert.match(unset.message, /no endpoint variable is set|neither CURSOR_BACKEND_URL nor CURSOR_WEBSITE_URL/);
+
+  const cursor = checkOf(reportOf(doctor(repo, { env: { CURSOR_BACKEND_URL: "https://api2.cursor.sh", CURSOR_WEBSITE_URL: "https://cursor.com" } })), "endpoints");
+  assert.equal(cursor.status, "pass", cursor.message);
+  assert.match(cursor.message, /CURSOR_BACKEND_URL=https:\/\/api2\.cursor\.sh/);
+
+  for (const value of ["http://api.cursor.sh", "https://evil.example"]) {
+    const r = doctor(repo, { env: { CURSOR_BACKEND_URL: value } });
+    assert.equal(r.status, 1, value);
+    const bad = checkOf(reportOf(r), "endpoints");
+    assert.equal(bad.status, "fail", value);
+    assert.match(bad.message, new RegExp(`CURSOR_BACKEND_URL is ${value.replace(/[.]/g, "\\.")}, which is not an https URL on cursor\\.sh or cursor\\.com`));
+    assert.match(bad.hint ?? "", /Unset CURSOR_BACKEND_URL/);
+  }
+});
+
+test("a bad CURSOR_WEBSITE_URL fails the endpoints check too, and a value's userinfo, path and query never reach the report", () => {
+  const secret = "s3cr3t-in-a-url";
+  const r = doctor(repoCopy(), { env: { CURSOR_WEBSITE_URL: `https://user:${secret}@evil.example/login?token=${secret}` } });
+  const bad = checkOf(reportOf(r), "endpoints");
+  assert.equal(bad.status, "fail");
+  assert.match(bad.message, /CURSOR_WEBSITE_URL is https:\/\/evil\.example,/);
+  assert.ok(!r.stdout.includes(secret) && !r.stderr.includes(secret), "the report repeats part of the URL");
+});
+
+test("while the endpoints check fails, login and models do not run: they say so, and the SDK is not asked for anything", () => {
+  const r = doctor(repoCopy(), { env: { CURSOR_BACKEND_URL: "https://evil.example" } });
+  const report = reportOf(r);
+  for (const id of ["login", "models"]) {
+    const check = checkOf(report, id);
+    assert.equal(check.status, "fail", id);
+    assert.match(check.message, /^not run: /, id);
+    assert.match(check.hint ?? "", /endpoints check/, id);
+    assert.doesNotMatch(check.message, /fake-key|catalog/, `${id} asked the SDK: ${check.message}`);
+  }
+  assert.equal(report.ok, false);
+});
+
+test("an endpoint variable in the entry's env of the repo's MCP config is checked too: the server the IDE starts gets it", () => {
+  const repo = repoCopy();
+  rmSync(join(repo, ".mcp.json"));
+  setEntryEnv(repo, ".cursor/mcp.json", { CURSOR_BACKEND_URL: "https://evil.example" });
+  const bad = checkOf(reportOf(doctor(repo)), "endpoints");
+  assert.equal(bad.status, "fail");
+  assert.match(bad.message, /\.cursor\/mcp\.json: CURSOR_BACKEND_URL is https:\/\/evil\.example,/);
+  setEntryEnv(repo, ".cursor/mcp.json", { CURSOR_BACKEND_URL: "https://api2.cursor.sh" });
+  assert.equal(checkOf(reportOf(doctor(repo)), "endpoints").status, "pass");
 });
 
 test("the models check compares every model the repo's config ends up using with the account's catalog, ids and aliases alike", () => {
@@ -325,11 +527,12 @@ test("the forge check of a GitHub repository runs `gh auth status` for the origi
   const gh = fakeForgeCli("gh");
   const ok = checkOf(reportOf(doctor(repo, { bins: [gh.dir] })), "forge");
   assert.equal(ok.status, "pass", ok.message);
-  assert.deepEqual(gh.calls(), ["auth status --hostname github.com"]);
+  assert.deepEqual(gh.calls(), ["auth status --hostname github.com", "api --hostname github.com -i --silent user"], "once logged in, the token's scopes are asked for, from the same host");
 
   const loggedOutGh = fakeForgeCli("gh", "You are not logged into any GitHub hosts.");
   const loggedOut = checkOf(reportOf(doctor(repo, { bins: [loggedOutGh.dir] })), "forge");
   assert.equal(loggedOut.status, "fail");
+  assert.deepEqual(loggedOutGh.calls(), ["auth status --hostname github.com"], "a login that failed has no token to ask about");
   assert.match(loggedOut.message, /not logged into any GitHub hosts/);
   assert.match(loggedOut.hint ?? "", /gh auth login --hostname github\.com/);
 
@@ -388,7 +591,158 @@ test("a declared GitHub host is checked with gh for that host, and a missing gla
   const gh = fakeForgeCli("gh");
   const forge = checkOf(reportOf(doctor(repo, { bins: [gh.dir] })), "forge");
   assert.equal(forge.status, "pass", forge.message);
-  assert.deepEqual(gh.calls(), ["auth status --hostname ghe.example.com"]);
+  assert.deepEqual(gh.calls(), ["auth status --hostname ghe.example.com", "api --hostname ghe.example.com -i --silent user"]);
+});
+
+test("the forge check warns, and the doctor still exits 0, when the GitHub token holds scopes the kit does not need: it names them, and the hint removes them", () => {
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  const gh = fakeForgeCli("gh", undefined, { scopes: "admin:public_key, delete_repo, repo" });
+  const r = doctor(repo, { bins: [gh.dir] });
+  assert.equal(r.status, 0, "a warning does not fail the doctor: " + r.stdout + r.stderr);
+  const report = reportOf(r);
+  assert.equal(report.ok, true);
+  const forge = checkOf(report, "forge");
+  assert.equal(forge.status, "warn");
+  assert.match(forge.message, /admin:public_key, delete_repo/);
+  assert.doesNotMatch(forge.message, /\brepo\b/, "the scope the kit needs is not named as a problem");
+  assert.match(forge.hint ?? "", /gh auth refresh --remove-scopes admin:public_key,delete_repo --hostname github\.com/);
+  assert.match(forge.hint ?? "", /fine-grained token limited to the target repository, with an expiry, in GH_TOKEN/);
+  assert.equal(report.checks.filter((c) => c.status !== "pass").length, 1, "only the forge check has something to say");
+});
+
+test("a token that holds only scopes the kit can live with passes the forge check, and a write scope that plants a key is as broad as the admin one", () => {
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  const fine = checkOf(reportOf(doctor(repo, { bins: [fakeForgeCli("gh", undefined, { scopes: "gist, read:org, repo" }).dir] })), "forge");
+  assert.equal(fine.status, "pass", fine.message);
+  assert.match(fine.message, /gist, read:org, repo/);
+  assert.equal(fine.hint, undefined);
+
+  const classic = checkOf(reportOf(doctor(repo, { bins: [fakeForgeCli("gh", undefined, { scopes: "repo, write:public_key, write:gpg_key, workflow" }).dir] })), "forge");
+  assert.equal(classic.status, "warn");
+  assert.match(classic.message, /write:public_key, write:gpg_key, workflow/);
+
+  const none = checkOf(reportOf(doctor(repo, { bins: [fakeForgeCli("gh", undefined, { scopes: "" }).dir] })), "forge");
+  assert.equal(none.status, "pass", "a classic token with no scopes has nothing broad");
+});
+
+test("a token with no scopes header is a fine-grained one: it passes, and says a scoped token is in use when GH_TOKEN holds it", () => {
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  const gh = fakeForgeCli("gh", undefined, { scopes: null });
+  const fromEnv = checkOf(reportOf(doctor(repo, { bins: [gh.dir], env: { GH_TOKEN: "fine-grained-token-from-the-environment" } })), "forge");
+  assert.equal(fromEnv.status, "pass", fromEnv.message);
+  assert.match(fromEnv.message, /a scoped token is in use/);
+  assert.match(fromEnv.message, /GH_TOKEN/);
+  assert.doesNotMatch(fromEnv.message, /fine-grained-token-from-the-environment/);
+
+  const stored = checkOf(reportOf(doctor(repo, { bins: [gh.dir] })), "forge");
+  assert.equal(stored.status, "pass", stored.message);
+  assert.match(stored.message, /no `X-OAuth-Scopes` header/);
+  assert.doesNotMatch(stored.message, /GH_TOKEN/);
+});
+
+test("a token in GH_TOKEN with broad scopes warns with the hint that fits it: `gh auth refresh` cannot narrow a token from the environment", () => {
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  const gh = fakeForgeCli("gh", undefined, { scopes: "repo, workflow" });
+  const forge = checkOf(reportOf(doctor(repo, { bins: [gh.dir], env: { GH_TOKEN: "classic-token-from-the-environment" } })), "forge");
+  assert.equal(forge.status, "warn");
+  assert.match(forge.message, /workflow/);
+  assert.match(forge.hint ?? "", /GH_TOKEN/);
+  assert.doesNotMatch(forge.hint ?? "", /--remove-scopes/, "the command that cannot work for a token from the environment is not offered");
+});
+
+test("when GitHub cannot be asked for the scopes the forge check warns with what gh said, and the doctor still exits 0", () => {
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  const r = doctor(repo, { bins: [fakeForgeCli("gh", undefined, { apiFails: "error connecting to api.github.com" }).dir] });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const forge = checkOf(reportOf(r), "forge");
+  assert.equal(forge.status, "warn");
+  assert.match(forge.message, /could not read the token's scopes/);
+  assert.match(forge.message, /error connecting to api\.github\.com/);
+  assert.match(forge.hint ?? "", /gh api --hostname github\.com -i --silent user/);
+});
+
+test("a failed `gh api` that says nothing on stderr does not put the response headers in the warning", () => {
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  const r = doctor(repo, { bins: [fakeForgeCli("gh", undefined, { scopes: null, apiFailsWithHeaders: true }).dir] });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const forge = checkOf(reportOf(r), "forge");
+  assert.equal(forge.status, "warn");
+  assert.match(forge.message, /could not read the token's scopes/);
+  assert.doesNotMatch(forge.message, /HTTP\/2|Access-Control|X-Github|Content-Type/i, "the answer's headers are not what the report says about a failure");
+});
+
+test("a token for a *.ghe.com host comes from GH_TOKEN, as for github.com, and not from the enterprise variables", () => {
+  const repo = gitRepoCopy("git@acme.ghe.com:acme/widgets.git");
+  put(repoConfigPath(repo), { forges: { "acme.ghe.com": "github" } });
+  const gh = fakeForgeCli("gh", undefined, { scopes: null });
+  const fromGhToken = checkOf(reportOf(doctor(repo, { bins: [gh.dir], env: { GH_TOKEN: "fine-grained-token-for-the-ghe-com-tenant" } })), "forge");
+  assert.equal(fromGhToken.status, "pass", fromGhToken.message);
+  assert.match(fromGhToken.message, /a scoped token is in use \(GH_TOKEN\)/);
+
+  const classic = checkOf(reportOf(doctor(repo, { bins: [fakeForgeCli("gh", undefined, { scopes: "repo, workflow" }).dir], env: { GH_TOKEN: "classic-token-for-the-ghe-com-tenant" } })), "forge");
+  assert.equal(classic.status, "warn");
+  assert.match(classic.hint ?? "", /in GH_TOKEN/, "the replacement goes where gh reads it for this host");
+
+  // A self-managed Enterprise Server host reads the enterprise variables, and GH_TOKEN there is for github.com.
+  const server = gitRepoCopy("git@ghe.example.com:acme/widgets.git");
+  put(repoConfigPath(server), { forges: { "ghe.example.com": "github" } });
+  const own = checkOf(reportOf(doctor(server, { bins: [gh.dir], env: { GH_ENTERPRISE_TOKEN: "fine-grained-token-for-the-server" } })), "forge");
+  assert.match(own.message, /a scoped token is in use \(GH_ENTERPRISE_TOKEN\)/);
+  const other = checkOf(reportOf(doctor(server, { bins: [gh.dir], env: { GH_TOKEN: "token-for-github-com-only" } })), "forge");
+  assert.doesNotMatch(other.message, /GH_TOKEN/, "a token for github.com is not the one used against this host");
+});
+
+test("the scopes are not asked for outside GitHub: a GitLab repository, and a repository with no forge, make no `gh api` call", () => {
+  const glab = fakeForgeCli("glab");
+  const gh = fakeForgeCli("gh", undefined, { scopes: "admin:org" });
+  const onGitlab = checkOf(reportOf(doctor(gitRepoCopy("https://gitlab.com/acme/widgets.git"), { bins: [glab.dir, gh.dir] })), "forge");
+  assert.equal(onGitlab.status, "pass", onGitlab.message);
+  assert.equal(checkOf(reportOf(doctor(repoCopy(), { bins: [gh.dir] })), "forge").status, "pass");
+  assert.deepEqual(gh.calls(), []);
+});
+
+test("the token never reaches the report or the console: the doctor does not ask gh for it, and prints only the scopes header", () => {
+  const token = "not-a-shaped-secret-4711-the-fake-gh-holds"; // no credential shape, so only the doctor's own care keeps it out, not the redactor
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  for (const scopes of ["admin:public_key, repo", "repo"]) {
+    const gh = fakeForgeCli("gh", undefined, { scopes, token });
+    for (const args of [["--json"], []]) {
+      const r = doctor(repo, { bins: [gh.dir], args });
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      assert.ok(!r.stdout.includes(token) && !r.stderr.includes(token), `the token appears in the output of \`wf doctor ${args.join(" ")}\` for the scopes "${scopes}"`);
+    }
+    assert.ok(gh.calls().every((call) => !/token|-t\b|--show-token/.test(call)), `gh was asked for the token: ${gh.calls().join(" | ")}`);
+    assert.deepEqual(new Set(gh.calls()), new Set(["auth status --hostname github.com", "api --hostname github.com -i --silent user"]));
+  }
+});
+
+test("--json shows a warning as `status: warn` with its hint and `ok: true`, and the checks without a warning keep their shape", () => {
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  const report = reportOf(doctor(repo, { bins: [fakeForgeCli("gh", undefined, { scopes: "admin:public_key, repo" }).dir] }));
+  assert.equal(report.ok, true);
+  assert.deepEqual(
+    report.checks.map((c) => [c.id, c.status]),
+    [["node", "pass"], ["dependencies", "pass"], ["endpoints", "pass"], ["login", "pass"], ["models", "pass"], ["forge", "warn"], ["mcp-server", "pass"], ["config", "pass"], ["kit-version", "pass"], ["sandbox", "pass"], ["kit", "pass"], ["state", "pass"], ["host", "pass"]],
+  );
+  assert.deepEqual(Object.keys(checkOf(report, "forge")), ["id", "title", "status", "message", "hint"]);
+  assert.deepEqual(Object.keys(checkOf(report, "node")), ["id", "title", "status", "message"]);
+});
+
+test("without --json a warning prints as `[warn]` with its fix hint, and the last line counts it: the exit code stays 0 unless a check failed", () => {
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  const gh = fakeForgeCli("gh", undefined, { scopes: "admin:public_key, repo" });
+  const warned = doctor(repo, { bins: [gh.dir], args: [] });
+  assert.equal(warned.status, 0, warned.stdout + warned.stderr);
+  assert.match(warned.stdout, /\[warn\]\s+Forge CLI: GitHub at github\.com: .*admin:public_key/);
+  assert.match(warned.stdout, /how to fix: Remove them with `gh auth refresh --remove-scopes admin:public_key --hostname github\.com`/);
+  assert.match(warned.stdout, /\[ok\]\s+Node\.js/);
+  assert.match(warned.stdout, /All 13 checks passed, 1 with a warning\./);
+
+  const both = doctor(repo, { bins: [gh.dir], args: [], env: { FAKE_SDK_LOGGED_OUT: "1" } });
+  assert.equal(both.status, 1, "a failure still fails the doctor");
+  assert.match(both.stdout, /\[warn\]\s+Forge CLI/);
+  assert.match(both.stdout, /\[FAIL\]\s+Cursor SDK login/);
+  assert.match(both.stdout, /2 of 13 checks failed, 1 with a warning\./);
 });
 
 test("an origin on a host nobody declared fails the forge check naming the host and the `forges` key, and a hint to declare it", () => {
@@ -411,7 +765,7 @@ test("outside a git repository, or in one with no origin, the forge check passes
   const gh = fakeForgeCli("gh");
   const local = checkOf(reportOf(doctor(gitRepoCopy("/srv/git/widgets.git"), { bins: [gh.dir] })), "forge");
   assert.equal(local.status, "pass", local.message);
-  assert.deepEqual(gh.calls(), ["auth status"]);
+  assert.deepEqual(gh.calls(), ["auth status", "api -i --silent user"]);
 });
 
 test("outside a git repository the forge check passes whatever the language git speaks: git is asked in the C locale", () => {
@@ -605,7 +959,7 @@ test("a check that throws is a failed check naming the workflow, not a crashed d
   const r = doctor(repo);
   assert.equal(r.status, 1, r.stderr);
   const report = reportOf(r);
-  assert.equal(report.checks.length, 8);
+  assert.equal(report.checks.length, 13);
   const config = checkOf(report, "config");
   assert.equal(config.status, "fail");
   assert.match(config.message, /bad-roles/);
@@ -687,4 +1041,242 @@ test("the kit-version check also tests the kit the IDE would start, which is not
   const same = checkOf(reportOf(doctor(repoAccepting(">=1.0.0 <2.0.0"), { kit: running })), "kit-version");
   assert.equal(same.status, "pass", same.message);
   assert.ok(same.message.includes("wf") && same.message.includes(".cursor/mcp.json") && same.message.includes("1.4.0"), same.message);
+});
+
+/** A user's home with the global config a fresh install writes: `caps.requireSandbox: true`. */
+const sandboxedHome = () => homeWithConfig({ caps: { requireSandbox: true } });
+const onLinux = { skip: process.platform !== "linux" && "bubblewrap is a Linux requirement" };
+
+test("the sandbox check passes, with nothing to look for, when the global caps do not require the sandbox", () => {
+  const check = checkOf(reportOf(doctor(repoCopy())), "sandbox");
+  assert.equal(check.status, "pass", check.message);
+  assert.match(check.message, /not required/);
+});
+
+test("requireSandbox true with no bwrap on the PATH fails the sandbox check, names bubblewrap and says how to fix it (issue #62)", onLinux, () => {
+  const r = doctor(repoCopy(), { home: sandboxedHome() });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  const check = checkOf(reportOf(r), "sandbox");
+  assert.equal(check.status, "fail");
+  assert.match(check.message, /bubblewrap/);
+  assert.match(check.message, /`bwrap` is not on the PATH/);
+  assert.match(check.hint ?? "", /Install bubblewrap/);
+  assert.match(check.hint ?? "", /requireSandbox/);
+});
+
+test("requireSandbox true with bwrap on the PATH passes the sandbox check and says where bubblewrap is", onLinux, () => {
+  const bwrap = fakeBin("bwrap", "exit 0");
+  const check = checkOf(reportOf(doctor(repoCopy(), { home: sandboxedHome(), bins: [ghLoggedIn, bwrap] })), "sandbox");
+  assert.equal(check.status, "pass", check.message);
+  assert.ok(check.message.includes(join(bwrap, "bwrap")), check.message);
+});
+
+test("with the sandbox required, the check says whether reads are limited to the workspace: a step can read the Cursor key until readBoundary is workspace in a sandbox.json", onLinux, () => {
+  const bins = [ghLoggedIn, fakeBin("bwrap", "exit 0")];
+  const open = checkOf(reportOf(doctor(repoCopy(), { home: sandboxedHome(), bins })), "sandbox");
+  assert.equal(open.status, "pass", open.message);
+  assert.match(open.message, /readBoundary.*not "workspace"/);
+  assert.match(open.message, /~\/\.cursor\/sdk\/auth\.json/);
+
+  const repo = repoCopy();
+  put(join(repo, ".cursor", "sandbox.json"), { readBoundary: "workspace" });
+  const inRepo = checkOf(reportOf(doctor(repo, { home: sandboxedHome(), bins })), "sandbox");
+  assert.match(inRepo.message, /reads are limited to the workspace/);
+
+  const userHome = sandboxedHome();
+  put(join(userHome, ".cursor", "sandbox.json"), { readBoundary: "workspace" });
+  const inHome = checkOf(reportOf(doctor(repoCopy(), { home: userHome, bins })), "sandbox");
+  assert.match(inHome.message, /"workspace" in ~\/\.cursor\/sandbox\.json/);
+  assert.match(inHome.message, /has not measured/, "the kit measured the repository's file, not the user's");
+  assert.doesNotMatch(inHome.message, /reads are limited to the workspace/);
+
+  const overridden = repoCopy();
+  put(join(overridden, ".cursor", "sandbox.json"), { readBoundary: "system" });
+  assert.match(checkOf(reportOf(doctor(overridden, { home: userHome, bins })), "sandbox").message, /readBoundary.*not "workspace"/, "the repository's own setting wins over the user's");
+
+  const broken = repoCopy();
+  put(join(broken, ".cursor", "sandbox.json"), "{ not json");
+  assert.match(checkOf(reportOf(doctor(broken, { home: sandboxedHome(), bins })), "sandbox").message, /readBoundary.*not "workspace"/, "a sandbox.json that does not parse limits nothing");
+});
+
+// ---- the installed kit (issue #64) ----
+
+let kitOrigin: string | undefined;
+/** A kit repository with one release, `v0.3.0`: the stand-in for GitHub that every tag install and working copy below is cloned from. */
+const kitRepository = (): string => (kitOrigin ??= makeOrigin(join(sandbox, "kit-origin"), "0.3.0"));
+
+/**
+ * A user's home with a tag install: `.cursor-workflows/kit` is a clone of the kit at `v0.3.0`, as the installer leaves it.
+ * Its dependencies are not installed: these tests read the `kit` check, and the others may fail for want of them.
+ */
+function homeWithTagInstall(): { userHome: string; kit: string } {
+  const userHome = join(sandbox, `home-${++counter}`);
+  mkdirSync(join(userHome, ".cursor-workflows"), { recursive: true });
+  const kit = join(userHome, ".cursor-workflows", "kit");
+  gitIn(sandbox, "clone", "--quiet", "--branch", "v0.3.0", kitRepository(), kit);
+  return { userHome, kit };
+}
+
+const kitCheck = (userHome: string) => checkOf(reportOf(doctor(repoCopy(), { home: userHome })), "kit");
+
+test("the kit check passes for a tag install whose HEAD is the tag of its package version and whose tree is clean", () => {
+  const { userHome, kit } = homeWithTagInstall();
+  const check = kitCheck(userHome);
+  assert.equal(check.status, "pass", check.message);
+  assert.ok(check.message.includes(kit) && check.message.includes("v0.3.0"), check.message);
+  assert.equal(check.hint, undefined);
+});
+
+for (const { what, listed, plant } of KIT_TAMPERING) {
+  test(`the kit check fails for a tag install with ${what}: it lists the change and says to reinstall`, () => {
+    const { userHome, kit } = homeWithTagInstall();
+    plant(kit);
+    const check = kitCheck(userHome);
+    assert.equal(check.status, "fail", check.message);
+    assert.ok(check.message.includes(`the kit at ${kit} has local changes: ${listed}`), check.message);
+    assert.match(check.hint ?? "", /Reinstall the kit/);
+  });
+}
+
+test("the kit check fails when HEAD of a tag install is not exactly the tag of its package version, with a clean tree", () => {
+  const { userHome, kit } = homeWithTagInstall();
+  gitIn(kit, "commit", "--quiet", "--allow-empty", "-m", "a commit after the release");
+  const untagged = kitCheck(userHome);
+  assert.equal(untagged.status, "fail", untagged.message);
+  assert.ok(untagged.message.includes(`HEAD of the kit at ${kit} is not tagged, and the tag of its package version is v0.3.0`), untagged.message);
+  assert.doesNotMatch(untagged.message, /local changes/);
+  assert.match(untagged.hint ?? "", /Reinstall the kit/);
+
+  // Another release tag is not the tag of this kit's package version either.
+  gitIn(kit, "tag", "v0.3.1");
+  const otherTag = kitCheck(userHome);
+  assert.equal(otherTag.status, "fail", otherTag.message);
+  assert.ok(otherTag.message.includes("is tagged v0.3.1, and the tag of its package version is v0.3.0"), otherTag.message);
+});
+
+test("the kit check lists both problems of a kit that is on the wrong commit and has local changes", () => {
+  const { userHome, kit } = homeWithTagInstall();
+  gitIn(kit, "commit", "--quiet", "--allow-empty", "-m", "a commit after the release");
+  PLANTED_NPMRC.plant(kit);
+  const check = kitCheck(userHome);
+  assert.equal(check.status, "fail");
+  assert.match(check.message, /local changes: \?\? \.npmrc/);
+  assert.match(check.message, /is not tagged/);
+});
+
+test("the kit check reports a development install and does not check it, not even a working copy with local changes", () => {
+  // The default home links this checkout at the kit location, as `install.sh --dev` does.
+  const linked = kitCheck(home);
+  assert.equal(linked.status, "pass", linked.message);
+  assert.match(linked.message, /development install/);
+  assert.ok(linked.message.includes(KIT_ROOT), linked.message);
+
+  const copy = join(sandbox, `working-copy-${++counter}`);
+  gitIn(sandbox, "clone", "--quiet", kitRepository(), copy);
+  PLANTED_NPMRC.plant(copy);
+  gitIn(copy, "commit", "--quiet", "--allow-empty", "-m", "work in progress");
+  const dirty = kitCheck(homeWithKit(copy));
+  assert.equal(dirty.status, "pass", dirty.message);
+  assert.match(dirty.message, /development install/);
+});
+
+test("the kit check has nothing to check when no kit is installed in the home, and fails for a kit folder that is not a clone", () => {
+  const empty = join(sandbox, `home-${++counter}`);
+  mkdirSync(join(empty, ".cursor-workflows"), { recursive: true });
+  const none = kitCheck(empty);
+  assert.equal(none.status, "pass", none.message);
+  assert.match(none.message, /no kit is installed/);
+
+  const copied = join(sandbox, `home-${++counter}`);
+  mkdirSync(join(copied, ".cursor-workflows", "kit"), { recursive: true });
+  const notAClone = kitCheck(copied);
+  assert.equal(notAClone.status, "fail", notAClone.message);
+  assert.match(notAClone.message, /not a git clone/);
+  assert.match(notAClone.hint ?? "", /Reinstall the kit/);
+});
+
+// ---- the host: WSL interop (issue #73) ----
+
+/** What `/proc/sys/fs/binfmt_misc/WSLInterop` holds on a WSL2 distribution with interop on (read on 2026-11-15, kernel 6.18): the switch, then the binfmt entry. */
+const WSL_INTEROP_ON = "enabled\ninterpreter /init\nflags: PF\noffset 0\nmagic 4d5a\n";
+
+/** A file for the doctor to read as the WSL interop file, holding `content`. */
+function interopFile(content: string): string {
+  const file = join(sandbox, `interop-${++counter}`);
+  writeFileSync(file, content);
+  return file;
+}
+
+/** The `host` check of a doctor run that reads `files` (one path, or several as a PATH lists them) as the WSL interop files. */
+const hostCheck = (repo: string, ...files: string[]) => checkOf(reportOf(doctor(repo, { env: { WF_DOCTOR_WSL_INTEROP_FILES: files.join(delimiter) } })), "host");
+
+test("the host check warns, and the doctor still exits 0, when WSL interop is enabled: it names auth.json and the wsl.conf setting that closes the boundary, and changes nothing", () => {
+  const interop = interopFile(WSL_INTEROP_ON);
+  const r = doctor(repoCopy(), { env: { WF_DOCTOR_WSL_INTEROP_FILES: interop } });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const report = reportOf(r);
+  assert.equal(report.ok, true, "a warning leaves the report ok");
+  const host = checkOf(report, "host");
+  assert.equal(host.status, "warn", host.message);
+  assert.match(host.message, /~\/\.cursor\/sdk\/auth\.json/);
+  assert.ok(host.message.includes("\\\\wsl$"), "it says how a Windows process reaches the Linux home");
+  assert.match(host.message, /0600/);
+  assert.match(host.hint ?? "", /separate WSL distribution/);
+  assert.match(host.hint ?? "", /\/etc\/wsl\.conf/);
+  assert.match(host.hint ?? "", /\[interop\]/);
+  assert.match(host.hint ?? "", /enabled=false/);
+  assert.match(host.hint ?? "", /never changes or restarts WSL/);
+  assert.match(host.hint ?? "", /the paragraph on WSL in https:\/\/github\.com\/rodrigorjsf\/cursor-workflows-starter\/blob\/v[^ ]*\/SECURITY\.md/);
+  assert.deepEqual(
+    report.checks.filter((c) => c.status !== "pass").map((c) => c.id),
+    ["host"],
+    "no other check warns because of it",
+  );
+  assert.equal(readFileSync(interop, "utf8"), WSL_INTEROP_ON, "the doctor only reads the file");
+  assert.equal(r.stderr, "");
+
+  const text = doctor(repoCopy(), { args: [], env: { WF_DOCTOR_WSL_INTEROP_FILES: interop } });
+  assert.equal(text.status, 0, text.stdout + text.stderr);
+  assert.match(text.stdout, /\[warn\]\s+WSL interop: .*auth\.json/);
+  assert.match(text.stdout, /how to fix: For a repository you do not trust/);
+  assert.match(text.stdout, /All 13 checks passed, 1 with a warning\./);
+});
+
+test("with no WSL interop file the host check passes and says the host is not WSL or has interop off, with no hint", () => {
+  const host = hostCheck(repoCopy(), join(sandbox, "there-is-no-such-interop-file"));
+  assert.equal(host.status, "pass", host.message);
+  assert.match(host.message, /not WSL/);
+  assert.match(host.message, /interop is off/);
+  assert.equal(host.hint, undefined);
+});
+
+test("a WSL interop file that reads disabled passes the host check: Windows programs cannot be started from this distribution", () => {
+  const host = hostCheck(repoCopy(), interopFile("disabled\n"));
+  assert.equal(host.status, "pass", host.message);
+  assert.match(host.message, /interop is off/);
+  assert.equal(host.hint, undefined);
+});
+
+test("a WSL interop file that cannot be read is a warning that says why, not a failure and not a pass", () => {
+  const directory = join(sandbox, "interop-is-a-directory");
+  mkdirSync(directory);
+  const r = doctor(repoCopy(), { env: { WF_DOCTOR_WSL_INTEROP_FILES: directory } });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const host = checkOf(reportOf(r), "host");
+  assert.equal(host.status, "warn", host.message);
+  assert.match(host.message, /could not read/);
+  assert.match(host.message, /EISDIR/);
+  assert.match(host.hint ?? "", /the paragraph on WSL in https:\/\//);
+});
+
+test("interop registered under the name WSLInterop-late, which a systemd distribution can have in place of WSLInterop, warns too: a missing first file does not make the host safe", () => {
+  const late = interopFile(WSL_INTEROP_ON);
+  const host = hostCheck(repoCopy(), join(sandbox, "there-is-no-such-interop-file"), late);
+  assert.equal(host.status, "warn", host.message);
+  assert.ok(host.message.includes(late), `the warning names the file that says enabled: ${host.message}`);
+});
+
+test("when one interop file says enabled and the other disabled the host check warns, and a disabled file with an absent one passes", () => {
+  assert.equal(hostCheck(repoCopy(), interopFile("disabled\n"), interopFile(WSL_INTEROP_ON)).status, "warn");
+  assert.equal(hostCheck(repoCopy(), interopFile("disabled\n"), join(sandbox, "there-is-no-such-interop-file")).status, "pass");
 });

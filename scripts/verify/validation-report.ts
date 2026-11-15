@@ -13,6 +13,8 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, hostname, release, userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { withWarnings } from "../../packages/runtime/src/doctor-report.js";
+import { isRecord } from "../../packages/runtime/src/runtime/parse-json.js";
 import { createRedactor } from "../../packages/runtime/src/runtime/redaction.js";
 import { isEntryPoint } from "../lib/cli.js";
 
@@ -142,12 +144,15 @@ function scenariosOf(progress: Record<string, string>): Scenario[] {
   }));
 }
 
+const isDoctorCheck = (value: unknown): value is DoctorCheck =>
+  isRecord(value) && typeof value.id === "string" && typeof value.status === "string" && typeof value.message === "string" && (value.hint === undefined || typeof value.hint === "string");
+
 function doctorOf(text: string | undefined): Report["doctor"] {
   if (text === undefined) return null;
   try {
-    const parsed = JSON.parse(text) as { ok?: unknown; checks?: unknown };
-    if (!Array.isArray(parsed.checks)) return null;
-    const checks = (parsed.checks as DoctorCheck[]).map(({ id, status, message, hint }) => ({ id, status, message, ...(hint ? { hint } : {}) }));
+    const parsed: unknown = JSON.parse(text);
+    if (!isRecord(parsed) || !Array.isArray(parsed.checks) || !parsed.checks.every(isDoctorCheck)) return null;
+    const checks = parsed.checks.map(({ id, status, message, hint }) => ({ id, status, message, ...(hint ? { hint } : {}) }));
     return { ok: parsed.ok === true, checks };
   } catch {
     return null;
@@ -217,7 +222,8 @@ function issueBody(report: Report): string {
     "",
   ];
   if (doctor) {
-    lines.push(`${doctor.ok ? "All checks passed." : "At least one check failed."}`, "", "| Check | Status | Message |", "|---|---|---|", ...doctor.checks.map((c) => `| ${cell(c.id)} | ${cell(c.status)} | ${cell(c.message)} |`));
+    const warned = doctor.checks.filter((c) => c.status === "warn").length;
+    lines.push(`${doctor.ok ? `All checks passed${warned ? `, ${withWarnings(warned)}` : ""}.` : "At least one check failed."}`, "", "| Check | Status | Message |", "|---|---|---|", ...doctor.checks.map((c) => `| ${cell(c.id)} | ${cell(c.status)} | ${cell(c.message)} |`));
   } else {
     lines.push("No doctor report was recorded.");
   }

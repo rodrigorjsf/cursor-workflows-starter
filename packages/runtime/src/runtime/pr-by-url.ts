@@ -17,6 +17,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { knownForgeOf } from "../config/file.js";
 import { type PrState, prStateOfMr } from "./forge-pr-state.js";
+import { isRecord } from "./parse-json.js";
 import { glabApiHost } from "./glab-host.js";
 
 export type { PrState };
@@ -137,8 +138,8 @@ async function gitlabState(mr: Extract<PrUrl, { forge: "gitlab" }>, signal: Abor
   const out = await ask("glab", ["api", ...host.args, `projects/${encodeURIComponent(mr.project)}/merge_requests/${mr.number}`], { ...host.env, GLAB_NO_PROMPT: "1", GLAB_CHECK_UPDATE: "false" }, signal);
   if (out === undefined) return undefined;
   try {
-    const { state } = JSON.parse(out) as { state?: unknown };
-    return typeof state === "string" ? prStateOfMr(state) : undefined;
+    const mr: unknown = JSON.parse(out);
+    return isRecord(mr) && typeof mr.state === "string" ? prStateOfMr(mr.state) : undefined;
   } catch {
     return undefined; // not JSON: glab printed something other than the merge request
   }

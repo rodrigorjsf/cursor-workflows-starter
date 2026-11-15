@@ -6,10 +6,14 @@
 //   a stream: a resumed run adds to the same log). The status is polled, so a resume of a finished run reopens the stream.
 // - Events are handed over in batches, so a burst (the replay of a long log) is one render, not one per event.
 import type { JobStart } from "./resume-command.js";
+import { parseRunDetail } from "./run-detail.js";
 import { useEffect, useRef, useState } from "react";
 import { batcher } from "./batch.js";
 import { runApiPath } from "./location.js";
+import { parseRunEvent } from "./run-event.js";
 import type { RunEvent } from "./run-graph.js";
+import type { SeamsProposalInfo } from "./seams-form.js";
+import { errorText } from "../app/error-text.js";
 
 /** `waiting`: the API does not know the run yet. `closed`: the stream was read to the end and shut. */
 export type Connection = "waiting" | "live" | "reconnecting" | "closed" | "not-found";
@@ -23,6 +27,8 @@ export interface RunInfo {
   repo: string;
   /** How the latest execution's job was started, when the API knows (see `JobStart` in the runtime). */
   start?: JobStart;
+  /** What the run waits for a decision on, when it stopped at a seams proposal (see `SeamsProposalInfo`). Absent otherwise, and once the run went on. */
+  seamsProposal?: SeamsProposalInfo;
 }
 
 export interface RunFeed {
@@ -77,19 +83,25 @@ export function useRunEvents(runId: string): RunFeed {
           if (stopped) return;
           setUnreachable(reply.ok || reply.status === 404 ? undefined : `the dashboard answered ${reply.status}`);
           if (reply.ok) {
-            const detail = (await reply.json()) as { status: ApiStatus; error?: unknown; workflow?: string; repo?: string; start?: JobStart };
-            latest = detail.status;
-            setStatus(latest);
-            setError(typeof detail.error === "string" ? detail.error : undefined);
-            const { workflow, repo } = detail;
-            const start = detail.start && typeof detail.start === "object" && "args" in detail.start ? detail.start : undefined;
-            if (typeof workflow === "string" && typeof repo === "string")
-              setInfo((before) => (before && before.workflow === workflow && before.repo === repo && JSON.stringify(before.start) === JSON.stringify(start) ? before : { workflow, repo, start }));
-            if (latest === "missing") setConnection("not-found");
+            const detail = parseRunDetail(await reply.json().catch(() => undefined));
+            if (!detail) setUnreachable(`the dashboard answered ${reply.status} with a body this page cannot read`);
+            else {
+              latest = detail.status;
+              setStatus(latest);
+              setError(detail.error);
+              const { workflow, repo, start, seamsProposal } = detail;
+              if (workflow !== undefined && repo !== undefined)
+                setInfo((before) =>
+                  before && before.workflow === workflow && before.repo === repo && JSON.stringify(before.start) === JSON.stringify(start) && before.seamsProposal?.digest === seamsProposal?.digest
+                    ? before
+                    : { workflow, repo, start, seamsProposal },
+                );
+              if (latest === "missing") setConnection("not-found");
+            }
           } else if (reply.status === 404 && Date.now() - since > NOT_FOUND_AFTER_MS) setConnection("not-found");
         } catch (err) {
           // the dashboard is not answering: say so, and try again
-          if (!stopped) setUnreachable(err instanceof Error ? err.message : String(err));
+          if (!stopped) setUnreachable(errorText(err));
         }
       }
       if (!stopped) timer = setTimeout(poll, latest === "running" || latest === undefined ? POLL_RUNNING_MS : POLL_SETTLED_MS);
@@ -130,11 +142,9 @@ export function useRunEvents(runId: string): RunFeed {
       const id = Number(message.lastEventId);
       if (id <= lastId.current) return;
       lastId.current = id;
-      try {
-        batch.push({ id, event: JSON.parse(message.data) as RunEvent });
-      } catch {
-        return; // a line that is not JSON is not an event
-      }
+      const parsed = parseRunEvent(message.data);
+      if (parsed.ok) batch.push({ id, event: parsed.event });
+      else console.warn(`dashboard: dropped line ${id} of the event stream (${parsed.why})`); // not an event: the code that reads events would throw on it
       goQuiet();
     };
     source.onerror = () => setConnection(source.readyState === EventSource.CLOSED ? "closed" : "reconnecting");

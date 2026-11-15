@@ -37,6 +37,7 @@ import { interruptedCloudSteps } from "../../src/runtime/projection.js";
 import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn, runsDirIn, tryAcquireRunLock } from "../../src/runtime/run-store.js";
 import { type Exec, Commands, LOCAL_GIT_TIMEOUT_MS, NETWORK_TIMEOUT_SEC, ORIGIN, WORKFLOW_BRANCH_PREFIX, worktreeOf, worktreesDirIn } from "./commands.js";
 import { DEFAULT_FORGE, type Forge, type ForgeName, type PrState, createForge, detectForge, forgeNameOf } from "./forge.js";
+import { repoRefusal } from "./repo-arg.js";
 import { type Progress, ProgressStore } from "./tdd.js";
 
 /** Why something is cleaned up: its PR was merged or closed, its run failed longer ago than the limit, or it is a cloud snapshot branch its step never deleted. */
@@ -190,8 +191,10 @@ export async function planGc(options: {
   snapshots: SnapshotSweep;
   /** The config's `forges` map: the forge of an origin host the kit does not know (ADR-0009). */
   forges?: Readonly<Record<string, ForgeName>>;
+  /** `workflows.implement-issue.settings.repoHosts`: the hosts, besides the ones the kit already trusts, that the `repo` a run recorded may name (`repo-arg.ts`). */
+  repoHosts?: readonly string[];
 }): Promise<GcPlan> {
-  const { cwd, commands, failedAfterDays, snapshots, forges = {} } = options;
+  const { cwd, commands, failedAfterDays, snapshots, forges = {}, repoHosts = [] } = options;
   const now = Date.now();
   const plan: GcPlan = { repo: cwd, failedAfterDays, remove: [], kept: [], errors: [] };
   const worktreesDir = worktreesDirIn(cwd);
@@ -204,6 +207,7 @@ export async function planGc(options: {
       .filter((l) => l.startsWith("worktree "))
       .map((l) => normal(l.slice("worktree ".length))),
   );
+  const originUrl = await commands.remoteUrl(cwd).catch(() => undefined);
   let remote: Map<string, string> | undefined;
   try {
     remote = await commands.remoteOwnedHeads(cwd);
@@ -233,7 +237,13 @@ export async function planGc(options: {
     let state: PrState | undefined;
     try {
       // The forge the run recorded decides, never one detected now: a config or remote change must not send this query to another forge's CLI.
-      state = (progress.pushed?.length ?? 0) > 0 ? await createForge(forgeNameOf(progress), commands).prState(cwd, branch, progress.repo) : undefined;
+      if ((progress.pushed?.length ?? 0) > 0) {
+        const forge = createForge(forgeNameOf(progress), commands);
+        // The record is a file of the repository's `.workflows/`, which a cloned repository may bring: its `repo` goes to the CLI as `--repo`, so it passes the rule a run's own `repo` argument does.
+        const refusal = progress.repo === undefined ? undefined : repoRefusal(progress.repo, { forge: forge.name, originUrl, repoHosts, forges });
+        if (refusal !== undefined) throw new Error(refusal);
+        state = await forge.prState(cwd, branch, progress.repo);
+      }
     } catch (err) {
       plan.errors.push(`run ${runId}: the state of its PR cannot be read, so it is kept: ${errorText(err)}`);
       continue;

@@ -9,27 +9,59 @@
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { appendJsonl, readJsonl } from "./state-files.js";
+import { PRIVATE_DIR, appendJsonl, parseJsonlLine, readJsonl } from "./state-files.js";
 
 export interface JournalEntry {
   key: string;
   label?: string;
   model?: string;
+  /** The step's result. Absent from a pruned entry (`pruned`). */
   result: unknown;
   chargedCents: number;
   totalTokens: number;
+  /** Retention deleted `result` (`withoutResults`): the entry keeps what the budget and the step list need, and cannot serve a resume. */
+  pruned?: true;
 }
 
 const isEntry = (v: unknown): v is JournalEntry => typeof v === "object" && v !== null && typeof (v as { key?: unknown }).key === "string";
 
+/**
+ * The journal text with the `result` of every entry removed and every entry marked `pruned`, or undefined when every entry already
+ * is. A journal holds the results of the run's steps, which are private source: retention (retention.ts) empties the journal of a
+ * run that falls outside it. A line that is not an entry (a torn last line, which can hold the start of a result) is removed:
+ * readers skip it, so it is of no use to a resume.
+ */
+export function withoutResults(journal: string): string | undefined {
+  let changed = false;
+  const lines = journal.split("\n").map((line) => {
+    if (!line.trim()) return line;
+    const entry = parseJsonlLine(line, isEntry);
+    if (entry?.pruned) return line;
+    changed = true;
+    if (!entry) return "";
+    const { result: _result, ...kept } = entry;
+    return JSON.stringify({ ...kept, pruned: true });
+  });
+  return changed ? lines.join("\n") : undefined;
+}
+
+/** Whether the journal file holds an entry retention emptied (`withoutResults`): the run cannot be resumed from it. Only reads: nothing is created, and a file that is not there is not pruned. */
+export function journalPruned(file: string): boolean {
+  return readJsonl(file, isEntry).records.some((entry) => entry.pruned === true);
+}
+
 export class Journal {
   private readonly cache = new Map<string, JournalEntry>();
   private readonly occurrences = new Map<string, number>();
+  /** Retention deleted the results this journal held (`withoutResults`): the run cannot be resumed from it. */
+  readonly pruned: boolean;
 
   constructor(private readonly file: string) {
-    mkdirSync(dirname(file), { recursive: true });
+    mkdirSync(dirname(file), { recursive: true, mode: PRIVATE_DIR });
     // A torn line (crash mid-append) is skipped: the step it recorded is simply not in the journal, so it runs again.
-    for (const entry of readJsonl(file, isEntry).records) this.cache.set(entry.key, entry);
+    const { records } = readJsonl(file, isEntry);
+    for (const entry of records) this.cache.set(entry.key, entry);
+    this.pruned = records.some((entry) => entry.pruned === true);
   }
 
   /** Calcula a chave determinística da chamada. Deve ser chamado de forma síncrona no início de agent(). */

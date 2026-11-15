@@ -1,4 +1,4 @@
-// The liveness check the job projection and the run lock share.
+// Seam: `isAlive`, the liveness check the job projection and the run lock share, asked about this process, an exited one and one owned by another user.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";

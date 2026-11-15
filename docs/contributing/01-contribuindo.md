@@ -3,8 +3,28 @@
 ## Antes de abrir um PR
 
 Rode `npm ci` e `npm run check`, que faz o `typecheck` e o `npm test` (com o Node do `mise.toml`: `mise exec -- npm run check`). Os testes são offline (SDK falso), não precisam de conta nem de rede,
-e são os mesmos do CI (Node 22.13.0 e 22.x). O `npm test` inclui o docs check ([9.2](02-convencoes-do-livro.md#o-que-o-docs-check-confere)):
+e são os mesmos do CI (Node 22.13.0, 22.x, 24.x e 26.x). O `npm test` inclui o docs check ([9.2](02-convencoes-do-livro.md#o-que-o-docs-check-confere)):
 um link quebrado, um rodapé errado ou um capítulo fora do índice reprova o PR.
+
+O `.npmrc` da raiz desliga os scripts de instalação das dependências (`ignore-scripts=true`) e faz o `engines` valer
+(`engine-strict=true`); o `install.sh` e o CI repetem `--ignore-scripts`, para que um `.npmrc` editado não os religue. No CI,
+todo `uses:` é fixado num SHA de commit com a versão no comentário (o Dependabot, que espera 7 dias antes de propor uma versão
+nova, mantém os SHAs), todo `actions/checkout` tem `persist-credentials: false`, cada job tem `timeout-minutes` e cada script
+`test` passa `--test-timeout` (120000 na raiz e no dashboard, 600000 no runtime). O prazo vale para cada arquivo de teste inteiro,
+não só para cada teste: o `doctor.process.test.ts` leva 165 s sozinho, e um arquivo que precise de mais que o valor do pacote pede um
+valor maior para o pacote, não um `timeout` no teste. O
+`test/supply-chain.test.ts` confere isso. Renomear um item da matriz de Node renomeia o check obrigatório `test (<versão>)`: quem
+mexe na matriz põe na descrição do PR o `gh api -X PUT` que atualiza o ruleset `main`, e o dono o roda ao integrar.
+
+O `typecheck` roda o `tsc` nos seis projetos (a raiz, as duas páginas do dashboard e os testes de cada diretório) com as opções de
+`packages/runtime/tsconfig.json`, que todos estendem: `strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`,
+`noFallthroughCasesInSwitch`, `noImplicitReturns`, `noUnusedLocals`, `noUnusedParameters`, `isolatedModules`,
+`noUncheckedSideEffectImports` e `moduleDetection: "force"`. Um índice que pode não existir se resolve com uma checagem, nunca com
+`!`. O `test/typescript-strictness.test.ts` confere que nenhum projeto desliga uma delas, que o registro de workflows não tem `any` e
+que nenhum `JSON.parse(...) as T` entra no código que o kit entrega: o dado que vem de um arquivo de estado, do `.mcp.json` ou do `gh` e
+do `glab` passa pelo `parseJson` (zod) ou pelo `isRecord`, de `packages/runtime/src/runtime/parse-json.ts`, e um dado de outra forma
+dá um erro que nomeia a origem e o campo. O `test/floating-promises.test.ts` usa o checker do TypeScript e reprova uma promessa que
+ninguém espera, devolve, marca com `void` ou termina com `.catch` em `packages/*/src` e `packages/*/workflows`.
 
 Uma vez por clone, ative o hook de pre-commit, que passa o `gitleaks` no que está staged e recusa o commit que traz um
 segredo: `git config core.hooksPath .githooks`. Vale para todos os worktrees do clone e pede o `gitleaks` no `PATH`. O
@@ -26,12 +46,12 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 ├── CLAUDE.md               # guia canônico do mantenedor, em inglês (AGENTS.md é um link simbólico para ele)
 ├── CODING_STANDARDS.md     # as regras de julgamento que o review aplica, em inglês (o review do implement-issue o lê)
 ├── packages/
-│   ├── dashboard/          # o dashboard local (workspace npm @cursor-workflows/dashboard): servidor HTTP sobre os runs e as métricas, que só lê, a não ser para cancelar um run
-│   │   ├── src/            # server.ts (API JSON, stream SSE e páginas), main.ts (o processo), board.ts (as colunas do quadro), pr-state.ts (estado das PRs e MRs, com cache, pelo `observe` do runtime),
+│   ├── dashboard/          # o dashboard local (workspace npm @cursor-workflows/dashboard): servidor HTTP sobre os runs e as métricas, que só lê, a não ser para iniciar um workflow num repositório que conhece, para retomar um run parado, para aprovar ou trocar as seams que um run do `implement-issue` propôs e para cancelar um run
+│   │   ├── src/            # server.ts (API JSON, stream SSE e páginas), main.ts (o processo), board.ts (as colunas do quadro), pr-state.ts (estado das PRs e MRs, com cache, pelo `observe` do runtime), start.ts (o que o Start diz ao navegador e recebe dele: o corpo do `POST /api/start`, as respostas e o esqueleto dos args), resume.ts (as respostas do `POST /api/runs/<runId>/resume`), seams.ts (os corpos e as respostas do `POST /api/runs/<runId>/seams/approve` e `/seams/replace`), request-body.ts (o corpo JSON que as ações com corpo compartilham), backlog.ts (o Backlog: o `GET /api/backlog` e o cache de 60 segundos da resposta do forge por repositório),
 │   │   │                   # web-bundle.ts (o esbuild que empacota as duas páginas quando o dashboard sobe, com cache por hash), pages.ts (o HTML delas)
-│   │   ├── app/            # a página `/`, em React (menus Runs, Board e Metrics); o esbuild a empacota quando o dashboard sobe
+│   │   ├── app/            # a página `/`, em React (menus Runs, Board e Metrics, e o painel Start: StartPanel.tsx, start-form.ts, start-api.ts; BoardView.tsx e backlog-board.ts, a coluna Backlog do quadro); o esbuild a empacota quando o dashboard sobe
 │   │   ├── run-view/       # a página do run, `/runs/<runId>` (React, React Flow, elkjs; tsconfig próprio, sem Node nem runtime):
-│   │   │                   # run-graph.ts (eventos → nós, arestas e raias), run-layout.ts (posições, elkjs), RunView.tsx (a tela)
+│   │   │                   # run-graph.ts (eventos → nós, arestas e raias), run-layout.ts (posições, elkjs), RunView.tsx (a tela), SeamsPanel.tsx e seams-form.ts (a proposta de seams de um run do `implement-issue`, com Approve e Replace seams)
 │   │   └── test/           # testes do servidor por HTTP, do grafo e do layout (puros) e um contrato com o engine de verdade
 │   └── runtime/            # o produto (workspace npm @cursor-workflows/runtime)
 │       ├── src/
@@ -47,11 +67,17 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   │   ├── run-store.ts    # log de eventos, journal, lock de cada run e locks nomeados do repositório (`.workflows/locks/`)
 │       │   │   ├── structured.ts   # saída estruturada via custom tool submit_result + Ajv
 │       │   │   ├── journal.ts      # resume sem repetir etapas concluídas
-│       │   │   ├── jobs.ts         # jobs: o que inicia um job (processo destacado, heartbeat)
+│       │   │   ├── jobs.ts         # jobs: o que roda um job (heartbeat, `startJob`, os sinais de cancelamento); reexporta o job-spawn.ts
+│       │   │   ├── job-spawn.ts    # o que inicia um job: o registro (`createJob`) e o processo destacado (`spawnJob`), sem o engine (o dashboard o usa)
 │       │   │   ├── job-state.ts    # o registro de um job, o estado projetado do log e o cancelamento, sem o engine (o dashboard o usa)
-│       │   │   ├── run-view.ts     # os runs de todos os repositórios, lidos do índice global e do log, para quem observa de fora (o dashboard)
+│       │   │   ├── job-children.ts # os grupos de processo dos comandos vivos de um job: o job os grava, e o cancelamento de um job travado os mata (o `SIGKILL` pula o gancho de saída)
+│       │   │   ├── run-view.ts     # os runs de todos os repositórios, lidos do índice global e do log, para quem observa de fora (o dashboard), e de que issue cada run do `implement-issue` trata (`runOriginsOf`)
 │       │   │   ├── run-tail.ts     # o log de eventos de um run lido por posição (cada linha tem um id): o stream ao vivo e o conteúdo de uma etapa
 │       │   │   ├── run-cancel.ts   # cancela um run de fora do processo que o executa (o botão Cancel do dashboard), pelo mesmo `cancelJob` do `wf cancel`
+│       │   │   ├── run-start.ts    # inicia um job de fora do processo que o executa (o painel Start do dashboard): só num repositório do índice global e num workflow que o runtime lista, com o `launchJob` que o resume também usa; sem o engine
+│       │   │   ├── run-resume.ts   # retoma um run parado de fora do processo que o executava (o botão Resume run do dashboard, e a decisão sobre as seams, que é um resume com outros args): repete o start do registro do job pelo mesmo caminho do Start (`launchJob`, em `launchResume`); sem o engine
+│       │   │   ├── args-schema.ts  # confere os args com o `argsSchema` do workflow, para o engine e para o Start; sem o engine
+│       │   │   ├── inside-workflow.ts  # a variável `WF_INSIDE_WORKFLOW` que marca um processo dentro de uma etapa
 │       │   │   ├── pr-by-url.ts    # o estado de uma PR (`gh`) ou MR (`glab api`) pela URL exata, nos hosts permitidos (github.com, gitlab.com e os do config do glab), para o dashboard
 │       │   │   ├── dashboard-instance.ts  # onde o dashboard escuta, o pid file e o `ensureDashboard` que o `start_workflow` chama
 │       │   │   ├── heartbeat-worker.mjs  # thread que atualiza o heartbeat do job mesmo com a principal bloqueada
@@ -65,6 +91,7 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   ├── doctor-report.ts    # o formato do relatório do doctor (só a biblioteca padrão: o node-check.ts o usa num Node antigo)
 │       │   ├── mcp-launch.ts       # como o IDE inicia o servidor MCP (o `workflows` do .cursor/mcp.json e do .mcp.json)
 │       │   ├── kit-version.ts      # versão do kit e a faixa `kit` que o repositório declara
+│       │   ├── kit-state.ts        # o estado do kit instalado pelo git: mudanças locais e tags do HEAD, que o upgrade e o doctor usam
 │       │   ├── upgrade.ts          # wf upgrade: leva o kit instalado à tag mais nova e roda o install.sh --refresh dela
 │       │   ├── unified-diff.ts     # o diff que o wf init imprime
 │       │   ├── cli.ts              # wf login | whoami | models | list | init | doctor | upgrade | config | run | start | wait | status | cancel | jobs | gc | stats | metrics
@@ -72,7 +99,7 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       ├── workflows/
 │       │   ├── smoke.ts            # teste de fumaça: uma etapa estruturada, num modelo incluído, com teto de 50 mil tokens
 │       │   ├── implement-issue.ts  # exemplo: TDD fatia a fatia conferido pelo código → review em 3 eixos → PR com evidência
-│       │   └── implement-issue/    # prompts (paráfrases das skills de mattpocock/skills), laço TDD, review, corpo do PR, `gc.ts` (o `wf gc`)
+│       │   └── implement-issue/    # prompts (paráfrases das skills de mattpocock/skills), laço TDD, review, corpo do PR, `gc.ts` (o `wf gc`), `backlog.ts` (as issues prontas e sem run, pelo forge, para o Backlog do dashboard), `plan.ts` (o plano e a regra do comando de teste), `seams-approval.ts` (a proposta de seams que um run espera e a decisão sobre ela, de fora do processo: aprovar ou trocar as seams pelo dashboard)
 │       └── test/                   # testes offline (fake SDK)
 ├── skills/                 # skills distribuídas (autossuficientes: SKILL.md + references/)
 │   ├── run-workflow/       # /run-workflow <nome> <args>: dispara e acompanha

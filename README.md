@@ -42,12 +42,16 @@ configuração ([6.2](docs/reference/config.md)). Mais simples: peça a um agent
 [INSTALL-AGENT.md](INSTALL-AGENT.md). À mão:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/scripts/install.sh -o /tmp/wf-install.sh
-bash /tmp/wf-install.sh --tag v0.4.0   # o kit na tag, o comando wf e as skills globais
+installer="$(mktemp)"
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/scripts/install.sh -o "$installer"
+bash "$installer" --tag v0.4.0   # o kit na tag, o comando wf e as skills globais
 wf login                               # login no navegador; o uso fica na SUA conta
 wf init                                # no seu repositório: grava os arquivos do kit, mostra o diff e não faz commit
-wf doctor                              # confere Node, login, modelos, o CLI do forge (gh ou glab), servidor MCP e configuração
+wf doctor                              # confere Node, login, modelos, o CLI do forge (gh ou glab), servidor MCP, configuração, sandbox do SDK, o kit instalado e a interoperabilidade do WSL
 ```
+
+O kit não consegue ler o Privacy Mode da sua conta: confirme que ele está ligado em *Cursor Settings → General* antes de rodar um
+workflow ([5.1](docs/operating/01-governanca-e-custos.md#políticas-de-admin-que-se-aplicam)).
 
 No Cursor IDE, habilite o MCP server `workflows` e digite `/run-workflow implement-issue 123`
 ([2.1 §6](docs/usage/01-instalacao.md#6-habilitar-no-cursor-ide)). Os tetos de custo vêm de uma configuração global com

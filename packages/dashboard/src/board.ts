@@ -6,7 +6,8 @@
 import type { RunCard, RunSummary, RunViewStatus } from "@cursor-workflows/runtime/observe";
 import type { PrState } from "./pr-state.js";
 
-export type ColumnKind = "phase" | "awaiting-approval" | "done" | "failed" | "cancelled";
+/** `backlog` is the column of the issues ready and not started (`/api/backlog`): the server's boards never hold it, the page puts it in front of the board of the workflow it starts. */
+export type ColumnKind = "backlog" | "phase" | "awaiting-approval" | "done" | "failed" | "cancelled";
 
 export interface BoardColumn {
   /** Stable id of the column: `phase:<title>` for a phase, the kind for an end, `running` for the one column of a workflow with no phases. */

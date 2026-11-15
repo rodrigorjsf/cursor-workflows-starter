@@ -1,5 +1,29 @@
 // Fake mínimo do @cursor/sdk: testa o controle de fluxo do engine sem rede nem conta Cursor.
 // Ativado por tsconfig.test.json (paths: "@cursor/sdk" -> este arquivo).
+// Typed against the real package: the SDK's declarations are imported (and re-exported, so `tsc -p tsconfig.test.json` can check
+// the sources against this module) by their path, because the bare `@cursor/sdk` maps back to this file under that config.
+// `fake-sdk.conformance.ts` asserts, in `npm run typecheck`, that each member the runtime uses still fits the real signature.
+import type {
+  AgentOptions,
+  AgentUsage,
+  CursorRequestOptions,
+  CursorSdkErrorOptions,
+  GetRunOptions,
+  GetUsageOptions,
+  ListRunsOptions,
+  Run,
+  RunResult,
+  SDKCustomTool,
+  SDKJsonValue,
+  SDKModel,
+  SDKUser,
+  SDKUserMessage,
+  SdkLoginOptions,
+  SdkLoginResult,
+  SendOptions,
+} from "../../../node_modules/@cursor/sdk/dist/esm/index.js";
+import { errorText } from "../src/runtime/error-text.js";
+export type * from "../../../node_modules/@cursor/sdk/dist/esm/index.js";
 /** Set when this module is loaded: lets a test prove that a module graph never imports the SDK. */
 (globalThis as { __fakeSdkLoaded?: boolean }).__fakeSdkLoaded = true;
 export const calls: any[] = [];
@@ -10,12 +34,16 @@ export const script: Array<(o: any, msg: string, n: number) => any> = [];
  * turn-ended deltas that reached onDelta on live runs. `sends`: Agent.send() calls.
  */
 export const stats = { active: 0, maxActive: 0, disposed: 0, usageReads: 0, cancels: 0, cancelled: 0, turnsDelivered: 0, sends: 0 };
-/** As in the SDK: `isRetryable` comes from the options and defaults to false (errors.d.ts, CursorSdkError). */
+/** As in the SDK: `isRetryable` comes from the options and defaults to false, `code` and `status` are the options' (errors.d.ts, CursorSdkError). */
 export class CursorAgentError extends Error {
-  isRetryable: boolean;
-  constructor(message?: string, options: { isRetryable?: boolean } = {}) {
+  readonly isRetryable: boolean;
+  readonly code?: string;
+  readonly status?: number;
+  constructor(message: string, options: CursorSdkErrorOptions = {}) {
     super(message);
     this.isRetryable = options.isRetryable ?? false;
+    this.code = options.code;
+    this.status = options.status;
   }
 }
 export class RateLimitError extends CursorAgentError {}
@@ -58,7 +86,7 @@ export const costConfig: {
   /** `Agent.listArtifacts` fails with this message, like an API that is down: a call nobody should make for a run that failed. */
   listArtifactsError?: string;
   /** Holds the creation of the agents it answers for (it gets the create options) until the promise settles; `undefined` = not held. */
-  createGate?: (options: any) => Promise<unknown> | undefined;
+  createGate?: (options: AgentOptions) => Promise<unknown> | undefined;
 } = { raw: 9, charged: 7 };
 /** A value that satisfies a JSON Schema: the first `enum` member, the `const`, or the plainest value of the type. */
 function sampleOf(schema: any): unknown {
@@ -84,27 +112,29 @@ function sampleOf(schema: any): unknown {
  * `FAKE_SDK_AUTO_SUBMIT=1`: a structured step is answered with a sample of its schema, as a model that follows the prompt
  * would. For spawned processes, which cannot reach the process-local `script`. Off by default: most tests choose the answer.
  */
-function autoSubmit(options: any) {
-  const tool = options.local?.customTools?.submit_result;
-  if (process.env.FAKE_SDK_AUTO_SUBMIT && tool) tool.execute(sampleOf(tool.inputSchema), {});
+function autoSubmit(options: AgentOptions) {
+  const tool: SDKCustomTool | undefined = options.local?.customTools?.submit_result;
+  if (process.env.FAKE_SDK_AUTO_SUBMIT && tool) tool.execute(sampleOf(tool.inputSchema) as Record<string, SDKJsonValue>, {});
 }
 /** What the cloud keeps for a cloud agent, whoever is connected to it. A client object is only a handle on this. */
 interface ServerRun {
   id: string;
   agentId: string;
   createdAt: number;
-  status: "running" | "finished" | "error" | "cancelled";
+  status: Run["status"];
   /** The run's end, once there is one. */
-  done: Promise<any>;
+  done: Promise<RunResult>;
   /** Ends the run with `result`; the first end wins. */
-  settle(result: any): void;
+  settle(result: RunResult): void;
   /** What the run was scripted as: `cancel()` of a run that does not end by itself. */
-  raw?: any;
+  raw?: SentRun;
 }
+/** What `send()` hands out: the part of an SDK `Run` the runtime calls on it. A cloud run is the handle `cloudHandle` makes, which has more. */
+type SentRun = Pick<Run, "wait" | "cancel">;
 interface AgentState {
   agentId: string;
   /** The options the agent was created with: what a script sees as `o`. */
-  options: any;
+  options: AgentOptions;
   /** Messages sent so far (the next one's number). */
   n: number;
   turnUsages: Array<typeof TURN_USAGE>;
@@ -142,7 +172,7 @@ export const forgetCloudAgent = (agentId: string) => void cloudServer.delete(age
 /** What a cloud agent's runs are, as the server has them. */
 export const cloudRunsOf = (agentId: string) => (cloudServer.get(agentId)?.runs ?? []).map(({ id, status }) => ({ id, status }));
 /** Puts an agent on the server with the given runs, the way an earlier session left it. */
-export function seedCloudAgent(agentId: string, runs: Array<{ status?: ServerRun["status"]; result?: string }>, options: any = { cloud: {} }) {
+export function seedCloudAgent(agentId: string, runs: Array<{ status?: ServerRun["status"]; result?: string }>, options: AgentOptions = { cloud: {} }) {
   const state: AgentState = { agentId, options, n: runs.length, turnUsages: [], runs: [] };
   for (const { status = "finished", result = "ok" } of runs) {
     const run = serverRun(state, undefined);
@@ -152,14 +182,15 @@ export function seedCloudAgent(agentId: string, runs: Array<{ status?: ServerRun
 }
 
 /**
- * Where a cloud run says it pushed, as the SDK's `RunResult.git` does. An agent that works on the current branch pushes to its
- * starting ref (the snapshot branch); any other pushes to a branch of its own, as the real one does with `workOnCurrentBranch` off.
- * A script's own `git` wins.
+ * Where a cloud run says it pushed, as the SDK's `RunResult.git` does. An agent that works on the current branch (a step that writes)
+ * pushes to its starting ref, the snapshot branch. Any other (a read-only step) pushes nothing and says nothing about where: a script
+ * that wants one to push gives its own `git`, which wins. (What the real API reports for a read-only agent that made no commit has not
+ * been measured: the cloud verification, issue #47, will.)
  */
-function pushedBranches(o: any, agentId: string) {
-  if (!o.cloud) return {};
+function pushedBranches(o: AgentOptions) {
+  if (!o.cloud?.workOnCurrentBranch) return {};
   const [repo] = o.cloud.repos ?? [];
-  return { git: { branches: [{ repoUrl: repo?.url, branch: o.cloud.workOnCurrentBranch ? repo?.startingRef : `cursor/${agentId}` }] } };
+  return { git: { branches: [{ repoUrl: repo?.url, branch: repo?.startingRef }] } };
 }
 
 const artifactPath = (key: string) => (key.startsWith("artifacts/") || key.startsWith("/") ? key : `artifacts/${key}`);
@@ -168,9 +199,9 @@ function notFound(what: string) {
   return Object.assign(new ConfigurationError(`${what} not found`), { status: 404 });
 }
 
-function serverRun(state: AgentState, raw: any): ServerRun {
-  let settle!: (result: any) => void;
-  const done = new Promise<any>((resolve) => (settle = resolve));
+function serverRun(state: AgentState, raw: SentRun | undefined): ServerRun {
+  let settle!: (result: RunResult) => void;
+  const done = new Promise<RunResult>((resolve) => (settle = resolve));
   const run: ServerRun = {
     id: `run-${++runCounter}`,
     agentId: state.agentId,
@@ -194,7 +225,7 @@ function cloudHandle(run: ServerRun) {
   const born = clientEpoch;
   const alive = () => born === clientEpoch;
   let gaveUp = false;
-  const timedOut = () => ({ id: run.id, status: "error", error: { message: "Timed out waiting for the cloud run to finish." } });
+  const timedOut = (): RunResult => ({ id: run.id, status: "error", error: { message: "Timed out waiting for the cloud run to finish." } });
   return {
     id: run.id,
     agentId: run.agentId,
@@ -202,11 +233,11 @@ function cloudHandle(run: ServerRun) {
     get status() {
       return gaveUp ? "error" : run.status;
     },
-    async wait() {
+    async wait(): Promise<RunResult> {
       if (gaveUp) return timedOut();
       const limit = costConfig.cloudWaitLimitMs;
       let timer: NodeJS.Timeout | undefined;
-      const result = await Promise.race([run.done, limit === undefined ? new Promise<never>(() => {}) : new Promise((r) => (timer = setTimeout(() => r(WAIT_LIMIT), limit)))]);
+      const result = await Promise.race([run.done, limit === undefined ? new Promise<never>(() => {}) : new Promise<typeof WAIT_LIMIT>((r) => (timer = setTimeout(() => r(WAIT_LIMIT), limit)))]);
       clearTimeout(timer);
       if (!alive()) await new Promise(() => {});
       if (result === WAIT_LIMIT) {
@@ -215,9 +246,9 @@ function cloudHandle(run: ServerRun) {
       }
       return result;
     },
-    async cancel() {
+    async cancel(): Promise<void> {
       if (!alive() || run.status !== "running") return;
-      await run.raw?.cancel?.();
+      await run.raw?.cancel();
       run.settle({ id: run.id, status: "cancelled" });
     },
   };
@@ -229,7 +260,8 @@ function agentOf(state: AgentState) {
   const born = clientEpoch;
   return {
     agentId: state.agentId,
-    async send(msg: string, options?: any) {
+    async send(message: string | SDKUserMessage, options?: SendOptions) {
+      const msg = typeof message === "string" ? message : message.text;
       if (born !== clientEpoch) await new Promise(() => {}); // the client is dead
       stats.sends++;
       if (o.cloud && !cloudServer.has(state.agentId)) cloudServer.set(state.agentId, state); // the first message creates the agent on the server
@@ -244,12 +276,12 @@ function agentOf(state: AgentState) {
       const r = await behave(o, msg, state.n++);
       if (r?.artifacts) state.artifacts = { ...state.artifacts, ...r.artifacts }; // the run saved files in the agent's artifacts directory
       /** A cloud run is on the server: the client gets a handle on it. */
-      const out = (raw: any) => {
+      const out = (raw: SentRun): SentRun => {
         if (!o.cloud) return raw;
         const run = serverRun(state, raw);
         raw.wait().then(
-          (result: any) => run.settle(result),
-          (err: unknown) => run.settle({ id: run.id, status: "error", error: { message: err instanceof Error ? err.message : String(err) } }),
+          (result) => run.settle(result),
+          (err: unknown) => run.settle({ id: run.id, status: "error", error: { message: errorText(err) } }),
         );
         return cloudHandle(run);
       };
@@ -284,15 +316,15 @@ function agentOf(state: AgentState) {
             await streamed;
             if (r.rejectWait) throw r.rejectWait; // the run fails after its turns, e.g. with a RateLimitError
             if (cancelled && r.stuckAfterCancel) await new Promise(() => {}); // a wait() that never settles once cancelled
-            return { id: "r", status: "finished", model: o.model, ...pushedBranches(o, state.agentId), ...r, ...(cancelled ? { status: "cancelled" } : {}) };
+            return { id: "r", status: "finished", model: o.model, ...pushedBranches(o), ...r, ...(cancelled ? { status: "cancelled" } : {}) };
           },
         });
       }
       for (const update of r?.deltas ?? DEFAULT_DELTAS) await deliver(update, false);
       if (r?.hang) {
         // A run that does not end by itself. `cancel()` ends it, as in the SDK: `wait()` then resolves with status "cancelled".
-        let end!: (result: any) => void;
-        const ended = new Promise((resolve) => (end = resolve));
+        let end!: (result: RunResult) => void;
+        const ended = new Promise<RunResult>((resolve) => (end = resolve));
         return out({
           async cancel() {
             if (r.cancelDelayMs) await new Promise((resolve) => setTimeout(resolve, r.cancelDelayMs)); // a cancellation that takes its time
@@ -302,7 +334,7 @@ function agentOf(state: AgentState) {
           wait: () => ended,
         });
       }
-      return out({ cancel: async () => void stats.cancels++, wait: async () => ({ id: "r", status: "finished", model: o.model, ...pushedBranches(o, state.agentId), ...r }) });
+      return out({ cancel: async () => void stats.cancels++, wait: async () => ({ id: "r", status: "finished", model: o.model, ...pushedBranches(o), ...r }) });
     },
     /** Like the cloud API: paths are relative to the workspace and start with `artifacts/`. A key that already starts with `artifacts/` or `/` is the path as it is. */
     async listArtifacts() {
@@ -344,20 +376,20 @@ function agentOf(state: AgentState) {
 }
 
 export const Agent = {
-  async getUsage(_agentId: string) {
+  async getUsage(_agentId: string, _options?: GetUsageOptions & CursorRequestOptions): Promise<AgentUsage> {
     return { usage: { ...TURN_USAGE, totalTokens: 110 }, cost: { chargedCents: 7, rawCostCents: 9 }, runs: [] };
   },
-  async create(o: any) {
+  async create(o: AgentOptions) {
     calls.push(o);
     if (o.cloud) {
       // Cloud mode, as the SDK 1.3.1 type declarations say: a cloud agent rejects tool allowlists, a replaced system prompt and
       // custom tools (they live under `local`). It sees only a repository's remote ref, so `cloud.repos` names where it starts.
-      for (const option of ["tools", "disallowedTools", "systemPrompt"]) {
+      for (const option of ["tools", "disallowedTools", "systemPrompt"] as const) {
         if (o[option] !== undefined) throw new ConfigurationError(`\`${option}\` is not supported on cloud agents`);
       }
       if (o.local?.customTools) throw new ConfigurationError("custom tools are not supported on cloud agents");
     }
-    if (costConfig.createHang) return new Promise(() => {}); // a creation that never answers
+    if (costConfig.createHang) return new Promise<never>(() => {}); // a creation that never answers
     if (costConfig.createDelayMs) await new Promise((r) => setTimeout(r, costConfig.createDelayMs)); // a slow one
     await costConfig.createGate?.(o); // a slow one, chosen by agent
     if (costConfig.createError) throw costConfig.createError();
@@ -370,14 +402,14 @@ export const Agent = {
     return agentOf({ agentId: `${o.cloud ? "bc" : "agent"}-${calls.length}`, options: o, n: 0, turnUsages: [], runs: [] });
   },
   /** A cloud agent again, from its id: a new client object on what the server has (nothing is asked of the network yet, as in the SDK). */
-  async resume(agentId: string, options: any = {}) {
+  async resume(agentId: string, options: Partial<AgentOptions> = {}) {
     resumes.push(agentId);
     stats.active++;
     stats.maxActive = Math.max(stats.maxActive, stats.active);
     return agentOf(cloudServer.get(agentId) ?? { agentId, options: { ...options, cloud: {} }, n: 0, turnUsages: [], runs: [] });
   },
   /** The runs of a cloud agent, oldest first unless `costConfig.listNewestFirst` (the real API's order is not documented: callers must not depend on it). */
-  async listRuns(agentId: string, _options?: any) {
+  async listRuns(agentId: string, _options?: ListRunsOptions) {
     lookups.push({ kind: "listRuns", agentId });
     if (costConfig.listRunsDelayMs) await new Promise((resolve) => setTimeout(resolve, costConfig.listRunsDelayMs));
     if (costConfig.lookupFailures) {
@@ -389,9 +421,11 @@ export const Agent = {
     const items = state.runs.map(cloudHandle);
     return { items: costConfig.listNewestFirst ? items.reverse() : items };
   },
-  async getRun(runId: string, options: { agentId: string }) {
-    lookups.push({ kind: "getRun", agentId: options.agentId, runId });
-    const run = cloudServer.get(options.agentId)?.runs.find((r) => r.id === runId);
+  /** The fake keeps cloud runs only, so a lookup that is not `runtime: "cloud"` finds nothing. */
+  async getRun(runId: string, options?: GetRunOptions) {
+    const agentId = options?.runtime === "cloud" ? options.agentId : undefined;
+    lookups.push({ kind: "getRun", agentId: agentId ?? "", runId });
+    const run = agentId === undefined ? undefined : cloudServer.get(agentId)?.runs.find((r) => r.id === runId);
     if (!run) throw notFound(`run ${runId}`);
     return cloudHandle(run);
   },
@@ -401,19 +435,32 @@ export const Agent = {
  * `FAKE_SDK_LOGGED_OUT=1` makes every call fail like a rejected key, with a message that carries the key it was given;
  * `FAKE_SDK_MODELS=a,b` is the catalog, by id (default: the models the built-in workflows use).
  */
-const DEFAULT_CATALOG = ["composer-2.5", "grok-4.7"];
+const modelOf = (id: string, rest: Partial<SDKModel> = {}): SDKModel => ({ id, displayName: id, aliases: [`${id}-alias`], ...rest });
+const defaultCatalog = (): SDKModel[] => [
+  modelOf("composer-2.5"),
+  // A model with a parameter, as `wf models` lists it: `reasoning_effort` is the one the book's defaults and examples use.
+  modelOf("grok-4.7", { parameters: [{ id: "reasoning_effort", values: [{ value: "low" }, { value: "high" }] }] }),
+];
+/** What `Cursor.auth.login()` hands back as the key: exported for the test that proves the CLI keeps it off its output. */
+export const FAKE_LOGIN_API_KEY = "crsr_fake_login_key_0123456789";
 const assertLoggedIn = () => {
   if (process.env.FAKE_SDK_LOGGED_OUT) throw new Error(`fake SDK: not logged in (key "${process.env.CURSOR_API_KEY ?? "none"}")`);
 };
 export const Cursor = {
-  async me() {
+  async me(_options?: CursorRequestOptions): Promise<SDKUser> {
     assertLoggedIn();
     return { apiKeyName: "fake-key", userEmail: "dev@example.com", createdAt: "2026-01-01T00:00:00.000Z" };
   },
   models: {
-    async list() {
+    async list(_options?: CursorRequestOptions): Promise<SDKModel[]> {
       assertLoggedIn();
-      return (process.env.FAKE_SDK_MODELS?.split(",") ?? DEFAULT_CATALOG).map((id) => ({ id, displayName: id, aliases: [`${id}-alias`] }));
+      return process.env.FAKE_SDK_MODELS?.split(",").map((id) => modelOf(id)) ?? defaultCatalog();
+    },
+  },
+  auth: {
+    /** A login that succeeds without a browser. The key is a made-up one: the CLI must never print it (`SdkLoginResult.apiKey`). */
+    async login(_options?: SdkLoginOptions): Promise<SdkLoginResult> {
+      return { apiKey: FAKE_LOGIN_API_KEY, email: "dev@example.com", apiKeyExpiresAtMs: Date.parse("2026-12-31T00:00:00.000Z") };
     },
   },
 };

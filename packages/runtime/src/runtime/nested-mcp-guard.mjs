@@ -6,10 +6,9 @@
 // .cursor/mcp.json > ~/.cursor/mcp.json), e este não expõe nada.
 //
 // JavaScript puro (sem tsx) para subir rápido em cada etapa.
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
-const server = new Server({ name: "cursor-workflows-nested-guard", version: "1" }, { capabilities: { tools: {} } });
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [] }));
+// `tools: {}` makes the SDK answer tools/list from the start, and with no tool registered the list is empty.
+const server = new McpServer({ name: "cursor-workflows-nested-guard", version: "1" }, { capabilities: { tools: {} } });
 await server.connect(new StdioServerTransport());

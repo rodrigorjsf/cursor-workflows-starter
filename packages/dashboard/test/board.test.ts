@@ -170,6 +170,8 @@ test("a run sits in the column of its state: its phase while it runs, then Await
   smoke("smoke-nophase0002", 1, [], { lockedBy: process.ppid });
   smoke("smoke-delivered03", 2, [{ type: "run-end", status: "finished", outcomeStatus: "done", result: { status: "done" } }]);
   smoke("smoke-pending0004", 3, [{ type: "run-end", status: "finished", outcomeStatus: "seams-proposed", result: { status: "seams-proposed" } }]);
+  smoke("smoke-command0011", 10, [{ type: "run-end", status: "finished", outcomeStatus: "test-command-proposed", result: { status: "test-command-proposed" } }]);
+  smoke("smoke-author0012", 11, [{ type: "run-end", status: "finished", outcomeStatus: "untrusted-author", result: { status: "untrusted-author" } }]);
   smoke("smoke-notdone0005", 4, [{ type: "run-end", status: "finished", outcomeStatus: "baseline-red", result: { status: "baseline-red" } }]);
   smoke("smoke-nostatus006", 5, [{ type: "run-end", status: "finished", result: "all good" }]);
   smoke("smoke-errored0007", 6, [{ type: "run-end", status: "failed", error: "Cost cap reached" }]);
@@ -182,6 +184,8 @@ test("a run sits in the column of its state: its phase while it runs, then Await
     "smoke-nophase0002": "phase:Ping",
     "smoke-delivered03": "done",
     "smoke-pending0004": "awaiting-approval",
+    "smoke-command0011": "awaiting-approval",
+    "smoke-author0012": "awaiting-approval",
     "smoke-notdone0005": "failed",
     "smoke-nostatus006": "done",
     "smoke-errored0007": "failed",

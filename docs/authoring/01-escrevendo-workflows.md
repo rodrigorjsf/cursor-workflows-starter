@@ -23,6 +23,7 @@ documento explica o *porquê* das regras e traz as receitas, que a skill aponta.
 | Commit, push e PR feitos pelo código, depois das verificações | Código do workflow | Garantida |
 | Trava de segredos antes do commit, do comentário na issue e do corpo do PR | `implement-issue` | Checada por código, só nesses formatos |
 | Testes no ambiente de quem chamou (`bash -c`, não `bash -lc`) | `runTests` | Garantida |
+| Um comando de teste que o planejador escolheu só roda depois de uma pessoa o ver | `implement-issue` | Garantida |
 | Escrever só dentro do repositório (`SCOPE_RULE`) | Instruções das etapas que escrevem | **Só pedido no prompt** |
 | Sandbox (`sandbox: true`) | Opção da etapa | Não testado neste kit |
 
@@ -42,17 +43,19 @@ documento explica o *porquê* das regras e traz as receitas, que a skill aponta.
   repositório para "consertar" o ambiente depois de uma falha causada pelo shell de login dos testes
   ([8.2 §9](../research/verificacoes-locais.md)). A `SCOPE_RULE` reduz a chance, mas nada impede a
   escrita. Ver [5.1 · Segurança](../operating/01-governanca-e-custos.md#segurança).
-- **Sandbox.** No Linux exige `bubblewrap`. Segundo a doc, restringe só as chamadas de shell e os processos que
-  elas disparam (escrita no cwd, em temporários e nos caminhos do `sandbox.json`; leitura livre; rede só pela
-  allowlist) e não diz que restringe `edit` e `write` ([2.2 §5](../usage/02-configuracao-inicial.md#5-contexto-do-projeto-nos-agentes)).
+- **Sandbox.** No Linux exige `bubblewrap` (ou um kernel com Landlock). Medido em 2026-11-14 ([8.2 §16](../research/verificacoes-locais.md)):
+  nega a rede salvo os hosts do `sandbox.json`, não deixa o shell escrever fora do cwd (a tool `edit` também não criou o arquivo
+  fora dele) e só recusa a leitura do `~/.cursor/sdk/auth.json` com `readBoundary: "workspace"` no `.cursor/sandbox.json` do repositório. A configuração global do instalador o liga em toda etapa
+  (`caps.requireSandbox`), então uma etapa que baixa pacotes precisa dos hosts no `.cursor/sandbox.json`
+  ([2.2 §5](../usage/02-configuracao-inicial.md#5-contexto-do-projeto-nos-agentes)).
 - **`timeoutMs` curto nas etapas que escrevem, e um `maxTokensPerStep` no papel delas.** O teto de tokens da etapa e o do
-  run cancelam a etapa no turno que os ultrapassa, mas o SDK só reporta o uso ao fim de cada turno, e um turno pode ser o
-  laço inteiro do agente. Por isso o `timeoutMs`, que cada envio (o pedido e cada re-prompt de schema) tem, continua
+  run cancelam a etapa no turno que os ultrapassa, mas o SDK só reporta o uso ao fim de cada turno, e o turno é o envio
+  inteiro (medido: 1 `turn-ended` numa etapa com 31 tool calls). Por isso o `timeoutMs`, que cada envio (o pedido e cada re-prompt de schema) tem, continua
   sendo o freio do que acontece dentro de um turno ([2.2 §3](../usage/02-configuracao-inicial.md#3-teto-de-custo)).
 
 ### Comandos: `ctx.exec`
 
-Todo comando que o workflow roda (testes, `git`, `gh` ou `glab`) passa por `ctx.exec(comando, args, { label, timeoutMs, cwd, env })`,
+Todo comando que o workflow roda (testes, `git`, `gh` ou `glab`) passa por `ctx.exec(comando, args, { label, timeoutMs, cwd, env, scrubSecrets })`,
 nunca por `execFileSync`, `execSync` ou `spawnSync`: uma chamada síncrona congela o processo do job, então o
 cancelamento espera atrás dela e nada a interrompe. O `npm test` reprova um arquivo de workflow que faça uma delas.
 
@@ -65,6 +68,10 @@ if (!tests.ok) await ctx.agent(`${FIX_INSTRUCTIONS}\n\n${tests.tail}`, { label: 
   são **resultados**, não exceções: o código decide o que significam. Um run cancelado mata o comando e lança.
 - O comando morre no `timeoutMs` da chamada; sem ele, no `execTimeoutMs` da configuração do workflow
   ([6.2](../reference/config.md)), 10 minutos por padrão. Dê um prazo curto a um comando de rede (`git push`, `gh`, `glab`).
+- `scrubSecrets: true` roda o comando sem as variáveis do ambiente do processo cujo nome tem `KEY`, `TOKEN`, `SECRET` ou
+  `PASSWORD` (`CURSOR_API_KEY`, `GH_TOKEN`...). Use para um comando que roda código em que o run não confia, como a
+  suíte de testes do repositório alvo; o `env` da chamada ainda acrescenta o que você nomear. O padrão é `false`: um
+  `git` ou o CLI do forge (`gh` ou `glab`) precisa do token.
 - A saída vai para o log de eventos enquanto o comando roda, com a redação e a retenção do conteúdo de um agente, e cada
   chamada é um nó do run, ao lado das etapas ([3.1](../internals/01-arquitetura.md#comandos-do-workflow-ctxexec)). `tail`
   é a saída real, sem redação: antes de levá-la a um texto que sai da máquina, passe pela trava de segredos.
@@ -220,7 +227,10 @@ Uma regra do processo que o modelo policiaria sozinho ("red antes de green", "s�
 - **Estado observável:** o código roda o comando e confere o resultado esperado com `runTests`, que roda por
   `ctx.exec` (um nó de comando no log do run), tem teto de tempo e devolve `kind` (`passed`, `failed`, `timeout`,
   `killed`; esta última é uma suíte morta por um sinal, como o OOM killer, que não é resultado de teste): só `failed`
-  vale como red. Ele tira `NODE_TEST_CONTEXT`, que faz um `node --test` aninhado sair com 0 mesmo falhando.
+  vale como red. Ele tira `NODE_TEST_CONTEXT`, que faz um `node --test` aninhado sair com 0 mesmo falhando, e roda o
+  comando sem as variáveis de ambiente com `KEY`, `TOKEN`, `SECRET` ou `PASSWORD` no nome (`scrubSecrets` do `ctx.exec`):
+  a suíte e o `setupCommand` rodam código do repositório alvo que o agente acabou de escrever, e esse código não herda
+  a `CURSOR_API_KEY` nem o `GH_TOKEN`. O `git` e o CLI do forge (`gh` ou `glab`) do workflow não passam por aí e continuam com os tokens.
 - **O que fica travado:** nas etapas de código (green, correção, refactor), os arquivos dos globs de teste e a
   configuração do runner (`protectedGlobs`, os scripts do `package.json` e os campos `jest`, `vitest`, `mocha`,
   `ava`, `c8` e `nyc` dele); no green e na correção, também o arquivo do teste da fatia (hash guardado no red). Sem
@@ -286,10 +296,18 @@ combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
    escapadas) e o caminho pelo chat (`resumeRunId`). O texto passa pela trava de segredos antes.
 3. O run 2 é o resume com o arg de aprovação (`approveSeams: true`) e executa **o resultado guardado**, não um
    recalculado: uma issue editada ou um arquivo de contexto novo mudaria o prompt do planejador e o plano. Uma
-   edição do humano (`seams: [...]`) refaz a etapa com a edição no prompt. O resultado guardado só é achado com o
+   edição do humano (`seams: [...]`) refaz a etapa com a edição no prompt. No `implement-issue` essa etapa também
+   escolhe o comando de teste, texto de modelo que roda por `bash -c`: com `seams` e sem `testCommand`, o run 2 não o
+   executa; para em `test-command-proposed` (também em `PENDING`), com o comando no comentário e um `next` sem `seams`,
+   e só o resume com `approveSeams: true` roda o plano guardado. O resultado guardado só é achado com o
    mesmo `runId` e o mesmo repositório, porque o progresso fica em `<cwd>/.workflows/runs/<runId>/`: rode o run 2 do
    mesmo diretório (ou com o mesmo `--cwd`) do run 1. Sem o resultado guardado, o `implement-issue` para com
-   `seams-not-proposed` em vez de aprovar um plano que ninguém viu.
+   `seams-not-proposed` em vez de aprovar um plano que ninguém viu. A decisão também fica na issue: o run 2 posta um
+   comentário com o `runId` e as seams (`Seams approved` com as do plano guardado, `Seams replaced` com as de `seams`),
+   quem quer que tenha enviado o resume (chat, CLI ou dashboard), uma vez por decisão: o progresso guarda a última, e um
+   resume depois de uma queda não a posta de novo (se a queda veio entre o post e a gravação, os comentários da issue dizem que ela já está lá).
+   O dashboard toma essa decisão sem o terminal: o painel de seams do Run view retoma o run com `approveSeams: true` ou
+   `seams: [...]` ([5.3 §Decidir as seams](../operating/03-observabilidade.md#decidir-as-seams-de-um-run-do-implement-issue)).
 4. A skill [`run-workflow`](../../skills/run-workflow/SKILL.md) trata qualquer resultado com `next`: mostra o
    resultado, pergunta ao usuário e relança só com a aprovação dele.
 
@@ -306,6 +324,10 @@ combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
 ## Testando
 
 1. Crie `packages/runtime/test/<nome>.test.ts`. O `packages/runtime/tsconfig.test.json` troca `@cursor/sdk` por `packages/runtime/test/fake-sdk.ts`.
+   O teste importa os controles do fake (`script`, `calls`...) de `./fake-sdk.js`. O fake é conferido contra o SDK de verdade: o
+   `npm run typecheck` compila `packages/runtime/test/fake-sdk.conformance.ts` sem a troca, e cada membro do SDK que o runtime
+   usa (`Agent.create`, `Cursor.auth.login`, as classes de erro...) tem de caber na assinatura real. Um fake que perde ou muda
+   um membro, ou uma versão do SDK que o move, reprova o typecheck. Um membro novo do SDK entra no fake e nesse arquivo juntos.
 2. No fake, `script.push(fn)` define o comportamento de cada `send()`:
    - `() => ({ result: "texto" })` simula texto livre;
    - `(o) => { o.local.customTools.submit_result.execute(obj, {}); return {}; }` simula saída estruturada;

@@ -1,4 +1,4 @@
-// Seam 2, the process: a workflow's command (`ctx.exec`) must not freeze the job's process. The `wf` CLI is a real child
+// Seam: the process. A workflow's command (`ctx.exec`) must not freeze the job's process. The `wf` CLI is a real child
 // process against the fake Cursor SDK, a temporary repo and a temporary home directory. While a long command runs, status
 // shows it and cancel, SIGTERM included, stops it at once: the job's event loop is free, and nothing the command started
 // is left running.

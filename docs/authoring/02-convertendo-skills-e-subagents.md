@@ -70,7 +70,7 @@ código, os fluxos das skills `tdd`, `codebase-design`, `code-review` e `pr` de
 
 | Na skill | No workflow |
 |---|---|
-| "confirme as seams com o usuário" (`tdd`) | Checkpoint em MED e HIGH: o run 1 propõe as seams na issue e devolve `seams-proposed`; o run 2, com `approveSeams`, o mesmo `runId` e o mesmo `--cwd`, executa o plano guardado (sem ele, para com `seams-not-proposed`). LOW segue sem parar, com uma fatia |
+| "confirme as seams com o usuário" (`tdd`) | Checkpoint em MED e HIGH: o run 1 propõe as seams na issue e devolve `seams-proposed`; o run 2, com `approveSeams`, o mesmo `runId` e o mesmo `--cwd`, executa o plano guardado (sem ele, para com `seams-not-proposed`) e comenta a aprovação, ou a troca das seams por `seams: [...]`, na issue. LOW segue sem parar, com uma fatia |
 | "red antes de green", "uma fatia por vez" (`tdd`) | Invariantes conferidas pelo código: só testes mudam no red e a suíte falha; nem testes nem configuração do runner mudam no green e a suíte passa; violação desfaz a etapa e tenta de novo uma vez |
 | "Design it twice" quando vale a pena (`codebase-design`) | Só no tier HIGH: três designers em `ctx.parallel` com restrições diferentes e um juiz com schema |
 | "dois sub-agents, sem misturar nem reordenar" (`code-review`) | Três eixos em `ctx.parallel` (Standards, Spec e Segurança, este do kit), cada um com o schema das suas categorias; o código roteia: requisito faltando ou errado vira fatia TDD extra (até 2), padrão violado ou falha de segurança vira refactor, e julgamento, fora do pedido e nota de segurança vão para o PR |
@@ -83,7 +83,8 @@ código, os fluxos das skills `tdd`, `codebase-design`, `code-review` e `pr` de
 estão no cabeçalho do workflow. As etapas que só leem (classificar, planejar, desenhar, julgar, revisar, escrever o
 texto do PR) rodam com `settingSources: []`, a única configuração medida que corta as skills
 ([5.2 §4.3](../operating/02-custos-e-cache.md#43-contexto-fixo-mínimo-por-etapa)). No lugar do `AGENTS.md`, o código lista no prompt
-os arquivos de contexto que existem no planejar, desenhar, julgar e no texto do PR, e os de padrão no eixo Standards;
+os arquivos de contexto que existem no planejar, desenhar, julgar e no texto do PR (a lista é o ajuste `contextFiles`, que um
+repositório troca quando o glossário dele mora em outro lugar, como o deste kit), e os de padrão no eixo Standards;
 o classificar recebe só a issue, e os eixos Spec e Segurança, a issue e o diff. Testes, diff, commit, comentário e PR são código: zero tokens.
 As etapas que escrevem (teste, código, correção, refactor) ficam com todas as tools, `task` inclusive, e o default do
 engine (`["project","team","mdm"]`): é a exceção do workflow ao item de `tools` do

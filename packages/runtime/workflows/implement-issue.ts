@@ -11,7 +11,22 @@
 //     run): o segundo run, com `--resume <runId>` e `approveSeams: true`, executa EXATAMENTE o plano proposto; com
 //     `seams: [...]`, refaz o plano com as seams dadas. A skill tdd manda combinar as seams antes dos testes, e o
 //     runtime não pausa para perguntar. Sem plano proposto no progresso (outro runId ou outro --cwd), `approveSeams`
-//     para com "seams-not-proposed" em vez de aprovar um plano novo; para pular o checkpoint, passe `seams`;
+//     para com "seams-not-proposed" em vez de aprovar um plano novo; para pular o checkpoint das seams, passe `seams`;
+//   - the issue holds the proposal, so the run also posts the decision on it when a resume approves or replaces the seams, whatever
+//     surface sent the resume (chat, CLI, dashboard): "Seams approved" with the stored plan's seams, or "Seams replaced" with the
+//     given list, naming the run. A resume that ends in "seams-not-proposed" posts nothing, and a decision the progress already
+//     records (`seamsDecision`) is not posted again;
+//   - the test command runs through `bash -c`, outside the sandbox: one the planner chose (after reading the issue body) runs only
+//     after a person saw it. It comes from `testCommand` (the user typed it), from the plan the user approved with `approveSeams`
+//     or, in LOW, it is the kit's `npm test`. With `seams` and no `testCommand` the run stores the plan, comments the command on
+//     the issue and stops with "test-command-proposed"; its `next` line drops `seams` (the stored plan holds them) and, resumed,
+//     runs that plan;
+//   - the issue's text is a stranger's: before the first agent call the run asks the forge how the issue's author stands to the repository
+//     (GitHub: `author_association`, through `gh api`; GitLab: the author's access level in the project, through `glab api`), and an
+//     author the forge does not trust (GitHub: not the owner, a member or a collaborator; GitLab: not a member with Developer access or
+//     above) stops the run with "untrusted-author" until the user passes `allowExternalAuthor` after reading the issue. The text that does reach an agent (the issue's title and body, the output of a test run, the
+//     diff of the run's own changes) comes behind a fixed line that says it is data, in a fence nothing in it can close
+//     (implement-issue/untrusted.ts);
 //   - a suíte tem de estar verde antes da primeira fatia ("baseline-red"; um runner sem nenhum teste conta como
 //     verde); `setupCommand` opcional antes; os testes têm teto de tempo ("tests-timeout"), e uma suíte morta por um sinal não conta como red ("tests-killed");
 //   - cada fatia é um ciclo red → green controlado pelo código. Red: o que a etapa mudar fora dos testes é
@@ -86,18 +101,24 @@
 // review que bloqueia e o alreadySatisfied só têm testes offline.
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import { wasKilledByCancel } from "../src/runtime/job-state.js";
-import { createRedactor, findCredential, findSecretEnvValue } from "../src/runtime/redaction.js";
+import { createRedactor } from "../src/runtime/redaction.js";
+import { findSecretInChange, findSecretInText, savedSecrets } from "../src/runtime/secret-guard.js";
 import { NamedLockedError, acquireNamedLock, eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { defineWorkflow, type AgentCallOptions, type WorkflowCard } from "../src/runtime/workflow.js";
 import { buildPrBody, inlineCode, sanitizeModelText, type PrText } from "./implement-issue/pr-body.js";
 import { CommandError, Commands, NETWORK_TIMEOUT_SEC, SNAPSHOT_GRACE_HOURS, WORKFLOW_BRANCH_PREFIX, worktreeOf } from "./implement-issue/commands.js";
 import { type Forge, createForge, detectForge, forgeNameOf, prLabel } from "./implement-issue/forge.js";
 import * as P from "./implement-issue/prompts.js";
+import { DEFAULT_TEST_COMMAND, type Plan, type Slice, proposedCommand, testCommandOf } from "./implement-issue/plan.js";
+import { IMPLEMENT_ISSUE } from "./implement-issue/name.js";
+import { REPO_ARG_PATTERN, repoRefusal } from "./implement-issue/repo-arg.js";
+import { untrusted } from "./implement-issue/untrusted.js";
 import { AXES, AXIS_SCHEMAS, blockingAxes, blockingOf, type Axis, type ReviewReports } from "./implement-issue/review.js";
 import {
   DEFAULT_PROTECTED_GLOBS,
@@ -115,6 +136,7 @@ import {
   runnerConfigChanged,
   sliceKey,
   snapshotTree,
+  type SeamsDecision,
   type SliceRecord,
 } from "./implement-issue/tdd.js";
 
@@ -157,6 +179,12 @@ type Settings = {
   testTimeoutSec: number;
   /** Teto de tempo de cada comando de rede (`git push` e o CLI do forge), em segundos: uma credencial pedida ou uma conexão parada falha a etapa. */
   networkTimeoutSec: number;
+  /** The label that marks an open issue as ready for this workflow: the dashboard's Backlog lists the issues that carry it. Read by the Backlog (`implement-issue/backlog.ts`), not by the run. */
+  backlogLabel: string;
+  /** The hosts, besides the forge's own and the one of `origin`, that the `repo` argument may name: the forge's CLI sends its token to the host it is given. `host` (any port) or `host:port`. */
+  repoHosts: string[];
+  /** The repository-relative files and folders that the plan, design and PR-text agents are told to read for context (the glossary, the coding standards, the ADRs). The ones that do not exist are skipped. */
+  contextFiles: string[];
 };
 const SETTINGS: Settings = {
   sliceCaps: { LOW: 1, MED: 3, HIGH: 5 },
@@ -176,36 +204,55 @@ const SETTINGS: Settings = {
   gcSnapshotGraceHours: SNAPSHOT_GRACE_HOURS,
   testTimeoutSec: 600,
   networkTimeoutSec: NETWORK_TIMEOUT_SEC,
+  backlogLabel: "ready-for-agent",
+  repoHosts: [],
+  contextFiles: ["GLOSSARY.md", "CONTEXT.md", "AGENTS.md", "CODING_STANDARDS.md", "CONTRIBUTING.md", "docs/adr"],
 };
 const READ_ONLY = ["read", "grep", "glob", "ls", "semSearch"];
 const REVIEW_TOOLS = ["read", "grep", "glob", "ls"];
 const NO_SETTING_SOURCES: SettingSource[] = [];
 const SEAMS_MARKER = "<!-- wf:implement-issue:seams -->";
-/** Arquivos que orientam o desenho e o review, quando existem no repositório. */
-const CONTEXT_FILES = ["GLOSSARY.md", "CONTEXT.md", "AGENTS.md", "CODING_STANDARDS.md", "CONTRIBUTING.md", "docs/adr"];
+/** The comment that records a person's decision on the proposed seams (approved, or replaced by their own): its own marker, apart from the proposal's. */
+const SEAMS_DECISION_MARKER = "<!-- wf:implement-issue:seams-decision -->";
+/** The comment of a stopped `test-command-proposed` run: its own marker, so a run that already posted its seams still posts the command. */
+const TEST_COMMAND_MARKER = "<!-- wf:implement-issue:test-command -->";
 const STANDARDS_FILES = ["CODING_STANDARDS.md", "CONTRIBUTING.md", "AGENTS.md", ".editorconfig"];
 
 interface Args {
   issue: number;
-  /** owner/repo, group/sub/project, or a repository URL; default: the cwd's repository. A URL names its host, which decides the forge (the host of `origin` decides otherwise). */
+  /**
+   * owner/repo, group/sub/project, or a repository URL; default: the cwd's repository. A URL names its host, which decides the forge (the host of `origin`
+   * decides otherwise). A host other than the forge's own and the one of `origin` is refused unless the config lists it in `settings.repoHosts` (the forge's CLI sends its token there).
+   */
   repo?: string;
-  /** Comando de teste; default: o que o plano sugerir, ou `npm test`. */
+  /** The test command you typed: it runs as written. Default: the one of the plan you approved with `approveSeams`, or `npm test`. With `seams` and no `testCommand`, the run stops at "test-command-proposed" so you see the planner's command first. */
   testCommand?: string;
   /** Roda uma vez no worktree novo antes da suíte de base (ex.: `npm ci`). */
   setupCommand?: string;
   openPr?: boolean;
-  /** Segundo run de MED/HIGH (com `--resume <runId>` e o mesmo `--cwd`): aprova o plano proposto no primeiro. */
+  /** Segundo run de MED/HIGH (com `--resume <runId>` e o mesmo `--cwd`): aprova o plano proposto no primeiro. The run comments the approval on the issue. */
   approveSeams?: boolean;
-  /** Seams aprovadas por você, no lugar das propostas: o plano é refeito com elas. */
+  /** Seams approved by you, in place of the proposed ones: the plan is made again with them (without `testCommand`, the command the planner chooses waits for your approval). On a resume of a run that proposed seams, the run comments the replacement on the issue. */
   seams?: string[];
+  /** Lifts the author gate: the run goes on although the forge does not trust the issue's author (GitHub: the owner, a member or a collaborator; GitLab: a member with Developer access or above). Pass it after you read the issue. */
+  allowExternalAuthor?: boolean;
   /** O que conta como arquivo de teste (default: DEFAULT_TEST_GLOBS). */
   testGlobs?: string[];
   /** Configuração do runner que nenhuma etapa pode tocar (default: DEFAULT_PROTECTED_GLOBS). */
   protectedGlobs?: string[];
 }
 
-interface Slice { behavior: string; seam: string; testIdea: string }
-interface Plan { seams: Array<{ name: string; interface: string; why: string }>; slices: Slice[]; testCommand: string; rationale?: string }
+/**
+ * How a comment shows the test command, which `bash -c` runs as written. An inline code span cannot hold a line break, so a
+ * command of several lines goes line by line, one span each: a person who approves it sees the script that runs, not a one-line
+ * look-alike (`npm test\ntouch PWNED` folded into `npm test touch PWNED`).
+ */
+const testCommandLines = (command: string): string[] => {
+  const lines = command.trimEnd().split(/\r\n|\r|\n/); // the line break `bash -c` ignores at the end is not a line
+  return lines.length === 1
+    ? [`Test command: ${inlineCode(lines[0]!)}`]
+    : [`Test command (${lines.length} lines, run as one script):`, "", ...lines.map((line) => `- ${inlineCode(line)}`)];
+};
 interface Impl { summary: string; filesChanged: string[] }
 interface TestOut { testFile: string; testName: string; alreadySatisfied?: boolean; evidence?: string }
 
@@ -247,7 +294,11 @@ const AXIS_INSTRUCTIONS: Record<Axis, string> = {
   security: P.SECURITY_INSTRUCTIONS,
 };
 
-const issueBlock = (i: { number: number; title: string; body: string }) => `## Issue #${i.number}: ${i.title}\n\n${i.body}`;
+/** The issue as a prompt block. Its title and body are a stranger's text: only the number (the user's own arg) stays outside the fence. */
+const issueBlock = (i: { number: number; title: string; body: string }) =>
+  `## Issue #${i.number}\n\n${untrusted(`issue #${i.number} (title and body)`, `Title: ${i.title}\n\n${i.body}`)}`;
+/** Test output goes to write steps: tests an agent wrote (after reading the issue) print what they like, so it is fenced like the issue. */
+const testOutputBlock = (output: string) => untrusted("the test suite's output", output);
 const sliceBlock = (s: Slice) => `## Slice\n- Behaviour: ${s.behavior}\n- Seam: ${s.seam}\n- Test idea: ${s.testIdea}`;
 const listBlock = (title: string, items: string[]) => (items.length ? `## ${title}\n${items.map((f) => `- ${f}`).join("\n")}` : "");
 const tail = (s: string | undefined, n = 3000) => (s ?? "").slice(-n);
@@ -395,64 +446,23 @@ async function withBodyFile<T>(body: string, fn: (path: string) => Promise<T>): 
   }
 }
 
-/** Diff desde a base do worktree, para o review e o PR. Grande demais: estatística + início, e o agente lê o resto. */
+/**
+ * Diff desde a base do worktree, para o review e o PR. Grande demais: estatística + início, e o agente lê o resto.
+ * The diff is untrusted text: code that a write step wrote after reading the issue, so a comment in it can try to steer the reviewers
+ * and the PR text. It goes behind the notice, in a fence no line of it can close.
+ */
 async function diffSinceBase(cmd: Commands, cwd: string, base: string, maxChars: number): Promise<string> {
   await cmd.git(cwd, "add", "-A");
   const diff = await cmd.gitRead(cwd, "diff", "--cached", "--no-color", base);
-  if (diff.length <= maxChars) return "```diff\n" + diff + "\n```";
+  const block = (text: string) => untrusted("the diff of this run's changes", text, "diff");
+  if (diff.length <= maxChars) return block(diff);
   const stat = await cmd.gitRead(cwd, "diff", "--cached", "--stat", base);
-  return `(diff truncated: read the files for the rest)\n\n${stat}\n\n\`\`\`diff\n${diff.slice(0, maxChars)}\n\`\`\``;
-}
-
-/**
- * Regras de segredo para qualquer texto que vai sair da máquina. Devolve a regra que disparou, nunca o trecho.
- * The credential formats are the event-log redactor's (redaction.ts, one list for both), plus the saved Cursor key and the
- * value of every secret-named environment variable (16 characters or more) of `env`.
- */
-export function findSecretInText(text: string, knownSecrets: string[] = savedSecrets(), env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const format = findCredential(text);
-  if (format) return format;
-  if (knownSecrets.some((k) => k.length >= 16 && text.includes(k))) return "the saved SDK key or CURSOR_API_KEY";
-  const variable = findSecretEnvValue(text, env, 16);
-  return variable ? `the value of the secret-named environment variable ${variable}` : undefined;
-}
-
-/**
- * Trava de segredos antes do commit. Uma issue com prompt injection poderia fazer uma etapa copiar
- * ~/.cursor/sdk/auth.json para o worktree, e o sandbox do SDK não restringe leitura. Olha o diff staged desde `base`
- * (default: HEAD, ou a árvore vazia num repo sem commits), para pegar também o que um agente tenha commitado. Devolve a regra que disparou, nunca o trecho.
- */
-export async function findStagedSecret(cmd: Commands, worktree: string, knownSecrets: string[] = savedSecrets(), base?: string): Promise<string | undefined> {
-  const git = (...a: string[]) => cmd.gitRead(worktree, ...a);
-  for (const name of (await git("diff", "--cached", "--name-only", ...(base ? [base] : []))).split("\n").filter(Boolean)) {
-    const file = basename(name);
-    if (file === "auth.json") return "auth.json file in the commit";
-    if (file === ".env" || file.startsWith(".env.")) return "a .env file in the commit";
-  }
-  const added = (await git("diff", "--cached", "--no-color", "-U0", ...(base ? [base] : [])))
-    .split("\n")
-    .filter((l) => l.startsWith("+") && !l.startsWith("+++"))
-    .join("\n");
-  const hit = findSecretInText(added, knownSecrets);
-  return hit ? `${hit} in the diff` : undefined;
-}
-
-/** A chave salva por `wf login` e a de CURSOR_API_KEY, lidas só em memória para a comparação. */
-function savedSecrets(): string[] {
-  const keys: string[] = [];
-  if (process.env.CURSOR_API_KEY) keys.push(process.env.CURSOR_API_KEY);
-  try {
-    const stored = JSON.parse(readFileSync(join(homedir(), ".cursor", "sdk", "auth.json"), "utf8")) as { apiKey?: unknown };
-    if (typeof stored.apiKey === "string") keys.push(stored.apiKey);
-  } catch {
-    // sem login salvo
-  }
-  return keys;
+  return `(diff truncated: read the files for the rest)\n\n${stat}\n\n${block(diff.slice(0, maxChars))}`;
 }
 
 export default defineWorkflow<Args>({
   meta: {
-    name: "implement-issue",
+    name: IMPLEMENT_ISSUE,
     description:
       "Implements an issue of the repository's forge (GitHub or GitLab) with slice-by-slice TDD (red → green checked by the code), a three-axis review (Standards, Spec, Security) and a PR in the Summary/Evidence/Merge Danger template.",
     whenToUse: "When the user asks to implement or resolve a specific issue by number.",
@@ -480,12 +490,13 @@ export default defineWorkflow<Args>({
       additionalProperties: false,
       properties: {
         issue: { type: "number" },
-        repo: { type: "string" },
+        repo: { type: "string", pattern: REPO_ARG_PATTERN },
         testCommand: { type: "string" },
         setupCommand: { type: "string" },
         openPr: { type: "boolean" },
         approveSeams: { type: "boolean" },
         seams: { type: "array", items: { type: "string" } },
+        allowExternalAuthor: { type: "boolean" },
         testGlobs: { type: "array", items: { type: "string" } },
         protectedGlobs: { type: "array", items: { type: "string" } },
       },
@@ -507,6 +518,20 @@ export default defineWorkflow<Args>({
     // The forge the run started on: a fresh run takes the one of its origin's host; a resume keeps the one its record names, and a
     // record without one (a run from before the field) is GitHub, whatever the origin says now.
     const forge = createForge(progress.existed ? forgeNameOf(progress.data) : await detectForge(cmd, ctx.cwd, ctx.forges, ctx.args.repo), cmd);
+    // Model text goes to a public issue: neutralized like the PR body's (closing keywords, mentions, `<!--`, and on GitLab its
+    // quick actions and references). The interface and the test command sit in inline code spans, where the forge gives them no effect only while
+    // the span holds: inlineCode turns their backticks and line breaks into characters that cannot close it.
+    const prose = (text: string) => sanitizeModelText(text, forge.name);
+    // Redacted with every credential format: a step result keeps the redact-only ones (a URL password in the test
+    // command, a `Bearer` header) for the workflow to run, but a public comment gets none of them.
+    const redactOutbound = (text: string) => createRedactor({ extra: savedSecrets() }).text(text);
+    const seamLine = (s: Plan["seams"][number]) => `- **${prose(s.name)}**: ${inlineCode(s.interface)} — ${prose(s.why)}`;
+    // Before the first call that carries the forge's token: a `repo` of another host sends it there (`implement-issue/repo-arg.ts`).
+    if (ctx.args.repo !== undefined) {
+      const refusal = repoRefusal(ctx.args.repo, { forge: forge.name, originUrl: await cmd.remoteUrl(ctx.cwd), repoHosts: settings.repoHosts, forges: ctx.forges });
+      // Thrown, not returned as a result status: like invalid args (which the engine also fails), a refused argument is a security refusal that must end the run `failed` (exit code 1, job `failed`), not a `finished` run with a status in its result.
+      if (refusal !== undefined) throw new Error(refusal);
+    }
     // Uma issue tem no máximo um run ativo: dois runs na mesma issue brigariam pelo mesmo trabalho e abririam dois PRs. O lock
     // fica no run store (`.workflows/locks/issue-<n>.lock`, ou `issue-<n>-<hash do repositório>.lock` quando o `--repo` é outro
     // repositório que não o do cwd: a issue #5 de outro repositório é outra issue) e vale até o run terminar, qualquer que seja
@@ -539,6 +564,25 @@ export default defineWorkflow<Args>({
       // ── Triagem: dados da issue via forge (código, sem modelo) ──────────────────────────
       ctx.phase("Triage");
       const issue = await forge.issue(ctx.cwd, number, repo);
+      // Anyone can open an issue on a public repository, and its text reaches steps that write code and run commands with the user's
+      // credentials: an issue by a stranger stops here, before the first agent call, until the user has read it and says so. The user's
+      // `allowExternalAuthor` skips the lookup too. A lookup that fails is an error (a CommandError fails the run), never a trusted author.
+      if (!ctx.args.allowExternalAuthor) {
+        const author = await forge.authorStanding(ctx.cwd, number, repo);
+        if (!author.trusted) {
+          ctx.card({ title: `#${issue.number} ${issue.title}`, badges: ["untrusted author"] });
+          return {
+            issue: issue.number,
+            status: "untrusted-author",
+            runId: ctx.runId,
+            authorAssociation: author.association,
+            reason:
+              `the author of issue #${issue.number} is not ${forge.trusts} (the forge says: ${author.association}), ` +
+              "and the issue's text reaches steps that write code and run commands with your credentials. Read the issue; if you trust it, run again with allowExternalAuthor: true",
+            next: `npm run wf -- run implement-issue --args ${shellQuote(JSON.stringify({ ...ctx.args, allowExternalAuthor: true }))} --resume ${ctx.runId}`,
+          };
+        }
+      }
       const labelTier = tierOfLabels(issue.labels, settings.labelTiers);
       let tier = labelTier;
       if (!tier) {
@@ -557,8 +601,50 @@ export default defineWorkflow<Args>({
       ctx.metric("tier", tier); // covariável de dificuldade: compare modelos dentro do mesmo tier
       ctx.metric("tier_source", labelTier ? "label" : "classifier");
       ctx.card(issueCard(issue, tier)); // on the Board from here on; delivery updates it
-      const ctxFiles = CONTEXT_FILES.filter((f) => existsSync(join(ctx.cwd, f)));
+      const ctxFiles = settings.contextFiles.filter((f) => existsSync(join(ctx.cwd, f)));
       const contextBlock = listBlock("Repository context files (read the ones that matter)", ctxFiles);
+
+      /**
+       * Puts a comment on the issue unless one `isPosted` accepts is already there (it is told the comment's final text): a resume
+       * re-runs the code that posts, so the forge's own comments are the memory that keeps a crash-resume from posting twice. The text
+       * is redacted and guarded like every outbound text. Returns the rule of the secret the text carries (nothing is posted then),
+       * or undefined.
+       */
+      const postOnce = async (text: string, isPosted: (body: string, comment: string) => boolean): Promise<string | undefined> => {
+        const comment = redactOutbound(text);
+        const leak = findSecretInText(comment);
+        if (leak) return leak;
+        const existing = await forge.issueComments(ctx.cwd, issue.number, repo);
+        if (!existing.some((body) => isPosted(body, comment))) await withBodyFile(comment, (f) => forge.commentOnIssue(ctx.cwd, issue.number, f, repo));
+        return undefined;
+      };
+
+      /**
+       * A person's decision on the proposed seams (approve the plan, or replace the seams with their own list) reaches the run as a
+       * resume, from the chat, the CLI or the dashboard, and the issue holds the proposal but not the decision: the run posts it,
+       * naming itself. Only a run that holds a proposal posts (a fresh run given `seams` replaces nothing). The progress records the
+       * decision once the comment is on the issue, so a later resume with the same decision posts nothing; and when a crash came
+       * between the post and the record, the issue's own comments say it is there. Returns the run's result when the comment
+       * would carry a secret (nothing is posted then), or undefined.
+       */
+      const decideSeams = async (decision: SeamsDecision["decision"], seams: string[], listing: string[]) => {
+        if (!progress.data.proposedPlan) return undefined;
+        const decided: SeamsDecision = { decision, seams };
+        if (isDeepStrictEqual(progress.data.seamsDecision, decided)) return undefined;
+        const text = [
+          SEAMS_DECISION_MARKER,
+          `## Seams ${decision} for the \`implement-issue\` run \`${ctx.runId}\``,
+          "",
+          ...listing,
+          "",
+          decision === "approved" ? "The run goes on with exactly this plan." : "The run plans again with these seams.",
+        ].join("\n");
+        const leak = await postOnce(text, (body, comment) => body.trim() === comment.trim());
+        if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the seams decision comment` };
+        progress.data.seamsDecision = decided;
+        progress.save();
+        return undefined;
+      };
 
       // ── Plano (codebase-design): LOW uma fatia; MED planejador; HIGH "Design it twice" ─────
       let plan: Plan;
@@ -566,7 +652,7 @@ export default defineWorkflow<Args>({
         plan = {
           seams: [{ name: "affected public interface", interface: "chosen by the test step", why: "LOW: one slice, no planner" }],
           slices: [{ behavior: issue.title, seam: "the public interface closest to the requested behaviour", testIdea: "use an example from the issue as the expected value" }],
-          testCommand: ctx.args.testCommand ?? "npm test",
+          testCommand: ctx.args.testCommand ?? DEFAULT_TEST_COMMAND,
         };
       } else if (ctx.args.approveSeams && !ctx.args.seams?.length && !progress.data.proposedPlan) {
         // Aprovar exige um plano mostrado: sem ele, um planejador novo produziria um plano que ninguém viu.
@@ -574,7 +660,13 @@ export default defineWorkflow<Args>({
       } else if (ctx.args.approveSeams && !ctx.args.seams?.length && progress.data.proposedPlan) {
         plan = progress.data.proposedPlan as Plan; // aprova exatamente o que foi mostrado na issue
         ctx.log("seams approved: using the plan proposed by the first run");
+        const blocked = await decideSeams("approved", plan.seams.map((s) => s.name), plan.seams.map(seamLine));
+        if (blocked) return blocked;
       } else {
+        if (ctx.args.seams?.length) {
+          const blocked = await decideSeams("replaced", ctx.args.seams, ctx.args.seams.map((seam) => `- ${inlineCode(seam)}`));
+          if (blocked) return blocked;
+        }
         ctx.phase("Plan");
         const approved = listBlock("Approved seams (use exactly these)", ctx.args.seams ?? []);
         // O planejador sabe o teto: sem isso, propôs 5 fatias para um tier de 3 na issue #8, e o PR saiu parcial.
@@ -619,52 +711,80 @@ export default defineWorkflow<Args>({
           });
         }
         // tdd: seams combinadas antes de qualquer teste. O runtime não pausa: propõe na issue, guarda o plano e para.
-        if (!ctx.args.seams?.length && !ctx.args.approveSeams) {
+        const proposesSeams = !ctx.args.seams?.length && !ctx.args.approveSeams;
+        // The test command runs through `bash -c`, outside the sandbox, with the caller's environment. A command the planner wrote
+        // after reading an issue body runs only after a person saw it: in the plan they approved with `approveSeams`, or typed by
+        // them in `testCommand`. With `seams` and no `testCommand`, the run proposes the command and stops.
+        const proposesCommand = !!ctx.args.seams?.length && ctx.args.testCommand === undefined && proposedCommand(plan) !== undefined;
+        if (proposesSeams || proposesCommand) {
+          const { seams: _seams, ...argsWithoutSeams } = ctx.args;
+          const chatApproval = `In the chat: \`/run-workflow implement-issue\` with \`resumeRunId: "${ctx.runId}"\` and \`approveSeams: true\``;
+          // What differs between the two stops. The relaunch of the proposed command drops `seams`: the stored plan already holds
+          // them, and with `seams` the stored-plan branch would not fire (the planner would run again and the run would stop here again).
+          const stop = proposesSeams
+            ? {
+                status: "seams-proposed",
+                marker: SEAMS_MARKER,
+                heading: `## Seams proposed by the \`implement-issue\` workflow (tier ${tier})`,
+                intro: [] as string[],
+                relaunchArgs: { ...ctx.args, approveSeams: true },
+                approve: "Relaunch with the same args and `approveSeams: true`, in the same directory as this run (or with the same `--cwd`); it executes exactly this plan:",
+                chat: `${chatApproval}. To change the seams, pass \`seams: [...]\` instead of \`approveSeams\`.`,
+                commentName: "seams comment",
+                result: {},
+              }
+            : {
+                status: "test-command-proposed",
+                marker: TEST_COMMAND_MARKER,
+                heading: `## Test command proposed by the \`implement-issue\` workflow (tier ${tier})`,
+                intro: [
+                  "The run was started with `seams` and no `testCommand`, so the planner chose the test command below. The workflow runs a command a model wrote only after a person saw it: nothing has run.",
+                  "",
+                ],
+                relaunchArgs: { ...argsWithoutSeams, approveSeams: true },
+                approve:
+                  "Relaunch with `approveSeams: true` and without `seams` (the stored plan already holds them), in the same directory as this run (or with the same `--cwd`); it executes exactly this plan, with this test command:",
+                chat: `${chatApproval}, without \`seams\`. To run another command, pass \`testCommand\` yourself.`,
+                commentName: "test command comment",
+                result: { testCommand: plan.testCommand },
+              };
           progress.data.proposedPlan = plan;
           progress.save();
-          const relaunch = `npm run wf -- run implement-issue --args ${shellQuote(JSON.stringify({ ...ctx.args, approveSeams: true }))} --resume ${ctx.runId}`;
-          // Model text goes to a public issue: neutralized like the PR body's (closing keywords, mentions, `<!--`, and on GitLab its
-          // quick actions and references). The interface and the test command sit in inline code spans, where the forge gives them no effect only while
-          // the span holds: inlineCode turns their backticks and line breaks into characters that cannot close it.
-          const prose = (text: string) => sanitizeModelText(text, forge.name);
-          // Redacted with every credential format: a step result keeps the redact-only ones (a URL password in the test
-          // command, a `Bearer` header) for the workflow to run, but a public comment gets none of them.
-          const redactOutbound = createRedactor({ extra: savedSecrets() }).text;
-          const comment = redactOutbound([
-            SEAMS_MARKER,
-            `## Seams proposed by the \`implement-issue\` workflow (tier ${tier})`,
-            "",
-            ...plan.seams.map((s) => `- **${prose(s.name)}**: ${inlineCode(s.interface)} — ${prose(s.why)}`),
-            "",
-            "### Slices (one per red → green cycle)",
-            "",
-            ...plan.slices.map(
-              (s, i) => `${i + 1}. ${prose(s.behavior)} (seam: ${prose(s.seam)}; test: ${prose(s.testIdea)})${i >= sliceCap ? " (deferred)" : ""}`,
-            ),
-            ...(plan.slices.length > sliceCap
-              ? ["", `The slices marked deferred are left out by the tier ${tier} slice cap (${sliceCap} slices): the PR only references the issue, without closing it.`]
-              : []),
-            "",
-            `Test command: ${inlineCode(ctx.args.testCommand ?? plan.testCommand)}`,
-            ...(plan.rationale ? ["", `### Why this design\n\n${prose(plan.rationale)}`] : []),
-            "",
-            "### To approve",
-            "",
-            "Relaunch with the same args and `approveSeams: true`, in the same directory as this run (or with the same `--cwd`); it executes exactly this plan:",
-            "",
-            "```bash",
-            relaunch,
-            "```",
-            "",
-            `In the chat: \`/run-workflow implement-issue\` with \`resumeRunId: "${ctx.runId}"\` and \`approveSeams: true\`. To change the seams, pass \`seams: [...]\` instead of \`approveSeams\`.`,
-          ].join("\n"));
-          const leak = findSecretInText(comment);
-          if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the seams comment` };
-          const existing = await forge.issueComments(ctx.cwd, issue.number, repo);
-          if (!existing.some((body) => body.includes(SEAMS_MARKER) && body.includes(ctx.runId))) {
-            await withBodyFile(comment, (f) => forge.commentOnIssue(ctx.cwd, issue.number, f, repo));
-          }
-          return { ...base, status: "seams-proposed", runId: ctx.runId, seams: plan.seams, slices: plan.slices, next: relaunch };
+          const relaunch = `npm run wf -- run implement-issue --args ${shellQuote(JSON.stringify(stop.relaunchArgs))} --resume ${ctx.runId}`;
+          const leak = await postOnce(
+            [
+              stop.marker,
+              stop.heading,
+              "",
+              ...stop.intro,
+              ...plan.seams.map(seamLine),
+              "",
+              "### Slices (one per red → green cycle)",
+              "",
+              ...plan.slices.map(
+                (s, i) => `${i + 1}. ${prose(s.behavior)} (seam: ${prose(s.seam)}; test: ${prose(s.testIdea)})${i >= sliceCap ? " (deferred)" : ""}`,
+              ),
+              ...(plan.slices.length > sliceCap
+                ? ["", `The slices marked deferred are left out by the tier ${tier} slice cap (${sliceCap} slices): the PR only references the issue, without closing it.`]
+                : []),
+              "",
+              ...testCommandLines(testCommandOf(plan, ctx.args.testCommand)), // what the run executes, whatever the planner wrote
+              ...(plan.rationale ? ["", `### Why this design\n\n${prose(plan.rationale)}`] : []),
+              "",
+              "### To approve",
+              "",
+              stop.approve,
+              "",
+              "```bash",
+              relaunch,
+              "```",
+              "",
+              stop.chat,
+            ].join("\n"),
+            (body) => body.includes(stop.marker) && body.includes(ctx.runId),
+          );
+          if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the ${stop.commentName}` };
+          return { ...base, status: stop.status, runId: ctx.runId, ...stop.result, seams: plan.seams, slices: plan.slices, next: relaunch };
         }
       }
 
@@ -742,7 +862,7 @@ export default defineWorkflow<Args>({
           hint: "find what makes this step kill the process, or raise workflows.implement-issue.settings.maxStepCrashes in the config and resume the run; a new run starts the count again",
         };
       }
-      const testCommand = ctx.args.testCommand ?? plan.testCommand ?? "npm test";
+      const testCommand = testCommandOf(plan, ctx.args.testCommand);
       const suite = (label: string) => runTests(cmd, testCommand, worktree, { timeoutMs: testTimeout, label: `suite:${label}` });
       if (!progress.data.baselineGreen) {
         if (ctx.args.setupCommand) {
@@ -887,7 +1007,7 @@ export default defineWorkflow<Args>({
             progress.upsert(rec);
             const { before } = await writeStep<Impl>(
               `green:${key}:${attempt}`,
-              `${P.CODE_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Failing test\n\`${rec.testName}\` in \`${rec.testFile}\`\n\n## Suite output\n${tail(rec.red)}${problem ? `\n\n## Fix\n${problem}` : ""}`,
+              `${P.CODE_INSTRUCTIONS}\n\n${issueBlock(issue)}\n\n${sliceBlock(sl)}\n\n## Failing test\n\`${rec.testName}\` in \`${rec.testFile}\`\n\n## Suite output\n${testOutputBlock(tail(rec.red))}${problem ? `\n\n## Fix\n${problem}` : ""}`,
               { label: attempt === 1 ? `code-${sfx}` : `code-${sfx}:${attempt}`, role: implementRole(tier), schema: IMPL_SCHEMA },
             );
             problem = await codeViolation(before, await snapshotTree(cmd, worktree), rec);
@@ -911,7 +1031,7 @@ export default defineWorkflow<Args>({
         // na suíte depois do settle, a correção fica no worktree e a suíte do green do resume é a desta rodada.
         for (let round = (rec.fixRound ?? 0) + 1; res.kind === "failed" && round <= settings.fixRounds; round++) {
           ctx.log(`slice ${sfx}: tests failed; fix ${round}/${settings.fixRounds}`);
-          const { before } = await writeStep<Impl>(`fix:${key}:${round}`, `${P.FIX_INSTRUCTIONS}\n\n${sliceBlock(sl)}\n\n## Test output\n${res.output}`, {
+          const { before } = await writeStep<Impl>(`fix:${key}:${round}`, `${P.FIX_INSTRUCTIONS}\n\n${sliceBlock(sl)}\n\n## Test output\n${testOutputBlock(res.output)}`, {
             label: `fix-${sfx}-${round}`,
             role: "fix",
             model: tier === "LOW" ? GROK : GROK_HIGH, // escala o modelo na correção
@@ -974,7 +1094,7 @@ export default defineWorkflow<Args>({
           round === 1 ? "## Round 1" : `## Round ${round}, after the fix\n${progress.data.refactorSummary ?? "Extra slices only: see the diff."}`;
         const results = await ctx.parallel(
           axes.map((axis) => () =>
-            ctx.agent<any>(`${AXIS_INSTRUCTIONS[axis]}\n\n${extra[axis]}\n\n${issueBlock(issue)}\n\n${roundBlock}\n\n## Diff since the base\n${diff}`, {
+            ctx.agent<unknown>(`${AXIS_INSTRUCTIONS[axis]}\n\n${extra[axis]}\n\n${issueBlock(issue)}\n\n${roundBlock}\n\n## Diff since the base\n${diff}`, {
               label: `review:${axis}:${round}`,
               phase: "Review",
               role: "review",
@@ -1061,7 +1181,7 @@ export default defineWorkflow<Args>({
         // Commits feitos por agentes (a instrução pede para não fazer) são desfeitos, mantendo a árvore.
         if (head !== baseCommit) await cmd.git(worktree, "reset", "--soft", baseCommit);
         await cmd.git(worktree, "add", "-A");
-        const secret = await findStagedSecret(cmd, worktree, undefined, baseCommit);
+        const secret = await findSecretInChange((...args) => cmd.gitRead(worktree, ...args), ["--cached", ...(baseCommit ? [baseCommit] : [])]);
         if (secret) {
           // Nada de commit, push ou PR. O worktree fica para inspeção; o motivo não repete o segredo.
           ctx.metric("secret_blocked", 1);

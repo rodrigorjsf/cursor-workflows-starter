@@ -1,4 +1,4 @@
-// Testes offline do engine (sem rede): `npm test`.
+// Seam: the engine, offline: `runWorkflow` with the fake Cursor SDK and no network, asserting on the outcome and on what the SDK was asked. Run by `npm test`.
 process.env.WF_METRICS = "off"; // estes testes não gravam no banco do usuário
 import assert from "node:assert/strict";
 import "./isolate-home.js";

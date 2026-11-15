@@ -7,13 +7,13 @@
 //   wf list
 //   wf init [--no-agents-md | --remove]   # writes the kit's files into the repo (MCP configs, repo config, .gitignore, AGENTS.md block); prints the diff, never commits
 //   wf config show [workflow]         # effective config of the current repo and where each value came from
-//   wf upgrade                        # moves the installed kit (~/.cursor-workflows/kit) to the newest release tag and redoes its dependencies, shim and skill links
-//   wf doctor [--json]                # checks the environment the IDE uses (Node, dependencies, login, models, forge CLI, MCP server, config, kit version); exits 1 when a check fails
+//   wf upgrade [--allow-mutable-tag]  # moves the installed kit (~/.cursor-workflows/kit) to the newest release tag and redoes its dependencies, shim and skill links; refuses a kit with local changes, a tag that moved upstream and a release that is not immutable (the flag skips the release check)
+//   wf doctor [--json]                # checks the environment the IDE uses (Node, dependencies, login, models, forge CLI, MCP server, config, kit version, SDK sandbox, installed kit, WSL interop); exits 1 when a check fails (a warning does not)
 //   wf run <workflow> --args '<json>' [--max-cents N] [--resume <runId>]   # primeiro plano; imprime JSON no fim
 //   wf start <workflow> --args '<json>' [--resume <runId>]                 # segundo plano; imprime {jobId}
 //   wf status <jobId>
 //   wf wait <jobId> [--timeout 240]       # espera até o timeout e imprime o estado
-//   wf cancel <jobId> [--timeout 30]      # running job: SIGTERM, wait for it to stop; frozen job (no heartbeat): SIGKILL, no revert; ended job: no signal. Left cloud agents are cancelled; the run stays resumable
+//   wf cancel <jobId> [--timeout 30]      # running job: SIGTERM, wait for it to stop; frozen job (no heartbeat): SIGKILL, no revert, and its ctx.exec commands are killed too; ended job: no signal. Left cloud agents are cancelled; the run stays resumable
 //   wf jobs
 //   wf gc [--dry-run]                     # removes the worktrees, local branches and origin branches of implement-issue runs whose PR was merged or closed, or that failed long ago, and the cloud snapshot branches their steps left on the cloud.remote remote; --dry-run only prints the plan
 //   wf stats [--days 30]                  # resumo de custo/eficiência (banco ~/.cursor-workflows/metrics.db)
@@ -43,18 +43,23 @@ import { initRepo } from "./init.js";
 import { assertKitCompatible } from "./kit-version.js";
 import { unifiedDiff } from "./unified-diff.js";
 import { upgradeKit } from "./upgrade.js";
-import { INSIDE_WORKFLOW_ENV, type RunStatus, runWorkflow } from "./runtime/engine.js";
+import { assertCursorEndpoints } from "./runtime/cursor-endpoints.js";
+import { type RunStatus, runWorkflow } from "./runtime/engine.js";
+import { insideWorkflow } from "./runtime/inside-workflow.js";
 import { cancelOnSignals, installCrashHandlers, spawnJob, startJob } from "./runtime/jobs.js";
 import { cancelJob, listJobs, readJob, readJobRecord, waitJob } from "./runtime/job-state.js";
 import { loadWorkflows } from "./runtime/registry.js";
 import { applyGc, directCommands, formatPlan, planGc } from "../workflows/implement-issue/gc.js";
+import { errorText } from "./runtime/error-text.js";
+
+const isStringList = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");
 
 /** The command line itself is wrong (an unknown flag, a flag value the command cannot use, a missing argument): exit 2. */
 class UsageError extends Error {}
 
 /** Exit codes: 0 done; 1 an error; 2 a usage error, printed as one line on stderr. */
 function exitWithError(err: unknown): never {
-  process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+  process.stderr.write(`${errorText(err)}\n`);
   process.exit(err instanceof UsageError ? 2 : 1);
 }
 
@@ -75,6 +80,7 @@ const FLAGS = {
   remove: { type: "boolean", default: false },
   json: { type: "boolean", default: false },
   "dry-run": { type: "boolean", default: false },
+  "allow-mutable-tag": { type: "boolean", default: false },
 } as const;
 
 /** The command line, parsed. An unknown flag or a flag with no value is a usage error, not a stack trace. */
@@ -153,10 +159,12 @@ async function resolveWorkflow() {
 async function main(): Promise<number> {
   installCrashHandlers();
   // `run --job` (the child mode of `start`) included: a step must not start a workflow through a job record either.
-  if ((command === "run" || command === "start") && process.env[INSIDE_WORKFLOW_ENV] === "1") {
+  if ((command === "run" || command === "start") && insideWorkflow()) {
     throw new Error("workflows cannot be started from inside a workflow step");
   }
   if (command === "run" || command === "start") assertKitCompatible(cwd); // before anything starts: a kit outside the repo's declared range is refused
+  // The commands that call the SDK for the account: it sends the key to the address in CURSOR_BACKEND_URL and CURSOR_WEBSITE_URL, whatever it is.
+  if (command === "login" || command === "models" || command === "whoami") assertCursorEndpoints();
   switch (command) {
     case "login": {
       const r = await Cursor.auth.login();
@@ -194,7 +202,7 @@ async function main(): Promise<number> {
       return report.ok ? 0 : 1;
     }
     case "upgrade": {
-      const result = upgradeKit();
+      const result = await upgradeKit({ allowMutableTag: values["allow-mutable-tag"] });
       out(result);
       process.stderr.write(
         result.upgraded
@@ -238,8 +246,9 @@ async function main(): Promise<number> {
       const def = await resolveWorkflow();
       const args = jsonFlag("args", values.args!);
       const overrides = overridesFlag();
-      const { violations } = loadEffectiveConfig(def, { cwd, flags: flagLimits(), mcpOverrides: overrides }); // an unusable config fails here, with its field path
-      const { job, log } = spawnJob({ cwd, workflow: def.meta.name, args, resumeRunId: values.resume, ...flagLimits(), overrides });
+      const { config, violations } = loadEffectiveConfig(def, { cwd, flags: flagLimits(), mcpOverrides: overrides }); // an unusable config fails here, with its field path
+      // Refused here too (exit 1, nothing written) when too many jobs run or the same job already does: the caps.maxRunningJobs cap, as for `start_workflow`.
+      const { job, log } = spawnJob({ cwd, workflow: def.meta.name, args, maxRunningJobs: config.caps.maxRunningJobs, resumeRunId: values.resume, ...flagLimits(), overrides });
       out({ jobId: job.jobId, runId: job.runId, log, next: `wf wait ${job.jobId}`, ...(violations.length ? { violations } : {}) });
       return 0;
     }
@@ -253,8 +262,8 @@ async function main(): Promise<number> {
     }
     case "cancel": {
       // 30 s at most. A running job gets SIGTERM: its process cancels its agents, reverts the in-flight step and writes the run's
-      // end. A frozen job (no heartbeat) is killed (SIGKILL): no revert, no run end, the job stays `failed`, and once its process
-      // is gone its cloud agents are cancelled through the Cursor API. A job whose process already ended gets no signal: only
+      // end. A frozen job (no heartbeat) is killed (SIGKILL) with the commands it started: no revert, no run end, the job stays
+      // `failed`, and once its process is gone its cloud agents are cancelled through the Cursor API. A job whose process already ended gets no signal: only
       // the cloud agents it left are cancelled. See `cancelJob`.
       out((await cancelJob(cwd, name ?? "", Math.min(timeoutMs(), 30_000))) ?? jobNotFound());
       return 0;
@@ -267,12 +276,13 @@ async function main(): Promise<number> {
       const def = (await loadWorkflows(cwd)).get("implement-issue");
       if (!def) throw new Error("unknown workflow: implement-issue. Use `wf list`.");
       const { config } = loadEffectiveConfig(def, { cwd });
-      const { gcFailedAfterDays: failedAfterDays, gcSnapshotGraceHours: graceHours, networkTimeoutSec } = config.settings;
+      const { gcFailedAfterDays: failedAfterDays, gcSnapshotGraceHours: graceHours, networkTimeoutSec, repoHosts } = config.settings;
       if (typeof failedAfterDays !== "number") throw new Error("workflows.implement-issue.settings.gcFailedAfterDays must be a number of days");
       if (typeof graceHours !== "number") throw new Error("workflows.implement-issue.settings.gcSnapshotGraceHours must be a number of hours");
       if (typeof networkTimeoutSec !== "number") throw new Error("workflows.implement-issue.settings.networkTimeoutSec must be a number of seconds");
+      if (!isStringList(repoHosts)) throw new Error("workflows.implement-issue.settings.repoHosts must be a list of hosts");
       const commands = directCommands(networkTimeoutSec);
-      const plan = await planGc({ cwd, commands, failedAfterDays, snapshots: { remote: config.cloud.remote, graceHours }, forges: config.forges });
+      const plan = await planGc({ cwd, commands, failedAfterDays, snapshots: { remote: config.cloud.remote, graceHours }, forges: config.forges, repoHosts });
       process.stderr.write(formatPlan(plan)); // the plan first, then the removal
       if (values["dry-run"]) process.stderr.write("wf gc: dry run, nothing was changed.\n");
       else await applyGc(plan, commands);

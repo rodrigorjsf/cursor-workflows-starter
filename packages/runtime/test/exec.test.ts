@@ -1,4 +1,4 @@
-// Seam 1, the run: `ctx.exec` runs a command a workflow needs (tests, git, gh) asynchronously, with a timeout, streams its
+// Seam: the run. `ctx.exec` runs a command a workflow needs (tests, git, gh) asynchronously, with a timeout, streams its
 // output into the run's event log and records the call as a step node. Runs `runWorkflow` with the fake Cursor SDK against a
 // real child process and asserts on what the workflow gets back and on the replayed event log.
 import assert from "node:assert/strict";
@@ -80,6 +80,27 @@ test("a command that cannot start is a result too: no exit code, and why", async
   assert.equal(result.exitCode, null);
   assert.equal(result.timedOut, false);
   assert.match(result.error!, /ENOENT/);
+});
+
+test("scrubSecrets starts the command without the secret-named variables of the process, and keeps what env sets and the other variables", async () => {
+  const saved = { ...process.env };
+  Object.assign(process.env, { EXEC_SCRUB_API_KEY: "a".repeat(20), EXEC_SCRUB_gh_token: "b".repeat(20), EXEC_SCRUB_PLAIN: "plain" });
+  try {
+    const code = "process.stdout.write(JSON.stringify(Object.keys(process.env).filter((n) => n.startsWith('EXEC_SCRUB_')).sort()))";
+    const wf = workflow(async (ctx) => [
+      (await ctx.exec(...node(code))).tail,
+      (await ctx.exec(...node(code), { scrubSecrets: true })).tail,
+      (await ctx.exec(...node(code), { scrubSecrets: true, env: { EXEC_SCRUB_SET_PASSWORD: "c".repeat(20) } })).tail,
+    ]);
+    const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });
+    assert.deepEqual(r.result, [
+      '["EXEC_SCRUB_API_KEY","EXEC_SCRUB_PLAIN","EXEC_SCRUB_gh_token"]',
+      '["EXEC_SCRUB_PLAIN"]',
+      '["EXEC_SCRUB_PLAIN","EXEC_SCRUB_SET_PASSWORD"]',
+    ]);
+  } finally {
+    for (const name of Object.keys(process.env)) if (!(name in saved)) delete process.env[name];
+  }
 });
 
 test("the command runs in the cwd and the env the call asks for", async () => {
