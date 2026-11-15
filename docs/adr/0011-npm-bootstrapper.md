@@ -70,4 +70,4 @@ keeps living in the cloned tag.**
 
 ---
 
-[← Anterior: 7.10 · ADR-0010: Detached jobs, and how each one is cancelled](0010-detached-jobs-and-how-each-is-cancelled.md) · [Índice](../README.md) · [Próximo: 8.1 · Cursor SDK como motor de workflows determinísticos: relatório de pesquisa →](../research/relatorio-pesquisa.md)
+[← Anterior: 7.10 · ADR-0010: Detached jobs, and how each one is cancelled](0010-detached-jobs-and-how-each-is-cancelled.md) · [Índice](../README.md) · [Próximo: 7.12 · ADR-0012: Delivery modes: the main tree by default, a worktree on request →](0012-delivery-modes.md)
