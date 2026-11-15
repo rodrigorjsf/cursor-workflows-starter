@@ -16,7 +16,8 @@ const INSTALLED_DEPENDENCIES = /^!! (.*\/)?node_modules\/$/;
 /** Runs `git` in the kit's clone and returns its trimmed stdout; throws with what git printed on stderr when it fails. */
 export function kitGit(kit: string, ...args: string[]): string {
   try {
-    return execFileSync("git", ["-C", kit, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    // LC_ALL=C: `wf upgrade` reads git's own words (a rejected tag), which a translated git would not say the same way.
+    return execFileSync("git", ["-C", kit, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, LC_ALL: "C" } }).trim();
   } catch (err) {
     throw new Error((err as { stderr?: string }).stderr?.trim() || errorText(err));
   }

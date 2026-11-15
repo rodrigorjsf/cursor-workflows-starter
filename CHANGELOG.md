@@ -11,6 +11,12 @@
   conferida; sem kit nessa pasta, não há o que conferir. Veja
   [2.3](docs/usage/03-invocacao-no-cursor-ide.md#conferindo-o-ambiente-wf-doctor) e [2.1 §Reinstalar o kit](docs/usage/01-instalacao.md#reinstalar-o-kit).
 
+- **`record-release-fixtures`: grava o que a API de releases do GitHub responde, para a API falsa dos testes do instalador.** O
+  script (`scripts/verify/record-release-fixtures.ts --tag <tag de uma release imutável>`) lê, sem token, a release de uma tag e uma
+  tag sem release (404) e grava as respostas, sem o repositório nem o dono, em
+  `packages/runtime/test/fixtures/github-releases/recordings.json`. A API falsa (`release-api-job.ts`) responde dali e só
+  muda o campo que o teste controla (`immutable`). Fora do `npm run check` e do CI.
+
 - **`verify-sandbox`: uma sonda real do sandbox do SDK, numa etapa que escreve.** O workflow (`scripts/verify/verify-sandbox.ts`) roda uma
   etapa com o sandbox ligado e um `.cursor/sandbox.json` com `readBoundary: "workspace"`, e tenta um `curl` para um host fora da
   allowlist, uma escrita fora do repositório e um `cat ~/.cursor/sdk/auth.json`, com controles que distinguem uma tentativa
@@ -85,6 +91,19 @@
   `.npmrc` plantado. O `wf upgrade` confere até quando o kit já está na tag mais nova. O `install.sh --refresh` não confere: ele
   termina a instalação de uma árvore que o `wf upgrade` já conferiu. Como reinstalar:
   [2.1 §Reinstalar o kit](docs/usage/01-instalacao.md#reinstalar-o-kit).
+
+- **O instalador e o `wf upgrade` recusam uma tag que se moveu e uma release que não é imutável.** Quem consegue mover uma
+  tag de release fazia toda instalação seguinte rodar o código dele, porque o `git fetch --tags --force` aceitava a tag movida
+  em silêncio. Os dois buscam as tags sem `--force` (a tag que mudou na origem falha o fetch, e a mensagem diz `moved
+  upstream`; o kit fica onde estava) e, antes do checkout, leem
+  `https://api.github.com/repos/rodrigorjsf/cursor-workflows-starter/releases/tags/<tag>`, sem token, e só seguem se o campo
+  `immutable` for `true`. Uma release que não é imutável, uma tag sem release e uma consulta que falha são erros, não um pulo.
+  O `--allow-mutable-tag` (`install.sh`, `wf upgrade`) pula só a consulta, para um fork instalado com `--repo`: a consulta cobre
+  só o repositório oficial, e um kit de outra origem é recusado sem a flag. O `wf upgrade` agora é assíncrono por dentro
+  (`upgradeKit` devolve uma `Promise`). O `INSTALL-AGENT.md` não ganha o checksum do `install.sh`: a âncora é a release
+  imutável. **Antes de lançar uma versão com essa checagem, a release dela tem de existir no GitHub com `immutable: true`**
+  (passo 1 do how-to [#74](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/74)); sem isso a instalação
+  seguinte falha para todos. Veja [2.1](docs/usage/01-instalacao.md#tag-movida-e-release-que-não-é-imutável).
 
 - **O arquivo de configuração global que o instalador grava liga o sandbox do SDK em toda etapa (`caps.requireSandbox: true`).**
   Uma sonda real mediu o sandbox numa etapa que escreve (8.2 §16): a rede de saída e a escrita fora do repositório pelo shell foram bloqueadas (a tool `edit`

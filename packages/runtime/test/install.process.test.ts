@@ -2,12 +2,17 @@
 // repository stands in for GitHub (see kit-origin.ts) and a fake `npm` on the PATH stands in for the registry: it logs
 // how it was called and links `node_modules` to this checkout's. The tests read the files the installer leaves in the
 // home (the kit, the `wf` shim, the skill links, the global config), what the shim runs, the exit codes and the messages.
+// The GitHub releases API, which both ask whether a release is immutable, is a child process (release-api-job.ts) that
+// the tests steer through files, because `spawnSync` blocks this process while the installer runs. The release check
+// covers only the official repository, so the tests give the installer its URL and make git rewrite it to the local
+// repository (`url.<path>.insteadOf`, in the environment): the kit's origin is then the official URL, as on a user's machine.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { after, before, test } from "node:test";
+import { after, afterEach, before, test } from "node:test";
 import { EDITED_FILE, KIT_TAMPERING, type KitTampering, PLANTED_NPMRC, git, makeOrigin, release } from "./kit-origin.js";
 
 const KIT_ROOT = join(import.meta.dirname, "..", "..", "..");
@@ -19,8 +24,12 @@ let origin: string;
 let npmBin: string;
 let npmLog: string;
 let counter = 0;
+/** The stand-in for the releases API: its directory (the tests' controls), its child process and its base URL. */
+let releaseApiDir: string;
+let releaseApi: ChildProcess;
+let releaseApiUrl: string;
 
-before(() => {
+before(async () => {
   sandbox = mkdtempSync(join(tmpdir(), "wf-install-"));
   origin = makeOrigin(join(sandbox, "origin"), "0.3.0");
   npmLog = join(sandbox, "npm.log");
@@ -31,8 +40,29 @@ before(() => {
   const packages = join(KIT_ROOT, "node_modules");
   writeFileSync(join(npmBin, "npm"), `#!/bin/sh\necho "$PWD $*" >> "$NPM_LOG"\nrm -rf node_modules\nmkdir node_modules\nln -s "${packages}"/* "${packages}/.bin" node_modules/\n`);
   chmodSync(join(npmBin, "npm"), 0o755);
+
+  releaseApiDir = join(sandbox, "release-api");
+  mkdirSync(releaseApiDir);
+  releaseApi = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), join(import.meta.dirname, "release-api-job.ts"), releaseApiDir], {
+    env: { ...process.env, TSX_TSCONFIG_PATH: join(import.meta.dirname, "..", "tsconfig.test.json") },
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  releaseApiUrl = await new Promise<string>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("the release API stand-in did not start within 30 s")), 30_000);
+    releaseApi.once("exit", (code) => reject(new Error(`the release API stand-in exited early with code ${code}`)));
+    releaseApi.stdout!.on("data", (chunk: Buffer) => {
+      const port = /port (\d+)/.exec(chunk.toString())?.[1];
+      if (port === undefined) return;
+      clearTimeout(timer);
+      resolve(`http://127.0.0.1:${port}`);
+    });
+  });
 });
-after(() => rmSync(sandbox, { recursive: true, force: true }));
+after(async () => {
+  releaseApi.kill();
+  await new Promise((resolve) => (releaseApi.exitCode === null && releaseApi.signalCode === null ? releaseApi.once("exit", resolve) : resolve(undefined)));
+  rmSync(sandbox, { recursive: true, force: true });
+});
 
 /** An empty home directory for one test. */
 function newHome(): string {
@@ -48,14 +78,37 @@ function env(home: string, extra: Record<string, string> = {}): Record<string, s
     NPM_LOG: npmLog,
     TSX_TSCONFIG_PATH: join(home, ".cursor-workflows", "kit", "packages", "runtime", "tsconfig.test.json"),
     WF_METRICS: "off",
+    // Tests only: ask the stand-in, not api.github.com, and take the test origins for the official repository.
+    WF_GITHUB_API_URL: releaseApiUrl,
     ...extra,
   };
 }
 
-/** Runs the installer of `from` (default: the origin's own copy, like a downloaded file). */
-function install(home: string, args: string[], { from = origin, ...extra }: { from?: string } & Record<string, string> = {}) {
+/** The official repository's clone URL, which the installer clones by default and the release check covers. */
+const OFFICIAL_URL = "https://github.com/rodrigorjsf/cursor-workflows-starter.git";
+/** For each home, the local repository that stands for the official one there. */
+const officialAt = new Map<string, string>();
+
+/** The environment that makes git read the official URL from the local repository `repo`, whatever the clone's own config says. */
+const officialRedirect = (repo: string): Record<string, string> => ({ GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: `url.${repo}.insteadOf`, GIT_CONFIG_VALUE_0: OFFICIAL_URL });
+
+/** Runs the installer of `from` (default: the origin's own copy, like a downloaded file), `--repo` as given. */
+function installFrom(home: string, args: string[], { from = origin, ...extra }: { from?: string } & Record<string, string> = {}) {
   const r = spawnSync("bash", [join(from, "scripts", "install.sh"), ...args], { env: env(home, extra), encoding: "utf8" });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+}
+
+/**
+ * Runs the installer as installFrom does, but with the local repository that `--repo` names standing for the official one:
+ * the installer gets the official URL, and git reads that URL from the local repository. A later call for the same home
+ * without `--repo` (or `wf upgrade`) keeps the stand-in.
+ */
+function install(home: string, args: string[], { from = origin, ...extra }: { from?: string } & Record<string, string> = {}) {
+  const at = args.indexOf("--repo");
+  const given = at === -1 ? [...args] : args.map((arg, i) => (i === at + 1 ? OFFICIAL_URL : arg));
+  if (at !== -1) officialAt.set(home, args[at + 1]!);
+  const stand = officialAt.get(home);
+  return installFrom(home, given, { from, ...(stand === undefined ? {} : officialRedirect(stand)), ...extra });
 }
 
 const kitOf = (home: string) => join(home, ".cursor-workflows", "kit");
@@ -309,18 +362,27 @@ test("the installer works in a home whose path has spaces, quotes and a dollar s
   assert.equal(readlinkSync(join(home, ".claude", "skills", "run-workflow")), join(kitOf(home), "skills", "run-workflow"));
 });
 
+/** A fork of the origin: a clone, so it has the origin's v0.3.0 (the same commit), and its own release `version`. */
+function fork(version = "0.4.0"): string {
+  const dir = join(sandbox, `fork-${++counter}`);
+  git(sandbox, "clone", "--quiet", origin, dir);
+  release(dir, version);
+  return dir;
+}
+
 test("--repo given again points an existing clone at that repository before it fetches the tag", () => {
   const home = newHome();
-  assert.equal(install(home, ["--tag", "v0.3.0", "--repo", origin]).status, 0);
-  const other = originWithReleases();
+  // Forks, not the official repository: --allow-mutable-tag skips the release check, which is not what this test is about.
+  assert.equal(installFrom(home, ["--tag", "v0.3.0", "--repo", origin, "--allow-mutable-tag"]).status, 0);
+  const other = fork();
 
-  const r = install(home, ["--tag", "v0.4.0", "--repo", other], { from: other });
+  const r = installFrom(home, ["--tag", "v0.4.0", "--repo", other, "--allow-mutable-tag"], { from: other });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(git(kitOf(home), "describe", "--tags", "--exact-match"), "v0.4.0");
   assert.equal(git(kitOf(home), "remote", "get-url", "origin"), other);
 
   // Without --repo the clone keeps the origin it has (a fork, say).
-  assert.equal(install(home, ["--tag", "v0.4.0"], { from: other }).status, 0);
+  assert.equal(installFrom(home, ["--tag", "v0.4.0", "--allow-mutable-tag"], { from: other }).status, 0);
   assert.equal(git(kitOf(home), "remote", "get-url", "origin"), other);
 });
 
@@ -344,7 +406,8 @@ test("a Node older than the kit's engines.node stops the installer before it ins
   const home = newHome();
   const old = join(sandbox, `old-node-${++counter}`);
   mkdirSync(old);
-  writeFileSync(join(old, "node"), '#!/bin/sh\n[ "$1" = "--version" ] && echo v22.11.0\n');
+  // Only `--version` is faked: the installer's release lookup runs a script on this Node, as it would on a real 22.11.
+  writeFileSync(join(old, "node"), `#!/bin/sh\nif [ "$1" = "--version" ]; then echo v22.11.0; exit 0; fi\nexec "${process.execPath}" "$@"\n`);
   chmodSync(join(old, "node"), 0o755);
   const before = npmCalls().length;
 
@@ -427,8 +490,9 @@ function originWithReleases(): string {
 }
 
 /** Runs `wf upgrade` through the installed shim, the way a user does. */
-function upgrade(home: string) {
-  const r = spawnSync(shimOf(home), ["upgrade"], { env: env(home), encoding: "utf8" });
+function upgrade(home: string, args: string[] = [], extra: Record<string, string> = {}) {
+  const stand = officialAt.get(home);
+  const r = spawnSync(shimOf(home), ["upgrade", ...args], { env: env(home, { ...(stand === undefined ? {} : officialRedirect(stand)), ...extra }), encoding: "utf8" });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
 }
 
@@ -464,11 +528,13 @@ test("wf upgrade at the newest tag reports it and changes nothing", () => {
   const home = newHome();
   assert.equal(install(home, ["--tag", "v0.4.0", "--repo", dir], { from: dir }).status, 0);
   const before = npmCalls().length;
+  const asked = releaseRequests().length;
 
   const r = upgrade(home);
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(JSON.parse(r.stdout), { upgraded: false, from: "0.4.0", to: "0.4.0", tag: "v0.4.0" });
   assert.deepEqual(npmCalls().slice(before), []);
+  assert.deepEqual(releaseRequests().slice(asked), [], "no checkout is coming, so the release is not looked up");
 });
 
 test("wf upgrade refuses a dev install and leaves the working copy where it is", () => {
@@ -564,4 +630,235 @@ test("wf upgrade lists every change of the kit, and refuses even when the kit is
   assert.equal(r.status, 1);
   assert.ok(r.stderr.includes(`the kit at ${kit} has local changes: ${TWO_CHANGES.map((k) => k.listed).join(", ")}; reinstall it`), r.stderr);
   assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.4.0");
+});
+
+// ---- a tag that moved, and a release that is not immutable ----
+
+afterEach(() => {
+  for (const file of readdirSync(releaseApiDir)) if (file.endsWith(".json")) rmSync(join(releaseApiDir, file));
+});
+
+/** The request paths the releases API stand-in has answered so far, oldest first. */
+function releaseRequests(): string[] {
+  const log = join(releaseApiDir, "requests.log");
+  return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean) : [];
+}
+
+/** The stand-in answers for `tag` with the recorded release whose `immutable` field is `immutable` (`undefined` leaves the field out; by default every tag is immutable). */
+function serveRelease(tag: string, immutable: boolean | undefined): void {
+  writeFileSync(join(releaseApiDir, `${tag}.json`), JSON.stringify({ immutable: immutable ?? null }));
+}
+
+/** The stand-in answers for `tag` with the recorded 404 of a tag that has no release. */
+function serveNoRelease(tag: string): void {
+  writeFileSync(join(releaseApiDir, `${tag}.json`), JSON.stringify({ release: "missing" }));
+}
+
+/** The URL of a port nothing listens on (fetch refuses the well-known low ports as "bad port", so a port the OS just gave and took back). */
+async function closedApiUrl(): Promise<string> {
+  const probe = createServer();
+  await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+  const { port } = probe.address() as { port: number };
+  await new Promise((resolve) => probe.close(resolve));
+  return `http://127.0.0.1:${port}`;
+}
+
+const OFFICIAL_RELEASE_PATH = "/repos/rodrigorjsf/cursor-workflows-starter/releases/tags";
+
+/** A bare repository, as GitHub serves a repository, with the releases of `originWithReleases()`; `dir` holds the installer to run. */
+function bareRemote(): { dir: string; bare: string } {
+  const dir = originWithReleases();
+  const bare = join(sandbox, `remote-${++counter}.git`);
+  git(sandbox, "clone", "--quiet", "--bare", dir, bare);
+  return { dir, bare };
+}
+
+test("the installer refuses a tag that moved upstream since the kit fetched it, and leaves the kit where it was", () => {
+  const { dir, bare } = bareRemote();
+  const home = newHome();
+  assert.equal(install(home, ["--tag", "v0.3.0", "--repo", bare], { from: dir }).status, 0);
+  const kit = kitOf(home);
+  const pinned = git(kit, "rev-parse", "v0.3.0^{commit}");
+  git(bare, "tag", "-f", "v0.3.0", "v0.4.0^{commit}"); // whoever holds a token re-points the release
+  const before = npmCalls().length;
+
+  const r = install(home, ["--tag", "v0.3.0", "--repo", bare], { from: dir });
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stderr, /moved/);
+  assert.ok(r.stderr.includes(OFFICIAL_URL), `the message names the repository: ${r.stderr}`);
+  assert.equal(git(kit, "rev-parse", "v0.3.0^{commit}"), pinned, "the local tag was not overwritten");
+  assert.equal(git(kit, "rev-parse", "HEAD"), pinned);
+  assert.deepEqual(npmCalls().slice(before), []);
+});
+
+test("wf upgrade refuses a release tag that moved upstream and leaves the kit on its tag", () => {
+  const { dir, bare } = bareRemote();
+  const home = newHome();
+  assert.equal(install(home, ["--tag", "v0.3.0", "--repo", bare], { from: dir }).status, 0);
+  const kit = kitOf(home);
+  const newest = git(kit, "rev-parse", "v0.4.0^{commit}");
+  git(bare, "tag", "-f", "v0.4.0", "v0.3.0^{commit}");
+  const before = npmCalls().length;
+
+  const r = upgrade(home);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stderr, /moved/);
+  assert.equal(git(kit, "rev-parse", "v0.4.0^{commit}"), newest, "the local tag was not overwritten");
+  assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.3.0");
+  assert.deepEqual(npmCalls().slice(before), []);
+});
+
+test("the installer asks the releases API about the official repository's tag before it clones anything", () => {
+  const home = newHome();
+  const asked = releaseRequests().length;
+  assert.equal(install(home, ["--tag", "v0.3.0", "--repo", origin]).status, 0);
+  assert.deepEqual(releaseRequests().slice(asked), [`${OFFICIAL_RELEASE_PATH}/v0.3.0`]);
+});
+
+test("the installer refuses a release that is not immutable and clones nothing", () => {
+  const home = newHome();
+  serveRelease("v0.3.0", false);
+  const before = npmCalls().length;
+
+  const r = install(home, ["--tag", "v0.3.0", "--repo", origin]);
+  assert.equal(r.status, 1, r.stdout);
+  assert.ok(r.stderr.includes("v0.3.0") && /not immutable/.test(r.stderr) && r.stderr.includes("--allow-mutable-tag"), `the message names the tag, the reason and the flag: ${r.stderr}`);
+  assert.ok(!existsSync(kitOf(home)) && !existsSync(shimOf(home)) && !existsSync(join(home, ".claude")));
+  assert.deepEqual(npmCalls().slice(before), []);
+
+  serveRelease("v0.3.0", undefined); // a release the API gives no immutable field for is not immutable either
+  assert.equal(install(newHome(), ["--tag", "v0.3.0", "--repo", origin]).status, 1);
+});
+
+test("the installer refuses a release that is not immutable before it moves an existing clone, which stays on its tag", () => {
+  const dir = originWithReleases();
+  const home = newHome();
+  assert.equal(install(home, ["--tag", "v0.3.0", "--repo", dir], { from: dir }).status, 0);
+  serveRelease("v0.4.0", false);
+
+  const r = install(home, ["--tag", "v0.4.0", "--repo", dir], { from: dir });
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stderr, /not immutable/);
+  assert.equal(git(kitOf(home), "describe", "--tags", "--exact-match"), "v0.3.0");
+});
+
+test("--allow-mutable-tag installs a release that is not immutable without asking the API", () => {
+  const home = newHome();
+  serveRelease("v0.3.0", false);
+  const asked = releaseRequests().length;
+
+  const r = install(home, ["--tag", "v0.3.0", "--repo", origin, "--allow-mutable-tag"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(git(kitOf(home), "describe", "--tags", "--exact-match"), "v0.3.0");
+  assert.deepEqual(releaseRequests().slice(asked), []);
+});
+
+test("a tag with no release is an error: only a published release installs", () => {
+  const home = newHome();
+  serveNoRelease("v0.3.0");
+  const r = install(home, ["--tag", "v0.3.0", "--repo", origin]);
+  assert.equal(r.status, 1, r.stdout);
+  assert.ok(r.stderr.includes("v0.3.0") && /no release/.test(r.stderr), r.stderr);
+  assert.ok(!existsSync(kitOf(home)));
+});
+
+test("a releases API that cannot be reached stops the installer: the check is never skipped", async () => {
+  const home = newHome();
+  const r = install(home, ["--tag", "v0.3.0", "--repo", origin], { WF_GITHUB_API_URL: await closedApiUrl() });
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stderr, /could not read the release of v0\.3\.0 from .*ECONNREFUSED/);
+  assert.ok(!existsSync(kitOf(home)) && !existsSync(shimOf(home)));
+});
+
+test("a repository other than the official one is refused unless --allow-mutable-tag says to skip the release check, even when a releases API answers", () => {
+  const home = newHome();
+  const asked = releaseRequests().length;
+  const refused = installFrom(home, ["--tag", "v0.3.0", "--repo", origin]);
+  assert.equal(refused.status, 1, refused.stdout);
+  assert.ok(refused.stderr.includes(origin) && refused.stderr.includes("--allow-mutable-tag"), refused.stderr);
+  assert.ok(!existsSync(kitOf(home)));
+  assert.deepEqual(releaseRequests().slice(asked), [], "the answer for the official repository's tag of that name says nothing about this one: it is not asked");
+
+  const allowed = installFrom(home, ["--tag", "v0.3.0", "--repo", origin, "--allow-mutable-tag"]);
+  assert.equal(allowed.status, 0, allowed.stderr);
+  assert.equal(git(kitOf(home), "describe", "--tags", "--exact-match"), "v0.3.0");
+});
+
+test("a refused install leaves an existing clone alone: its origin stays, and no tag is fetched", () => {
+  const home = newHome();
+  const dir = originWithReleases();
+  assert.equal(install(home, ["--tag", "v0.3.0", "--repo", dir], { from: dir }).status, 0);
+  const kit = kitOf(home);
+  const newer = fork("0.9.0");
+
+  // Not the official repository: refused before the origin is replaced.
+  const foreign = installFrom(home, ["--tag", "v0.9.0", "--repo", newer], { from: newer });
+  assert.equal(foreign.status, 1, foreign.stdout);
+  assert.equal(git(kit, "config", "--get", "remote.origin.url"), OFFICIAL_URL);
+  assert.equal(git(kit, "tag", "--list", "v0.9.0"), "", "nothing was fetched from the refused repository");
+
+  // The official repository's release is not immutable: refused before the tags are fetched.
+  serveRelease("v0.9.0", false);
+  const mutable = install(home, ["--tag", "v0.9.0", "--repo", newer], { from: newer });
+  assert.equal(mutable.status, 1, mutable.stdout);
+  assert.match(mutable.stderr, /not immutable/);
+  assert.equal(git(kit, "tag", "--list", "v0.9.0"), "", "the tag of a release that is not immutable was not fetched");
+  assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.3.0");
+});
+
+test("--allow-mutable-tag belongs to a tag install: with --dev or --refresh it is a usage error", () => {
+  for (const mode of ["--dev", "--refresh"]) {
+    const r = installFrom(newHome(), [mode, "--allow-mutable-tag"], { from: workingCopy(true) });
+    assert.equal(r.status, 2, `${mode}: ${r.stdout}`);
+    assert.match(r.stderr, /--allow-mutable-tag/);
+  }
+});
+
+test("wf upgrade refuses a release that is not immutable and leaves the kit on its old tag; --allow-mutable-tag goes ahead", () => {
+  const dir = originWithReleases();
+  const home = newHome();
+  assert.equal(install(home, ["--tag", "v0.3.0", "--repo", dir], { from: dir }).status, 0);
+  const kit = kitOf(home);
+  serveRelease("v0.4.0", false);
+  const before = npmCalls().length;
+  const asked = releaseRequests().length;
+
+  const refused = upgrade(home);
+  assert.equal(refused.status, 1, refused.stdout);
+  assert.ok(refused.stderr.includes("v0.4.0") && /not immutable/.test(refused.stderr) && refused.stderr.includes("--allow-mutable-tag"), refused.stderr);
+  assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.3.0");
+  assert.deepEqual(npmCalls().slice(before), []);
+  assert.deepEqual(releaseRequests().slice(asked), [`${OFFICIAL_RELEASE_PATH}/v0.4.0`]);
+
+  const allowed = upgrade(home, ["--allow-mutable-tag"]);
+  assert.equal(allowed.status, 0, allowed.stderr);
+  assert.deepEqual(JSON.parse(allowed.stdout), { upgraded: true, from: "0.3.0", to: "0.4.0", tag: "v0.4.0" });
+  assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.4.0");
+});
+
+test("wf upgrade with a releases API that cannot be reached fails and leaves the kit on its old tag", async () => {
+  const dir = originWithReleases();
+  const home = newHome();
+  assert.equal(install(home, ["--tag", "v0.3.0", "--repo", dir], { from: dir }).status, 0);
+
+  const r = upgrade(home, [], { WF_GITHUB_API_URL: await closedApiUrl() });
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stderr, /could not read the release of v0\.4\.0 from .*ECONNREFUSED/);
+  assert.equal(git(kitOf(home), "describe", "--tags", "--exact-match"), "v0.3.0");
+});
+
+test("wf upgrade of a kit whose origin is not the official repository is refused unless --allow-mutable-tag says to skip the release check", () => {
+  const dir = originWithReleases();
+  const home = newHome();
+  assert.equal(installFrom(home, ["--tag", "v0.3.0", "--repo", dir, "--allow-mutable-tag"], { from: dir }).status, 0);
+  const asked = releaseRequests().length;
+
+  const refused = upgrade(home);
+  assert.equal(refused.status, 1, refused.stdout);
+  assert.ok(refused.stderr.includes(dir) && refused.stderr.includes("--allow-mutable-tag"), refused.stderr);
+  assert.equal(git(kitOf(home), "describe", "--tags", "--exact-match"), "v0.3.0");
+  assert.deepEqual(releaseRequests().slice(asked), []);
+
+  assert.equal(upgrade(home, ["--allow-mutable-tag"]).status, 0);
+  assert.equal(git(kitOf(home), "describe", "--tags", "--exact-match"), "v0.4.0");
 });

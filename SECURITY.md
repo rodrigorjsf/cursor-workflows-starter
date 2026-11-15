@@ -49,6 +49,13 @@ falhas de segurança.
     o que está em `.git/` (hooks, configuração do clone) nem no `node_modules/`, que o `npm ci` refaz. Quem pode escrever no kit
     controla o código que ele roda até a próxima reinstalação: o sandbox das etapas é a proteção, e a verificação é como você fica
     sabendo.
+- **O instalador e o `wf upgrade` recusam uma tag que se moveu e uma release que não é imutável.** O kit instala de uma tag
+  e roda o que ela contém, então quem move a tag (um token roubado, uma sessão comprometida) faz toda instalação seguinte
+  rodar o código dele. Os dois buscam as tags sem `--force` (o git recusa sobrescrever uma tag que mudou na origem: `moved
+  upstream`) e leem `releases/tags/<tag>` da API do GitHub, sem token, e só seguem se `immutable` for `true`: uma release
+  imutável trava a tag no commit dela. Uma release ausente, uma que não é imutável e uma consulta que falha são erros, não
+  um pulo. O `--allow-mutable-tag` pula só a consulta, para um fork instalado com `--repo`. O `INSTALL-AGENT.md` não traz o
+  checksum do `install.sh`: um commit não contém o próprio hash, então a âncora é a release imutável. Detalhes em [2.1](docs/usage/01-instalacao.md#tag-movida-e-release-que-não-é-imutável).
 - **Com `settingSources` contendo `"project"` (o default), o repositório alvo roda código na sua máquina:** hooks de
   `.cursor/hooks.json` e de `.claude/settings.json` e servidores MCP de `.cursor/mcp.json`. Não use o default em
   repositórios em que você não confia.

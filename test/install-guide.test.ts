@@ -140,3 +140,31 @@ test("the installer clones the same repository the runtime links to, so one rena
   assert.equal(kitFileUrl("INSTALL-AGENT.md", "0.3.0"), `https://github.com/${KIT_REPO}/blob/v0.3.0/INSTALL-AGENT.md`);
   assert.equal(kitFileUrl("a/b.json", "0.3.0", "raw"), `https://raw.githubusercontent.com/${KIT_REPO}/v0.3.0/a/b.json`);
 });
+
+test("no tag fetch of the installer or of wf upgrade forces over a moved tag, and both ask the releases API whether the release is immutable", () => {
+  for (const parts of [["scripts", "install.sh"], ["packages", "runtime", "src", "upgrade.ts"]]) {
+    const file = parts.join("/");
+    const lines = read(...parts).split("\n").filter((line) => !/^\s*(#|\/\/|\*|\/\*)/.test(line));
+    const tagFetches = lines.filter((line) => /\bfetch\b/.test(line) && /--tags\b/.test(line));
+    assert.ok(tagFetches.length > 0, `${file} no longer fetches the tags: this check has nothing to look at`);
+    for (const line of tagFetches) assert.doesNotMatch(line, /--force|\s-f\b|\+refs\/tags/, `${file} forces a tag fetch, which accepts a moved tag silently: ${line.trim()}`);
+    const text = lines.join("\n");
+    assert.match(text, /releases\/tags\//, `${file} never asks the releases API about the tag`);
+    assert.match(text, /\bimmutable\b/, `${file} never tests the release's immutable field`);
+  }
+});
+
+test("the installer and wf upgrade say the same four things about a tag, and the guide quotes only words both say", () => {
+  const installer = read("scripts", "install.sh");
+  const upgrade = read("packages", "runtime", "src", "upgrade.ts");
+  const fragments = ["moved upstream since this kit fetched it", "is not immutable", "has no release for tag", "could not read the release of"];
+  for (const fragment of fragments) {
+    assert.ok(installer.includes(fragment), `scripts/install.sh no longer says "${fragment}"`);
+    assert.ok(upgrade.includes(fragment), `packages/runtime/src/upgrade.ts no longer says "${fragment}"`);
+  }
+  // What the guide tells an agent to look for in a tag error must be said by the code, word for word.
+  for (const quoted of ["moved upstream", "is not immutable", "has no release for tag", "could not read the release of"]) {
+    assert.ok(GUIDE.includes(`\`${quoted}\``), `INSTALL-AGENT.md no longer quotes \`${quoted}\``);
+    assert.ok(fragments.some((fragment) => fragment.startsWith(quoted)), `\`${quoted}\` is not the start of a message the code prints`);
+  }
+});

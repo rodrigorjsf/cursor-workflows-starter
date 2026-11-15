@@ -74,6 +74,10 @@ Pick the task, then run its steps in order. Each step ends on a stated result.
 1. Run `wf upgrade`. It moves the installed kit to the newest release tag and redoes its dependencies, the `wf`
    command and the skill links; stdout is `{ upgraded, from, to, tag }`. Done when it exits 0.
    - `upgraded: false` means the kit is already on the newest release.
+   - A failure that says `moved upstream`, `is not immutable`, `has no release for tag` or `could not read the release
+     of` is the tag check, which runs before the checkout: the kit stays on its old tag. Tell the user with the output.
+     Retry once only for `could not read the release of`. Never add `--allow-mutable-tag` yourself: it skips the release
+     check, and only the user may choose that, for a kit installed from a fork.
    - A refusal that names a dev install means the kit location links to a working copy: the user updates that copy with
      git, then you run `bash ~/.cursor-workflows/kit/scripts/install.sh --refresh`.
    - A refusal that says `the kit at <kit> has local changes: <list>; reinstall it` means the installed kit was edited:
