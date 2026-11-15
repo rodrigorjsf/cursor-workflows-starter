@@ -568,7 +568,7 @@ test("--json shows a warning as `status: warn` with its hint and `ok: true`, and
   assert.equal(report.ok, true);
   assert.deepEqual(
     report.checks.map((c) => [c.id, c.status]),
-    [["node", "pass"], ["dependencies", "pass"], ["login", "pass"], ["models", "pass"], ["forge", "warn"], ["mcp-server", "pass"], ["config", "pass"], ["kit-version", "pass"], ["sandbox", "pass"]],
+    [["node", "pass"], ["dependencies", "pass"], ["login", "pass"], ["models", "pass"], ["forge", "warn"], ["mcp-server", "pass"], ["config", "pass"], ["kit-version", "pass"], ["sandbox", "pass"], ["kit", "pass"]],
   );
   assert.deepEqual(Object.keys(checkOf(report, "forge")), ["id", "title", "status", "message", "hint"]);
   assert.deepEqual(Object.keys(checkOf(report, "node")), ["id", "title", "status", "message"]);
@@ -582,13 +582,13 @@ test("without --json a warning prints as `[warn]` with its fix hint, and the las
   assert.match(warned.stdout, /\[warn\]\s+Forge CLI: GitHub at github\.com: .*admin:public_key/);
   assert.match(warned.stdout, /how to fix: Remove them with `gh auth refresh --remove-scopes admin:public_key --hostname github\.com`/);
   assert.match(warned.stdout, /\[ok\]\s+Node\.js/);
-  assert.match(warned.stdout, /All 9 checks passed, 1 with a warning\./);
+  assert.match(warned.stdout, /All 10 checks passed, 1 with a warning\./);
 
   const both = doctor(repo, { bins: [gh.dir], args: [], env: { FAKE_SDK_LOGGED_OUT: "1" } });
   assert.equal(both.status, 1, "a failure still fails the doctor");
   assert.match(both.stdout, /\[warn\]\s+Forge CLI/);
   assert.match(both.stdout, /\[FAIL\]\s+Cursor SDK login/);
-  assert.match(both.stdout, /2 of 9 checks failed, 1 with a warning\./);
+  assert.match(both.stdout, /2 of 10 checks failed, 1 with a warning\./);
 });
 
 test("an origin on a host nobody declared fails the forge check naming the host and the `forges` key, and a hint to declare it", () => {
