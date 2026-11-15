@@ -3,11 +3,13 @@
 // browser validation (the `chrome-devtools` MCP), because this repo has no DOM to run it in.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
+import ts from "typescript";
 import { type DashboardServer, startDashboard } from "../src/server.js";
+import { PACKAGE } from "./render.js";
 import { http, sandbox, type Sandbox } from "./support.js";
 
 let box: Sandbox;
@@ -97,5 +99,40 @@ test("the page and its assets keep the Host check and the read-only methods", as
     assert.equal((await http(dash.url, path, { host: "evil.example" })).status, 403, path);
     assert.equal((await http(dash.url, path, { method: "POST" })).status, 405, path);
     assert.equal((await http(dash.url, path, { method: "HEAD" })).status, 200, path);
+  }
+});
+
+// ── A page that fails shows why, instead of going blank ──────────────────────────────────────────────────────────────────────
+// Nothing runs the page here, so these two read the entry files of the pages as the TypeScript parser does: the root each mounts is wrapped in
+// the error boundary, and `createRoot` gets an `onUncaughtError`, for what a boundary cannot catch (an error in the boundary itself).
+
+/** The entry file of each page, relative to the package. */
+const ENTRIES = ["app/main.tsx", "run-view/run-page.tsx"];
+
+/** What a page's entry file mounts: the tag of the element handed to `.render(...)`, and the properties of the options handed to `createRoot(..., options)`. */
+function mountOf(entry: string): { rendered: string | undefined; rootOptions: string[] } {
+  const sf = ts.createSourceFile(entry, readFileSync(join(PACKAGE, entry), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let rendered: string | undefined;
+  let rootOptions: string[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "createRoot") {
+      const options = node.arguments[1];
+      if (options && ts.isObjectLiteralExpression(options)) rootOptions = options.properties.flatMap((p) => (p.name && ts.isIdentifier(p.name) ? [p.name.text] : []));
+    }
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "render") {
+      const element = node.arguments[0];
+      if (element && ts.isJsxElement(element)) rendered = element.openingElement.tagName.getText(sf);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return { rendered, rootOptions };
+}
+
+test("both pages mount their root inside the error boundary, with an onUncaughtError for what the boundary cannot catch", () => {
+  for (const entry of ENTRIES) {
+    const { rendered, rootOptions } = mountOf(entry);
+    assert.equal(rendered, "ErrorBoundary", `${entry}: the root is not wrapped in <ErrorBoundary>`);
+    assert.ok(rootOptions.includes("onUncaughtError"), `${entry}: createRoot has no onUncaughtError (it has: ${rootOptions.join(", ") || "no options"})`);
   }
 });
