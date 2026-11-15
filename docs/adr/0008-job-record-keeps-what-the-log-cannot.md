@@ -4,6 +4,8 @@
 
 **Amended:** 2026-11-14: the citation of the detached-jobs decision points at ADR-0010, which superseded ADR-0003; the decision here is unchanged.
 
+**Amended:** 2026-11-14: `start` also names the workflow (`workflow`), which the cap on running jobs (`caps.maxRunningJobs`) reads to refuse a job that runs the same workflow with the same args as one that runs; the record still holds no fact about progress.
+
 ## Context
 
 [ADR-0002](0002-event-log-source-of-truth.md) made the per-run event log the source of truth and said that the job record
