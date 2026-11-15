@@ -164,7 +164,7 @@ export async function pushSnapshot({ cwd, remote, branch, signal, allowPublicRem
  * when `remote` (at `repoUrl`) is public or cannot be asked about and `allowPublicRemote` is not set. The secret scan always runs: the
  * opt-in is about a public repository, not about leaking a key.
  */
-async function refuseUnsafeSnapshot({ top, remote, repoUrl, head, commit, allowPublicRemote, signal }: { top: string; remote: string; repoUrl: string; head: string; commit: string; allowPublicRemote: boolean; signal?: AbortSignal }): Promise<void> {
+async function refuseUnsafeSnapshot({ top, remote, repoUrl, commit, head, allowPublicRemote, signal }: Pick<PushedSnapshot, "top" | "remote" | "repoUrl" | "commit"> & { head: string; allowPublicRemote: boolean; signal?: AbortSignal }): Promise<void> {
   const secret = await findSecretInChange((...args) => git(top, args, { signal }), [head, commit]);
   if (secret) {
     throw new SnapshotRefusedError(

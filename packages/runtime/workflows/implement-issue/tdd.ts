@@ -150,10 +150,11 @@ export interface TestRun {
  * nó de comando, e nada trava o processo enquanto ela roda. Sem `-l`: um shell de login recarrega o perfil e pode trocar
  * o PATH (medido: o npm do `mise exec` virou outro, quebrado). Sem NODE_TEST_CONTEXT: dentro de um runner de testes, um
  * `node --test` aninhado herda essa variável e sai com 0 mesmo com teste falhando (medido no 22.13 e 22.23). Com teto de
- * tempo: um teste red de comportamento assíncrono que ainda não existe costuma travar. Sem os segredos do ambiente
- * (`scrubSecrets`: `CURSOR_API_KEY`, `GH_TOKEN`, qualquer variável com KEY, TOKEN, SECRET ou PASSWORD no nome): a suíte e o
- * `setupCommand` rodam código do repositório alvo que um agente acabou de escrever, e esse código não herda nada que possa mandar embora.
- * O `git` e o `gh` do workflow não passam por aqui e continuam com os tokens.
+ * tempo: um teste red de comportamento assíncrono que ainda não existe costuma travar.
+ *
+ * Runs without the environment's secrets (`scrubSecrets`: `CURSOR_API_KEY`, `GH_TOKEN`, any variable with KEY, TOKEN, SECRET or PASSWORD
+ * in its name): the suite and the `setupCommand` run code of the target repository that an agent has just written, and that code
+ * inherits nothing it could send away. The workflow's own `git` and forge CLI calls do not come through here and keep their tokens.
  */
 export async function runTests(cmd: Commands, command: string, cwd: string, opts: { timeoutMs: number; label: string }): Promise<TestRun> {
   const r = await cmd.exec("bash", ["-c", command], { cwd, env: { NODE_TEST_CONTEXT: undefined }, scrubSecrets: true, timeoutMs: opts.timeoutMs, label: opts.label });

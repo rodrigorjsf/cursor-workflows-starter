@@ -47,8 +47,8 @@ export function findSecretInText(text: string, knownSecrets: string[] = savedSec
 export async function findSecretInChange(git: GitReader, range: string[], knownSecrets: string[] = savedSecrets()): Promise<string | undefined> {
   for (const name of (await git("diff", "--name-only", ...range)).split("\n").filter(Boolean)) {
     const file = basename(name);
-    if (file === "auth.json") return "auth.json file in the commit";
-    if (file === ".env" || file.startsWith(".env.")) return "a .env file in the commit";
+    if (file === "auth.json") return "an auth.json file in the change";
+    if (file === ".env" || file.startsWith(".env.")) return "a .env file in the change";
   }
   const added = (await git("diff", "--no-color", "-U0", ...range))
     .split("\n")

@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ErrorBoundary, ErrorFallback, crashText } from "../app/ErrorBoundary.js";
+import { crashText } from "../app/crash.js";
+import { ErrorBoundary, ErrorFallback } from "../app/ErrorBoundary.js";
 import { render, textOf } from "./render.js";
 
 test("the fallback shows the error and a link that reloads the page", () => {

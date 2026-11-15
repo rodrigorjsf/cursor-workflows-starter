@@ -265,7 +265,9 @@ export function runningJobOf(cwd: string, runId: string): JobState | undefined {
  * with the same args is already running (a looping agent that calls `start_workflow` again and again would pay for each copy), or
  * `maxRunningJobs` jobs (the `caps.maxRunningJobs` cap; `null` for none) already run. A job runs while its process is there and
  * beating and its run has not ended: a frozen one, which `readJob` reports as failed, does not count. Only reads; the check and
- * the job record that follows it must not be split by an `await`, or two starts can both pass.
+ * the job record that follows it must not be split by an `await`, or two starts of one process can both pass. Between processes there
+ * is no lock: two starts at the same instant (two chats' MCP servers, the CLI and the dashboard) can both pass, so this is a rate limit and
+ * not a barrier (SECURITY.md says so).
  */
 export function jobRefusal(cwd: string, workflow: string, args: unknown, maxRunningJobs: number | null): string | undefined {
   const dir = jobsDirIn(cwd);

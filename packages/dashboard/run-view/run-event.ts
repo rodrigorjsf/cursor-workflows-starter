@@ -1,4 +1,4 @@
-// One message of the event stream, read into a `RunEvent` or dropped with a reason. The stream is text from outside the page: the
+// One message of the event stream, read into a `RunEvent` or dropped with a reason. Pure: no DOM, no React, no clock. The stream is text from outside the page: the
 // runtime wrote it, and a kit older or newer than this page may have. `run-graph.ts` reads an event defensively (a field it does not
 // know is left alone), but only if it is an object with a `type`; a message that is `null`, a number or an array would throw in the
 // code that reads `event.type`, and an error there blanks the whole page. So the page asks here first, and drops what fails.

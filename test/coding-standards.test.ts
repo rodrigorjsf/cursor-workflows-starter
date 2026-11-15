@@ -637,13 +637,16 @@ test("every ctx.metric name in a workflow is snake_case", () => {
 const PUSH_HELPERS = "packages/runtime/workflows/implement-issue/commands.ts";
 /** A call whose callee is one of these runs a command: `ctx.exec`, `Commands.exec`, `child_process`'s functions. */
 const RUNS_A_COMMAND = /^(exec|execFile|execFileSync|execSync|spawn|spawnSync|runCommand)$/;
+/** The `Commands` methods that run any CLI by name, which they take as an argument: `forgeRead("git", cwd, "push")`. */
+const RUNS_A_NAMED_CLI = /^forgeRead(With|OrNothing)?$/;
 /** Text that is a `git push` command line: `git push`, `git -C dir push`, inside a shell one-liner. */
 const GIT_PUSH_LINE = /\bgit\b[^\n]*\bpush\b/;
 
 /**
  * Lines of a workflow file that run `git push` itself instead of calling the helpers of `PUSH_HELPERS`: a call to a `git`, `gitRead` or
- * `gitIs` method with the argument `"push"`, a command call whose command is `git` with `"push"` among its arguments, and a command
- * call with a string that is a `git ... push` command line (`bash -c "git push"`). Read from the syntax tree, so comments and log text
+ * `gitIs` method with the argument `"push"`, a command call whose command is `git` with `"push"` among its arguments, a call of a
+ * `Commands` method that runs a named CLI (`forgeRead`...) with both `"git"` and `"push"`, and a command call with a string that
+ * is a `git ... push` command line (`bash -c "git push"`). Read from the syntax tree, so comments and log text
  * never trip it; a subcommand held in a variable passes.
  */
 function directGitPush(path: string, text: string): number[] {
@@ -659,6 +662,7 @@ function directGitPush(path: string, text: string): number[] {
     const pushes =
       (/^git(Read|Is)?$/.test(callee) && direct.includes("push")) ||
       (RUNS_A_COMMAND.test(callee) && direct[0] === "git" && listed.includes("push")) ||
+      (RUNS_A_NAMED_CLI.test(callee) && direct.includes("git") && direct.includes("push")) ||
       (RUNS_A_COMMAND.test(callee) && [...direct, ...listed].some((s) => GIT_PUSH_LINE.test(s)));
     if (pushes) found.push(lineOf(sf, node));
   });

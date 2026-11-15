@@ -1,29 +1,18 @@
 // The error boundary both pages mount their root in, and what a page shows when it fails. An error in a component's render (an event of a
 // shape the page does not know, a field it assumed) unmounts the whole React tree and leaves a blank page, with the reason only in the
-// console. Here a failure shows the error and a link that reloads the page; `showCrash` does the same in plain DOM for an error no
+// console. Here a failure shows the error and a link that reloads the page; `showCrashIn` does the same in plain DOM for an error no
 // boundary caught (React has already unmounted the tree then, so a component cannot show it). Its style, `crash.css`, is imported by the
 // two entry files, which esbuild bundles: a test that renders this file has no loader for a style.
 import { Component, type ReactNode } from "react";
-
-/** What a thrown value says, for the page: an Error's message, a string as it is, other JSON as JSON, and a thrown nothing as such. */
-export function crashText(error: unknown): string {
-  if (error instanceof Error) return error.message || error.name;
-  if (typeof error === "string") return error;
-  if (error === undefined || error === null) return "an unknown error (nothing was thrown with it)";
-  try {
-    return JSON.stringify(error) ?? String(error);
-  } catch {
-    return String(error);
-  }
-}
+import { CRASH_TITLE, RELOAD_LABEL, crashText } from "./crash.js";
 
 /** The error and the way back. An empty `href` is the address of the page itself: following it reloads it. */
 export function ErrorFallback({ error }: { error: unknown }) {
   return (
     <div className="crash" role="alert">
-      <h1>The dashboard hit an error</h1>
+      <h1>{CRASH_TITLE}</h1>
       <pre>{crashText(error)}</pre>
-      <a href="">Reload the page</a>
+      <a href="">{RELOAD_LABEL}</a>
     </div>
   );
 }
@@ -63,12 +52,12 @@ export function showCrashIn(container: HTMLElement): (error: unknown) => void {
       box.className = "crash";
       box.setAttribute("role", "alert");
       const title = doc.createElement("h1");
-      title.textContent = "The dashboard hit an error";
+      title.textContent = CRASH_TITLE;
       const message = doc.createElement("pre");
       message.textContent = crashText(error);
       const reload = doc.createElement("a");
       reload.setAttribute("href", "");
-      reload.textContent = "Reload the page";
+      reload.textContent = RELOAD_LABEL;
       box.append(title, message, reload);
       container.replaceChildren(box);
     }, 0);
