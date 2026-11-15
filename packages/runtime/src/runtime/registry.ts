@@ -18,20 +18,22 @@ export function workflowDirs(cwd: string): string[] {
   return [...new Set(dirs)].filter((d) => existsSync(d));
 }
 
+/** Does the object name itself: a `meta.name` that is a non-empty string? */
+const hasName = (value: Record<string, unknown>): boolean => isRecord(value.meta) && typeof value.meta.name === "string" && value.meta.name !== "";
+
 /**
  * Is `value` a workflow definition? A workflow file is code the kit imports without a type check, so what its default export
  * holds is checked at load: the two members every caller relies on, the name (the key of the registry, and of `wf run <name>`)
  * and `run`. The rest of the shape is validated where it is used: the args against `meta.argsSchema`, the roles and settings by
  * the config layers.
  */
-const isWorkflowDefinition = (value: unknown): value is WorkflowDefinition =>
-  isRecord(value) && isRecord(value.meta) && typeof value.meta.name === "string" && value.meta.name !== "" && typeof value.run === "function";
+const isWorkflowDefinition = (value: unknown): value is WorkflowDefinition => isRecord(value) && hasName(value) && typeof value.run === "function";
 
 /** Why `value`, which failed `isWorkflowDefinition`, is not a workflow: the first member that is wrong. */
 function whyNotWorkflow(value: unknown): string {
   const lead = "the default export is not a workflow definition";
   if (!isRecord(value)) return `${lead}: expected an object, got ${value === null ? "null" : typeof value}`;
-  if (!isRecord(value.meta) || typeof value.meta.name !== "string" || value.meta.name === "") return `${lead}: meta.name must be a non-empty string`;
+  if (!hasName(value)) return `${lead}: meta.name must be a non-empty string`;
   return `${lead}: run must be a function`;
 }
 

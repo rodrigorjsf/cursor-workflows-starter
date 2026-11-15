@@ -161,7 +161,7 @@ const ALLOWED_JSON_CASTS: Array<{ file: string; call: string; why: string }> = [
   { file: "scripts/config-reference.ts", call: "schemaText", why: "the kit's own shipped config schema" },
   { file: "scripts/verify/record-gh-fixtures.ts", call: 'readFileSync(join(calls, name), "utf8")', why: "a recording this script wrote" },
   { file: "scripts/verify/record-glab-fixtures.ts", call: 'readFileSync(join(this.recordDir, calls[0]!), "utf8")', why: "a recording this script wrote" },
-  { file: "scripts/verify/record-release-fixtures.ts", call: "createRedactor({ env: {} }).text(text)", why: "a recorder stores what the service answered, and types it for the one script that records it" },
+  { file: "scripts/verify/record-release-fixtures.ts", call: "createRedactor({ env: {} }).text(text)", why: "the recording the script has just built and scrubbed, parsed back to its own type" },
 ];
 
 test("no shipped code casts a JSON.parse result to a shape outside the allowlist, and every allowlist entry still names a cast", () => {

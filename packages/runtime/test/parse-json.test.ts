@@ -1,4 +1,4 @@
-// Seam 1, the files the runtime reads back as JSON, in process: what comes out of a text that is not JSON, or is JSON of
+// Seam: the files the runtime reads back as JSON, in process: what comes out of a text that is not JSON, or is JSON of
 // another shape than the one the runtime writes. A state file (job record, run lock, dashboard pid file, memo entry,
 // workflow progress) and a repo's `.mcp.json` are data at rest that a crash, an older kit or another tool may have left in
 // any shape, and the runtime decides from them whether a process is alive, what a resume repeats and which server starts.

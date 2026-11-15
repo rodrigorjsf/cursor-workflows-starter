@@ -1,15 +1,17 @@
-// Seam 1, the forge module in process (`createForge` over a `Commands` whose commands answer with a given stdout): what it makes
+// Seam: the forge module in process (`createForge` over a `Commands` whose commands answer with a given stdout): what it makes
 // of what `gh` and `glab` printed. The answers are data from a service the kit does not control, and a CLI that changes its
 // output, a proxy that answers with an HTML page, or a GitLab of another version would reach `implement-issue`, `wf gc` and the
 // dashboard's Backlog as a value they trust. Each read is checked: an answer of the shape the forge gave when it was recorded
-// (the real `glab` 1.130.0 output of test/fixtures/glab/recordings.json) is read as before, and any other is an error that names
-// the command and the field, never a TypeError further on. What the workflows do with a forge that fails is asserted by their own
+// (the real `glab` 1.130.0 output of test/fixtures/glab/recordings.json, and the real `gh` list of test/fixtures/gh/recordings.json)
+// is read as before, and any other is an error that names the command and the field, never a TypeError further on. `gh issue view
+// --json` has no recording: its two shapes below are written by hand from what gh 2.102.0 printed for this repository's issues. What the workflows do with a forge that fails is asserted by their own
 // tests, on the fake `gh` and `glab`.
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import { createForge } from "../workflows/implement-issue/forge.js";
+import { GH_RECORDINGS_PATH, type GhRecordingsFile } from "../../../scripts/verify/record-gh-fixtures.js"; // the recorder owns the format and the path; importing it runs nothing
 import { recorded } from "./glab-recordings.js";
 
 /** An Exec whose every command exits 0 after printing `stdout`: `Commands.read` has its Exec send a command's stdout to the file named in WF_STDOUT. */
@@ -33,7 +35,11 @@ test("GitHub: an issue as gh prints it is read, and one that is not JSON or has 
   await assert.rejects(github("null").issue("/x", 7), /^Error: gh issue view 7: \(root\): /);
 });
 
-test("GitHub: the issues of a label as gh lists them are read, and a list whose issue has no url is an error naming the field", async () => {
+test("GitHub: the issues of a label as gh lists them (the recorded output of the real gh) are read, and a list whose issue has no url is an error naming the field", async () => {
+  const listed = (JSON.parse(readFileSync(GH_RECORDINGS_PATH, "utf8")) as GhRecordingsFile).recordings["issue-list"];
+  assert.ok(listed, `${GH_RECORDINGS_PATH} has no "issue-list" recording: run scripts/verify/record-gh-fixtures.ts`);
+  const issues = await github(listed.stdout).listIssues("/x", "ready-for-agent");
+  assert.ok(issues.length > 0 && issues.every((i) => Number.isInteger(i.number) && i.url.startsWith("https://")), JSON.stringify(issues));
   assert.deepEqual(await github(JSON.stringify([{ number: 3, title: "a", url: "https://github.com/o/r/issues/3" }])).listIssues("/x", "ready-for-agent"), [{ number: 3, title: "a", url: "https://github.com/o/r/issues/3" }]);
   assert.deepEqual(await github("[]").listIssues("/x", "ready-for-agent"), []);
   await assert.rejects(github(JSON.stringify([{ number: 3, title: "a" }])).listIssues("/x", "ready-for-agent"), /^Error: gh issue list: 0\.url: /);
@@ -74,7 +80,7 @@ test("GitLab: the notes of an issue are read from one page or from several, with
   assert.ok(many.length > one.length, "every page is read");
   assert.deepEqual(await gitlab(JSON.stringify([{ body: "mine" }, { body: "added label", system: true }])).issueComments("/x", 1), ["mine"]);
   await assert.rejects(gitlab(JSON.stringify([{ body: 5 }])).issueComments("/x", 1), /^Error: glab api issue notes: 0\.0\.body: /);
-  await assert.rejects(gitlab('{"message":"404 Not Found"}').issueComments("/x", 1), /^Error: glab api issue notes: 0: /);
+  await assert.rejects(gitlab('{"message":"404 Not Found"}').issueComments("/x", 1), /^Error: glab api issue notes: expected a list/);
 });
 
 test("GitLab: the project glab printed is read for its URL, and one with no web_url is an error naming the field", async () => {

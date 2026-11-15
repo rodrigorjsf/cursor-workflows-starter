@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { ToolName } from "@cursor/sdk";
 import { z } from "zod";
+import { errorText } from "./error-text.js";
 import { parseJson } from "./parse-json.js";
 import { stateDir } from "./state.js";
 import { writeFileAtomic } from "./state-files.js";
@@ -65,7 +66,12 @@ export class MemoStore {
   }
   get(key: string): unknown | undefined {
     const file = join(this.dir, `${key}.json`);
-    return existsSync(file) ? parseJson(readFileSync(file, "utf8"), MEMO_ENTRY, file).result : undefined;
+    if (!existsSync(file)) return undefined;
+    try {
+      return parseJson(readFileSync(file, "utf8"), MEMO_ENTRY, file).result;
+    } catch (err) {
+      throw new Error(`${errorText(err)}; delete the file and the step runs again`);
+    }
   }
   set(key: string, result: unknown): void {
     writeFileAtomic(join(this.dir, `${key}.json`), JSON.stringify({ result }));

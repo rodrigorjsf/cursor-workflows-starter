@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import { errorText } from "../../src/runtime/error-text.js";
 import { isRecord, parseJson } from "../../src/runtime/parse-json.js";
 import { runDirIn } from "../../src/runtime/run-store.js";
 import { writeFileAtomic } from "../../src/runtime/state-files.js";
@@ -298,7 +299,14 @@ export class ProgressStore {
   constructor(cwd: string, runId: string) {
     this.file = join(runDirIn(cwd, runId), "tdd-progress.json");
     this.existed = existsSync(this.file);
-    this.data = this.existed ? parseJson(readFileSync(this.file, "utf8"), PROGRESS, this.file) : { slices: [] };
+    this.data = this.existed ? this.read() : { slices: [] };
+  }
+  private read(): Progress {
+    try {
+      return parseJson(readFileSync(this.file, "utf8"), PROGRESS, this.file);
+    } catch (err) {
+      throw new Error(`${errorText(err)}; restore the file, or start a new run instead of resuming this one`);
+    }
   }
   slice(key: string): SliceRecord | undefined {
     return this.data.slices.find((s) => s.key === key);

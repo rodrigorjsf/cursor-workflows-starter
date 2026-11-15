@@ -120,7 +120,8 @@
 
 - **O registro de workflows confere o módulo que carrega.** Um arquivo de workflow cujo `export default` não é um workflow (não é um
   objeto, não tem `meta.name` ou tem um `run` que não é função) vai para `broken`, com o motivo, em vez de entrar no mapa com o tipo
-  `WorkflowDefinition<any, any>` e quebrar na hora de rodar. Um módulo sem `export default` continua sendo um módulo que os workflows
+  `WorkflowDefinition<any, any>` e quebrar na hora de rodar. Antes, um `export default` sem `meta.name` era ignorado em silêncio; agora é
+  acusado, e o `loadWorkflows` (o `wf doctor` e o `wf run`) para nele. Um módulo sem `export default` continua sendo um módulo que os workflows
   importam, e não é listado nem acusado. O `wf doctor` e o `list_workflows` mostram o motivo.
 
 - **`wf upgrade` e o instalador recusam um kit com mudanças locais.** Antes de buscar as tags ou mover o que for, os dois rodam

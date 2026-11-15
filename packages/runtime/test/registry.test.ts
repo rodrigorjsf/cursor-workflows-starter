@@ -1,4 +1,4 @@
-// Seam 1, the workflow registry in process: `discoverWorkflows` and `loadWorkflows` over a target repo's `.agents/workflows/`.
+// Seam: the workflow registry in process: `discoverWorkflows` and `loadWorkflows` over a target repo's `.agents/workflows/`.
 // A workflow file is code the kit imports and runs without a type check, so what it exports is checked when it loads: a
 // module that is not a workflow definition is reported in `broken` (the caller lists it with the reason) and never
 // reaches the run. The process seam (the MCP server still serves the good ones) is registry.process.test.ts.
@@ -49,7 +49,8 @@ test("a default export without a name, with a blank name, without meta, or that 
   assert.match(problemOf(broken, "blank-name.mjs") ?? "", /meta\.name must be a non-empty string/);
   assert.match(problemOf(broken, "no-meta.mjs") ?? "", /meta\.name must be a non-empty string/);
   assert.match(problemOf(broken, "not-an-object.mjs") ?? "", /expected an object, got string/);
-  assert.equal(workflows.size, 3, `the good workflow and the kit's two, nothing malformed: ${[...workflows.keys()].join(", ")}`);
+  assert.deepEqual(["no-run", "missing-run", "no-name", "blank-name", "no-meta", "not-an-object"].filter((name) => workflows.has(name)), [], "nothing malformed is listed");
+  assert.ok(workflows.has("good"), "the well formed one is");
 });
 
 test("a workflow that is well formed is listed, and a module with no default export is a helper: neither listed nor broken", async () => {

@@ -252,7 +252,9 @@ export function createForge(name: string, commands: Commands): Forge {
 /**
  * What each forge CLI prints, as far as the kit reads it (every other field is left as it came). The answers are data from a service the
  * kit does not control, so each read is checked against these, and an answer of another shape is an error naming the command and the field
- * (`parse-json.ts`). Every field here was in the output recorded from the real CLI (`test/fixtures/glab/recordings.json` for glab).
+ * (`parse-json.ts`). The glab fields are the ones in the output recorded from the real CLI (`test/fixtures/glab/recordings.json`); gh's are the
+ * ones of the real `gh` 2.102.0 on 2026-11-14 (`issue view --json number,title,body,labels` and `--json comments` on this repository's own
+ * issues, read-only) and of the recorded `issue list` (`test/fixtures/gh/recordings.json`).
  */
 const GITHUB_ISSUE = z.looseObject({ number: z.number(), title: z.string(), body: z.string(), labels: z.array(z.looseObject({ name: z.string() })) });
 const GITHUB_ISSUE_REFS = z.array(z.looseObject({ number: z.number(), title: z.string(), url: z.string() }));
@@ -262,7 +264,9 @@ const GITLAB_ISSUE_REFS = z.array(z.looseObject({ iid: z.number(), title: z.stri
 /** One array per page (`jsonValues`): `glab api --paginate` prints all the pages as one array, or one array per page. */
 const GITLAB_NOTE_PAGES = z.array(z.array(z.looseObject({ body: z.string(), system: z.boolean().optional() })));
 const GITLAB_PROJECT = z.looseObject({ web_url: z.string() });
-const GITLAB_MR_PAGES = z.array(z.array(z.looseObject({ web_url: z.string(), state: z.string() })));
+const GITLAB_MR = z.looseObject({ web_url: z.string(), state: z.string() });
+const GITLAB_MR_PAGES = z.array(z.array(GITLAB_MR));
+type GitlabMr = z.infer<typeof GITLAB_MR>;
 
 const NO_PR_FOUND = /no pull requests? found/i;
 /** The `author_association` values of an author who is no stranger: the owner, a member of the owning organization, a collaborator. Every other value, one GitHub adds later included, is a stranger's. */
@@ -450,6 +454,16 @@ function apiHost(repo: string | undefined): GlabHost {
 const projectOf = (repo: string | undefined): string => `projects/${repo ? encodeURIComponent(repoPathOf(repo)) : ":fullpath"}`;
 
 /**
+ * The pages of a paginated `glab api` answer, each an array, checked against `schema`: an answer that is not a list (an error object
+ * where the pages should be) is an error that says so, named `source`.
+ */
+function pagesOf<S extends z.ZodType>(text: string, schema: S, source: string): z.output<S> {
+  const pages = jsonValues(text);
+  if (!pages.every(Array.isArray)) throw new Error(`${source}: expected a list`);
+  return checkShape(pages, schema, source);
+}
+
+/**
  * The JSON arrays and objects `text` holds, one after the other: `glab api --paginate` 1.130.0 prints one array for all the pages
  * (recorded from a real GitLab), and this reads one array per page too, as another version may print. Output that stops in the
  * middle of a value is an error, never a shorter list.
@@ -475,11 +489,6 @@ function jsonValues(text: string): unknown[] {
   return values;
 }
 
-interface GitlabMr {
-  web_url: string;
-  state: string;
-}
-
 /** GitLab, through `glab`. */
 class GitlabForge implements Forge {
   readonly name = "gitlab";
@@ -502,8 +511,7 @@ class GitlabForge implements Forge {
   }
 
   async issueComments(cwd: string, number: number, repo?: string): Promise<string[]> {
-    const pages = checkShape(jsonValues(await this.api(cwd, repo, "--paginate", `${projectOf(repo)}/issues/${number}/notes`)), GITLAB_NOTE_PAGES, "glab api issue notes");
-    const notes = pages.flat();
+    const notes = pagesOf(await this.api(cwd, repo, "--paginate", `${projectOf(repo)}/issues/${number}/notes`), GITLAB_NOTE_PAGES, "glab api issue notes").flat();
     return notes.filter((note) => !note.system).map((note) => note.body);
   }
 
@@ -545,9 +553,7 @@ class GitlabForge implements Forge {
    */
   private async latestMr(cwd: string, branch: string, repo?: string): Promise<GitlabMr | undefined> {
     const query = `source_branch=${encodeURIComponent(branch)}&order_by=created_at&sort=desc&per_page=100`;
-    const pages = jsonValues(await this.api(cwd, repo, "--paginate", `${projectOf(repo)}/merge_requests?${query}`));
-    if (!pages.every(Array.isArray)) throw new Error(`glab api merge_requests (${branch}): expected a list`);
-    const mrs: GitlabMr[] = checkShape(pages, GITLAB_MR_PAGES, `glab api merge_requests (${branch})`).flat();
+    const mrs: GitlabMr[] = pagesOf(await this.api(cwd, repo, "--paginate", `${projectOf(repo)}/merge_requests?${query}`), GITLAB_MR_PAGES, `glab api merge_requests (${branch})`).flat();
     return mrs.find((mr) => prStateOfMr(mr.state) === "OPEN") ?? mrs[0];
   }
 
