@@ -29,6 +29,7 @@ import { jobsDirIn } from "./job-state.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
 import { type InterruptedCloudStep, addUsage, emptyUsage, resumeHint, subtractUsage, turnTokens, withRatio } from "./projection.js";
 import { CONTENT_MAX_CHARS, RunLockedError, RunStore } from "./run-store.js";
+import { savedSecrets } from "./secret-guard.js";
 import type { RetentionPolicy } from "./retention.js";
 import { registerRun } from "./runs-index.js";
 import { INSIDE_WORKFLOW_ENV } from "./inside-workflow.js";
@@ -531,7 +532,9 @@ export async function runWorkflow<A, R>(
 
   let store: RunStore;
   try {
-    store = RunStore.open(join(opts.stateDir ?? runtimeStateDir(opts.cwd, "runs"), runId), runId, { secrets: [opts.apiKey] });
+    // The SDK takes the key from `opts.apiKey`, then CURSOR_API_KEY, then the login `wf login` saved: the first two are known here (and CURSOR_API_KEY
+    // is an env value the redactor already learns), the third only by reading the file the SDK reads, so the store redacts that key too.
+    store = RunStore.open(join(opts.stateDir ?? runtimeStateDir(opts.cwd, "runs"), runId), runId, { secrets: [opts.apiKey, ...savedSecrets()] });
   } catch (err) {
     if (err instanceof RunLockedError) return refused(err.message); // nothing is written: the run belongs to the other execution
     throw err;
