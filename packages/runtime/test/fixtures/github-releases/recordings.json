@@ -1,0 +1,48 @@
+{
+  "recordedFrom": "https://api.github.com",
+  "recordedOn": "2026-11-14",
+  "placeholders": {
+    "repo": "owner/repo",
+    "owner": "owner"
+  },
+  "recordings": {
+    "release": {
+      "path": "/repos/owner/repo/releases/tags/v0.4.0",
+      "status": 200,
+      "body": {
+        "url": "https://api.github.com/repos/owner/repo/releases/445248557",
+        "assets_url": "https://api.github.com/repos/owner/repo/releases/445248557/assets",
+        "upload_url": "https://uploads.github.com/repos/owner/repo/releases/445248557/assets{?name,label}",
+        "html_url": "https://github.com/owner/repo/releases/tag/v0.4.0",
+        "id": 445248557,
+        "author": {
+          "login": "owner",
+          "type": "User"
+        },
+        "node_id": "RE_kwDOVq5jEs4aifQt",
+        "tag_name": "v0.4.0",
+        "target_commitish": "main",
+        "name": "v0.4.0 (pré-release)",
+        "draft": false,
+        "immutable": true,
+        "prerelease": true,
+        "created_at": "2026-11-14T11:07:42Z",
+        "updated_at": "2026-11-14T11:32:09Z",
+        "published_at": "2026-11-14T11:32:09Z",
+        "assets": [],
+        "tarball_url": "https://api.github.com/repos/owner/repo/tarball/v0.4.0",
+        "zipball_url": "https://api.github.com/repos/owner/repo/zipball/v0.4.0",
+        "body": "<release notes>"
+      }
+    },
+    "no-release": {
+      "path": "/repos/owner/repo/releases/tags/v0.0.0-no-such-release",
+      "status": 404,
+      "body": {
+        "message": "Not Found",
+        "documentation_url": "https://docs.github.com/rest/releases/releases#get-a-release-by-tag-name",
+        "status": "404"
+      }
+    }
+  }
+}

@@ -10,8 +10,8 @@
 #   `install.sh --refresh` (dependencies, shim, skill links and config for the kit already in place). Safe to run again.
 #   WF_HOME replaces ~/.cursor-workflows. A tag install refuses a tag that moved upstream and a release that is not immutable
 #   (GitHub's `immutable` field), because a tag someone can move makes every later install run their code;
-#   --allow-mutable-tag skips the release check, for a fork given with --repo. WF_GITHUB_API_URL (tests only) replaces
-#   https://api.github.com and makes the check take --repo as the official repository.
+#   --allow-mutable-tag skips the release check, for a fork given with --repo (the check covers only the official repository).
+#   WF_GITHUB_API_URL (tests only) replaces https://api.github.com.
 
 # Everything runs inside main(), called on the last line: bash reads a function whole before running it, so a
 # half-downloaded script (curl | bash) does nothing, and `wf upgrade` can check out a new install.sh under a running one.
@@ -33,6 +33,7 @@ main() {
     esac
   done
   [ -n "$mode" ] || { usage >&2; return 2; }
+  [ -z "$allow_mutable" ] || [ "$mode" = "tag" ] || { echo "error: --allow-mutable-tag skips the release check of a tag install, so it only goes with --tag" >&2; return 2; }
 
   local wf_dir="${WF_HOME:-$HOME/.cursor-workflows}"
   local kit="$wf_dir/kit"
@@ -73,15 +74,17 @@ warn() {
 
 # Puts the kit at $kit on the tag: clones it, or moves an existing clone to the tag. A kit location that is a link is a dev
 # install: it points at somebody's working copy, which this script must not check out. An existing clone fetches from
-# its own origin; a --repo given on the command line replaces that origin first. The tags are fetched without --force, so
-# a tag that exists in the clone and moved upstream fails the fetch instead of being overwritten, and the release of the
-# tag must be immutable (see require_immutable_release) before anything is cloned or checked out.
+# its own origin (as configured, whatever a user's url.<base>.insteadOf rewrites it to); a --repo given on the command line
+# replaces that origin first. The release of the tag must be immutable (see require_immutable_release) before the clone is
+# touched, and the tags are fetched without --force, so a tag that exists in the clone and moved upstream fails the fetch
+# instead of being overwritten.
 fetch_kit() {
-  local kit="$1" tag="$2" repo="$3" repo_given="$4" allow_mutable="$5" official="$6" origin fetch_err
+  local kit="$1" tag="$2" repo="$3" repo_given="$4" allow_mutable="$5" official="$6" origin="$3" fetch_err
   [ ! -L "$kit" ] || die "$kit is a development install (it points to $(readlink "$kit")); remove the link to install a tag"
   if [ -d "$kit/.git" ]; then
+    [ -n "$repo_given" ] || origin="$(git -C "$kit" config --get remote.origin.url)" || die "the clone at $kit has no origin remote"
+    [ -n "$allow_mutable" ] || require_immutable_release "$official" "$origin" "$tag"
     [ -z "$repo_given" ] || git -C "$kit" remote set-url origin "$repo"
-    origin="$(git -C "$kit" remote get-url origin)" || die "the clone at $kit has no origin remote"
     # Not --quiet: it also hides the line that names a rejected tag. The output is held, and shown only on failure.
     # LC_ALL=C: the check below reads git's own words, which a translated git would not say the same way.
     if ! fetch_err="$(LC_ALL=C git -C "$kit" fetch --tags 2>&1)"; then
@@ -91,10 +94,9 @@ fetch_kit() {
         *) die "could not fetch the tags of $origin" ;;
       esac
     fi
-    [ -n "$allow_mutable" ] || require_immutable_release "$official" "$origin" "$tag"
     git -C "$kit" -c advice.detachedHead=false checkout --quiet "$tag" || die "tag $tag does not exist in $kit"
   else
-    [ -n "$allow_mutable" ] || require_immutable_release "$official" "$repo" "$tag"
+    [ -n "$allow_mutable" ] || require_immutable_release "$official" "$origin" "$tag"
     git -c advice.detachedHead=false clone --quiet --branch "$tag" "$repo" "$kit" || die "could not clone $repo at tag $tag"
   fi
 }
@@ -106,28 +108,27 @@ fetch_kit() {
 # immutable and a call that fails are all errors, never a skip: --allow-mutable-tag is the one explicit skip. Needs `node`
 # for the HTTP call and the JSON, which the install requires anyway.
 require_immutable_release() {
-  local official="$1" origin="$2" tag="$3" api="${WF_GITHUB_API_URL:-}" slug url verdict
-  slug="${official#https://github.com/}"
-  slug="${slug%.git}"
-  if [ -z "$api" ]; then
-    [ "${origin%/}" = "${official%/}" ] || [ "${origin%/}" = "${official%.git}" ] || die "the release check covers only $official, and this kit's origin is $origin. Pass --allow-mutable-tag to install from it without the check"
-    api="https://api.github.com"
-  fi
+  local official="$1" origin="$2" tag="$3" api="${WF_GITHUB_API_URL:-https://api.github.com}" lookup_timeout_ms=20000 want got slug url verdict
+  want="${official%/}"
+  got="${origin%/}"
+  [ "${got%.git}" = "${want%.git}" ] || die "the release check covers only $official, and this kit's origin is $origin. Pass --allow-mutable-tag to install from it without the check"
   case "$tag" in
     ""|*[!A-Za-z0-9._-]*) die "tag \"$tag\" is not a plain tag name (letters, digits, dots, dashes and underscores), so its release cannot be looked up. Pass --allow-mutable-tag to install it without the check" ;;
   esac
+  slug="${official#https://github.com/}"
+  slug="${slug%.git}"
   url="$api/repos/$slug/releases/tags/$tag"
   verdict="$(node -e '
     const say = (word) => console.log(word);
     if (typeof fetch !== "function") { say("oldnode"); process.exit(0); }
-    fetch(process.argv[1], { headers: { accept: "application/vnd.github+json", "user-agent": "cursor-workflows-installer" }, signal: AbortSignal.timeout(20000) })
+    fetch(process.argv[1], { headers: { accept: "application/vnd.github+json", "user-agent": "cursor-workflows-installer" }, signal: AbortSignal.timeout(Number(process.argv[2])) })
       .then(async (res) => {
         if (res.status === 404) return say("missing");
         if (!res.ok) return say("unreachable HTTP " + res.status);
         say((await res.json()).immutable === true ? "immutable" : "mutable");
       })
       .catch((err) => say("unreachable " + (err.cause?.message || err.cause?.code || err.message)));
-  ' "$url")" || verdict="unreachable node failed"
+  ' "$url" "$lookup_timeout_ms")" || verdict="unreachable node failed"
   case "$verdict" in
     immutable) ;;
     mutable) die "the release $tag of $slug is not immutable, so its tag may have been moved to other code. Install an immutable release, or pass --allow-mutable-tag to install it anyway" ;;

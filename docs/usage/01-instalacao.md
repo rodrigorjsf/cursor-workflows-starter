@@ -49,7 +49,7 @@ Baixar o script para um arquivo, em vez de passá-lo direto ao `bash`, deixa voc
 
 | Passo | Resultado |
 |---|---|
-| Kit | Antes de mexer no kit, confere a tag ([abaixo](#tag-movida-e-release-que-não-é-imutável)): a release dela no GitHub tem de ser imutável. Depois clona o repositório na tag em `~/.cursor-workflows/kit` (`WF_HOME` muda a pasta `~/.cursor-workflows`). Se já há um clone, busca as tags da origem dele, sem `--force`, e o move para a tag (um `--repo` dado de novo troca essa origem antes) |
+| Kit | Antes de clonar ou trocar de tag, confere a tag ([abaixo](#tag-movida-e-release-que-não-é-imutável)): a release dela no GitHub tem de ser imutável. Depois clona o repositório na tag em `~/.cursor-workflows/kit` (`WF_HOME` muda a pasta `~/.cursor-workflows`). Se já há um clone, busca as tags da origem dele, sem `--force`, e o move para a tag (um `--repo` dado de novo troca essa origem antes) |
 | Node | Para antes de instalar qualquer coisa se o `node` do PATH for mais antigo que o `engines.node` do kit (22.13), dizendo as duas versões |
 | Dependências | `npm ci` na pasta do kit: a árvore exata do `package-lock.json` |
 | Comando `wf` | Escreve `~/.local/bin/wf`, um script que roda o CLI do kit instalado. Se a pasta não está no PATH, o instalador avisa e diz como corrigir (bash ou zsh: `export PATH` no `~/.profile`; fish: `fish_add_path`). Um `wf` que não é dele fica como está, com aviso |

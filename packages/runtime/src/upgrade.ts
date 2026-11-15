@@ -30,7 +30,7 @@ export interface UpgradeResult {
 /** The official repository, as the installer clones it. */
 const OFFICIAL_ORIGIN = `https://github.com/${KIT_REPO}`;
 
-/** Tests only: the base URL of the GitHub API, in place of `https://api.github.com`. When set, the kit's origin is taken to be the official repository. */
+/** Tests only: the base URL of the GitHub API, in place of `https://api.github.com`. */
 const API_URL_ENV = "WF_GITHUB_API_URL";
 
 /** How long the release lookup may take before it is a failure. */
@@ -83,22 +83,31 @@ function newestReleaseTag(kit: string): string {
 /** Whether two clone URLs name the same repository, ignoring a trailing slash and `.git`. */
 const sameRepository = (a: string, b: string): boolean => a.replace(/\/$/, "").replace(/\.git$/, "") === b.replace(/\/$/, "").replace(/\.git$/, "");
 
+/** Options of `upgradeKit`. */
+export interface UpgradeOptions {
+  /** Skip the release check (a kit installed from a fork). A tag that moved upstream is refused all the same. */
+  allowMutableTag?: boolean;
+}
+
 /**
- * Throws unless the GitHub release of `tag` says `immutable: true`: an immutable release locks its tag to its commit, so whoever
- * steals a token cannot move the tag to code that this upgrade then runs. The release API needs no token. Only the official
- * repository is covered, so a kit with another origin is refused too (the answer for a tag of the same name in the official
- * repository says nothing about the fork's). A missing release, one that is not immutable and a failed call are all errors,
- * never a skip.
+ * Throws unless the kit's origin is the official repository, the only one the release check covers: the answer for a tag of
+ * the same name in the official repository says nothing about a fork's. The origin is read as configured, not as git expands
+ * it, so a user's `url.<base>.insteadOf` does not turn the official repository into another one.
  */
-async function assertImmutableRelease(kit: string, tag: string): Promise<void> {
-  const testApi = process.env[API_URL_ENV];
-  if (!testApi) {
-    const origin = git(kit, "remote", "get-url", "origin");
-    if (!sameRepository(origin, OFFICIAL_ORIGIN)) {
-      throw new Error(`the release check covers only ${OFFICIAL_ORIGIN}, and this kit's origin is ${origin}. Run \`wf upgrade --allow-mutable-tag\` to upgrade from it without the check.`);
-    }
+function assertOfficialOrigin(kit: string): void {
+  const origin = git(kit, "config", "--get", "remote.origin.url");
+  if (!sameRepository(origin, OFFICIAL_ORIGIN)) {
+    throw new Error(`the release check covers only ${OFFICIAL_ORIGIN}, and this kit's origin is ${origin}. Run \`wf upgrade --allow-mutable-tag\` to upgrade from it without the check.`);
   }
-  const url = `${testApi || "https://api.github.com"}/repos/${KIT_REPO}/releases/tags/${tag}`;
+}
+
+/**
+ * Throws unless the GitHub release of `tag` says `immutable: true`: an immutable release locks its tag to its commit, so
+ * whoever steals a token cannot move the tag to code that this upgrade then runs. The release API needs no token. A missing
+ * release, one that is not immutable and a failed call are all errors, never a skip.
+ */
+async function assertImmutableRelease(tag: string): Promise<void> {
+  const url = `${process.env[API_URL_ENV] || "https://api.github.com"}/repos/${KIT_REPO}/releases/tags/${tag}`;
   const unreadable = (reason: string) => new Error(`could not read the release of ${tag} from ${url} (${reason}). Check the network and run again, or pass --allow-mutable-tag to skip the check.`);
   let response: Response;
   try {
@@ -118,14 +127,15 @@ async function assertImmutableRelease(kit: string, tag: string): Promise<void> {
 }
 
 /** Moves the installed kit to the newest release; does nothing when it is already there. Progress goes to stderr. */
-export async function upgradeKit({ allowMutableTag = false }: { allowMutableTag?: boolean } = {}): Promise<UpgradeResult> {
+export async function upgradeKit({ allowMutableTag = false }: UpgradeOptions = {}): Promise<UpgradeResult> {
   const kit = installedKit();
   const from = readKitPackage().version;
+  if (!allowMutableTag) assertOfficialOrigin(kit); // before anything is fetched from another repository
   const tag = newestReleaseTag(kit);
   const to = semver.parse(tag)!.version;
   if (semver.lte(to, from)) return { upgraded: false, from, to: from, tag };
 
-  if (!allowMutableTag) await assertImmutableRelease(kit, tag);
+  if (!allowMutableTag) await assertImmutableRelease(tag);
   try {
     git(kit, "-c", "advice.detachedHead=false", "checkout", "--quiet", tag);
   } catch (err) {

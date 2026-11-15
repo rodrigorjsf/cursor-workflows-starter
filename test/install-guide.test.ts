@@ -153,3 +153,18 @@ test("no tag fetch of the installer or of wf upgrade forces over a moved tag, an
     assert.match(text, /\bimmutable\b/, `${file} never tests the release's immutable field`);
   }
 });
+
+test("the installer and wf upgrade say the same four things about a tag, and the guide quotes only words both say", () => {
+  const installer = read("scripts", "install.sh");
+  const upgrade = read("packages", "runtime", "src", "upgrade.ts");
+  const fragments = ["moved upstream since this kit fetched it", "is not immutable", "has no release for tag", "could not read the release of"];
+  for (const fragment of fragments) {
+    assert.ok(installer.includes(fragment), `scripts/install.sh no longer says "${fragment}"`);
+    assert.ok(upgrade.includes(fragment), `packages/runtime/src/upgrade.ts no longer says "${fragment}"`);
+  }
+  // What the guide tells an agent to look for in a tag error must be said by the code, word for word.
+  for (const quoted of ["moved upstream", "is not immutable", "has no release for tag", "could not read the release of"]) {
+    assert.ok(GUIDE.includes(`\`${quoted}\``), `INSTALL-AGENT.md no longer quotes \`${quoted}\``);
+    assert.ok(fragments.some((fragment) => fragment.startsWith(quoted)), `\`${quoted}\` is not the start of a message the code prints`);
+  }
+});

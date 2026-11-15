@@ -4,6 +4,12 @@
 
 ### Adicionado
 
+- **`record-release-fixtures`: grava o que a API de releases do GitHub responde, para a API falsa dos testes do instalador.** O
+  script (`scripts/verify/record-release-fixtures.ts --tag <tag de uma release imutável>`) lê, sem token, a release de uma tag e uma
+  tag sem release (404) e grava as respostas, sem o repositório nem o dono, em
+  `packages/runtime/test/fixtures/github-releases/recordings.json`. A API falsa (`release-api-job.ts`) responde dali e só
+  muda o campo que o teste controla (`immutable`). Fora do `npm run check` e do CI.
+
 - **`verify-sandbox`: uma sonda real do sandbox do SDK, numa etapa que escreve.** O workflow (`scripts/verify/verify-sandbox.ts`) roda uma
   etapa com o sandbox ligado e um `.cursor/sandbox.json` com `readBoundary: "workspace"`, e tenta um `curl` para um host fora da
   allowlist, uma escrita fora do repositório e um `cat ~/.cursor/sdk/auth.json`, com controles que distinguem uma tentativa
