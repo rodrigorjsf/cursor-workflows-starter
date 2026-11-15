@@ -268,7 +268,7 @@ forgeTest(
     await run({});
     const calls = forgeState().calls;
     assert.deepEqual(calls[0], ["issue", "view", "7", "--output", "json"]);
-    assert.deepEqual(calls.find((c) => c[0] === "api" && !c.includes("POST")), ["api", "--paginate", "projects/:fullpath/issues/7/notes"]);
+    assert.deepEqual(calls.find((c) => c[0] === "api" && !c.includes("POST") && c.some((arg) => arg.endsWith("/notes"))), ["api", "--paginate", "projects/:fullpath/issues/7/notes"]);
   },
   ["gitlab"],
 );
