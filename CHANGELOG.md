@@ -4,6 +4,19 @@
 
 ### Adicionado
 
+- **O estado dos runs é privado, e a retenção cobre o journal e o memo** (issue #72). Dois ajustes do mesmo risco, dado de
+  código privado em disco:
+  - **Modos privados.** O runtime cria `.workflows/` e as pastas dentro dela com `0700` e os arquivos com `0600` (log de eventos,
+    journal, trava do run, memo, registro e log de cada job, e o registro dos grupos de processo de um `ctx.exec`), qualquer que
+    seja o `umask`; `.workflows/worktrees/` fica de fora. O modo vale só quando o arquivo nasce: nada que já existe é mudado. O
+    `wf doctor` ganhou a verificação `state` (a 11ª, no fim da lista), que avisa (`warn`) de uma `.workflows/` que o grupo ou os
+    outros alcançam e dá o `chmod 700`. O instalador roda com `umask 077`, então `~/.cursor-workflows/` nasce `0700`.
+  - **Retenção do journal e do memo.** Para os runs fora da retenção (30 runs, 14 dias), o `result` de cada linha do journal
+    é apagado e a linha fica marcada `pruned`; o `--resume` desse run é recusado, antes de qualquer etapa, com `run <id> cannot be
+    resumed: the retention policy deleted the step results its journal held…`. As entradas do memo com mais de 14 dias são
+    apagadas. Antes só o texto do log de eventos era podado, e o journal e o memo ficavam para sempre. As funções
+    `pruneContent` e `RunStore.pruneOldContent` passam a se chamar `pruneRuns` e `pruneOldRuns`.
+
 - **O runtime recusa mais cedo o que passa de um limite que ele quer manter.** Sete frentes do mesmo endurecimento (issue #70):
   - **Teto de jobs simultâneos.** O teto global `caps.maxRunningJobs` (padrão 3; `null` o tira) faz o `wf start`, o
     `start_workflow` e o Start do dashboard recusarem um job quando esse tanto já roda no repositório, sem criar o job nem o

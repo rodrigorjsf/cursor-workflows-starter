@@ -80,6 +80,7 @@ _Evite_: travado.
 **Journal**:
 O `journal.jsonl` do run: o resultado de cada etapa que terminou, com a chave `hash(prompt + opções) + ocorrência`. É
 o que faz o resume pular as etapas prontas. Não registra o que aconteceu, só o que está pronto: isso é o log de eventos.
+A retenção apaga o resultado de cada linha do journal de um run velho e marca o run: ele não retoma mais.
 _Evite_: histórico, log.
 
 **Log de eventos** (*event log*):

@@ -669,10 +669,25 @@ Para validar a entrega depois, por exemplo quando o PR é aceito ou recusado, us
     formato, numa variável com outro nome, passa;
   - cada texto é cortado em 32768 caracteres (`truncated` e `chars` dizem o quanto havia);
   - **retenção:** ao iniciar um run, o `text` dos runs do repositório fora dos 30 mais recentes (contando o que
-    começa) ou sem atividade há mais de 14 dias é apagado. O evento fica, com tipo, ids e tamanho. O journal não
-    entra: é o estado do resume. O `result` do `run-end` (o que o workflow devolveu) também não é conteúdo de etapa e
-    fica, mas passa pela redação como todo evento. `RunOptions.retention` muda os limites (`null` desliga um deles).
+    começa) ou sem atividade há mais de 14 dias é apagado. O evento fica, com tipo, ids e tamanho. O `result` do
+    `run-end` (o que o workflow devolveu) também não é conteúdo de etapa e fica, mas passa pela redação como todo evento.
+    O journal e o memo guardam o resultado de cada etapa, que também é código privado, e passam pela mesma retenção:
+    - **journal:** num run fora dela, o `result` de cada linha do journal é apagado. A linha fica, com a chave, o rótulo,
+      o modelo, os custos e `pruned: true`. Um journal sem os resultados não serve mais para retomar, então o run fica
+      marcado e o `--resume` (ou o `resumeRunId`) dele é recusado, antes de qualquer etapa, com
+      `run <id> cannot be resumed: the retention policy deleted the step results its journal held…`: rodar de novo todas as
+      etapas as cobraria de novo. Um run que não concluiu nenhuma etapa não tem resultado a perder e continua retomável;
+    - **memo:** a entrada com mais de 14 dias desde a última gravação é apagada (a etapa só roda de novo). O memo é do
+      repositório, não de um run, então só o limite de dias vale para ele.
+
+    `RunOptions.retention` muda os limites (`null` desliga um deles).
 - **Permissões:** pasta `0700`, arquivo `0600`.
+- **Permissões do estado dos runs (`.workflows/`):** o runtime cria `.workflows/` e as pastas dentro dela com `0700` e os
+  arquivos com `0600` (log de eventos, journal, trava do run, memo, registro e log de cada job), qualquer que seja o
+  `umask` do usuário: o log e o journal guardam código privado do repositório. `.workflows/worktrees/` fica de fora,
+  porque o código lá mantém os modos do git. O modo vale só quando o arquivo ou a pasta nasce, e o runtime nunca muda o
+  de um que já existe: o `wf doctor` (verificação `state`) avisa de uma `.workflows/` que o grupo ou os outros alcançam e
+  dá o `chmod 700`. O instalador roda com `umask 077`, então `~/.cursor-workflows/` também nasce `0700`.
 - **Export anonimizado por padrão:** sem nome de repositório, sem `agent_id`, sem prompt, com erros redigidos. Use
   `--no-anonymize` só para análise local.
 - **Consolidação do time (V1):** cada pessoa roda `wf metrics export` e o time junta os CSVs num BI. A atribuição

@@ -150,7 +150,8 @@ reporta, porque lá o `getUsage()` dá `feature_unavailable` [[TESTE]](../resear
 - **Decisão objetiva é código:** label, contagem, exit code, tamanho do diff. Cada `if` que substitui um
   "decida se…" é uma chamada a menos.
 - **Pule etapas condicionalmente:** plano só para MED/HIGH, review só para HIGH ou diff grande.
-- **Resume pelo journal:** nunca relance um run falho do zero.
+- **Resume pelo journal:** nunca relance um run falho do zero. A retenção apaga os resultados do journal dos runs fora dos 30
+  mais recentes ou com mais de 14 dias, e esses runs não retomam mais ([5.3 §7](03-observabilidade.md)): retome logo.
 - **`memo: true` em etapas só de leitura** (`tools` só com read, grep, glob, ls, semSearch…): a mesma etapa com
   o repositório no mesmo estado (HEAD + mudanças locais + arquivos novos) devolve o resultado salvo, mesmo em
   outro run. O runtime recusa `memo` em etapa que pode escrever.

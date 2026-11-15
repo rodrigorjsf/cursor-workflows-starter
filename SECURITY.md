@@ -69,6 +69,18 @@ falhas de segurança.
   `workflows` do próprio kit, e cada run emite um `warning` com a mesma lista antes da primeira etapa. Para impedir que uma
   etapa os carregue, tire `"project"` de `caps.allowedSettingSources` no `~/.cursor-workflows/config.json`; o instalador o
   deixa na lista.
+- **O estado dos runs é só seu, e os resultados velhos são apagados.** O `.workflows/` do repositório guarda os logs de
+  eventos (prompts, o que o agente disse, a saída de comandos), os journals e o memo (o resultado de cada etapa): código
+  privado. O runtime cria `.workflows/` e as pastas dentro dela com `0700` e os arquivos com `0600` (o log, o journal, a
+  trava do run, o memo, o registro e o log de cada job), qualquer que seja o `umask`, e o instalador roda com `umask 077`, então
+  `~/.cursor-workflows/` também nasce `0700`. O `.workflows/worktrees/` fica de fora: o código lá mantém os modos do git. O modo
+  vale só quando o arquivo nasce: **uma `.workflows/` que um kit mais antigo criou com `0755` continua assim**, e o `wf doctor`
+  (verificação `state`) avisa e dá o `chmod 700`. A retenção apaga, dos runs fora dos 30 mais recentes ou com mais de 14 dias, o
+  texto dos logs e o `result` de cada linha do journal (o run não retoma mais, e o `--resume` dele é recusado dizendo por quê), e
+  apaga as entradas do memo com mais de 14 dias; antes, o journal e o memo ficavam para sempre. Os 14 dias contam da última
+  atividade do run, então o conteúdo de um run recente fica no disco até lá: o apagamento não é imediato e não é um apagamento
+  seguro (o conteúdo pode sobreviver em um backup ou em blocos do disco). Detalhes em
+  [5.3 §7](docs/operating/03-observabilidade.md#7-privacidade-e-uso-no-time).
 - **Um agente em laço não abre jobs sem fim.** O `start_workflow` é uma tool que o modelo chama, e cada job gasta. O teto
   global `caps.maxRunningJobs` (padrão 3; `null` o tira) faz o `wf start`, o `start_workflow` e o Start do dashboard
   recusarem um job quando esse tanto já roda no repositório, sem criar o job nem o processo, e recusarem um job que roda o
