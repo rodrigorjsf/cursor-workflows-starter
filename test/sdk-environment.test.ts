@@ -40,7 +40,18 @@ const NOT_AN_ENDPOINT: Readonly<Record<string, string>> = {
   CURSOR_WORKLOAD_CGROUP: "a cgroup name",
 };
 
-const readByTheSdk = (): string[] => [...new Set(bundles.flatMap((text) => [...text.matchAll(/process\.env\.(CURSOR_[A-Z0-9_]+)/g)].map((m) => m[1]!)))].sort();
+/** The `CURSOR_*` names `text` reads from the environment. */
+const namesIn = (text: string): string[] => [...text.matchAll(/process\.env\.(CURSOR_[A-Z0-9_]+)/g)].map((m) => m[1]!);
+
+const readByTheSdk = (): string[] => [...new Set(bundles.flatMap(namesIn))].sort();
+
+// A bundle may read the environment as `process.env.NAME`, as `process.env["NAME"]`, or through a local that holds `process.env`
+// (`const { env } = process; env.NAME`): the scan must see all three, or an endpoint variable read in the second or third way goes unnoticed.
+// A name built at run time (`process.env[name]`) cannot be seen by any scan.
+test("the scan finds a variable however the bundle spells the read, and not one that is only mentioned", () => {
+  const sample = 'a=process.env.CURSOR_A_URL;b=process.env["CURSOR_B_URL"];c=process.env[\'CURSOR_C_URL\'];const{env:e}=process;d=env.CURSOR_D_URL;f="CURSOR_E_URL";g=x.sandboxEnv.CURSOR_F;';
+  assert.deepEqual(namesIn(sample).sort(), ["CURSOR_A_URL", "CURSOR_B_URL", "CURSOR_C_URL", "CURSOR_D_URL"]);
+});
 
 test("every CURSOR_* variable the installed SDK reads is either one the kit checks as an endpoint or one a person judged not to be an address", () => {
   const found = readByTheSdk();

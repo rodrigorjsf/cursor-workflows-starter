@@ -32,6 +32,7 @@ forgeTest("a repo that names a host other than github.com, in any spelling gh ta
   await refused("http://github.com/o/r", /https|ssh|plain-text/); // github.com, but in the clear
   await refused("git://github.com/o/r", /https|ssh|plain-text/);
   await refused("ext::touch", /\bext\b/); // a remote helper is not a repository
+  await refused("https://evil.example:99999/o/r", /not a valid URL/); // Node's URL parser refuses the port: the spelling must not count as "names no host"
 }, ["github"]);
 
 forgeTest("a repo that is not made of owner/name characters is refused by the arguments' schema, before the run starts", async () => {
@@ -100,4 +101,14 @@ forgeTest("on GitLab, group/sub/project is a path and keeps working, gitlab.com 
   issue(["complexity:medium"]);
   const listed = await run({ repo: "gitlab.example.com/group/project" });
   assert.equal(res(listed).status, "seams-proposed", JSON.stringify(listed));
+}, ["gitlab"]);
+
+// glab reads four segments as HOST/GROUP/NAMESPACE/REPO as far as the kit knows (it could not be checked against a pinned glab): the first one
+// may be a host whatever it looks like, so a nested group is named by its URL, which carries its host.
+forgeTest("on GitLab a path of four segments or more may start with a host, so it is refused until that name is allowed, and a nested group is named by its URL", async () => {
+  await refused("corp/group/sub/project", /\bcorp\b.*repoHosts/s);
+  await refused("https://evil.example:99999/group/project", /not a valid URL/);
+  issue(["complexity:medium"]);
+  const url = await run({ repo: "https://gitlab.com/group/sub/deeper/project" });
+  assert.equal(res(url).status, "seams-proposed", JSON.stringify(url));
 }, ["gitlab"]);
