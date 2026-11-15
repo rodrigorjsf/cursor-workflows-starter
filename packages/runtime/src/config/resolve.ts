@@ -373,6 +373,19 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
     });
   }
 
+  // Publishing the worktree's uncommitted files to a public repository is the machine owner's decision, like sending code to the cloud at all.
+  const allowPublicRemote = input.global?.data.cloud?.allowPublicRemote === true;
+  if (input.repo?.data.cloud?.allowPublicRemote !== undefined) {
+    violations.push({
+      layer: "repo",
+      ref: input.repo.path,
+      path: "/cloud/allowPublicRemote",
+      requested: input.repo.data.cloud.allowPublicRemote,
+      applied: allowPublicRemote,
+      message: "cloud.allowPublicRemote applies only in the global file: a repository cannot allow its own uncommitted files to be pushed to a public remote; ignored",
+    });
+  }
+
   if (input.repo?.data.dashboard) {
     violations.push({
       layer: "repo",
@@ -509,7 +522,7 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
     roles: Object.fromEntries(roles.map((r) => [r.name, settingsOf(pointerOf("roles", r.name))])),
     labels: Object.fromEntries([...labels].map((glob) => [glob, settingsOf(pointerOf("labels", glob))])),
     execTimeoutMs: cells.get(pointerOf("execTimeoutMs"))!.value as number,
-    cloud: { remote: cells.get(pointerOf("cloud", "remote"))!.value as string },
+    cloud: { remote: cells.get(pointerOf("cloud", "remote"))!.value as string, allowPublicRemote },
     forges: Object.fromEntries([...forges].map(([host, cell]) => [host, cell.value as ForgeName])),
     settings: Object.fromEntries([...settings].map(([key, cell]) => [key, cell.value])),
   };

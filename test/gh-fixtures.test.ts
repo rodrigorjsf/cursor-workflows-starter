@@ -3,12 +3,14 @@
 // recorded them, no local host and no credential, and they hold what the Backlog's `gh issue list` printed. The GitHub and the gh that
 // made them are not here: running them is the recorder's job (scripts/verify/record-gh-fixtures.ts), which stays out of `npm run check` and CI.
 // They also hold what `gh api repos/.../issues/<n> --jq .author_association` printed, which the `implement-issue` tests' fake `gh` plays,
-// and what `gh api -i --silent user` printed (the response headers, whose scopes header `wf doctor` reads), which the doctor tests' fake `gh` plays.
+// and what `gh api -i --silent user` printed (the response headers, whose scopes header `wf doctor` reads), which the doctor tests' fake `gh` plays,
+// and what `gh repo view <url> --json visibility -q .visibility` printed (the cloud snapshot guard's question), which the cloud tests' fake `gh` plays.
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
-import { AUTHOR_RECORDING, type GhRecordingsFile, REPO_PLACEHOLDER, TOKEN_SCOPES_RECORDING } from "../scripts/verify/record-gh-fixtures.js";
+import { AUTHOR_RECORDING, type GhRecordingsFile, REPO_PLACEHOLDER, TOKEN_SCOPES_RECORDING, UNAVAILABLE_PLACEHOLDER, VISIBILITY_RECORDING } from "../scripts/verify/record-gh-fixtures.js";
+import { visibilityArgs } from "../packages/runtime/src/runtime/remote-visibility.js";
 import { scopesFromHeaders } from "../packages/runtime/src/github-token-scopes.js";
 import { loginOf } from "../packages/runtime/workflows/implement-issue/forge.js";
 import { leaksWithoutSecrets } from "../scripts/lib/scrub-recording.js";
@@ -58,6 +60,24 @@ test("the recording of gh api -i --silent user holds the command line the doctor
   for (const neutral of [/^Date: Thu, 01 Jan 1970 00:00:00 GMT\r?$/m, /^Last-Modified: Thu, 01 Jan 1970 00:00:00 GMT\r?$/m, /^X-Github-Request-Id: 0000:/m, /^X-Github-Edge-Region: region\r?$/m]) {
     assert.match(recording.stdout, neutral, "the headers that name the moment, the request or the edge are neutralised");
   }
+});
+
+test("the recordings of gh repo view hold the command line the cloud snapshot guard sends, and what gh printed: a bare visibility, or the error for a host that is not GitHub", () => {
+  const file = JSON.parse(read(RECORDINGS)) as GhRecordingsFile;
+  for (const [name, url, visibility] of [
+    [VISIBILITY_RECORDING.public, `https://github.com/${REPO_PLACEHOLDER}`, "PUBLIC"],
+    [VISIBILITY_RECORDING.private, `https://github.com/${REPO_PLACEHOLDER}`, "PRIVATE"],
+  ] as const) {
+    const recording = file.recordings[name]!;
+    assert.deepEqual(recording.args, visibilityArgs(url), "remote-visibility.ts, visibilityArgs");
+    assert.equal(recording.exitCode, 0, recording.stderr);
+    assert.equal(recording.stdout, `${visibility}\n`, "-q prints the bare value and a newline");
+  }
+  const unavailable = file.recordings[VISIBILITY_RECORDING.unavailable]!;
+  assert.deepEqual(unavailable.args, visibilityArgs(UNAVAILABLE_PLACEHOLDER));
+  assert.equal(unavailable.exitCode, 1);
+  assert.equal(unavailable.stdout, "");
+  assert.match(unavailable.stderr, /^GraphQL: /, "what gh says for a URL on a host that is not GitHub");
 });
 
 test("the recordings name no repository of the machine that recorded them, no local host and no credential", () => {

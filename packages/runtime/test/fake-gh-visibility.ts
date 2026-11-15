@@ -12,7 +12,7 @@ export type VisibilityAnswer = "PUBLIC" | "PRIVATE" | "unavailable";
 const RECORDING_OF: Record<VisibilityAnswer, string> = { PUBLIC: VISIBILITY_RECORDING.public, PRIVATE: VISIBILITY_RECORDING.private, unavailable: VISIBILITY_RECORDING.unavailable };
 
 const FAKE_GH = (recording: string, callsFile: string) => `#!/usr/bin/env node
-const fs = require("fs");
+const fs = process.getBuiltinModule("node:fs"); // no require: under packages/ an extensionless file is an ES module, and under the system's temp folder a CommonJS one
 const recorded = JSON.parse(fs.readFileSync(${JSON.stringify(GH_RECORDINGS_PATH)}, "utf8")).recordings[${JSON.stringify(recording)}];
 const argv = process.argv.slice(2);
 // the form of the call: the repository's URL is the one argument that is not part of it
@@ -24,21 +24,24 @@ process.stderr.write(recorded.stderr);
 process.exit(recorded.exitCode);
 `;
 
+/** The PATH of this process before the first fake gh. */
+let basePath: string | undefined;
+
 /**
  * Puts a `gh` that answers `answer` first on the PATH of this process, with `dir` as its folder. Returns what it was asked (one
  * argument list per call) and how to put the PATH back.
  */
 export function fakeVisibilityGh(dir: string, answer: VisibilityAnswer): { asked(): string[][]; restore(): void } {
+  basePath ??= process.env.PATH; // the PATH without any fake gh: a test that installs one after another does not stack them
   const bin = join(dir, "fake-gh-bin");
   mkdirSync(bin, { recursive: true });
   const callsFile = join(dir, "fake-gh-calls.jsonl");
   writeFileSync(callsFile, "");
   writeFileSync(join(bin, "gh"), FAKE_GH(RECORDING_OF[answer], callsFile));
   chmodSync(join(bin, "gh"), 0o755);
-  const saved = process.env.PATH;
-  process.env.PATH = `${bin}${delimiter}${saved ?? ""}`;
+  process.env.PATH = `${bin}${delimiter}${basePath ?? ""}`;
   return {
     asked: () => readFileSync(callsFile, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as string[]),
-    restore: () => void (process.env.PATH = saved),
+    restore: () => void (process.env.PATH = basePath),
   };
 }

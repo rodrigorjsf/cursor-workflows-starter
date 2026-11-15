@@ -80,6 +80,8 @@ export interface DashboardPrefs {
 export interface CloudPrefs {
   /** The git remote that cloud steps' snapshot branches are pushed to. Default: `origin`. */
   remote?: string;
+  /** Global file only: push a snapshot to a remote that is public, or that `gh` cannot tell the visibility of. Default: false. */
+  allowPublicRemote?: boolean;
 }
 
 export interface ConfigFile {

@@ -74,11 +74,11 @@ test("a secret added to a tracked file is found too, and one already committed i
   assert.equal(snapshotRefs(), "");
 
   git(repo, "checkout", "--", "b.txt");
-  writeFileSync(join(repo, "c.txt"), "an ordinary file\n");
+  writeFileSync(join(repo, "c.txt"), `already committed: ghp_${x(36)}\n`);
   git(repo, "add", "c.txt");
   git(repo, "commit", "-qm", "later");
   writeFileSync(join(repo, "a.txt"), "a, edited\n");
-  await push(); // the repository has no secret in the change
+  await push(); // the secret is in HEAD, which the user has: the change the snapshot adds has none
   assert.notEqual(snapshotRefs(), "");
 });
 

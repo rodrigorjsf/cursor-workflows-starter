@@ -585,7 +585,7 @@ async function executeRun<A, R>(
   const backendFor = (location: StepLocation): AgentBackend => {
     if (opts.backend?.location === location) return opts.backend;
     if (location === "local") return localBackend;
-    return (cloudBackend ??= createCloudBackend({ remote: resolved.config.cloud.remote, runId }));
+    return (cloudBackend ??= createCloudBackend({ remote: resolved.config.cloud.remote, runId, allowPublicRemote: resolved.config.cloud.allowPublicRemote }));
   };
   let currentPhase: string | undefined;
   const flows = new AsyncLocalStorage<Flow>();

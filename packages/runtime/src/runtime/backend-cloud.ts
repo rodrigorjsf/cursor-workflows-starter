@@ -35,7 +35,7 @@ import {
 } from "./backend.js";
 import { errorText } from "./error-text.js";
 import { isGone } from "./cloud-cancel.js";
-import { BringBackError, type PushedSnapshot, UnsupportedRemoteError, bringBack, deleteSnapshot, pushSnapshot, snapshotBranch } from "./cloud-snapshot.js";
+import { BringBackError, type PushedSnapshot, SnapshotRefusedError, UnsupportedRemoteError, bringBack, deleteSnapshot, pushSnapshot, snapshotBranch } from "./cloud-snapshot.js";
 import type { JsonSchema } from "./workflow.js";
 import { type Parsed, RESULT_ARTIFACT, artifactInstruction, artifactReprompt, jsonBlockInstruction, jsonBlockReprompt, resultFromArtifact, resultFromJsonBlock } from "./structured.js";
 
@@ -55,6 +55,8 @@ export interface CloudBackendOptions {
   remote: string;
   /** The run the steps belong to: part of every snapshot branch's name. */
   runId: string;
+  /** The global config's `cloud.allowPublicRemote`: push snapshots to a public remote, or one that cannot be asked about, without asking. Default: false. */
+  allowPublicRemote?: boolean;
   /** The least time between two waits on a run that is still going (default one second; tests turn it off). */
   waitFloorMs?: number;
 }
@@ -214,7 +216,7 @@ async function bringWorkBack(result: AttemptResult, pushed: PushedBranches | und
   }
 }
 
-async function runCloudAttempt({ remote, runId, waitFloorMs = WAIT_FLOOR_MS }: CloudBackendOptions, prompt: string, o: StepOptions, signal: AbortSignal, onEvent: (event: AttemptEvent) => void): Promise<AttemptResult> {
+async function runCloudAttempt({ remote, runId, allowPublicRemote, waitFloorMs = WAIT_FLOOR_MS }: CloudBackendOptions, prompt: string, o: StepOptions, signal: AbortSignal, onEvent: (event: AttemptEvent) => void): Promise<AttemptResult> {
   onEvent({
     type: "warning",
     message: `cloud agents ignore setting sources (requested: ${o.settingSources.join(", ") || "none"}): the VM loads the project, team and plugin settings it always loads`,
@@ -241,11 +243,11 @@ async function runCloudAttempt({ remote, runId, waitFloorMs = WAIT_FLOOR_MS }: C
     start = { kind: "resumed", ...resumed };
   } else {
     try {
-      start = { kind: "fresh", snapshot: await pushSnapshot({ cwd: o.cwd, remote, branch: snapshotBranch(runId), signal }) };
+      start = { kind: "fresh", snapshot: await pushSnapshot({ cwd: o.cwd, remote, branch: snapshotBranch(runId), signal, allowPublicRemote }) };
     } catch (err) {
       if (signal.aborted) return { outcome: { kind: "aborted", reason: signal.reason } };
-      // A remote no cloud step can use is refused the same way on every attempt: the step fails now.
-      return { outcome: { kind: "error", reason: "other", message: `cloud snapshot: ${errorText(err)}` }, ...(err instanceof UnsupportedRemoteError && { final: true as const }) };
+      // A remote no cloud step can use, a secret in the snapshot and a public remote are refused the same way on every attempt: the step fails now.
+      return { outcome: { kind: "error", reason: "other", message: `cloud snapshot: ${errorText(err)}` }, ...((err instanceof UnsupportedRemoteError || err instanceof SnapshotRefusedError) && { final: true as const }) };
     }
   }
   /** Where the agent of this attempt starts from. A reattached one keeps the branch the interrupted attempt pushed. */

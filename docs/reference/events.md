@@ -356,6 +356,7 @@ As preferências das etapas na nuvem, depois das camadas.
 | Campo | Tipo | Obrigatório | Descrição |
 | --- | --- | --- | --- |
 | `remote` | `string` | sim | O remote do git para onde vão as branches de snapshot das etapas na nuvem. Padrão: `origin`. |
+| `allowPublicRemote` | `boolean` | sim | `true` deixa o snapshot ir para um remote público, ou para um que o `gh` não sabe dizer se é. Só o arquivo global liga. Padrão: `false`. |
 
 ### ConfigSource
 

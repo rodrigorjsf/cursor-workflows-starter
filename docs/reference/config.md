@@ -109,6 +109,7 @@ Valida os dois arquivos de configuração do kit: o global (`~/.cursor-workflows
 | Campo | Tipo | Obrigatório | Descrição |
 | --- | --- | --- | --- |
 | `remote` | `string` | não | Nome do remote do git para onde vão as branches de snapshot do worktree, que o cloud agent lê. Padrão: `origin`. Aponte para um fork se o pipeline de CI do `origin` não deve rodar a cada snapshot (as branches ficam sob `wf/cloud-snapshot/` e são apagadas quando a etapa termina; o `wf gc` varre, neste remote, as que ficaram para trás). |
+| `allowPublicRemote` | `boolean` | não | Só vale no arquivo global; no do repositório é registrado como violação e não tem efeito. Antes de empurrar um snapshot que difere do HEAD (ou seja, com arquivos não commitados ou novos), o motor pergunta ao `gh repo view` se o remote é público e recusa o snapshot se for, ou se o `gh` não souber responder (outro host que não o GitHub, sem rede, sem login): apagar a branch depois não despublica os commits, o GitHub os mantém alcançáveis pelo SHA e os forks também. `true` empurra mesmo assim e não pergunta. A busca de segredos no snapshot roda sempre. Padrão: `false`. |
 
 ## O dashboard
 
