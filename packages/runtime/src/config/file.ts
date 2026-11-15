@@ -40,6 +40,11 @@ export function knownForgeOf(host: string): ForgeName | undefined {
   return Object.hasOwn(KNOWN_FORGE_HOSTS, bare) ? KNOWN_FORGE_HOSTS[bare] : undefined;
 }
 
+/** The host the kit knows `forge` by: the one `knownForgeOf` maps back to it (`github.com`, `gitlab.com`). */
+export function knownHostOf(forge: ForgeName): string {
+  return Object.entries(KNOWN_FORGE_HOSTS).find(([, known]) => known === forge)![0];
+}
+
 /** `host` without its `:port`: the host `knownForgeOf` matches, and the one a message about that match names. */
 export const bareHost = (host: string): string => host.replace(/:\d+$/, "");
 

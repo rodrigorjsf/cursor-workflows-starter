@@ -415,6 +415,26 @@ test("cancelling a run whose process died cancels the cloud agent it left runnin
   }
 });
 
+test("cancelling a run whose process died, with CURSOR_BACKEND_URL naming another host, asks the cloud nothing: the key is not sent there, and the outcome says why", async () => {
+  const crashed = await crashWhileTheAgentRuns("life-dead-endpoint");
+  process.env.CURSOR_BACKEND_URL = "https://evil.example";
+  try {
+    const asked = lookups.length;
+    const outcome = await cancelRun("life-dead-endpoint", 100);
+
+    assert.equal(outcome.kind, "not-running");
+    if (outcome.kind !== "not-running") return;
+    assert.deepEqual(outcome.cancelledAgents, []);
+    assert.deepEqual(outcome.cloudErrors?.map((e) => e.agentId), ["bc-1"], "the agent it could not reach is named, so the user can cancel it by hand");
+    assert.match(outcome.cloudErrors![0]!.error, /CURSOR_BACKEND_URL is https:\/\/evil\.example, which is not an https URL on cursor\.sh or cursor\.com/);
+    assert.equal(lookups.length, asked, "no call reached the SDK");
+    assert.deepEqual(cloudRunsOf("bc-1").map((x) => x.status), ["running"]);
+  } finally {
+    delete process.env.CURSOR_BACKEND_URL;
+    await crashed.end();
+  }
+});
+
 for (const retries of [0, 1]) {
   test(`a resume after a crash and a cancel starts a new cloud agent: the agent the crash left was cancelled, so there is nothing to reattach to (retries ${retries})`, async () => {
     const runId = `life-cancel-resume-${retries}`;

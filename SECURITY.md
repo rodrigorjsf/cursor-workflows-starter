@@ -56,6 +56,14 @@ falhas de segurança.
   imutável trava a tag no commit dela. Uma release ausente, uma que não é imutável e uma consulta que falha são erros, não
   um pulo. O `--allow-mutable-tag` pula só a consulta, para um fork instalado com `--repo`. O `INSTALL-AGENT.md` não traz o
   checksum do `install.sh`: um commit não contém o próprio hash, então a âncora é a release imutável. Detalhes em [2.1](docs/usage/01-instalacao.md#tag-movida-e-release-que-não-é-imutável).
+- **O instalador só é baixado por `https`, para um arquivo que o `mktemp` escolheu.** O `curl -L` segue redirecionamentos e, sem
+  opção, aceita um que desça para `http`; o `INSTALL-AGENT.md` e os guias de instalação usam `curl --proto '=https' --tlsv1.2` e
+  gravam o script no caminho do `installer="$(mktemp)"`, e não em `/tmp/wf-install.sh`, que qualquer usuário da máquina podia
+  criar antes. O `git push` e o `git ls-remote` do `implement-issue` e do `wf gc`, e o fetch e a exclusão do snapshot de uma
+  etapa na nuvem, rodam com `GIT_ALLOW_PROTOCOL=file:https:ssh`: o git recusa o transporte da URL que de fato usa (a de push
+  para o push, a de fetch para o `ls-remote`, depois de `insteadOf` e `pushInsteadOf`) antes de abrir uma conexão, e a recusa
+  vale também para quem tem `protocol.ext.allow=always`. Um remote `http://`, `git://` ou `ext::` faz o comando falhar dizendo
+  qual transporte foi recusado; um caminho local, `https` e `ssh` seguem como antes.
 - **Nenhum script de instalação de dependência roda, nem na sua máquina nem no CI.** Uma dependência comprometida pode rodar
   código no `npm install`. O `.npmrc` do kit tem `ignore-scripts=true`, e o instalador e o CI passam `--ignore-scripts` mesmo assim,
   porque um `.npmrc` editado ou ausente religaria os scripts. No lockfile só o `esbuild` e o `fsevents` declaram um, e a medição
@@ -127,6 +135,13 @@ falhas de segurança.
   imagem Markdown, uma tag HTML ou uma URL para um host que não é o do forge aparece como código, com o `https` quebrado por
   um espaço de largura zero, porque o navegador de quem abre a página busca a imagem e uma query string carrega o que o
   modelo leu. Um link para o `github.com` (no GitLab, `gitlab.com`) continua clicável.
+- **A chave só vai para o endpoint do Cursor.** O SDK (1.3.1) lê `CURSOR_BACKEND_URL` (a API e a troca de token) e
+  `CURSOR_WEBSITE_URL` (o login) do ambiente e manda a chave para o que elas trazem, sem conferir o esquema nem o host; o
+  servidor MCP herda o ambiente do IDE. O kit olha as duas antes de chamar o SDK e recusa um valor que não seja uma URL `https`
+  em `cursor.sh` ou `cursor.com`: o run termina `failed` (`refused`) sem escrever nada, o `wf login`, o `wf models` e o
+  `wf whoami` saem com erro, e o `wf doctor` tem a verificação `endpoints`, que também lê o `env` das entradas do MCP e não deixa
+  `login` e `models` rodarem enquanto falha. A mensagem mostra só o esquema e o host do valor. Um teste lê o bundle do SDK e
+  reprova quando uma versão nova lê outra variável `CURSOR_*` que o kit não conferiu.
 - **Revogue a chave no dashboard do Cursor** depois de testar o kit, e imediatamente em caso de suspeita.
 
 ## Privacy Mode
@@ -167,6 +182,14 @@ falhas de segurança.
   escopos e diz como tirá-los: `gh auth refresh --remove-scopes <escopos>`. O doctor não lê, não imprime nem registra o
   token; só os escopos. Um token fine-grained não devolve esse cabeçalho, então o doctor não vê as permissões dele: com
   `GH_TOKEN` no ambiente e sem o cabeçalho, o check passa e diz que há um token com escopo em uso. O doctor também não lê o token do `glab`.
+- **O argumento `repo` do `implement-issue` não escolhe para onde o token vai.** O `gh` aceita `[HOST/]OWNER/REPO` e uma URL em
+  `--repo`, e manda o token (`GH_ENTERPRISE_TOKEN`, ou o login guardado para aquele host) ao host que recebe; o `repo` vem de
+  quem conduz o chat. Ele só pode nomear o host próprio do forge (`github.com` ou `gitlab.com`), o host do `origin` do
+  repositório, um host declarado em `forges` ou um de `workflows.implement-issue.settings.repoHosts` (a lista é sua, no arquivo
+  global ou no do repositório). Qualquer outro host, escrito como `HOST/OWNER/REPO` ou como URL, e uma URL que não seja `https`
+  nem `ssh` encerram o run antes da primeira chamada ao forge (no GitLab, um caminho de quatro segmentos ou mais começa pelo host, até onde o kit sabe: um grupo aninhado se nomeia pela URL), e os caracteres do argumento são limitados a `owner/name`, a um
+  caminho de grupo e a uma URL. O `wf gc` aplica a mesma regra ao `repo` que um run gravou no registro dele, que é um arquivo do
+  `.workflows/` do repositório.
 - **O token recomendado é um fine-grained, de um repositório só.** Crie-o em *Settings → Developer settings → Personal access
   tokens → Fine-grained tokens*, com acesso só ao repositório alvo, as permissões **Contents**, **Pull requests** e
   **Issues** em leitura e escrita, **Metadata** em leitura e **uma data de expiração**. Ponha-o em `GH_TOKEN` (num host do GitHub Enterprise Server, em `GH_ENTERPRISE_TOKEN`) no ambiente que

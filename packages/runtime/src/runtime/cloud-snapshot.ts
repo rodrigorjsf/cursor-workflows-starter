@@ -29,6 +29,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { errorText } from "./error-text.js";
+import { NETWORK_GIT_ENV } from "./git-transport.js";
 import { remoteVisibility } from "./remote-visibility.js";
 import { findSecretInChange } from "./secret-guard.js";
 
@@ -155,7 +156,7 @@ export async function pushSnapshot({ cwd, remote, branch, signal, allowPublicRem
   // --no-verify: the branch is the engine's own and a throwaway, not a commit the user wrote, and a pre-push hook of the user's (a test
   // run, a lint) would run on it for every cloud step, and could block the push that deletes it. The check a hook like gitleaks would do is
   // `refuseUnsafeSnapshot`'s, above.
-  await git(top, ["push", "--quiet", "--no-verify", remote, `${commit}:refs/heads/${branch}`], { timeoutMs: NETWORK_TIMEOUT_MS });
+  await git(top, ["push", "--quiet", "--no-verify", remote, `${commit}:refs/heads/${branch}`], { env: NETWORK_GIT_ENV, timeoutMs: NETWORK_TIMEOUT_MS });
   return { top, remote, repoUrl, branch, commit };
 }
 
@@ -231,7 +232,7 @@ async function worktreeTree(top: string, signal?: AbortSignal): Promise<string> 
  */
 export async function deleteSnapshot(snapshot: Pick<PushedSnapshot, "top" | "remote" | "branch">): Promise<void> {
   // --no-verify, as for the push: a hook of the user's must not run on, or block, the deletion of the engine's own throwaway branch.
-  await git(snapshot.top, ["push", "--quiet", "--no-verify", snapshot.remote, "--delete", `refs/heads/${snapshot.branch}`], { timeoutMs: NETWORK_TIMEOUT_MS });
+  await git(snapshot.top, ["push", "--quiet", "--no-verify", snapshot.remote, "--delete", `refs/heads/${snapshot.branch}`], { env: NETWORK_GIT_ENV, timeoutMs: NETWORK_TIMEOUT_MS });
 }
 
 /** Why a cloud agent's work could not be brought back into the worktree. */
@@ -269,7 +270,7 @@ export async function bringBack({ cwd, remote, branch, base, signal }: { cwd: st
   // A private ref: two steps in one repository must not meet on FETCH_HEAD.
   const fetched = `refs/wf/cloud-result/${randomUUID().slice(0, 8)}`;
   try {
-    await git(top, ["fetch", "--quiet", "--no-tags", remote, `+refs/heads/${branch}:${fetched}`], { signal, timeoutMs: NETWORK_TIMEOUT_MS }).catch((err: unknown) => {
+    await git(top, ["fetch", "--quiet", "--no-tags", remote, `+refs/heads/${branch}:${fetched}`], { env: NETWORK_GIT_ENV, signal, timeoutMs: NETWORK_TIMEOUT_MS }).catch((err: unknown) => {
       throw signal?.aborted ? err : new BringBackError(`could not fetch the cloud agent's branch ${branch} from ${remote} (${gitErrorLine(err)}): its work is not in the worktree`);
     });
     const tip = await git(top, ["rev-parse", `${fetched}^{commit}`], { signal });

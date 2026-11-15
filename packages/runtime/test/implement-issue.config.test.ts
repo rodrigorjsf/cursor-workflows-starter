@@ -68,7 +68,7 @@ const settings = (value: Record<string, unknown>) => writeRepoConfig(fx.repo, { 
 const slice = (n: number) => ({ behavior: `comportamento ${n}`, seam: "math.subtract", testIdea: `ideia ${n}` });
 const WRONG_CODE = SUB_CODE.replace("a - b", "a + b");
 
-test("implement-issue declares its twelve settings with the code defaults; each is in the config schema, and the defaults pass it", () => {
+test("implement-issue declares its thirteen settings with the code defaults; each is in the config schema, and the defaults pass it", () => {
   assert.deepEqual(implementIssue.meta.settings, {
     sliceCaps: { LOW: 1, MED: 3, HIGH: 5 },
     extraSlices: 2,
@@ -82,6 +82,7 @@ test("implement-issue declares its twelve settings with the code defaults; each 
     testTimeoutSec: 600,
     networkTimeoutSec: 120,
     backlogLabel: "ready-for-agent",
+    repoHosts: [],
   });
   assert.deepEqual(validateConfigData({ workflows: { "implement-issue": { settings: implementIssue.meta.settings } } }), []);
   const schema = JSON.parse(readFileSync(CONFIG_SCHEMA_PATH, "utf8")) as { definitions: { workflowSettings: { properties: Record<string, unknown> } } };
@@ -115,6 +116,10 @@ forgeTest("a setting that is out of range, misspelled or of the wrong shape fail
   await fails({ labelTiers: { urgent: "EXTREME" } }, /\/workflows\/implement-issue\/settings\/labelTiers\/urgent/);
   await fails({ backlogLabel: "ready,triaged" }, /\/workflows\/implement-issue\/settings\/backlogLabel/); // one label: a forge reads a comma as two
   await fails({ backlogLabel: "" }, /\/workflows\/implement-issue\/settings\/backlogLabel/);
+  await fails({ repoHosts: "ghe.corp.example" }, /\/workflows\/implement-issue\/settings\/repoHosts/); // a list, not one host
+  await fails({ repoHosts: ["https://ghe.corp.example"] }, /\/workflows\/implement-issue\/settings\/repoHosts\/0/); // a host, with no scheme and no path
+  await fails({ repoHosts: ["ghe.corp.example/acme"] }, /\/workflows\/implement-issue\/settings\/repoHosts\/0/);
+  await fails({ repoHosts: ["ghe.corp.example", "ghe.corp.example"] }, /\/workflows\/implement-issue\/settings\/repoHosts/);
   await fails({ fixRound: 1 }, /\/workflows\/implement-issue\/settings\/fixRound: unknown setting \(workflow implement-issue declares: sliceCaps, extraSlices, fixRounds/);
   assert.equal(calls.length, 0);
 });

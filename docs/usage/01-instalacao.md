@@ -42,11 +42,15 @@ pacote: o `npm test` reprova se os dois divergirem, então uma versão nova só 
 ### Pelo instalador
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/scripts/install.sh -o /tmp/wf-install.sh
-bash /tmp/wf-install.sh --tag v0.4.0
+installer="$(mktemp)"
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/scripts/install.sh -o "$installer"
+bash "$installer" --tag v0.4.0
 ```
 
-Baixar o script para um arquivo, em vez de passá-lo direto ao `bash`, deixa você lê-lo antes de rodar. O instalador:
+Baixar o script para um arquivo, em vez de passá-lo direto ao `bash`, deixa você lê-lo antes de rodar. O `--proto '=https'` e o
+`--tlsv1.2` fazem o `curl` recusar um redirecionamento para `http` e uma conexão com TLS antigo (o `-L` do `-fsSL` segue
+redirecionamentos, e sem a opção o `curl` aceita um que desça para `http`), e o `mktemp` escolhe o arquivo: um caminho fixo e
+previsível em `/tmp` pode ser criado de antemão por outro usuário da máquina, e o `bash` rodaria o script dele. O instalador:
 
 | Passo | Resultado |
 |---|---|
@@ -113,7 +117,9 @@ um `npm` ou uma etapa sem sandbox: leia a lista antes de apagar qualquer coisa, 
 
 ```bash
 mv ~/.cursor-workflows/kit ~/.cursor-workflows/kit.com-mudancas  # guarda o que mudou, para você ler
-bash /tmp/wf-install.sh --tag v0.4.0                              # o instalador baixado em "Pelo instalador"
+installer="$(mktemp)"                                             # o instalador de novo, como em "Pelo instalador"
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/scripts/install.sh -o "$installer"
+bash "$installer" --tag v0.4.0
 wf doctor                                                         # a verificação `kit` deve passar
 ```
 

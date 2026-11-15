@@ -110,6 +110,7 @@ import { buildPrBody, inlineCode, sanitizeModelText, type PrText } from "./imple
 import { CommandError, Commands, NETWORK_TIMEOUT_SEC, SNAPSHOT_GRACE_HOURS, WORKFLOW_BRANCH_PREFIX, worktreeOf } from "./implement-issue/commands.js";
 import { type Forge, createForge, detectForge, forgeNameOf, prLabel } from "./implement-issue/forge.js";
 import * as P from "./implement-issue/prompts.js";
+import { REPO_ARG_PATTERN, repoRefusal } from "./implement-issue/repo-arg.js";
 import { untrusted } from "./implement-issue/untrusted.js";
 import { AXES, AXIS_SCHEMAS, blockingAxes, blockingOf, type Axis, type ReviewReports } from "./implement-issue/review.js";
 import {
@@ -172,6 +173,8 @@ type Settings = {
   networkTimeoutSec: number;
   /** The label that marks an open issue as ready for this workflow: the dashboard's Backlog lists the issues that carry it. Read by the Backlog (`implement-issue/backlog.ts`), not by the run. */
   backlogLabel: string;
+  /** The hosts, besides the forge's own and the one of `origin`, that the `repo` argument may name: the forge's CLI sends its token to the host it is given. `host` (any port) or `host:port`. */
+  repoHosts: string[];
 };
 const SETTINGS: Settings = {
   sliceCaps: { LOW: 1, MED: 3, HIGH: 5 },
@@ -192,6 +195,7 @@ const SETTINGS: Settings = {
   testTimeoutSec: 600,
   networkTimeoutSec: NETWORK_TIMEOUT_SEC,
   backlogLabel: "ready-for-agent",
+  repoHosts: [],
 };
 const READ_ONLY = ["read", "grep", "glob", "ls", "semSearch"];
 const REVIEW_TOOLS = ["read", "grep", "glob", "ls"];
@@ -205,7 +209,10 @@ const STANDARDS_FILES = ["CODING_STANDARDS.md", "CONTRIBUTING.md", "AGENTS.md", 
 
 interface Args {
   issue: number;
-  /** owner/repo, group/sub/project, or a repository URL; default: the cwd's repository. A URL names its host, which decides the forge (the host of `origin` decides otherwise). */
+  /**
+   * owner/repo, group/sub/project, or a repository URL; default: the cwd's repository. A URL names its host, which decides the forge (the host of `origin`
+   * decides otherwise). A host other than the forge's own and the one of `origin` is refused unless the config lists it in `settings.repoHosts` (the forge's CLI sends its token there).
+   */
   repo?: string;
   /** The test command you typed: it runs as written. Default: the one of the plan you approved with `approveSeams`, or `npm test`. With `seams` and no `testCommand`, the run stops at "test-command-proposed" so you see the planner's command first. */
   testCommand?: string;
@@ -478,7 +485,7 @@ export default defineWorkflow<Args>({
       additionalProperties: false,
       properties: {
         issue: { type: "number" },
-        repo: { type: "string" },
+        repo: { type: "string", pattern: REPO_ARG_PATTERN },
         testCommand: { type: "string" },
         setupCommand: { type: "string" },
         openPr: { type: "boolean" },
@@ -506,6 +513,12 @@ export default defineWorkflow<Args>({
     // The forge the run started on: a fresh run takes the one of its origin's host; a resume keeps the one its record names, and a
     // record without one (a run from before the field) is GitHub, whatever the origin says now.
     const forge = createForge(progress.existed ? forgeNameOf(progress.data) : await detectForge(cmd, ctx.cwd, ctx.forges, ctx.args.repo), cmd);
+    // Before the first call that carries the forge's token: a `repo` of another host sends it there (`implement-issue/repo-arg.ts`).
+    if (ctx.args.repo !== undefined) {
+      const refusal = repoRefusal(ctx.args.repo, { forge: forge.name, originUrl: await cmd.remoteUrl(ctx.cwd), repoHosts: settings.repoHosts, forges: ctx.forges });
+      // Thrown, not returned as a result status: like invalid args (which the engine also fails), a refused argument is a security refusal that must end the run `failed` (exit code 1, job `failed`), not a `finished` run with a status in its result.
+      if (refusal !== undefined) throw new Error(refusal);
+    }
     // Uma issue tem no máximo um run ativo: dois runs na mesma issue brigariam pelo mesmo trabalho e abririam dois PRs. O lock
     // fica no run store (`.workflows/locks/issue-<n>.lock`, ou `issue-<n>-<hash do repositório>.lock` quando o `--repo` é outro
     // repositório que não o do cwd: a issue #5 de outro repositório é outra issue) e vale até o run terminar, qualquer que seja

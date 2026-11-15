@@ -48,4 +48,8 @@ test("SECURITY.md says what the runtime hardening does: the job cap, the scrubbe
   says("what is checked before a cloud snapshot is pushed", "`cloud.allowPublicRemote`", "gh repo view", "PUBLIC", "não despublica", "fecha o caminho");
   says("that wf doctor and a run list the code of the repository's settings", ".cursor/hooks.json", ".claude/settings.json", ".cursor/mcp.json", "`wf doctor` avisa", "`warning`");
   says("that wf init stays inside the repository", "link simbólico", "`wf init`", "CWE-59");
+  // The issue #71 pins: where the Cursor key, the forge token and the installer script may go.
+  says("that the Cursor key goes only to a Cursor endpoint", "`CURSOR_BACKEND_URL`", "`CURSOR_WEBSITE_URL`", "`cursor.sh`", "`cursor.com`", "`endpoints`");
+  says("which hosts the repo argument may name", "`workflows.implement-issue.settings.repoHosts`", "`HOST/OWNER/REPO`", "`forges`", "`GH_ENTERPRISE_TOKEN`");
+  says("how the installer is downloaded and which git transports are allowed", "--proto '=https'", "mktemp", "`GIT_ALLOW_PROTOCOL=file:https:ssh`", "`ext::`");
 });

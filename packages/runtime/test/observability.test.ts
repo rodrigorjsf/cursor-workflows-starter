@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { calls, costConfig, script } from "./fake-sdk.js";
+import { calls, costConfig, script, stats } from "./fake-sdk.js";
 import { openDb } from "../src/observability/db.js";
 import { exportRows, markRun, reconcile, summary, toCsv } from "../src/observability/queries.js";
 import { outcomeClass } from "../src/runtime/outcome.js";
@@ -135,6 +135,22 @@ test("sem custo do Cursor: estimativa pela tabela pricing, com faixa de contexto
   assert.equal(rec.updated, 1);
   assert.equal((db.prepare("SELECT cost_source FROM v_attempts").get() as { cost_source: string }).cost_source, "cursor");
   db.close();
+});
+
+test("reconcile refuses to call the SDK while CURSOR_BACKEND_URL names an address that is not Cursor's: the key would go there", async () => {
+  Object.assign(costConfig, { raw: undefined });
+  const haiku = defineWorkflow({ meta: { name: "h", description: "h" }, defaults: { model: { id: "claude-haiku-5-5" }, retries: 0 }, run: (ctx) => ctx.agent("x") });
+  await runWorkflow(haiku, {}, { cwd, metricsDb: dbPath });
+  const db = await openDb(dbPath);
+  process.env.CURSOR_BACKEND_URL = "https://evil.example";
+  try {
+    const readsBefore = stats.usageReads;
+    await assert.rejects(reconcile(db), /CURSOR_BACKEND_URL is https:\/\/evil\.example/);
+    assert.equal(stats.usageReads, readsBefore, "Agent.getUsage was not called");
+  } finally {
+    delete process.env.CURSOR_BACKEND_URL;
+    db.close();
+  }
 });
 
 test("faixa de contexto e export anonimizado", async () => {
