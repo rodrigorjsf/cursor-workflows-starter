@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { calls as sdkCalls } from "./fake-sdk.js";
 import type { AgentBackend, AttemptEvent, AttemptResult, StepOptions } from "../src/runtime/backend.js";
+import { assertNoRealSdkUnderTest } from "../src/runtime/backend.js";
 import { BudgetExceededError, RunCancelledError, runWorkflow } from "../src/runtime/engine.js";
 import type { WorkflowEvent } from "../src/runtime/events.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
@@ -392,4 +393,10 @@ test("the global allowedLocations cap is checked against the backend's location"
   assert.equal(r.status, "failed");
   assert.match(r.error!, /allowedLocations cap \(cloud\) does not allow local steps/);
   assert.equal(handed.length, 0);
+});
+
+test("under node --test an agent starts only on the fake SDK: a file run without tsconfig.test.json fails before any call", () => {
+  assert.throws(() => assertNoRealSdkUnderTest({ NODE_TEST_CONTEXT: "child-v8" }, {}), /tsconfig\.test\.json/);
+  assert.doesNotThrow(() => assertNoRealSdkUnderTest({ NODE_TEST_CONTEXT: "child-v8" }, { calls: [] }));
+  assert.doesNotThrow(() => assertNoRealSdkUnderTest({}, {}));
 });
