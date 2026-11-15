@@ -39,7 +39,7 @@ Pick the task, then run its steps in order. Each step ends on a stated result.
 ## Check the setup
 
 1. Run `wf doctor --json`. Its `checks`, always in this order: `node`, `dependencies`, `login`, `models`, `forge`,
-   `mcp-server`, `config`, `kit-version`, `sandbox`. `ok: true` and exit code 0 mean the setup works. A check's `status` is
+   `mcp-server`, `config`, `kit-version`, `sandbox`, `kit`. `ok: true` and exit code 0 mean the setup works. A check's `status` is
    `pass`, `warn` or `fail`: a `warn` passed, and names something worth fixing. Done when no check is `fail`, or each failing
    check's `message` and `hint` went to the user, and each `warn`'s `message` and `hint` went to the user too.
    - On a Node older than 22.13 the report holds the `node` check alone.
@@ -59,6 +59,11 @@ Pick the task, then run its steps in order. Each step ends on a stated result.
      `bwrap` is not on the PATH: install bubblewrap (`sudo apt install bubblewrap`). The message also says whether a
      `sandbox.json` limits reads to the workspace (`readBoundary: "workspace"`); without it a step can read the
      Cursor key. Adding that setting, or turning the sandbox off, is the user's call.
+   - `kit`: the kit installed at `~/.cursor-workflows/kit` has local changes (the message lists them) or is not on
+     exactly the tag of its version. A step that ran without the sandbox, or the user, edited it, and an edit survives
+     `wf upgrade`. Show the user the list. Only with their ok, reinstall: `mv ~/.cursor-workflows/kit
+     ~/.cursor-workflows/kit.changed`, then run the installer again (INSTALL-AGENT.md, step 2). A development
+     install (a link to a working copy) is reported, not checked.
    - `models`: a model id in the config is not in the account's catalog; `wf models` lists the ids. Changing the
      config is the user's call (see "Read or change the config").
 3. Run `wf doctor` again. Done when it exits 0, or when the user has the remaining failures and their hints. A `warn` does not
@@ -71,6 +76,8 @@ Pick the task, then run its steps in order. Each step ends on a stated result.
    - `upgraded: false` means the kit is already on the newest release.
    - A refusal that names a dev install means the kit location links to a working copy: the user updates that copy with
      git, then you run `bash ~/.cursor-workflows/kit/scripts/install.sh --refresh`.
+   - A refusal that says `the kit at <kit> has local changes: <list>; reinstall it` means the installed kit was edited:
+     the kit stays where it was. Show the user the list; with their ok, reinstall as the `kit` check above says.
    - A failure after the checkout leaves the kit on the new tag: fix the error shown, then run the same
      `install.sh --refresh`.
 2. Run `wf doctor` in each repo the user names. Its `kit-version` check compares the kit with the `kit` range in

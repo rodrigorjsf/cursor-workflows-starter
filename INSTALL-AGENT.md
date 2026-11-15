@@ -50,6 +50,10 @@ that includes `implement-issue`.
 - A line starting `error:` is a failure: fix what it names and run the installer again. For example,
   `<tool> is not on the PATH; install it and run again` or `Node <have> (<path>) is too old: the kit needs <need> or
   newer. Install a newer Node, put it on the PATH and run again`.
+- `error: the kit at <kit> has local changes: <list>; reinstall it` means an earlier install was edited (by the user, or
+  by a step that ran without the sandbox), and the installer will not move it or run `npm ci` in it. Show the user the
+  list. Only with their ok, move the folder aside (`mv ~/.cursor-workflows/kit ~/.cursor-workflows/kit.changed`, so they
+  can read what changed) and run the installer again; the global config and the skill links stay.
 
 ## 3. Log in to the Cursor SDK
 
@@ -89,7 +93,7 @@ hint says if you can, hand the user what needs them (the login, a newer Node, `g
 `glab auth login --hostname <host>`), and run the doctor again. An entry with `"status": "warn"` does not fail the doctor: it
 passed, and its `message` and `hint` name something to fix, such as a GitHub token that holds scopes the kit does not need.
 Relay each warning to the user, and do not print the token. The checks, in this order: `node`, `dependencies`, `login`, `models`, `forge`, `mcp-server`,
-`config`, `kit-version`, `sandbox`. `forge` asks the CLI of the repository's forge (`gh` for GitHub, `glab` for GitLab) and passes
+`config`, `kit-version`, `sandbox`, `kit`. `kit` fails when the installed kit has local changes or is not on exactly the tag of its version: reinstall it as step 2 says. `forge` asks the CLI of the repository's forge (`gh` for GitHub, `glab` for GitLab) and passes
 outside a git repository. The host of `origin` picks the forge: `github.com` and `gitlab.com` are known, and any other
 host (a self-managed GitLab) must be declared under the `forges` config key: until it is, the check fails with a message
 that names the key. Declaring the host is the user's call.

@@ -70,6 +70,7 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   ├── doctor-report.ts    # o formato do relatório do doctor (só a biblioteca padrão: o node-check.ts o usa num Node antigo)
 │       │   ├── mcp-launch.ts       # como o IDE inicia o servidor MCP (o `workflows` do .cursor/mcp.json e do .mcp.json)
 │       │   ├── kit-version.ts      # versão do kit e a faixa `kit` que o repositório declara
+│       │   ├── kit-state.ts        # o estado do kit instalado pelo git: mudanças locais e tags do HEAD, que o upgrade e o doctor usam
 │       │   ├── upgrade.ts          # wf upgrade: leva o kit instalado à tag mais nova e roda o install.sh --refresh dela
 │       │   ├── unified-diff.ts     # o diff que o wf init imprime
 │       │   ├── cli.ts              # wf login | whoami | models | list | init | doctor | upgrade | config | run | start | wait | status | cancel | jobs | gc | stats | metrics

@@ -49,7 +49,7 @@ Baixar o script para um arquivo, em vez de passá-lo direto ao `bash`, deixa voc
 
 | Passo | Resultado |
 |---|---|
-| Kit | Clona o repositório na tag em `~/.cursor-workflows/kit` (`WF_HOME` muda a pasta `~/.cursor-workflows`). Se já há um clone, busca as tags da origem dele e o move para a tag (um `--repo` dado de novo troca essa origem antes) |
+| Kit | Clona o repositório na tag em `~/.cursor-workflows/kit` (`WF_HOME` muda a pasta `~/.cursor-workflows`). Se já há um clone, confere antes de tudo que ele não tem mudanças locais (com mudanças, para: [Reinstalar o kit](#reinstalar-o-kit)), busca as tags da origem dele e o move para a tag (um `--repo` dado de novo troca essa origem antes) |
 | Node | Para antes de instalar qualquer coisa se o `node` do PATH for mais antigo que o `engines.node` do kit (22.13), dizendo as duas versões |
 | Dependências | `npm ci` na pasta do kit: a árvore exata do `package-lock.json` |
 | Comando `wf` | Escreve `~/.local/bin/wf`, um script que roda o CLI do kit instalado. Se a pasta não está no PATH, o instalador avisa e diz como corrigir (bash ou zsh: `export PATH` no `~/.profile`; fish: `fish_add_path`). Um `wf` que não é dele fica como está, com aviso |
@@ -73,8 +73,34 @@ só diz isso. Depois de atualizar, rode `wf doctor` em cada repositório: um kit
 ([2.3](03-invocacao-no-cursor-ide.md#conferindo-o-ambiente-wf-doctor)).
 
 Ele recusa o que não é um kit instalado: um kit em modo de desenvolvimento (abaixo), um `wf` que roda de outra pasta, e a
-falta de rede (o kit continua na versão em que estava). Se o instalador falhar depois do checkout, a mensagem diz o
-comando para terminar: `bash ~/.cursor-workflows/kit/scripts/install.sh --refresh`.
+falta de rede (o kit continua na versão em que estava). Recusa também um kit com mudanças locais, antes de buscar as tags
+ou mover o que for, mesmo que o kit já esteja na tag mais nova: o `git checkout` de uma tag nova mantém um arquivo editado que
+as duas tags compartilham e todo arquivo novo, e o `npm ci` do instalador lê um `.npmrc` que esteja na pasta, então uma etapa
+sem sandbox que escreveu no kit faria o instalador rodar o código dela. A mensagem é
+`the kit at <kit> has local changes: <lista>; reinstall it`, e o kit continua onde estava. Se o instalador falhar depois do
+checkout, a mensagem diz o comando para terminar: `bash ~/.cursor-workflows/kit/scripts/install.sh --refresh`.
+
+### Reinstalar o kit
+
+O `wf upgrade`, o instalador (`install.sh --tag` sobre um clone que já existe) e o `wf doctor` (verificação `kit`) mandam
+reinstalar o kit quando a pasta dele tem mudanças locais. A lista da mensagem usa os códigos do `git status --porcelain`: `M`
+(arquivo rastreado editado), `D` (apagado), `??` (arquivo novo) e `!!` (arquivo que o `.gitignore` ou o `.git/info/exclude`
+esconde). Só o `node_modules/` do próprio kit fica de fora, porque o `npm ci` o refaz. O `wf doctor` falha também quando o HEAD
+do kit não está exatamente na tag da versão do pacote (`v<versão>`), mesmo com a árvore limpa. Quem mexeu na pasta foi você,
+um `npm` ou uma etapa sem sandbox: leia a lista antes de apagar qualquer coisa, e depois reinstale.
+
+```bash
+mv ~/.cursor-workflows/kit ~/.cursor-workflows/kit.com-mudancas  # guarda o que mudou, para você ler
+bash /tmp/wf-install.sh --tag v0.4.0                              # o instalador baixado em "Pelo instalador"
+wf doctor                                                         # a verificação `kit` deve passar
+```
+
+O `config.json` global e os links das skills ficam, porque os links passam pelo local fixo do kit. Depois de olhar o que mudou,
+apague `~/.cursor-workflows/kit.com-mudancas`.
+
+A verificação vê o que o git vê. Ela não vê o que está dentro de `.git/` (hooks e configuração do clone) nem o conteúdo do
+`node_modules/`: o `npm ci` refaz o `node_modules/` a cada reinstalação, e o resto é um limite do desenho, porque o kit mora
+numa pasta que o seu usuário, e portanto uma etapa sem sandbox, pode escrever ([SECURITY.md](../../SECURITY.md)).
 
 ### Modo de desenvolvimento
 
@@ -91,7 +117,8 @@ scripts/install.sh --dev  # ~/.cursor-workflows/kit passa a ser um link para est
 Com `--dev`, o comando `wf`, o servidor MCP dos repositórios e as skills globais rodam o seu código. O instalador usa
 `npm install` só se faltar o `node_modules` (o `npm ci` esvaziaria o seu). O `wf upgrade` recusa essa instalação, e o
 instalador não troca um modo pelo outro: para passar de uma tag para o modo de desenvolvimento, mova `~/.cursor-workflows/kit`
-para trás (e o inverso vale também).
+para trás (e o inverso vale também). O `wf doctor` informa essa instalação como de desenvolvimento e não confere a árvore nem a
+tag dela: um working copy tem mudanças por natureza.
 
 ## 4. Login e modelos
 

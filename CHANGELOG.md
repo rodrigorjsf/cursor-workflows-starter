@@ -4,6 +4,13 @@
 
 ### Adicionado
 
+- **`wf doctor` tem uma décima verificação, `kit`.** Numa instalação por tag, o HEAD do kit em `~/.cursor-workflows/kit` tem de estar
+  exatamente na tag da versão do pacote (`v<versão>`) e a árvore tem de estar limpa (`git status --porcelain --untracked-files=all
+  --ignored=matching`, sem o `node_modules/` do próprio kit). Uma etapa sem sandbox pode editar o kit, que tem o motor dos tetos, da
+  redação e das allowlists, e a edição sobrevive ao `wf upgrade`. Uma instalação de desenvolvimento (um link) é informada e não é
+  conferida; sem kit nessa pasta, não há o que conferir. Veja
+  [2.3](docs/usage/03-invocacao-no-cursor-ide.md#conferindo-o-ambiente-wf-doctor) e [2.1 §Reinstalar o kit](docs/usage/01-instalacao.md#reinstalar-o-kit).
+
 - **`verify-sandbox`: uma sonda real do sandbox do SDK, numa etapa que escreve.** O workflow (`scripts/verify/verify-sandbox.ts`) roda uma
   etapa com o sandbox ligado e um `.cursor/sandbox.json` com `readBoundary: "workspace"`, e tenta um `curl` para um host fora da
   allowlist, uma escrita fora do repositório e um `cat ~/.cursor/sdk/auth.json`, com controles que distinguem uma tentativa
@@ -70,6 +77,14 @@
   [7.10](docs/adr/0010-detached-jobs-and-how-each-is-cancelled.md).
 
 ### Mudado
+
+- **`wf upgrade` e o instalador recusam um kit com mudanças locais.** Antes de buscar as tags ou mover o que for, os dois rodam
+  `git status --porcelain --untracked-files=all --ignored=matching` no kit (sem o `node_modules/` do próprio kit) e param com
+  `the kit at <kit> has local changes: <lista>; reinstall it` se a saída não for vazia, deixando o kit na tag em que estava. Antes, o
+  `git checkout` de uma tag nova mantinha um arquivo editado que as duas tags compartilham e todo arquivo novo, e o `npm ci` lia um
+  `.npmrc` plantado. O `wf upgrade` confere até quando o kit já está na tag mais nova. O `install.sh --refresh` não confere: ele
+  termina a instalação de uma árvore que o `wf upgrade` já conferiu. Como reinstalar:
+  [2.1 §Reinstalar o kit](docs/usage/01-instalacao.md#reinstalar-o-kit).
 
 - **O arquivo de configuração global que o instalador grava liga o sandbox do SDK em toda etapa (`caps.requireSandbox: true`).**
   Uma sonda real mediu o sandbox numa etapa que escreve (8.2 §16): a rede de saída e a escrita fora do repositório pelo shell foram bloqueadas (a tool `edit`
