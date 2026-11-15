@@ -113,7 +113,7 @@ test("the quickstart only runs commands that exist: the installer it fetches, th
   const commands = wfCommands();
   const installerHelp = spawnSync("bash", [join(ROOT, "scripts", "install.sh"), "--help"], { encoding: "utf8" }).stdout;
   for (const hub of HUBS) {
-    const lines = read(hub.file).match(/^(?:npm run [\w:-]+|wf [a-z]+|bash \S*install\.sh .*)/gm) ?? [];
+    const lines = read(hub.file).match(/^(?:npm run [\w:-]+|wf [a-z]+|bash "\$installer" .*)/gm) ?? [];
     assert.ok(lines.length >= 4, `${hub.file}: the quickstart runs something (found ${lines.length} commands)`);
     for (const line of lines) {
       const [first, second, third] = line.split(" ");
@@ -130,7 +130,7 @@ test("the quickstart fetches and installs the tag of the package version, the sa
   for (const hub of HUBS) {
     const text = read(hub.file);
     assert.ok(text.includes(`rodrigorjsf/cursor-workflows-starter/${tag}/scripts/install.sh`), `${hub.file}: fetch install.sh at ${tag}`);
-    assert.ok(text.includes(`install.sh --tag ${tag}`), `${hub.file}: install ${tag}`);
+    assert.ok(text.includes(`bash "$installer" --tag ${tag}`), `${hub.file}: install ${tag}`);
     assert.ok(parseMarkdown(text).links.some((l) => l.target === "INSTALL-AGENT.md"), `${hub.file}: links to INSTALL-AGENT.md`);
   }
 });

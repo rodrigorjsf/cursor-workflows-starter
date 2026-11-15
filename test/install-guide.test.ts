@@ -33,20 +33,41 @@ test("the guide is pinned to the tag of the package version, in every command th
   const tags = new Set(GUIDE.match(/\bv\d+\.\d+\.\d+(?:-[\w.]+)?\b/g));
   assert.deepEqual([...tags], [TAG], "one tag in the whole guide, the package's version: bump the guide with the version");
   assert.ok(GUIDE.includes(`raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/${TAG}/scripts/install.sh`), "the installer is fetched from the tag, not from a branch");
-  assert.ok(GUIDE.includes(`install.sh --tag ${TAG}`), "the installer is told to install that tag");
+  assert.ok(GUIDE.includes(`bash "$installer" --tag ${TAG}`), "the installer is told to install that tag");
   assert.doesNotMatch(GUIDE, /\/(main|master|HEAD)\//, "no branch in a fetched URL");
 });
 
 test("the installer the guide fetches exists in the repo and takes the flags the guide uses", () => {
   assert.ok(existsSync(join(ROOT, "scripts", "install.sh")));
   const help = spawnSync("bash", [join(ROOT, "scripts", "install.sh"), "--help"], { encoding: "utf8" }).stdout;
-  for (const flag of new Set(GUIDE.match(/install\.sh (--[a-z-]+)/g)?.map((m) => m.split(" ")[1]))) assert.ok(help.includes(flag!), `install.sh --help does not list ${flag}`);
+  const flags = new Set(GUIDE.match(/"\$installer" (--[a-z-]+)/g)?.map((m) => m.split(" ")[1]));
+  assert.ok(flags.size > 0, "the guide runs the installer with a flag: this check has nothing to look at");
+  for (const flag of flags) assert.ok(help.includes(flag!), `install.sh --help does not list ${flag}`);
 });
+
+// The script runs with the user's rights, so where it comes from and where it lands decide who else can write it first. curl follows a
+// redirect and, by default, accepts a plain-text one: `--proto` limits the protocols of the first request and of every redirect, so a
+// downgrade to http fails. `/tmp/wf-install.sh` was a path anyone on the machine could predict and plant before the download.
+const FETCH_DOCS = ["INSTALL-AGENT.md", "README.md", "README.en.md", "docs/usage/01-instalacao.md"];
+for (const file of FETCH_DOCS) {
+  test(`${file} downloads the installer over https only, with TLS 1.2 or newer, to a path mktemp chose`, () => {
+    const text = read(file);
+    const fetches = text.split("\n").filter((line) => /^curl .*scripts\/install\.sh/.test(line));
+    assert.ok(fetches.length > 0, `${file} no longer fetches the installer: this check has nothing to look at`);
+    for (const line of fetches) {
+      assert.match(line, / --proto '=https' /, `${file}: curl may follow a redirect to http: ${line}`);
+      assert.match(line, / --tlsv1\.2 /, `${file}: curl accepts a TLS version older than 1.2: ${line}`);
+      assert.match(line, / -o "\$installer"$/, `${file}: the script goes to the path in $installer: ${line}`);
+    }
+    assert.match(text, /^installer="\$\(mktemp\)"/m, `${file}: $installer is not made by mktemp`);
+    assert.doesNotMatch(text, /\/tmp\/wf-install\.sh/, `${file}: the installer still lands on a fixed, predictable path`);
+  });
+}
 
 test("the guide runs install, login check, Privacy Mode confirmation, init, doctor, in that order, and every wf command in it exists", () => {
   const sections = GUIDE.split(/^## /m).slice(1);
   const steps = [
-    [/^\d+\. Install the kit/, "install.sh --tag"],
+    [/^\d+\. Install the kit/, '"$installer" --tag'],
     [/^\d+\. Log in/, "wf whoami"],
     [/^\d+\. Confirm Privacy Mode/, "Privacy Mode"],
     [/^\d+\. Set up the repo/, "wf init"],
@@ -123,7 +144,7 @@ test("the default global config the installer copies is the first example of the
 });
 
 test("every document that tells a reader to fetch or install a tag names the package version's tag", () => {
-  const pins = /(?:cursor-workflows-starter\/(v\d[\w.-]*)\/|install\.sh --tag (v\d[\w.-]*))/g; // a real version: the placeholder vX.Y.Z is exempt
+  const pins = /(?:cursor-workflows-starter\/(v\d[\w.-]*)\/|(?:install\.sh|"\$installer") --tag (v\d[\w.-]*))/g; // a real version: the placeholder vX.Y.Z is exempt
   const found: string[] = [];
   for (const file of markdownFiles(ROOT)) {
     for (const m of read(file).matchAll(pins)) {
