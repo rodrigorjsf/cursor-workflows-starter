@@ -157,11 +157,16 @@ function commitFiles(paths: string[]) {
   git(fx.repo, "commit", "-qm", "context files");
 }
 
-/** The paths the "Repository context files" block of the prompt of step `label` lists, in order; none when the prompt has no such block. */
-function contextListed(label: string): string[] {
+/** What the step `label` was sent. */
+function promptOf(label: string): string {
   const prompt = fx.prompts.find((p) => p.label === label);
   assert.ok(prompt, `no ${label} step ran: ${fx.prompts.map((p) => p.label).join(", ")}`);
-  const lines = prompt.msg.split("\n");
+  return prompt.msg;
+}
+
+/** The paths the "Repository context files" block of the prompt of step `label` lists, in order; none when the prompt has no such block. */
+function contextListed(label: string): string[] {
+  const lines = promptOf(label).split("\n");
   const heading = lines.indexOf(CONTEXT_HEADING);
   if (heading === -1) return [];
   const listed: string[] = [];
@@ -187,7 +192,7 @@ forgeTest("contextFiles in the repo config replaces the default list: the plan p
   const r = await run({});
   assert.equal(res(r).status, "seams-proposed", JSON.stringify(res(r)));
   assert.deepEqual(contextListed("plan"), ["docs/glossary.md"]);
-  assert.ok(!fx.prompts.find((p) => p.label === "plan")!.msg.includes("GLOSSARY.md"), "the instructions do not send the planner to a glossary file the repository does not name");
+  assert.ok(!promptOf("plan").includes("GLOSSARY.md"), "the instructions do not send the planner to a glossary file the repository does not name");
 });
 
 forgeTest("a contextFiles path that does not exist is skipped, a folder is listed as it is, and an empty list leaves the block out", async () => {
@@ -203,10 +208,10 @@ forgeTest("a contextFiles path that does not exist is skipped, a folder is liste
   const none = await run({});
   assert.equal(res(none).status, "seams-proposed", JSON.stringify(res(none)));
   assert.deepEqual(contextListed("plan"), []);
-  assert.ok(!fx.prompts.find((p) => p.label === "plan")!.msg.includes("Repository context files"), "no empty heading");
+  assert.ok(!promptOf("plan").includes("Repository context files"), "no empty heading");
 });
 
-forgeTest("the contextFiles of the config reach the three designers of a HIGH run and the PR-text agent, not only the planner", async () => {
+forgeTest("the contextFiles of the config reach the three designers and the judge of a HIGH run and the PR-text agent, not only the planner", async () => {
   issue(["complexity:high"]);
   commitFiles([...DEFAULT_CONTEXT_PATHS, "docs/glossary.md"]);
   settings({ contextFiles: ["docs/glossary.md"] });
@@ -215,8 +220,8 @@ forgeTest("the contextFiles of the config reach the three designers of a HIGH ru
   fx.handlers.judge = (o) => submit(o, { ...PLAN, rationale: "a interface mínima basta" });
   const r = await run({ seams: ["math.subtract(a, b)"], openPr: true });
   assert.equal(res(r).status, "done", JSON.stringify(res(r)));
-  for (const label of ["design:minimal", "design:flexible", "design:common", "pr-text"]) assert.deepEqual(contextListed(label), ["docs/glossary.md"], label);
-  assert.ok(!fx.prompts.find((p) => p.label === "pr-text")!.msg.includes("GLOSSARY.md"), "the instructions do not send the PR-text agent to a glossary file the repository does not name");
+  for (const label of ["design:minimal", "design:flexible", "design:common", "judge", "pr-text"]) assert.deepEqual(contextListed(label), ["docs/glossary.md"], label);
+  assert.ok(!promptOf("pr-text").includes("GLOSSARY.md"), "the instructions do not send the PR-text agent to a glossary file the repository does not name");
 });
 
 forgeTest("labelTiers is the label-to-tier map: the file's labels count (any case), the default ones no longer do", async () => {

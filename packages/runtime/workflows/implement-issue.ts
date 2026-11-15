@@ -59,7 +59,7 @@
 //     "push-refused" e não é sobrescrito.
 //
 // Os limites (fatias por tier, fatias extras, rodadas de correção, tentativas de red e green, tamanho do diff, mapa
-// label → tier, limite de quedas, tetos de tempo dos testes e dos comandos de rede, arquivos de contexto) são os `settings` do workflow: os valores abaixo são os padrões, e o repositório os troca em
+// label → tier, limite de quedas, tetos de tempo dos testes e dos comandos de rede) são os `settings` do workflow: os valores abaixo são os padrões, e o repositório os troca em
 // `workflows.implement-issue.settings` (docs/reference/config.md).
 //
 // Custo por etapa (passo 4 da /skill-to-workflow). "[]" = settingSources vazio: sem AGENTS.md, regras, hooks, MCP e
