@@ -4,7 +4,8 @@
 // from what the doctor warns about. The Privacy Mode section links Cursor's data-use page and says what the kit does about a setting it
 // cannot read. The section on who receives the user's data names every party with what it gets, from which step and what governs its
 // retention; the key section says how the Cursor key is born, expires, is rotated and revoked. Whether the links resolve is
-// docs-check.test.ts; the doctor itself is packages/runtime/test/doctor.process.test.ts.
+// docs-check.test.ts; the doctor itself is packages/runtime/test/doctor.process.test.ts. The research chapter's record of the
+// implement-issue run under the sandbox (issue #99) and what SECURITY.md says of it are read the same way, at the end of the file.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -142,4 +143,41 @@ test("the maintainer guide has a Conta do mantenedor checklist: 2FA with no SMS,
   for (const needle of ["trimestre", "chaves SSH", "deploy keys", "OAuth", "GitHub Apps", "Cursor"]) assert.ok(audit.includes(needle), `the audit item does not mention ${needle}`);
   for (const needle of ["trimestre", "log de segurança", "90 dias", "Export"]) assert.ok(securityLog.includes(needle), `the security-log item does not mention ${needle}`);
   assert.ok(section.includes("(https://github.com/rodrigorjsf/cursor-workflows-starter/issues/74)"), "the section does not point to the how-to issue #74");
+});
+
+// Issue #99: the installer's global config turns the SDK sandbox on for every step, and the #62 probe measured one write step. The whole
+// `implement-issue` LOW example ran afterwards with that config; the research chapter holds the dated record (outcome, tokens, which
+// backend enforced the sandbox, what it cost against the shared budget), and SECURITY.md says what that run did and did not cover.
+const RESEARCH = readFileSync(join(resolve(import.meta.dirname, ".."), "docs", "research", "verificacoes-locais.md"), "utf8");
+
+test("the research chapter records the implement-issue LOW run under caps.requireSandbox: the date, the outcome, the tokens, the sandbox backend, the budget and the clean-up", () => {
+  const title = parseMarkdown(RESEARCH).headings.find((h) => h.level === 2 && h.text.startsWith("17. "))?.text;
+  assert.ok(title, "the research chapter has no section 17 (the implement-issue run with the sandbox on)");
+  const section = sectionOf(RESEARCH, title);
+  assert.ok(section, `the research chapter has no "## ${title}" section`);
+  const text = flat(section);
+  for (const needle of [
+    "2026-11-15",
+    "caps.requireSandbox: true",
+    "templates/global-config.json",
+    "complexity:low",
+    "`status: \"done\"`",
+    "`implement-issue-acfe2c7e`",
+    "299.105 tokens",
+    "CURSOR_SANDBOX_LANDLOCK_STATUS=fully_enforced",
+    "--max-tokens 400000",
+    "`git commit`",
+    "EAI_AGAIN",
+    "[#99](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/99)",
+  ]) {
+    assert.ok(text.includes(needle), `section 17 does not record ${needle}`);
+  }
+});
+
+test("SECURITY.md says the implement-issue LOW example ran whole with the sandbox on and points to the record, and keeps what stays unmeasured", () => {
+  const text = flat(SECURITY);
+  assert.ok(text.includes("o exemplo LOW do `implement-issue` rodou inteiro com o sandbox ligado"), "SECURITY.md does not say that the LOW example ran whole with the sandbox on");
+  assert.ok(text.includes("[8.2 §17](docs/research/verificacoes-locais.md)"), "SECURITY.md does not point to section 17 of the research chapter");
+  assert.ok(text.includes("**Não medido:** macOS e Windows"), "SECURITY.md no longer lists macOS and Windows as unmeasured");
+  assert.ok(!text.includes("e o `implement-issue` inteiro com o sandbox ligado (a sonda"), "SECURITY.md still lists the whole implement-issue as unmeasured under the sandbox");
 });
