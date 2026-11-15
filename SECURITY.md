@@ -39,10 +39,7 @@ falhas de segurança.
   - **O `implement-issue` inteiro foi medido no exemplo LOW.** Em 2026-11-15, com o padrão do instalador e um repositório sem
     `.cursor/sandbox.json`, o exemplo LOW do `implement-issue` rodou inteiro com o sandbox ligado e terminou `done`
     ([8.2 §17](docs/research/verificacoes-locais.md), [#99](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/99)).
-    Numa etapa no worktree, o `git` funciona (inclusive o `commit`, que escreve fora do `cwd`), uma escrita na home
-    (`~/.cache`) é negada, e sem `.cursor/sandbox.json` nem o registro do npm é alcançado: o `setupCommand` e os testes do
-    kit rodam fora do sandbox e não são afetados, mas um passo do agente que baixa pacotes só funciona com os hosts listados.
-  - **Não medido:** macOS e Windows, o MED e o HIGH do `implement-issue` com o sandbox ligado, e um kernel sem Landlock.
+  - **Não medido:** macOS e Windows, e o MED e o HIGH do `implement-issue` com o sandbox ligado.
 - **No WSL, a permissão `0600` não protege a chave de um processo do Windows.** O kit suporta Linux e WSL2
   ([`INSTALL-AGENT.md`](INSTALL-AGENT.md)), mas o Windows alcança a home do Linux por `\\wsl$` como o usuário padrão da
   distribuição ([permissões de arquivo no WSL](https://learn.microsoft.com/en-us/windows/wsl/file-permissions)): um programa do

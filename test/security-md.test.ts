@@ -14,6 +14,7 @@ import { parseMarkdown, sectionOf } from "../scripts/lib/markdown.js";
 import { BROAD_SCOPES, SECURITY_TOKEN_SECTION } from "../packages/runtime/src/github-token-scopes.js";
 
 const SECURITY = readFileSync(join(resolve(import.meta.dirname, ".."), "SECURITY.md"), "utf8");
+const RESEARCH = readFileSync(join(resolve(import.meta.dirname, ".."), "docs", "research", "verificacoes-locais.md"), "utf8");
 
 test("SECURITY.md has one section on the GitHub token, under the heading the doctor's warning names", () => {
   assert.equal(SECURITY_TOKEN_SECTION, "O token do GitHub");
@@ -148,8 +149,6 @@ test("the maintainer guide has a Conta do mantenedor checklist: 2FA with no SMS,
 // Issue #99: the installer's global config turns the SDK sandbox on for every step, and the #62 probe measured one write step. The whole
 // `implement-issue` LOW example ran afterwards with that config; the research chapter holds the dated record (outcome, tokens, which
 // backend enforced the sandbox, what it cost against the shared budget), and SECURITY.md says what that run did and did not cover.
-const RESEARCH = readFileSync(join(resolve(import.meta.dirname, ".."), "docs", "research", "verificacoes-locais.md"), "utf8");
-
 test("the research chapter records the implement-issue LOW run under caps.requireSandbox: the date, the outcome, the tokens, the sandbox backend, the budget and the clean-up", () => {
   const title = parseMarkdown(RESEARCH).headings.find((h) => h.level === 2 && h.text.startsWith("17. "))?.text;
   assert.ok(title, "the research chapter has no section 17 (the implement-issue run with the sandbox on)");
@@ -162,8 +161,6 @@ test("the research chapter records the implement-issue LOW run under caps.requir
     "templates/global-config.json",
     "complexity:low",
     "`status: \"done\"`",
-    "`implement-issue-acfe2c7e`",
-    "299.105 tokens",
     "CURSOR_SANDBOX_LANDLOCK_STATUS=fully_enforced",
     "--max-tokens 400000",
     "`git commit`",
@@ -172,6 +169,9 @@ test("the research chapter records the implement-issue LOW run under caps.requir
   ]) {
     assert.ok(text.includes(needle), `section 17 does not record ${needle}`);
   }
+  // The values are the run's own (its id, its tokens in pt-BR thousands), which a later Nota may correct: the test asks only that they are there.
+  assert.match(text, /`implement-issue-[0-9a-f]{8}`/, "section 17 does not name the run's id");
+  assert.match(text, /\d{1,3}(?:\.\d{3})+ tokens/, "section 17 does not record the run's tokens");
 });
 
 test("SECURITY.md says the implement-issue LOW example ran whole with the sandbox on and points to the record, and keeps what stays unmeasured", () => {
