@@ -24,7 +24,7 @@ The installer writes these defaults to the global file when it has none:
 | `maxTokens` (per run) | 3,000,000 |
 | `maxTokensPerStep` | 600,000 |
 | `maxCents` (per run) | 500 |
-| `allowedModels` | `null`: every model |
+| `allowedModels` | `null`: every model, models without zero data retention (ZDR) included. When retention matters, list only the models the account shows as ZDR |
 | `allowedSettingSources` | `project`, `user`, `team`, `mdm`, `plugins` (never `all`) |
 | `allowedLocations` | `local` |
 | `maxConcurrency` | 4 |

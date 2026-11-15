@@ -34,7 +34,8 @@ usa recebe depois os próprios arquivos, do `wf init` ([2.3](03-invocacao-no-cur
 
 Aponte qualquer agente de código para o guia, fixado numa tag:
 `https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/INSTALL-AGENT.md`. Ele checa a máquina,
-instala o kit, confere o login, roda o `wf init` no repositório atual e termina no `wf doctor`. O guia é público, está
+instala o kit, confere o login, pede que você confirme que o Privacy Mode está ligado (veja [§4](#4-login-e-modelos)), roda o
+`wf init` no repositório atual e termina no `wf doctor`. O guia é público, está
 em inglês (texto escrito para agentes) e não depende de nenhum outro documento. A tag que ele traz é sempre a versão do
 pacote: o `npm test` reprova se os dois divergirem, então uma versão nova só sai com o guia apontando para ela.
 
@@ -156,6 +157,12 @@ e pode ser aberta em outro dispositivo. Gere a URL só quando for concluir o log
 `whoami` é o primeiro teste do plano. No Free, o login funciona, mas `whoami` já responde
 `[plan_required] Cloud Agent is not available for free users. Please upgrade to Pro.`, e `models` dá o mesmo erro
 (medido em 2026-11-11).
+
+**Privacy Mode.** Com ele desligado, a Cursor pode guardar e treinar com o código, os prompts e a saída de comandos que cada etapa
+manda, e o SDK segue a mesma regra do IDE. O SDK não deixa o kit ler o modo: confirme que está ligado em *Cursor
+Settings → General* (conta individual) ou com o admin do time. O guia de instalação para e pergunta isso antes de configurar o
+repositório, e o `wf doctor` repete o lembrete na verificação `login`. O que o modo desligado permite, e por que o
+`caps.allowedModels` só deve listar modelos ZDR quando a retenção importa: [5.1](../operating/01-governanca-e-custos.md#políticas-de-admin-que-se-aplicam).
 
 Ajuste os modelos de cada papel na configuração JSON ou nas variáveis `WF_MODEL_*`
 ([2.2 · Configuração](02-configuracao-inicial.md), [6.2](../reference/config.md)); os defaults estão em `meta.roles` de

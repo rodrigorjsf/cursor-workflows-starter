@@ -4,6 +4,18 @@
 
 ### Adicionado
 
+- **O Privacy Mode passa a ser uma pré-condição da instalação, confirmada por você.** Com o modo desligado, a Cursor pode guardar e
+  treinar com o código, os prompts e a saída de comandos que cada etapa manda, e o SDK segue a regra do IDE. O SDK
+  fixado (1.3.1) não tem chamada pública que leia o modo (o `Cursor.me()` não devolve o campo), então o kit não o confere: o
+  `INSTALL-AGENT.md` ganhou o passo 4, "Confirm Privacy Mode", depois do login e antes do `wf init`, em que o agente pergunta se o
+  modo está ligado (*Cursor Settings → General*, ou imposto pelo admin do time) e não segue até a pessoa responder; os passos
+  seguintes passaram a 5, 6 e 7. A verificação `login` do `wf doctor` passa a dizer, quando passa, `Privacy Mode cannot be read
+  through the SDK: confirm it is on in Cursor Settings > General`. O SECURITY.md ganhou a seção "Privacy Mode" (com a página de
+  uso de dados da Cursor), e o capítulo [5.1](docs/operating/01-governanca-e-custos.md#políticas-de-admin-que-se-aplicam) explica o
+  que o modo desligado permite e por que o `caps.allowedModels` deve listar só modelos de retenção zero de dados (ZDR) quando a
+  retenção importa: um modelo sem ZDR e uma chave de API própria ficam fora da garantia. O `allowedModels` que o instalador grava
+  continua `null`.
+
 - **`wf doctor` tem uma décima verificação, `kit`.** Numa instalação por tag, o HEAD do kit em `~/.cursor-workflows/kit` tem de estar
   exatamente na tag da versão do pacote (`v<versão>`) e a árvore tem de estar limpa (`git status --porcelain --untracked-files=all
   --ignored=matching`, sem o `node_modules/` do próprio kit). Uma etapa sem sandbox pode editar o kit, que tem o motor dos tetos, da

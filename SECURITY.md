@@ -91,6 +91,23 @@ falhas de segurança.
   repositório.
 - **Revogue a chave no dashboard do Cursor** depois de testar o kit, e imediatamente em caso de suspeita.
 
+## Privacy Mode
+
+- **Com o Privacy Mode desligado, a Cursor pode guardar o que cada etapa manda e treinar com isso.** Cada etapa envia à Cursor o
+  código do repositório, o prompt e a saída dos comandos que ela roda, e o SDK segue as mesmas regras de Privacy Mode do IDE. Com
+  o modo desligado, a página de uso de dados da Cursor diz que ela pode guardar e usar código, prompts e ações do editor para
+  melhorar os modelos; com ele ligado, diz que não treina com os seus dados, mas que um prompt que dispare um detector de abuso
+  pode ser guardado para investigação ([cursor.com/data-use](https://cursor.com/data-use)).
+- **O kit não consegue ler o modo, só pedir que você o confirme.** O SDK fixado (1.3.1) não tem uma chamada pública para isso:
+  o `Cursor.me()` não devolve o campo, e usar um export interno do SDK seria depender do que a Cursor pode mudar sem aviso. Por isso o
+  [`INSTALL-AGENT.md`](INSTALL-AGENT.md) manda o agente que instala parar e perguntar se o Privacy Mode está ligado (em
+  *Cursor Settings → General*, numa conta individual, ou imposto pelo admin do time) e só seguir depois da resposta, e a
+  verificação `login` do `wf doctor` repete o lembrete sempre que passa. Nenhum dos dois confere o modo: quem responde é você.
+- **Modelos sem retenção zero e a sua própria chave de API ficam fora dessa garantia.** Quando a retenção importa, o
+  `caps.allowedModels` do `~/.cursor-workflows/config.json` (o instalador grava `null`, que libera todo modelo) deve listar só os
+  modelos que a sua conta mostra como de retenção zero de dados (ZDR). O raciocínio está em
+  [5.1 §Políticas de admin que se aplicam](docs/operating/01-governanca-e-custos.md#políticas-de-admin-que-se-aplicam).
+
 ## O token do GitHub
 
 - **Qualquer etapa sem sandbox lê o token do `gh`.** O kit chama o `gh` com o login que você guardou nele: o `implement-issue`
