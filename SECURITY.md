@@ -47,8 +47,9 @@ falhas de segurança.
   `enabled=false` no `/etc/wsl.conf` dela e pare-a pelo Windows (`wsl --terminate <distribuição>`) para valer
   ([configurações de interop](https://learn.microsoft.com/en-us/windows/wsl/wsl-config#interop-settings)). Isso fecha o caminho
   de uma etapa iniciar um programa do Windows; não fecha o de um programa que já roda no seu Windows e lê `\\wsl$`. A verificação
-  `host` do `wf doctor` lê `/proc/sys/fs/binfmt_misc/WSLInterop` e, com a interoperabilidade ligada, avisa (`warn`, sem falhar) e
-  nomeia o `auth.json`; ela nunca muda o `wsl.conf` nem reinicia o WSL.
+  `host` do `wf doctor` lê `/proc/sys/fs/binfmt_misc/WSLInterop` (e `WSLInterop-late`, o nome que uma distribuição com systemd pode
+  ter no lugar dele) e, com a interoperabilidade ligada, avisa (`warn`, sem falhar) e nomeia o `auth.json`; avisa também quando um
+  desses arquivos existe e não se lê. Ela nunca muda o `wsl.conf` nem reinicia o WSL.
 - **O kit instalado fica numa pasta que uma etapa sem sandbox pode editar.** O `~/.cursor-workflows/kit` tem o motor que aplica
   os tetos, a redação e as allowlists, e é o mesmo código em todo repositório. O `git checkout` de uma tag nova mantém um arquivo
   rastreado editado que as duas tags compartilham, e todo arquivo não rastreado (reproduzido num repositório de teste: saiu com 0),

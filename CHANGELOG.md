@@ -17,7 +17,8 @@
     o usuário padrão da distribuição, então o `0600` do `~/.cursor/sdk/auth.json` não o segura, e, com a interoperabilidade ligada,
     uma etapa sem sandbox inicia programas do Windows. O SECURITY.md sugere uma distribuição WSL separada ou `[interop]
     enabled=false` no `/etc/wsl.conf` para repositórios em que você não confia. A verificação `host` lê
-    `/proc/sys/fs/binfmt_misc/WSLInterop` e **avisa** (`warn`, sem falhar) quando ele diz `enabled`; sem o arquivo, passa. Só lê:
+    `/proc/sys/fs/binfmt_misc/WSLInterop` (e `WSLInterop-late`, o nome que uma distribuição com systemd pode ter no lugar dele) e
+    **avisa** (`warn`, sem falhar) quando um deles diz `enabled`, ou quando um existe e não se lê; sem os arquivos, passa. Só lê:
     nunca muda o `wsl.conf` nem reinicia o WSL.
   - **"Conta do mantenedor".** O capítulo [9.4](docs/contributing/04-scripts-do-mantenedor.md#conta-do-mantenedor) tem a lista do que se
     mantém na conta dona dos releases: 2FA com passkey ou TOTP, assinatura SSH de commits e tags com vigilant mode, a auditoria

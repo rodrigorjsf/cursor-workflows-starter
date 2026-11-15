@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starte
 bash /tmp/wf-install.sh --tag v0.4.0   # o kit na tag, o comando wf e as skills globais
 wf login                               # login no navegador; o uso fica na SUA conta
 wf init                                # no seu repositório: grava os arquivos do kit, mostra o diff e não faz commit
-wf doctor                              # confere Node, login, modelos, o CLI do forge (gh ou glab), servidor MCP, configuração, sandbox do SDK, o kit instalado e o host WSL
+wf doctor                              # confere Node, login, modelos, o CLI do forge (gh ou glab), servidor MCP, configuração, sandbox do SDK, o kit instalado e a interoperabilidade do WSL
 ```
 
 O kit não consegue ler o Privacy Mode da sua conta: confirme que ele está ligado em *Cursor Settings → General* antes de rodar um

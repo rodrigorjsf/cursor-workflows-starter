@@ -2,14 +2,14 @@
 // the IDE's environment would be: the kit sits at ~/.cursor-workflows/kit, the repo has the MCP configs `wf init` writes,
 // and `gh`, `glab` and `node` are whatever the PATH of the process says (git is the real one). The fake `gh` answers `gh api -i --silent user`
 // from the recording of the real one (packages/runtime/test/fixtures/gh/recordings.json), setting only the scopes header. The `host` check
-// reads the WSL interop file the kernel exposes: every run points it at a file of the test's own (`WF_DOCTOR_WSL_INTEROP_FILE`), so the
+// reads the WSL interop files the kernel exposes: every run points it at files of the test's own (`WF_DOCTOR_WSL_INTEROP_FILES`), so the
 // machine the suite runs on, WSL or not, never decides a result. The tests read the report, the exit code and the messages; they never
 // import the doctor.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { after, before, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -68,7 +68,7 @@ function env(bins: string[], extra: Record<string, string> = {}, userHome = home
     TSX_TSCONFIG_PATH: join(kit, "packages", "runtime", "tsconfig.test.json"),
     WF_METRICS: "off",
     WF_DASH_AUTOSTART: "off", // the tests must not leave a dashboard behind
-    WF_DOCTOR_WSL_INTEROP_FILE: join(sandbox, "no-wsl-interop"), // a file that is not there: the host is not WSL, whatever the machine running the suite is
+    WF_DOCTOR_WSL_INTEROP_FILES: join(sandbox, "no-wsl-interop"), // a file that is not there: the host is not WSL, whatever the machine running the suite is
     ...extra,
   };
 }
@@ -1117,11 +1117,12 @@ function interopFile(content: string): string {
   return file;
 }
 
-const hostCheck = (repo: string, interop: string) => checkOf(reportOf(doctor(repo, { env: { WF_DOCTOR_WSL_INTEROP_FILE: interop } })), "host");
+/** The `host` check of a doctor run that reads `files` (one path, or several as a PATH lists them) as the WSL interop files. */
+const hostCheck = (repo: string, ...files: string[]) => checkOf(reportOf(doctor(repo, { env: { WF_DOCTOR_WSL_INTEROP_FILES: files.join(delimiter) } })), "host");
 
 test("the host check warns, and the doctor still exits 0, when WSL interop is enabled: it names auth.json and the wsl.conf setting that closes the boundary, and changes nothing", () => {
   const interop = interopFile(WSL_INTEROP_ON);
-  const r = doctor(repoCopy(), { env: { WF_DOCTOR_WSL_INTEROP_FILE: interop } });
+  const r = doctor(repoCopy(), { env: { WF_DOCTOR_WSL_INTEROP_FILES: interop } });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const report = reportOf(r);
   assert.equal(report.ok, true, "a warning leaves the report ok");
@@ -1144,9 +1145,9 @@ test("the host check warns, and the doctor still exits 0, when WSL interop is en
   assert.equal(readFileSync(interop, "utf8"), WSL_INTEROP_ON, "the doctor only reads the file");
   assert.equal(r.stderr, "");
 
-  const text = doctor(repoCopy(), { args: [], env: { WF_DOCTOR_WSL_INTEROP_FILE: interop } });
+  const text = doctor(repoCopy(), { args: [], env: { WF_DOCTOR_WSL_INTEROP_FILES: interop } });
   assert.equal(text.status, 0, text.stdout + text.stderr);
-  assert.match(text.stdout, /\[warn\]\s+Host: .*auth\.json/);
+  assert.match(text.stdout, /\[warn\]\s+WSL interop: .*auth\.json/);
   assert.match(text.stdout, /how to fix: For a repository you do not trust/);
   assert.match(text.stdout, /All 11 checks passed, 1 with a warning\./);
 });
@@ -1169,11 +1170,23 @@ test("a WSL interop file that reads disabled passes the host check: Windows prog
 test("a WSL interop file that cannot be read is a warning that says why, not a failure and not a pass", () => {
   const directory = join(sandbox, "interop-is-a-directory");
   mkdirSync(directory);
-  const r = doctor(repoCopy(), { env: { WF_DOCTOR_WSL_INTEROP_FILE: directory } });
+  const r = doctor(repoCopy(), { env: { WF_DOCTOR_WSL_INTEROP_FILES: directory } });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const host = checkOf(reportOf(r), "host");
   assert.equal(host.status, "warn", host.message);
   assert.match(host.message, /could not read/);
   assert.match(host.message, /EISDIR/);
   assert.match(host.hint ?? "", /the paragraph on WSL in https:\/\//);
+});
+
+test("interop registered under the name WSLInterop-late, which a systemd distribution can have in place of WSLInterop, warns too: a missing first file does not make the host safe", () => {
+  const late = interopFile(WSL_INTEROP_ON);
+  const host = hostCheck(repoCopy(), join(sandbox, "there-is-no-such-interop-file"), late);
+  assert.equal(host.status, "warn", host.message);
+  assert.ok(host.message.includes(late), `the warning names the file that says enabled: ${host.message}`);
+});
+
+test("when one interop file says enabled and the other disabled the host check warns, and a disabled file with an absent one passes", () => {
+  assert.equal(hostCheck(repoCopy(), interopFile("disabled\n"), interopFile(WSL_INTEROP_ON)).status, "warn");
+  assert.equal(hostCheck(repoCopy(), interopFile("disabled\n"), join(sandbox, "there-is-no-such-interop-file")).status, "pass");
 });

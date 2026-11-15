@@ -13,7 +13,7 @@ export const CHECK_TITLES = {
   "kit-version": "Kit version",
   sandbox: "SDK sandbox",
   kit: "Installed kit",
-  host: "Host",
+  host: "WSL interop",
 } as const;
 
 export type CheckId = keyof typeof CHECK_TITLES;
