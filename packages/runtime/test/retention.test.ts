@@ -7,13 +7,13 @@ process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
 import "./isolate-home.js";
 import { type ChildProcess, spawn } from "node:child_process";
-import { readFileSync, readdirSync, rmSync, statSync, utimesSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { calls, costConfig, script, stats } from "./fake-sdk.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import type { ContentEvent, WorkflowEvent } from "../src/runtime/events.js";
-import { DEFAULT_RETENTION } from "../src/runtime/retention.js";
+import { DEFAULT_RETENTION, pruneMemo } from "../src/runtime/retention.js";
 import { MemoStore } from "../src/runtime/memo.js";
 import { eventLogPath, readEventLog, runDirPath } from "../src/runtime/run-store.js";
 import { defineWorkflow } from "../src/runtime/workflow.js";
@@ -218,6 +218,17 @@ test("memo entries are deleted by age alone: the days limit decides, a null days
 
   await run("c", { runs: null, days: 14 });
   assert.deepEqual(memoKeys(), ["recent"], "only the entry past the days limit goes");
+});
+
+test("a memo folder that is missing has nothing to prune, and one that cannot be listed is reported as failed, not as nothing pruned", () => {
+  assert.deepEqual(pruneMemo({ memoDir: join(cwd, "no-memo") }), { pruned: [], failed: [] });
+  mkdirSync(cwd, { recursive: true });
+  const notAFolder = join(cwd, "memo-file");
+  writeFileSync(notAFolder, "");
+  const { pruned, failed } = pruneMemo({ memoDir: notAFolder });
+  assert.deepEqual(pruned, []);
+  assert.equal(failed.length, 1);
+  assert.match(failed[0]?.error ?? "", /ENOTDIR/);
 });
 
 test("a limit set to null is off, and a limit passed to the run replaces the default", async () => {

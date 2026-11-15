@@ -149,7 +149,8 @@ export function pruneRuns(options: {
 /**
  * Deletes the memo entries of `memoDir` (`<key>.json`, written by `MemoStore`) whose last write is older than `policy.days`. The
  * memo belongs to the repo and not to a run, so only the days limit applies, and `null` keeps every entry. A file that is not an
- * entry (the temporary file of a write in progress) is left. Never throws: what could not be deleted is returned as `failed`.
+ * entry (the temporary file of a write in progress) is left. Never throws: what could not be deleted is returned as `failed`, and a
+ * folder that cannot be listed is one `failed` entry with the key `*`.
  */
 export function pruneMemo(options: { memoDir: string; policy?: RetentionPolicy; now?: number }): { pruned: string[]; failed: Array<{ key: string; error: string }> } {
   const maxDays = limitOf(options.policy?.days, DEFAULT_RETENTION.days);
@@ -160,8 +161,10 @@ export function pruneMemo(options: { memoDir: string; policy?: RetentionPolicy; 
   let names: string[];
   try {
     names = readdirSync(options.memoDir).filter((name) => name.endsWith(".json") && !name.startsWith("."));
-  } catch {
-    return result; // no memo yet
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return result; // no memo yet
+    result.failed.push({ key: "*", error: `could not list ${options.memoDir}: ${errorText(err)}` });
+    return result;
   }
   for (const name of names) {
     const key = name.slice(0, -".json".length);
