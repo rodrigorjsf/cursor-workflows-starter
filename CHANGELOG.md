@@ -8,9 +8,9 @@
   compilado sem a troca de `@cursor/sdk` e afirma, com `satisfies`, que cada membro que o runtime usa (`Agent.create`, `Agent.resume`,
   `Agent.getRun`, `Agent.listRuns`, `Agent.getUsage`, `Cursor.me`, `Cursor.models.list`, `Cursor.auth.login` e as classes de erro) cabe
   na assinatura real. Um fake que perde ou muda um membro, ou uma versão do SDK que o move, reprova o typecheck em vez de passar nos
-  testes offline e falhar na API. O fake ganhou o que a pesquisa achou faltando (`Cursor.auth.login`, os `parameters` de um modelo, as
-  opções de `Agent.getRun` e de `Agent.getUsage`), os parâmetros tipados com os tipos do SDK, `code` e `status` nos erros, e reexporta os
-  tipos do SDK. `wf login` e `wf models` ganharam um teste de processo.
+  testes offline e falhar na API. O fake ganhou `Cursor.auth.login`, os `parameters` de um modelo, as opções de `Agent.getRun` e de
+  `Agent.getUsage`, os parâmetros e as runs tipados com os tipos do SDK, `code` e `status` nos erros, e reexporta os tipos do SDK.
+  `wf login` e `wf models` ganharam um teste de processo.
 
 - **`wf doctor` tem uma décima verificação, `kit`.** Numa instalação por tag, o HEAD do kit em `~/.cursor-workflows/kit` tem de estar
   exatamente na tag da versão do pacote (`v<versão>`) e a árvore tem de estar limpa (`git status --porcelain --untracked-files=all

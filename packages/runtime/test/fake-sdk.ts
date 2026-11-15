@@ -11,6 +11,8 @@ import type {
   GetRunOptions,
   GetUsageOptions,
   ListRunsOptions,
+  Run,
+  RunResult,
   SDKCustomTool,
   SDKJsonValue,
   SDKModel,
@@ -118,14 +120,16 @@ interface ServerRun {
   id: string;
   agentId: string;
   createdAt: number;
-  status: "running" | "finished" | "error" | "cancelled";
+  status: Run["status"];
   /** The run's end, once there is one. */
-  done: Promise<any>;
+  done: Promise<RunResult>;
   /** Ends the run with `result`; the first end wins. */
-  settle(result: any): void;
+  settle(result: RunResult): void;
   /** What the run was scripted as: `cancel()` of a run that does not end by itself. */
-  raw?: any;
+  raw?: SentRun;
 }
+/** What `send()` hands out: the part of an SDK `Run` the runtime calls on it. A cloud run is the handle `cloudHandle` makes, which has more. */
+type SentRun = Pick<Run, "wait" | "cancel">;
 interface AgentState {
   agentId: string;
   /** The options the agent was created with: what a script sees as `o`. */
@@ -193,9 +197,9 @@ function notFound(what: string) {
   return Object.assign(new ConfigurationError(`${what} not found`), { status: 404 });
 }
 
-function serverRun(state: AgentState, raw: any): ServerRun {
-  let settle!: (result: any) => void;
-  const done = new Promise<any>((resolve) => (settle = resolve));
+function serverRun(state: AgentState, raw: SentRun | undefined): ServerRun {
+  let settle!: (result: RunResult) => void;
+  const done = new Promise<RunResult>((resolve) => (settle = resolve));
   const run: ServerRun = {
     id: `run-${++runCounter}`,
     agentId: state.agentId,
@@ -219,7 +223,7 @@ function cloudHandle(run: ServerRun) {
   const born = clientEpoch;
   const alive = () => born === clientEpoch;
   let gaveUp = false;
-  const timedOut = () => ({ id: run.id, status: "error", error: { message: "Timed out waiting for the cloud run to finish." } });
+  const timedOut = (): RunResult => ({ id: run.id, status: "error", error: { message: "Timed out waiting for the cloud run to finish." } });
   return {
     id: run.id,
     agentId: run.agentId,
@@ -227,11 +231,11 @@ function cloudHandle(run: ServerRun) {
     get status() {
       return gaveUp ? "error" : run.status;
     },
-    async wait() {
+    async wait(): Promise<RunResult> {
       if (gaveUp) return timedOut();
       const limit = costConfig.cloudWaitLimitMs;
       let timer: NodeJS.Timeout | undefined;
-      const result = await Promise.race([run.done, limit === undefined ? new Promise<never>(() => {}) : new Promise((r) => (timer = setTimeout(() => r(WAIT_LIMIT), limit)))]);
+      const result = await Promise.race([run.done, limit === undefined ? new Promise<never>(() => {}) : new Promise<typeof WAIT_LIMIT>((r) => (timer = setTimeout(() => r(WAIT_LIMIT), limit)))]);
       clearTimeout(timer);
       if (!alive()) await new Promise(() => {});
       if (result === WAIT_LIMIT) {
@@ -240,9 +244,9 @@ function cloudHandle(run: ServerRun) {
       }
       return result;
     },
-    async cancel() {
+    async cancel(): Promise<void> {
       if (!alive() || run.status !== "running") return;
-      await run.raw?.cancel?.();
+      await run.raw?.cancel();
       run.settle({ id: run.id, status: "cancelled" });
     },
   };
@@ -270,11 +274,11 @@ function agentOf(state: AgentState) {
       const r = await behave(o, msg, state.n++);
       if (r?.artifacts) state.artifacts = { ...state.artifacts, ...r.artifacts }; // the run saved files in the agent's artifacts directory
       /** A cloud run is on the server: the client gets a handle on it. */
-      const out = (raw: any) => {
+      const out = (raw: SentRun): SentRun => {
         if (!o.cloud) return raw;
         const run = serverRun(state, raw);
         raw.wait().then(
-          (result: any) => run.settle(result),
+          (result) => run.settle(result),
           (err: unknown) => run.settle({ id: run.id, status: "error", error: { message: err instanceof Error ? err.message : String(err) } }),
         );
         return cloudHandle(run);
@@ -317,8 +321,8 @@ function agentOf(state: AgentState) {
       for (const update of r?.deltas ?? DEFAULT_DELTAS) await deliver(update, false);
       if (r?.hang) {
         // A run that does not end by itself. `cancel()` ends it, as in the SDK: `wait()` then resolves with status "cancelled".
-        let end!: (result: any) => void;
-        const ended = new Promise((resolve) => (end = resolve));
+        let end!: (result: RunResult) => void;
+        const ended = new Promise<RunResult>((resolve) => (end = resolve));
         return out({
           async cancel() {
             if (r.cancelDelayMs) await new Promise((resolve) => setTimeout(resolve, r.cancelDelayMs)); // a cancellation that takes its time
@@ -429,10 +433,11 @@ export const Agent = {
  * `FAKE_SDK_LOGGED_OUT=1` makes every call fail like a rejected key, with a message that carries the key it was given;
  * `FAKE_SDK_MODELS=a,b` is the catalog, by id (default: the models the built-in workflows use).
  */
-const DEFAULT_CATALOG: SDKModel[] = [
-  { id: "composer-2.5", displayName: "composer-2.5", aliases: ["composer-2.5-alias"] },
+const modelOf = (id: string, rest: Partial<SDKModel> = {}): SDKModel => ({ id, displayName: id, aliases: [`${id}-alias`], ...rest });
+const defaultCatalog = (): SDKModel[] => [
+  modelOf("composer-2.5"),
   // A model with a parameter, as `wf models` lists it: `reasoning_effort` is the one the book's defaults and examples use.
-  { id: "grok-4.7", displayName: "grok-4.7", aliases: ["grok-4.7-alias"], parameters: [{ id: "reasoning_effort", values: [{ value: "low" }, { value: "high" }] }] },
+  modelOf("grok-4.7", { parameters: [{ id: "reasoning_effort", values: [{ value: "low" }, { value: "high" }] }] }),
 ];
 /** What `Cursor.auth.login()` hands back as the key: exported for the test that proves the CLI keeps it off its output. */
 export const FAKE_LOGIN_API_KEY = "crsr_fake_login_key_0123456789";
@@ -447,7 +452,7 @@ export const Cursor = {
   models: {
     async list(_options?: CursorRequestOptions): Promise<SDKModel[]> {
       assertLoggedIn();
-      return process.env.FAKE_SDK_MODELS?.split(",").map((id) => ({ id, displayName: id, aliases: [`${id}-alias`] })) ?? DEFAULT_CATALOG;
+      return process.env.FAKE_SDK_MODELS?.split(",").map((id) => modelOf(id)) ?? defaultCatalog();
     },
   },
   auth: {
