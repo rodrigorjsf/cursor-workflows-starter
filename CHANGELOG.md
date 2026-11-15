@@ -187,8 +187,8 @@
   replaced`, com a lista dada, para `seams: [...]`. Vale qualquer que seja a superfície que enviou o resume (chat, CLI ou
   dashboard). Um resume que termina em `seams-not-proposed` não posta nada, nem um run novo que já recebe `seams` (não há
   proposta a trocar), e uma decisão igual à última gravada em `seamsDecision`, no progresso do run, não é postada de novo: um
-  resume depois de uma queda não repete o comentário. O texto passa pelo mesmo redator e pela mesma trava de segredos dos
-  outros comentários.
+  resume depois de uma queda não repete o comentário, mesmo quando a queda veio entre o post e a gravação, porque o run confere
+  os comentários da issue antes de postar. O texto passa pelo mesmo redator e pela mesma trava de segredos dos outros comentários.
 
 ### Mudado
 

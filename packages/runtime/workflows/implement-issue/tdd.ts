@@ -234,9 +234,8 @@ export interface Progress {
   /** Plano mostrado na issue: `approveSeams` aprova exatamente este, não um recalculado. */
   proposedPlan?: unknown;
   /**
-   * The seams decision a person made for this run, the last one: `approved` (the plan the issue shows) or `replaced` (their own
-   * list of seams). It is posted on the issue when the run holds a proposal, and a decision equal to this record is not posted
-   * again, so a crash-resume of a decided run posts nothing. A decision made while the run held no proposal is recorded only.
+   * The last seams decision this run posted on the issue: `approved` (the plan the issue shows) or `replaced` (a person's own
+   * list of seams). A resume that makes the same decision posts nothing; one that differs is posted and replaces this record.
    */
   seamsDecision?: SeamsDecision;
   /** Relatórios de review por rodada: o resume os reaproveita em vez de pedir um review novo. */

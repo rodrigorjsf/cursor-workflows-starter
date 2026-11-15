@@ -227,7 +227,7 @@ interface Args {
   /** Roda uma vez no worktree novo antes da suíte de base (ex.: `npm ci`). */
   setupCommand?: string;
   openPr?: boolean;
-  /** Segundo run de MED/HIGH (com `--resume <runId>` e o mesmo `--cwd`): aprova o plano proposto no primeiro. O run comenta a aprovação na issue. */
+  /** Segundo run de MED/HIGH (com `--resume <runId>` e o mesmo `--cwd`): aprova o plano proposto no primeiro. The run comments the approval on the issue. */
   approveSeams?: boolean;
   /** Seams approved by you, in place of the proposed ones: the plan is made again with them (without `testCommand`, the command the planner chooses waits for your approval). On a resume of a run that proposed seams, the run comments the replacement on the issue. */
   seams?: string[];
@@ -610,30 +610,42 @@ export default defineWorkflow<Args>({
       const contextBlock = listBlock("Repository context files (read the ones that matter)", ctxFiles);
 
       /**
+       * Puts a comment on the issue unless one `isPosted` accepts is already there (it is told the comment's final text): a resume
+       * re-runs the code that posts, so the forge's own comments are the memory that keeps a crash-resume from posting twice. The text
+       * is redacted and guarded like every outbound text. Returns the rule of the secret the text carries (nothing is posted then),
+       * or undefined.
+       */
+      const postOnce = async (text: string, isPosted: (body: string, comment: string) => boolean): Promise<string | undefined> => {
+        const comment = redactOutbound(text);
+        const leak = findSecretInText(comment);
+        if (leak) return leak;
+        const existing = await forge.issueComments(ctx.cwd, issue.number, repo);
+        if (!existing.some((body) => isPosted(body, comment))) await withBodyFile(comment, (f) => forge.commentOnIssue(ctx.cwd, issue.number, f, repo));
+        return undefined;
+      };
+
+      /**
        * A person's decision on the proposed seams (approve the plan, or replace the seams with their own list) reaches the run as a
        * resume, from the chat, the CLI or the dashboard, and the issue holds the proposal but not the decision: the run posts it,
-       * naming itself. Only a run that holds a proposal posts (a fresh run given `seams` replaces nothing), and a decision equal to the
-       * recorded one is not posted again: the progress records it after the post, so a crash-resume posts nothing twice. Returns
-       * the run's result when the comment would carry a secret (nothing is posted then), or undefined.
+       * naming itself. Only a run that holds a proposal posts (a fresh run given `seams` replaces nothing). The progress records the
+       * decision once the comment is on the issue, so a later resume with the same decision posts nothing; and when a crash came
+       * between the post and the record, the issue's own comments say it is there. Returns the run's result when the comment
+       * would carry a secret (nothing is posted then), or undefined.
        */
       const decideSeams = async (decision: SeamsDecision["decision"], seams: string[], listing: string[]) => {
+        if (!progress.data.proposedPlan) return undefined;
         const decided: SeamsDecision = { decision, seams };
         if (isDeepStrictEqual(progress.data.seamsDecision, decided)) return undefined;
-        if (progress.data.proposedPlan) {
-          const comment = redactOutbound(
-            [
-              SEAMS_DECISION_MARKER,
-              `## Seams ${decision} for the \`implement-issue\` run \`${ctx.runId}\``,
-              "",
-              ...listing,
-              "",
-              decision === "approved" ? "The run goes on with exactly this plan." : "The run plans again with these seams.",
-            ].join("\n"),
-          );
-          const leak = findSecretInText(comment);
-          if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the seams decision comment` };
-          await withBodyFile(comment, (f) => forge.commentOnIssue(ctx.cwd, issue.number, f, repo));
-        }
+        const text = [
+          SEAMS_DECISION_MARKER,
+          `## Seams ${decision} for the \`implement-issue\` run \`${ctx.runId}\``,
+          "",
+          ...listing,
+          "",
+          decision === "approved" ? "The run goes on with exactly this plan." : "The run plans again with these seams.",
+        ].join("\n");
+        const leak = await postOnce(text, (body, comment) => body.trim() === comment.trim());
+        if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the seams decision comment` };
         progress.data.seamsDecision = decided;
         progress.save();
         return undefined;
@@ -744,41 +756,39 @@ export default defineWorkflow<Args>({
           progress.data.proposedPlan = plan;
           progress.save();
           const relaunch = `npm run wf -- run implement-issue --args ${shellQuote(JSON.stringify(stop.relaunchArgs))} --resume ${ctx.runId}`;
-          const comment = redactOutbound([
-            stop.marker,
-            stop.heading,
-            "",
-            ...stop.intro,
-            ...plan.seams.map(seamLine),
-            "",
-            "### Slices (one per red → green cycle)",
-            "",
-            ...plan.slices.map(
-              (s, i) => `${i + 1}. ${prose(s.behavior)} (seam: ${prose(s.seam)}; test: ${prose(s.testIdea)})${i >= sliceCap ? " (deferred)" : ""}`,
-            ),
-            ...(plan.slices.length > sliceCap
-              ? ["", `The slices marked deferred are left out by the tier ${tier} slice cap (${sliceCap} slices): the PR only references the issue, without closing it.`]
-              : []),
-            "",
-            ...testCommandLines(ctx.args.testCommand ?? proposedCommand(plan) ?? DEFAULT_TEST_COMMAND), // what the run executes, whatever the planner wrote
-            ...(plan.rationale ? ["", `### Why this design\n\n${prose(plan.rationale)}`] : []),
-            "",
-            "### To approve",
-            "",
-            stop.approve,
-            "",
-            "```bash",
-            relaunch,
-            "```",
-            "",
-            stop.chat,
-          ].join("\n"));
-          const leak = findSecretInText(comment);
+          const leak = await postOnce(
+            [
+              stop.marker,
+              stop.heading,
+              "",
+              ...stop.intro,
+              ...plan.seams.map(seamLine),
+              "",
+              "### Slices (one per red → green cycle)",
+              "",
+              ...plan.slices.map(
+                (s, i) => `${i + 1}. ${prose(s.behavior)} (seam: ${prose(s.seam)}; test: ${prose(s.testIdea)})${i >= sliceCap ? " (deferred)" : ""}`,
+              ),
+              ...(plan.slices.length > sliceCap
+                ? ["", `The slices marked deferred are left out by the tier ${tier} slice cap (${sliceCap} slices): the PR only references the issue, without closing it.`]
+                : []),
+              "",
+              ...testCommandLines(ctx.args.testCommand ?? proposedCommand(plan) ?? DEFAULT_TEST_COMMAND), // what the run executes, whatever the planner wrote
+              ...(plan.rationale ? ["", `### Why this design\n\n${prose(plan.rationale)}`] : []),
+              "",
+              "### To approve",
+              "",
+              stop.approve,
+              "",
+              "```bash",
+              relaunch,
+              "```",
+              "",
+              stop.chat,
+            ].join("\n"),
+            (body) => body.includes(stop.marker) && body.includes(ctx.runId),
+          );
           if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the ${stop.commentName}` };
-          const existing = await forge.issueComments(ctx.cwd, issue.number, repo);
-          if (!existing.some((body) => body.includes(stop.marker) && body.includes(ctx.runId))) {
-            await withBodyFile(comment, (f) => forge.commentOnIssue(ctx.cwd, issue.number, f, repo));
-          }
           return { ...base, status: stop.status, runId: ctx.runId, ...stop.result, seams: plan.seams, slices: plan.slices, next: relaunch };
         }
       }

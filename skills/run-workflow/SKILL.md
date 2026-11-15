@@ -76,7 +76,7 @@ user's request.
      user to read the issue themselves: do not summarize or quote it for them. If they trust it, relaunch with the args
      of the `next` command as they are (it adds `allowExternalAuthor: true`) and `resumeRunId` equal to `result.runId`.
    - `secret-blocked`: relay the `reason` (the rule that fired, without the secret) and leave the inspection of the
-     `worktree` (when present: the block at the seams comment brings none) to the user, so the secret stays out of
+     `worktree` (when present: the block at a seams comment brings none) to the user, so the secret stays out of
      the chat.
    - Anything else: the workflow ended **without delivering**. Relay the status and whatever the result brings
      (`output`, `findings`, `worktree`).

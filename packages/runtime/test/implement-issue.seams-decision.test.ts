@@ -3,7 +3,8 @@
 // reaches the run by a resume, whichever surface sent it (chat, CLI, dashboard), so the run records it on the issue itself. Asserts
 // what the issue holds afterwards: the comments, in order, and what each says. Every test runs on both forges.
 import assert from "node:assert/strict";
-import { PLAN, fx, forgeState, forgeTest, issue, names, run, submit } from "./implement-issue.fixture.js";
+import { readFileSync, writeFileSync } from "node:fs";
+import { PLAN, fx, forgeState, forgeTest, issue, names, progressFileOf, run, submit } from "./implement-issue.fixture.js";
 
 const res = (r: { result?: unknown }) => r.result as any;
 const SEAMS_MARKER = "<!-- wf:implement-issue:seams -->";
@@ -86,6 +87,23 @@ forgeTest("a replacement is posted once too, and a resume after a crash does not
   const second = await run({ seams: ["math.subtract(a, b)"] }, first.runId);
   assert.equal(res(second).status, "done", JSON.stringify(res(second)));
   assert.equal(decisions().length, 1, "the crash-resume did not post it again");
+});
+
+forgeTest("a crash between the post and the progress record does not make the resume post the decision again: the issue says it is there", async () => {
+  const first = await proposed();
+  await run({ approveSeams: true }, first.runId);
+  assert.equal(decisions().length, 1);
+  // What a crash right after the post leaves: the comment is on the issue, and the progress does not know it was posted.
+  const file = progressFileOf(first.runId);
+  const progress = JSON.parse(readFileSync(file, "utf8"));
+  assert.ok(progress.seamsDecision, "the progress had recorded the decision");
+  delete progress.seamsDecision;
+  writeFileSync(file, JSON.stringify(progress));
+
+  const again = await run({ approveSeams: true }, first.runId);
+  assert.equal(res(again).status, "done", JSON.stringify(res(again)));
+  assert.equal(decisions().length, 1, "the comment already on the issue is not posted again");
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).seamsDecision, { decision: "approved", seams: ["math.subtract"] }, "and the progress records it again");
 });
 
 forgeTest("an approval after a replacement is its own decision: the issue holds both, in order", async () => {

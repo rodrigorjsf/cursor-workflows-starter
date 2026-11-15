@@ -479,7 +479,10 @@ test("the same stopped run resumed with the same args stops again and posts the 
   const again = await run({ seams: ["x"], testCommand: undefined }, first.runId);
   assert.equal(res(again).status, "test-command-proposed", JSON.stringify(res(again)));
   assert.equal(names().filter((n) => n === "plan").length, 1, "the planner's answer comes from the journal");
-  assert.equal(forgeState().comments.length, 1, "one comment per run");
+  const comments = forgeState().comments;
+  assert.equal(comments.filter((body) => body.includes("<!-- wf:implement-issue:test-command -->")).length, 1, "one test command comment per run");
+  assert.equal(comments.length, 2, "and the resume with seams is a decision of its own");
+  assert.match(comments[1]!, /Seams replaced/);
 });
 
 test("a run that proposed seams and is then resumed with seams still posts the test command: the two comments have their own markers", async () => {

@@ -305,7 +305,7 @@ combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
    `seams-not-proposed` em vez de aprovar um plano que ninguém viu. A decisão também fica na issue: o run 2 posta um
    comentário com o `runId` e as seams (`Seams approved` com as do plano guardado, `Seams replaced` com as de `seams`),
    quem quer que tenha enviado o resume (chat, CLI ou dashboard), uma vez por decisão: o progresso guarda a última, e um
-   resume depois de uma queda não a posta de novo.
+   resume depois de uma queda não a posta de novo (se a queda veio entre o post e a gravação, os comentários da issue dizem que ela já está lá).
 4. A skill [`run-workflow`](../../skills/run-workflow/SKILL.md) trata qualquer resultado com `next`: mostra o
    resultado, pergunta ao usuário e relança só com a aprovação dele.
 
