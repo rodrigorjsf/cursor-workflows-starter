@@ -312,6 +312,10 @@ combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
 ## Testando
 
 1. Crie `packages/runtime/test/<nome>.test.ts`. O `packages/runtime/tsconfig.test.json` troca `@cursor/sdk` por `packages/runtime/test/fake-sdk.ts`.
+   O teste importa os controles do fake (`script`, `calls`...) de `./fake-sdk.js`. O fake é conferido contra o SDK de verdade: o
+   `npm run typecheck` compila `packages/runtime/test/fake-sdk.conformance.ts` sem a troca, e cada membro do SDK que o runtime
+   usa (`Agent.create`, `Cursor.auth.login`, as classes de erro...) tem de caber na assinatura real. Um fake que perde ou muda
+   um membro, ou uma versão do SDK que o move, reprova o typecheck. Um membro novo do SDK entra no fake e nesse arquivo juntos.
 2. No fake, `script.push(fn)` define o comportamento de cada `send()`:
    - `() => ({ result: "texto" })` simula texto livre;
    - `(o) => { o.local.customTools.submit_result.execute(obj, {}); return {}; }` simula saída estruturada;
