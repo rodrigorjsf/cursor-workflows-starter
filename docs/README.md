@@ -64,6 +64,7 @@ As decisões difíceis de reverter, em inglês, uma por arquivo (`docs/adr/NNNN-
 - [7.8 · ADR-0008: The job record keeps what the event log cannot](adr/0008-job-record-keeps-what-the-log-cannot.md): o ADR-0002 com o registro do job corrigido: além da identidade, guarda só o que o log não pode guardar (`start`, `refused` e `killedByCancel`, a marca de um job travado que o cancelamento matou); status, gasto e resultado seguem projetados do log
 - [7.9 · ADR-0009: The forge is a seam: GitHub and GitLab](adr/0009-forge-seam-github-and-gitlab.md): o forge (GitHub via `gh`, GitLab via `glab`) detectado pelo host do `origin`, com o mapa `forges` na config para hosts self-managed; `glab api` onde o CLI não basta; "PR" segue o termo do kit
 - [7.10 · ADR-0010: Detached jobs, and how each one is cancelled](adr/0010-detached-jobs-and-how-each-is-cancelled.md): o ADR-0003 com todos os caminhos de cancelamento: o job em execução recebe SIGTERM e desfaz a etapa; o travado é morto com SIGKILL, sem desfazer, junto com os comandos de `ctx.exec` e o que o SDK iniciou; o morto não recebe sinal e só tem os cloud agents cancelados
+- [7.11 · ADR-0011: The npm package is a bootstrapper for the tag install](adr/0011-npm-bootstrapper.md): o pacote npm `cursor-workflows` só embrulha a instalação por tag: roda o `install.sh` que leva, com um plano e um único consentimento, e o `wf init`; não mexe num kit já instalado; o CI publica depois de criar a release imutável
 
 ### Parte 8 · Pesquisa
 

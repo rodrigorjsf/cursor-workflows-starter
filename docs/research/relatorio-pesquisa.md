@@ -601,4 +601,4 @@ condicional** sobre o Cursor SDK. Esse é o espaço que o starter kit ocupa.
 
 ---
 
-[← Anterior: 7.10 · ADR-0010: Detached jobs, and how each one is cancelled](../adr/0010-detached-jobs-and-how-each-is-cancelled.md) · [Índice](../README.md) · [Próximo: 8.2 · Verificações locais (2026-11-11) →](verificacoes-locais.md)
+[← Anterior: 7.11 · ADR-0011: The npm package is a bootstrapper for the tag install](../adr/0011-npm-bootstrapper.md) · [Índice](../README.md) · [Próximo: 8.2 · Verificações locais (2026-11-11) →](verificacoes-locais.md)

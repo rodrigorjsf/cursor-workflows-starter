@@ -85,3 +85,5 @@ When something fails repeatedly, when User has to re-explain, or when a workarou
 - Piped `gh issue view --comments` prints only comments: use `--json body,comments`.
 - Test repos: set `core.autocrlf=false`; global git here converts line endings.
 - `node_modules/.bin/tsc` is TypeScript 6; TS 7 is `node_modules/typescript/bin/tsc`.
+- `main` rejects direct pushes (4 required checks): push a branch, open a PR.
+- Stale node_modules after a dependency bump: run `npm ci` before tests.
