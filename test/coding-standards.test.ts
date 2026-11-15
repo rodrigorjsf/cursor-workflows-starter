@@ -672,8 +672,10 @@ test("the git push check fires on a workflow that pushes itself, through ctx.exe
     'await ctx.exec("bash", ["-c", "git push --force"]);',
     'execSync("git -C dir push");',
     'await cmd.gitRead(cwd, "push", "--dry-run");',
+    'await cmd.forgeRead("git", cwd, "push", "origin");',
+    'await cmd.forgeReadWith("git", cwd, {}, "push");',
   ].join("\n");
-  assert.deepEqual(directGitPush("packages/runtime/workflows/x.ts", offender), [1, 2, 3, 4, 5]);
+  assert.deepEqual(directGitPush("packages/runtime/workflows/x.ts", offender), [1, 2, 3, 4, 5, 6, 7]);
   assert.deepEqual(directGitPush(".agents/workflows/mine.ts", 'await ctx.exec("git", ["push"]);\n'), [1]);
   const legit = [
     'await cmd.push(cwd, "-u", "origin", branch);',
@@ -682,6 +684,7 @@ test("the git push check fires on a workflow that pushes itself, through ctx.exe
     'await ctx.exec("git", ["config", "push.default", "simple"]);',
     'await cmd.git(cwd, "status");',
     'ctx.log("git push is not run here");',
+    'await cmd.forgeRead("gh", cwd, "pr", "view");',
     '// await ctx.exec("git", ["push"]);',
   ].join("\n");
   assert.deepEqual(directGitPush("packages/runtime/workflows/x.ts", legit), []);

