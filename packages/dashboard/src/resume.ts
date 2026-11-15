@@ -5,6 +5,7 @@
 // runtime reads from that job's record. Every refusal is a 404 for a run the index does not know and a 409 for the rest: the run exists,
 // but is not in a state, or has not got what it takes, to be resumed from here.
 import type { ResumeRunOutcome, StartRunOutcome } from "@cursor-workflows/runtime/observe";
+import { listedWorkflows, startedFields } from "./start.js";
 
 type Started = Extract<StartRunOutcome, { kind: "started" }>;
 
@@ -19,7 +20,7 @@ export interface ResumedReply {
 export function resumeReply(outcome: ResumeRunOutcome): { status: number; body: ResumedReply | { error: string } } {
   switch (outcome.kind) {
     case "started":
-      return { status: 202, body: { jobId: outcome.jobId, runId: outcome.runId, ...(outcome.violations.length > 0 ? { violations: outcome.violations } : {}) } };
+      return { status: 202, body: startedFields(outcome) };
     case "unknown-run":
       return { status: 404, body: { error: "run not found" } };
     case "not-resumable":
@@ -31,7 +32,7 @@ export function resumeReply(outcome: ResumeRunOutcome): { status: number; body: 
     case "unknown-repo":
       return { status: 409, body: { error: "the run's repository is no longer on this machine" } };
     case "unknown-workflow":
-      return { status: 409, body: { error: `the run's repository no longer lists its workflow; it lists: ${outcome.available.join(", ") || "no workflows"}` } };
+      return { status: 409, body: { error: `the run's repository no longer lists its workflow; it lists: ${listedWorkflows(outcome.available)}` } };
     case "invalid-args":
     case "refused":
       return { status: 409, body: { error: outcome.error } };

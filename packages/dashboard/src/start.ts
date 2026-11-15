@@ -74,15 +74,25 @@ export function parseStartBody(raw: string): ParsedStart {
 export const unknownRepoError = (repo: string): string =>
   `unknown repository: ${repo}; the dashboard starts workflows only in repositories whose runs it already knows: start one there from the chat or with \`wf start\` first`;
 
+/** The fields of a 202 both doors answer (start here, resume in resume.ts): the job, its run, and what the global caps cut, left out when nothing was. */
+export const startedFields = (outcome: StartRunOutcomeStarted): Pick<StartedReply, "jobId" | "runId" | "violations"> => ({
+  jobId: outcome.jobId,
+  runId: outcome.runId,
+  ...(outcome.violations.length > 0 ? { violations: outcome.violations } : {}),
+});
+
+/** The workflows a repository lists, as a refusal names them. */
+export const listedWorkflows = (available: string[]): string => available.join(", ") || "no workflows";
+
 /** The status and the body the runtime's answer to a start becomes. A start that worked is 202: the job runs on its own, and its run registers itself a moment later. */
 export function startReply(outcome: StartRunOutcome, request: StartRunRequest): { status: number; body: StartedReply | { error: string } } {
   switch (outcome.kind) {
     case "started":
-      return { status: 202, body: { jobId: outcome.jobId, runId: outcome.runId, repo: request.repo, workflow: request.workflow, ...(outcome.violations.length > 0 ? { violations: outcome.violations } : {}) } };
+      return { status: 202, body: { ...startedFields(outcome), repo: request.repo, workflow: request.workflow } };
     case "unknown-repo":
       return { status: 404, body: { error: unknownRepoError(request.repo) } };
     case "unknown-workflow":
-      return { status: 404, body: { error: `unknown workflow: ${request.workflow}; this repository lists: ${outcome.available.join(", ") || "no workflows"}` } };
+      return { status: 404, body: { error: `unknown workflow: ${request.workflow}; this repository lists: ${listedWorkflows(outcome.available)}` } };
     case "invalid-args":
       return { status: 400, body: { error: outcome.error } };
     case "refused":
