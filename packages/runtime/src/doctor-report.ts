@@ -13,6 +13,7 @@ export const CHECK_TITLES = {
   "kit-version": "Kit version",
   sandbox: "SDK sandbox",
   kit: "Installed kit",
+  state: "Run state",
 } as const;
 
 export type CheckId = keyof typeof CHECK_TITLES;

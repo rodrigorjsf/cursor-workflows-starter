@@ -34,9 +34,13 @@ export function ensureIgnored(cwd: string): void {
   if (!current.split("\n").includes(".workflows/")) appendFileSync(exclude, `${current.endsWith("\n") || !current ? "" : "\n"}.workflows/\n`);
 }
 
+/** Where the repo's run state lives, whether or not it exists: nothing is created. */
+export const stateRootIn = (cwd: string): string => join(cwd, ".workflows");
+
+/** A folder of the repo's run state (`.workflows/<parts>`), made when it is not there, for its user alone (`PRIVATE_DIR`): it holds the private source of the repo. */
 export function stateDir(cwd: string, ...parts: string[]): string {
   ensureIgnored(cwd);
-  const dir = join(cwd, ".workflows", ...parts);
+  const dir = join(stateRootIn(cwd), ...parts);
   mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR });
   return dir;
 }

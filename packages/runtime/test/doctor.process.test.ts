@@ -900,7 +900,7 @@ test("a check that throws is a failed check naming the workflow, not a crashed d
   const r = doctor(repo);
   assert.equal(r.status, 1, r.stderr);
   const report = reportOf(r);
-  assert.equal(report.checks.length, 10);
+  assert.equal(report.checks.length, 11);
   const config = checkOf(report, "config");
   assert.equal(config.status, "fail");
   assert.match(config.message, /bad-roles/);

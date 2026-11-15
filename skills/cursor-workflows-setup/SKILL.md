@@ -39,7 +39,7 @@ Pick the task, then run its steps in order. Each step ends on a stated result.
 ## Check the setup
 
 1. Run `wf doctor --json`. Its `checks`, always in this order: `node`, `dependencies`, `login`, `models`, `forge`,
-   `mcp-server`, `config`, `kit-version`, `sandbox`, `kit`. `ok: true` and exit code 0 mean the setup works. A check's `status` is
+   `mcp-server`, `config`, `kit-version`, `sandbox`, `kit`, `state`. `ok: true` and exit code 0 mean the setup works. A check's `status` is
    `pass`, `warn` or `fail`: a `warn` passed, and names something worth fixing. Done when no check is `fail`, or each failing
    check's `message` and `hint` went to the user, and each `warn`'s `message` and `hint` went to the user too.
    - On a Node older than 22.13 the report holds the `node` check alone.
