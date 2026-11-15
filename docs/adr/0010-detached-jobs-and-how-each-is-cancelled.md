@@ -121,4 +121,4 @@ that cannot be written is a `warning` event, and the command still runs, out of 
 
 ---
 
-[← Anterior: 7.9 · ADR-0009: The forge is a seam: GitHub and GitLab](0009-forge-seam-github-and-gitlab.md) · [Índice](../README.md) · [Próximo: 8.1 · Cursor SDK como motor de workflows determinísticos: relatório de pesquisa →](../research/relatorio-pesquisa.md)
+[← Anterior: 7.9 · ADR-0009: The forge is a seam: GitHub and GitLab](0009-forge-seam-github-and-gitlab.md) · [Índice](../README.md) · [Próximo: 7.11 · ADR-0011: The npm package is a bootstrapper for the tag install →](0011-npm-bootstrapper.md)
