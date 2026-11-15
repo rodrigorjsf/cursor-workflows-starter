@@ -240,8 +240,9 @@ async function main(): Promise<number> {
       const def = await resolveWorkflow();
       const args = jsonFlag("args", values.args!);
       const overrides = overridesFlag();
-      const { violations } = loadEffectiveConfig(def, { cwd, flags: flagLimits(), mcpOverrides: overrides }); // an unusable config fails here, with its field path
-      const { job, log } = spawnJob({ cwd, workflow: def.meta.name, args, resumeRunId: values.resume, ...flagLimits(), overrides });
+      const { config, violations } = loadEffectiveConfig(def, { cwd, flags: flagLimits(), mcpOverrides: overrides }); // an unusable config fails here, with its field path
+      // Refused here too (exit 1, nothing written) when too many jobs run or the same job already does: the caps.maxRunningJobs cap, as for `start_workflow`.
+      const { job, log } = spawnJob({ cwd, workflow: def.meta.name, args, maxRunningJobs: config.caps.maxRunningJobs, resumeRunId: values.resume, ...flagLimits(), overrides });
       out({ jobId: job.jobId, runId: job.runId, log, next: `wf wait ${job.jobId}`, ...(violations.length ? { violations } : {}) });
       return 0;
     }

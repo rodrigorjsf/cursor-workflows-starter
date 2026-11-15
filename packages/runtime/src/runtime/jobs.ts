@@ -19,7 +19,7 @@ import { resumeHint } from "./projection.js";
 import { abortOpenRuns } from "./run-store.js";
 import type { WorkflowDefinition } from "./workflow.js";
 
-export { type NewJob, type SpawnJobOptions, createJob, spawnJob } from "./job-spawn.js";
+export { JobRefusedError, type NewJob, type SpawnJobOptions, createJob, spawnJob } from "./job-spawn.js";
 
 /**
  * Process handlers for the MCP server and the CLI. The official cookbook (dag-task-runner) warns that the SDK fires

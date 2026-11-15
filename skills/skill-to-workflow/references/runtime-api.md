@@ -99,6 +99,7 @@ if (!tests.ok) { /* tests.exitCode, tests.timedOut, tests.tail: the last 32768 c
 | `timeoutMs` | The command is killed after this long: SIGTERM to its whole process group, SIGKILL two seconds later. Default: `workflows.<name>.execTimeoutMs` in the config files, 10 minutes when unset. Give a network command (`git push`, `gh`, `glab`) a short one. |
 | `cwd` | Working directory. Default: the run's cwd. |
 | `env` | Variables added to the process's own environment. A variable set to `undefined` is removed from the command's (`{ NODE_TEST_CONTEXT: undefined }`). |
+| `scrubSecrets` | `true` starts the command without the variables of the process's environment whose name holds `KEY`, `TOKEN`, `SECRET` or `PASSWORD` (any case: `CURSOR_API_KEY`, `GH_TOKEN`). Use it for a command that runs code the run does not trust, such as a test suite of the target repository; `env` still adds what you name. Default: `false`: a `git` call or the forge CLI's (`gh`, `glab`) needs its token. |
 
 - There is **no shell**: `command` and its `args` go to the program as they are. Use `["bash", ["-c", line]]` when you
   need one (`bash -c`, not `bash -lc`: rules.md, rule 3). The command has no stdin and no controlling terminal, so a

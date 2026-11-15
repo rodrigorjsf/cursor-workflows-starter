@@ -71,7 +71,7 @@ test("the run button of a card starts implement-issue for its issue through the 
     return found.status === 200 ? found.json : undefined;
   }, JOB_WAIT);
   assert.equal(detail.workflow, "implement-issue");
-  assert.deepEqual(detail.start, { args: { issue: 7 }, maxTokens: 50_000, maxCents: 20 }, "the job was started for issue 7, under the caps the form gave");
+  assert.deepEqual(detail.start, { workflow: "implement-issue", args: { issue: 7 }, maxTokens: 50_000, maxCents: 20 }, "the job was started for issue 7, under the caps the form gave");
   assert.deepEqual(await waitFor("issue 7 to leave the Backlog", async () => ((await numbers()).includes(7) ? undefined : await numbers()), JOB_WAIT), [9]);
 });
 

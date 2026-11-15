@@ -54,6 +54,8 @@ export const forgeState = () =>
     comments: string[];
     prs: Array<{ url: string; body: string; head?: string; state?: string; title?: string }>;
     calls: string[][];
+    /** Whether GH_TOKEN was in the environment of each `gh` call, in the order of `calls`. */
+    ghToken?: Array<"set" | "unset">;
     fail?: Record<string, string>;
     /** The calls the CLI of the other forge got: the workflow asked the wrong one. */
     wrongCli?: string[][];
@@ -116,6 +118,7 @@ const st = JSON.parse(fs.readFileSync(f, "utf8"));
 const a = process.argv.slice(2);
 if (st.forge !== "github") { (st.wrongCli = st.wrongCli || []).push(["gh", ...a]); fs.writeFileSync(f, JSON.stringify(st)); process.stderr.write("fake gh: this test's forge is " + st.forge); process.exit(99); }
 st.calls.push(a);
+(st.ghToken = st.ghToken || []).push(process.env.GH_TOKEN === undefined ? "unset" : "set"); // does the workflow's own call still get the token?
 const failure = (st.fail || {})[a[0] + " " + a[1]];
 if (failure !== undefined) { fs.writeFileSync(f, JSON.stringify(st)); process.stderr.write(failure); process.exit(1); }
 const flag = (n) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };

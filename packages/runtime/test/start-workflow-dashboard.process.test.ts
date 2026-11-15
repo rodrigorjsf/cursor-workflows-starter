@@ -97,7 +97,7 @@ test("start_workflow starts the dashboard once and returns the link to the run's
     assert.deepEqual([run.repo, run.workflow, run.status, run.phase], [repo, "quick", "finished", "work"]);
     const detail = (await (await fetch(`${origin}/api/runs/${first.runId}`)).json()) as { result: unknown; start: unknown };
     assert.equal(detail.result, "ok");
-    assert.deepEqual(detail.start, { args: {} }, "how the run's latest execution was started: what an exact resume command repeats");
+    assert.deepEqual(detail.start, { workflow: "quick", args: {} }, "how the run's latest execution was started: what an exact resume command repeats");
   });
 });
 
@@ -105,7 +105,7 @@ test("the job record keeps how the job was started: the args and the chat's over
   await withServer({}, async (call) => {
     const started = await call("start_workflow", { name: "quick", args: {}, overrides: { maxCents: 40 } });
     const record = JSON.parse(readFileSync(join(repo, ".workflows", "jobs", `${started.jobId}.json`), "utf8"));
-    assert.deepEqual(record.start, { args: {}, overrides: { maxCents: 40 } });
+    assert.deepEqual(record.start, { workflow: "quick", args: {}, overrides: { maxCents: 40 } });
     let state = await call("wait_workflow", { jobId: started.jobId, timeoutSec: 5 });
     for (const stop = performance.now() + 30_000; state.status === "running" && performance.now() < stop; ) state = await call("wait_workflow", { jobId: started.jobId, timeoutSec: 5 });
     assert.equal(state.status, "finished");

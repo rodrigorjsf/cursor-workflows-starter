@@ -155,9 +155,13 @@ export interface TestRun {
  * o PATH (medido: o npm do `mise exec` virou outro, quebrado). Sem NODE_TEST_CONTEXT: dentro de um runner de testes, um
  * `node --test` aninhado herda essa variável e sai com 0 mesmo com teste falhando (medido no 22.13 e 22.23). Com teto de
  * tempo: um teste red de comportamento assíncrono que ainda não existe costuma travar.
+ *
+ * Runs without the environment's secrets (`scrubSecrets`: `CURSOR_API_KEY`, `GH_TOKEN`, any variable with KEY, TOKEN, SECRET or PASSWORD
+ * in its name): the suite and the `setupCommand` run code of the target repository that an agent has just written, and that code
+ * inherits nothing it could send away. The workflow's own `git` and forge CLI calls do not come through here and keep their tokens.
  */
 export async function runTests(cmd: Commands, command: string, cwd: string, opts: { timeoutMs: number; label: string }): Promise<TestRun> {
-  const r = await cmd.exec("bash", ["-c", command], { cwd, env: { NODE_TEST_CONTEXT: undefined }, timeoutMs: opts.timeoutMs, label: opts.label });
+  const r = await cmd.exec("bash", ["-c", command], { cwd, env: { NODE_TEST_CONTEXT: undefined }, scrubSecrets: true, timeoutMs: opts.timeoutMs, label: opts.label });
   const output = (r.error ? `${r.error}\n${r.tail}` : r.tail).slice(-4000);
   if (r.timedOut) return { ok: false, output, kind: "timeout" };
   if (r.exitCode === null) return { ok: false, output, kind: "killed" };

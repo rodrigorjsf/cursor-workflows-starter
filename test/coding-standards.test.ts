@@ -353,7 +353,7 @@ const isWorkflow = (e: ts.Expression): boolean =>
   (ts.isObjectLiteralExpression(e) && e.properties.some((p) => p.name !== undefined && ts.isIdentifier(p.name) && p.name.text === "meta")) ||
   ((ts.isSatisfiesExpression(e) || ts.isAsExpression(e) || ts.isParenthesizedExpression(e)) && isWorkflow(e.expression));
 
-/** Lines with a default export that is not a workflow definition; for a PascalCase .tsx, 0 when it exports no function of its name. */
+/** Lines with a default export that is not a workflow definition; for a PascalCase .tsx, 0 when it exports no function, constant or class of its name (an error boundary has to be a class). */
 function badExports(path: string, text: string): number[] {
   const sf = parse(path, text);
   const found: number[] = [];
@@ -363,7 +363,7 @@ function badExports(path: string, text: string): number[] {
     const isExport = modifiers.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
     if (ts.isExportAssignment(s) && !s.isExportEquals && !isWorkflow(s.expression)) found.push(lineOf(sf, s));
     if (isExport && modifiers.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword)) found.push(lineOf(sf, s));
-    if (isExport && ts.isFunctionDeclaration(s) && s.name) exported.add(s.name.text);
+    if (isExport && (ts.isFunctionDeclaration(s) || ts.isClassDeclaration(s)) && s.name) exported.add(s.name.text);
     if (isExport && ts.isVariableStatement(s)) for (const d of s.declarationList.declarations) if (ts.isIdentifier(d.name)) exported.add(d.name.text);
   }
   const name = basename(path).replace(/\.tsx$/, "");
@@ -377,6 +377,7 @@ test("the export check fires on a default export that is not a workflow and on a
   assert.deepEqual(badExports("w.ts", 'export default defineWorkflow({ meta: { name: "w" } });\n'), []);
   assert.deepEqual(badExports("w.ts", 'export default { meta: { name: "fixture" }, async run() {} };\n'), []);
   assert.deepEqual(badExports("app/Panel.tsx", "export function Panel() { return null; }\nexport function Row() { return null; }\n"), []);
+  assert.deepEqual(badExports("app/Panel.tsx", "export class Panel extends Component { render() { return null; } }\n"), [], "a class component: an error boundary cannot be a function");
 });
 
 test("exports are named: the one default export is a workflow definition, and a PascalCase component file exports its component", () => {
@@ -630,6 +631,74 @@ test("the metric name check fires on camelCase and kebab-case names and passes s
 test("every ctx.metric name in a workflow is snake_case", () => {
   const workflows = ["packages/runtime/workflows", ".agents/workflows", "scripts"].flatMap((d) => files(d, CODE));
   assert.deepEqual(scan(workflows, nonSnakeMetrics), [], "name the metric in snake_case, e.g. slices_planned");
+});
+
+/** The one file of the workflows that may run `git push`: the helpers every other file calls (`push`, `pushOwned`, `deleteOwned`). */
+const PUSH_HELPERS = "packages/runtime/workflows/implement-issue/commands.ts";
+/** A call whose callee is one of these runs a command: `ctx.exec`, `Commands.exec`, `child_process`'s functions. */
+const RUNS_A_COMMAND = /^(exec|execFile|execFileSync|execSync|spawn|spawnSync|runCommand)$/;
+/** The `Commands` methods that run any CLI by name, which they take as an argument: `forgeRead("git", cwd, "push")`. */
+const RUNS_A_NAMED_CLI = /^forgeRead(With|OrNothing)?$/;
+/** Text that is a `git push` command line: `git push`, `git -C dir push`, inside a shell one-liner. */
+const GIT_PUSH_LINE = /\bgit\b[^\n]*\bpush\b/;
+
+/**
+ * Lines of a workflow file that run `git push` itself instead of calling the helpers of `PUSH_HELPERS`: a call to a `git`, `gitRead` or
+ * `gitIs` method with the argument `"push"`, a command call whose command is `git` with `"push"` among its arguments, a call of a
+ * `Commands` method that runs a named CLI (`forgeRead`...) with both `"git"` and `"push"`, and a command call with a string that
+ * is a `git ... push` command line (`bash -c "git push"`). Read from the syntax tree, so comments and log text
+ * never trip it; a subcommand held in a variable passes.
+ */
+function directGitPush(path: string, text: string): number[] {
+  if (posix(path) === PUSH_HELPERS) return [];
+  const sf = parse(path, text);
+  const found: number[] = [];
+  walk(sf, (node) => {
+    if (!ts.isCallExpression(node)) return;
+    const callee = ts.isPropertyAccessExpression(node.expression) ? node.expression.name.text : ts.isIdentifier(node.expression) ? node.expression.text : undefined;
+    if (callee === undefined) return;
+    const direct = node.arguments.flatMap((a) => (ts.isStringLiteralLike(a) ? [a.text] : []));
+    const listed = node.arguments.flatMap((a) => (ts.isArrayLiteralExpression(a) ? a.elements.flatMap((e) => (ts.isStringLiteralLike(e) ? [e.text] : [])) : []));
+    const pushes =
+      (/^git(Read|Is)?$/.test(callee) && direct.includes("push")) ||
+      (RUNS_A_COMMAND.test(callee) && direct[0] === "git" && listed.includes("push")) ||
+      (RUNS_A_NAMED_CLI.test(callee) && direct.includes("git") && direct.includes("push")) ||
+      (RUNS_A_COMMAND.test(callee) && [...direct, ...listed].some((s) => GIT_PUSH_LINE.test(s)));
+    if (pushes) found.push(lineOf(sf, node));
+  });
+  return found;
+}
+
+test("the git push check fires on a workflow that pushes itself, through ctx.exec, the Commands git methods or a shell line, and passes the helpers, other git commands and text", () => {
+  const offender = [
+    'await ctx.exec("git", ["push", "origin", "HEAD"]);',
+    'await cmd.git(cwd, "-c", "x=y", "push");',
+    'await ctx.exec("bash", ["-c", "git push --force"]);',
+    'execSync("git -C dir push");',
+    'await cmd.gitRead(cwd, "push", "--dry-run");',
+    'await cmd.forgeRead("git", cwd, "push", "origin");',
+    'await cmd.forgeReadWith("git", cwd, {}, "push");',
+  ].join("\n");
+  assert.deepEqual(directGitPush("packages/runtime/workflows/x.ts", offender), [1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(directGitPush(".agents/workflows/mine.ts", 'await ctx.exec("git", ["push"]);\n'), [1]);
+  const legit = [
+    'await cmd.push(cwd, "-u", "origin", branch);',
+    "await cmd.pushOwned(cwd, branch, undefined);",
+    "await cmd.deleteOwned(cwd, branch, sha);",
+    'await ctx.exec("git", ["config", "push.default", "simple"]);',
+    'await cmd.git(cwd, "status");',
+    'ctx.log("git push is not run here");',
+    'await cmd.forgeRead("gh", cwd, "pr", "view");',
+    '// await ctx.exec("git", ["push"]);',
+  ].join("\n");
+  assert.deepEqual(directGitPush("packages/runtime/workflows/x.ts", legit), []);
+  assert.deepEqual(directGitPush(PUSH_HELPERS, offender), [], "the helpers are where it is allowed");
+});
+
+test("no workflow runs git push itself: pushing and deleting a remote branch go through the Commands helpers, which touch only the branches the workflow owns", () => {
+  const workflows = ["packages/runtime/workflows", ".agents/workflows"].flatMap((d) => files(d, CODE));
+  assert.ok(workflows.includes(PUSH_HELPERS), "the helpers are among the files scanned");
+  assert.deepEqual(scan(workflows, directGitPush), [], "call Commands.push, pushOwned or deleteOwned (workflows/implement-issue/commands.ts)");
 });
 
 // --- Maintainer scripts and Bash --------------------------------------------------------------------------------------

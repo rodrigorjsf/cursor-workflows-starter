@@ -10,6 +10,8 @@
 
 **Amended:** 2026-11-14: the doctor's `forge` check also asks a GitHub login what its token may do. `loginOf` carries a `ForgeToken` for GitHub (`ForgeLogin.token`: the `gh api -i --silent user` call whose `X-OAuth-Scopes` header lists a classic token's scopes, the environment variables `gh` takes a token from, the command that prints the token and the one that removes scopes), and the check reports a token with a scope the kit does not need as a `warn`, a doctor status that does not fail the report (#63). The CLI's name and commands stay in the forge module. GitLab's token is not read, and the call's `--hostname` form for an Enterprise host is not recorded against a real one (#100).
 
+**Amended:** 2026-11-14: the one question the engine asks a forge outside this seam is whether the remote a cloud snapshot goes to is public (`remoteVisibility`, `src/runtime/remote-visibility.ts`: `gh repo view <url> --json visibility`), because `src/` may not import a workflow. It is GitHub's only: for a GitLab remote, or any host `gh` cannot answer for, the snapshot is refused unless the global `cloud.allowPublicRemote` is `true`, so the "cloud steps on GitLab rely on Cursor's own support" consequence below now carries that opt-in.
+
 ## Context
 
 The kit opened pull requests, read issues and commented on them only through the GitHub CLI (`gh`). `gh` was called

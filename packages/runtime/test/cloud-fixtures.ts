@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fakeVisibilityGh } from "./fake-gh-visibility.js";
 
 export const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" });
 
@@ -17,8 +18,13 @@ export function addRemote(repo: string, remoteName: string, bare: string): void 
   git(repo, "config", `url.${bare}.insteadOf`, url);
 }
 
-/** A repository at `repo` with one commit (`a.txt`, `b.txt`) and a bare repository at `remote`, added as `remoteName`. */
+/**
+ * A repository at `repo` with one commit (`a.txt`, `b.txt`) and a bare repository at `remote`, added as `remoteName`. The remote is
+ * private for the `gh` on the PATH (a stand-in, fake-gh-visibility.ts): a snapshot is refused for a remote that is public or that gh
+ * cannot answer for. A test that needs another answer installs its own after this call.
+ */
 export function repoWithRemote(repo: string, remote: string, remoteName = "origin"): void {
+  fakeVisibilityGh(dirname(repo), "PRIVATE");
   mkdirSync(repo, { recursive: true });
   git(repo, "init", "-q", "-b", "main");
   git(repo, "config", "user.email", "test@example.com");

@@ -4,7 +4,8 @@ process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
 import "./isolate-home.js";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { calls, script } from "./fake-sdk.js";
@@ -63,6 +64,43 @@ test("a step result that holds a credential is stored redacted in the journal an
   assert.equal(resumed.status, "finished", resumed.error);
   assert.equal(calls.length, created, "both steps come from the journal: no agent is created again");
   assert.deepEqual(resumed.result, first.result);
+});
+
+test("the key `wf login` saved is redacted from the event log, the journal and the memo even when no key was passed to the run and CURSOR_API_KEY is unset", async () => {
+  // The SDK reads the saved login itself, so the engine never sees the key in its options or its environment: it reads the file the SDK reads.
+  // A key of no known shape, so that nothing but knowing the key can hide it.
+  const saved = `saved-login-${"x".repeat(24)}`;
+  const home = mkdtempSync(join(tmpdir(), "wf-saved-key-home-"));
+  mkdirSync(join(home, ".cursor", "sdk"), { recursive: true });
+  writeFileSync(join(home, ".cursor", "sdk", "auth.json"), JSON.stringify({ apiKey: saved }));
+  const before = { HOME: process.env.HOME, CURSOR_API_KEY: process.env.CURSOR_API_KEY };
+  process.env.HOME = home;
+  delete process.env.CURSOR_API_KEY;
+  try {
+    mkdirSync(cwd, { recursive: true });
+    script.push(() => ({ status: "finished", result: `the saved key is ${saved}` }));
+    const wf = defineWorkflow({
+      meta: { name: "saved-key", description: "saved-key" },
+      defaults: { model: { id: "m" } },
+      async run(ctx) {
+        return ctx.agent<string>("echo the key", { tools: ["read"], memo: true });
+      },
+    });
+    const r = await runWorkflow(wf, {}, { cwd });
+    assert.equal(r.status, "finished", r.error);
+    assert.equal(r.result, "the saved key is [REDACTED]");
+    const stored = filesUnder(join(cwd, ".workflows"));
+    for (const name of ["events.jsonl", "journal.jsonl"]) assert.ok(stored.some(([path]) => path.endsWith(name)), `${name} was written`);
+    assert.ok(stored.some(([path]) => path.includes(join(".workflows", "memo"))), "the memo was written");
+    for (const [path, text] of stored) assert.ok(!text.includes(saved), `${path} holds the saved key`);
+    assert.ok(stored.some(([, text]) => text.includes("[REDACTED]")), "what was hidden is marked");
+  } finally {
+    for (const [name, value] of Object.entries(before)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("a step result keeps the redact-only shapes (a URL password, Bearer, JWT): the workflow may run them; the event log still hides them", async () => {

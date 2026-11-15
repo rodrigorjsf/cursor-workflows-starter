@@ -37,3 +37,15 @@ test("SECURITY.md has a Privacy Mode section that links Cursor's data-use page, 
     assert.ok(section.includes(needle), `the Privacy Mode section does not mention ${needle}`);
   }
 });
+
+// The runtime hardening of issue #70: what SECURITY.md says of each, in the words a reader would search for.
+test("SECURITY.md says what the runtime hardening does: the job cap, the scrubbed environment, the snapshot guard, the repository's code, and wf init's symlinks", () => {
+  const says = (what: string, ...needles: string[]) => {
+    for (const needle of needles) assert.ok(SECURITY.includes(needle), `SECURITY.md does not say ${what}: no "${needle}"`);
+  };
+  says("how many jobs run at once", "caps.maxRunningJobs", "mesmo workflow", "mesmos args");
+  says("that the tests and the setup command do not see the environment's secrets", "`setupCommand`", "`CURSOR_API_KEY`", "`GH_TOKEN`", "KEY", "TOKEN", "SECRET", "PASSWORD");
+  says("what is checked before a cloud snapshot is pushed", "`cloud.allowPublicRemote`", "gh repo view", "PUBLIC", "não despublica", "fecha o caminho");
+  says("that wf doctor and a run list the code of the repository's settings", ".cursor/hooks.json", ".claude/settings.json", ".cursor/mcp.json", "`wf doctor` avisa", "`warning`");
+  says("that wf init stays inside the repository", "link simbólico", "`wf init`", "CWE-59");
+});

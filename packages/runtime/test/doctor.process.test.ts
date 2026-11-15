@@ -247,6 +247,60 @@ test("without --json the report is text, one block per check with the fix hint u
   assert.match(r.stdout, /3 of 10 checks failed\./);
 });
 
+/** The hooks and MCP servers a cloned repository can bring: the three files a step that loads the project's settings runs code from. */
+function withRepoCode(repo: string): void {
+  put(join(repo, ".cursor", "hooks.json"), { version: 1, hooks: { beforeShellExecution: [{ command: "./hooks/audit.sh" }], afterFileEdit: [{ command: "node scripts/after-edit.mjs --fix" }] } });
+  put(join(repo, ".claude", "settings.json"), { hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "python3 .claude/guard.py" }] }] } });
+  const mcp = JSON.parse(readFileSync(join(repo, ".cursor", "mcp.json"), "utf8")) as { mcpServers: Record<string, unknown> };
+  mcp.mcpServers.docs = { command: "npx", args: ["-y", "@example/docs-server", "--root", "."] };
+  put(join(repo, ".cursor", "mcp.json"), mcp);
+}
+
+test("a repository whose settings run code makes the config check warn, listing every hook and MCP server command and not the kit's own server; the doctor still passes", () => {
+  const repo = repoCopy();
+  withRepoCode(repo);
+  const r = doctor(repo);
+  assert.equal(r.status, 0, "a warning does not fail the doctor");
+  const report = reportOf(r);
+  assert.equal(report.ok, true);
+
+  const config = checkOf(report, "config");
+  assert.equal(config.status, "warn", config.message);
+  for (const listed of [
+    ".cursor/hooks.json (beforeShellExecution): ./hooks/audit.sh",
+    ".cursor/hooks.json (afterFileEdit): node scripts/after-edit.mjs --fix",
+    ".claude/settings.json (PreToolUse): python3 .claude/guard.py",
+    '.cursor/mcp.json (MCP server "docs"): npx -y @example/docs-server --root .',
+  ]) {
+    assert.ok(config.message.includes(listed), `${listed} is not in: ${config.message}`);
+  }
+  assert.ok(!config.message.includes("tsx"), `the kit's own workflows server is not listed: ${config.message}`);
+  assert.ok(!config.message.includes('MCP server "workflows"'));
+  assert.match(config.message, /settingSources/);
+  assert.match(config.hint ?? "", /caps\.allowedSettingSources/);
+  assert.match(config.hint ?? "", /SECURITY\.md/);
+  for (const other of report.checks.filter((c) => c.id !== "config")) assert.equal(other.status, "pass", `${other.id}: ${other.message}`);
+});
+
+test("without code in the repository's settings, or when the global caps keep the project's settings out, the config check passes", () => {
+  assert.equal(checkOf(reportOf(doctor(repoCopy())), "config").status, "pass", "nothing but the kit's own server");
+
+  const repo = repoCopy();
+  withRepoCode(repo);
+  const withoutProject = homeWithConfig({ caps: { allowedSettingSources: ["user", "team", "mdm", "plugins"] } });
+  const config = checkOf(reportOf(doctor(repo, { home: withoutProject })), "config");
+  assert.equal(config.status, "pass", `"project" is not an allowed setting source, so a step never loads these files: ${config.message}`);
+});
+
+test("a hooks file that is not JSON is skipped, not a crash", () => {
+  const repo = repoCopy();
+  put(join(repo, ".cursor", "hooks.json"), "{ not json");
+  put(join(repo, ".claude", "settings.json"), JSON.stringify({ hooks: "nothing" }));
+  const r = doctor(repo);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(checkOf(reportOf(r), "config").status, "pass");
+});
+
 test("wf doctor --json reports an unusable repo config with its file and field path and a fix hint, and exits non-zero", () => {
   const repo = repoCopy();
   put(repoConfigPath(repo), { workflows: { "implement-issue": { roles: { reviwer: { retries: 0 } } } } });

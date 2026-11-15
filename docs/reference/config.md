@@ -101,6 +101,7 @@ Valida os dois arquivos de configuração do kit: o global (`~/.cursor-workflows
 | `allowedSettingSources` | `array de "project" \| "user" \| "team" \| "mdm" \| "plugins" \| "all" \| null` | não | Camadas de configuração (`settingSources`) que uma etapa pode carregar. Listas: vale a interseção. O instalador grava todas menos `all`. `null` libera todas. |
 | `allowedLocations` | `array de "local" \| "cloud" \| null` | não | Onde as etapas podem rodar: `local`, `cloud` ou os dois. Sem a chave, só `local`: mandar código para uma VM na nuvem é decisão do dono da máquina, e o arquivo do repositório nunca a toma. Listas: vale a interseção. `null` libera todos. Um papel com `location: "cloud"` que a lista não permite roda local, e o pedido vira uma violação. |
 | `maxConcurrency` | `integer \| null` | não | Máximo de agentes simultâneos num run. `null` desliga. |
+| `maxRunningJobs` | `integer \| null` | não | Máximo de jobs rodando ao mesmo tempo num repositório. Um `wf start` ou `start_workflow` além do teto é recusado, sem criar job, e o mesmo vale para um job que roda o mesmo workflow com os mesmos args de um que já roda. Sem a chave, 3. `null` desliga o teto (a recusa do job repetido continua). |
 | `requireSandbox` | `boolean \| null` | não | `true` liga o sandbox local do SDK em toda etapa, mesmo quando o código do workflow o desliga: um pull request que edita um workflow não afrouxa o sandbox. O arquivo que o instalador grava traz `true`: uma sonda real, de 2026-11-14, mostrou a rede e a escrita fora do repositório bloqueadas (a leitura da chave do Cursor só com `readBoundary: "workspace"` num `sandbox.json`). No Linux exige `bubblewrap`; o `wf doctor` falha sem ele. Ausente, `false` ou `null`: vale o `sandbox` de cada etapa. |
 
 ## Etapas na nuvem
@@ -108,6 +109,7 @@ Valida os dois arquivos de configuração do kit: o global (`~/.cursor-workflows
 | Campo | Tipo | Obrigatório | Descrição |
 | --- | --- | --- | --- |
 | `remote` | `string` | não | Nome do remote do git para onde vão as branches de snapshot do worktree, que o cloud agent lê. Padrão: `origin`. Aponte para um fork se o pipeline de CI do `origin` não deve rodar a cada snapshot (as branches ficam sob `wf/cloud-snapshot/` e são apagadas quando a etapa termina; o `wf gc` varre, neste remote, as que ficaram para trás). |
+| `allowPublicRemote` | `boolean` | não | Só vale no arquivo global; no do repositório é registrado como violação e não tem efeito. Antes de empurrar um snapshot que difere do HEAD (ou seja, com arquivos não commitados ou novos), o motor pergunta ao GitHub, pelo `gh repo view` (o `glab` não é consultado), se o remote é público e recusa o snapshot se for, ou se a pergunta não for respondida (um remote no GitLab ou em outro host que não o GitHub, sem rede, sem login): apagar a branch depois não despublica os commits, o GitHub os mantém alcançáveis pelo SHA e os forks também. `true` empurra mesmo assim e não pergunta. A busca de segredos no snapshot roda sempre. Padrão: `false`. |
 
 ## O dashboard
 

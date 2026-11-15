@@ -23,6 +23,8 @@ export interface ConfigCaps {
   allowedSettingSources?: SettingSource[] | null;
   allowedLocations?: StepLocation[] | null;
   maxConcurrency?: number | null;
+  /** Jobs that may run at once in one repository (`wf start`, `start_workflow`). Absent: 3; `null`: no cap. */
+  maxRunningJobs?: number | null;
   requireSandbox?: boolean | null;
 }
 
@@ -78,6 +80,8 @@ export interface DashboardPrefs {
 export interface CloudPrefs {
   /** The git remote that cloud steps' snapshot branches are pushed to. Default: `origin`. */
   remote?: string;
+  /** Global file only: push a snapshot to a remote that is public, or that `gh` cannot tell the visibility of. Default: false. */
+  allowPublicRemote?: boolean;
 }
 
 export interface ConfigFile {

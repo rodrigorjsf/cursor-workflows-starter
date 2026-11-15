@@ -64,7 +64,25 @@ falhas de segurança.
   antes de propor uma versão nova (ver [9.1](docs/contributing/01-contribuindo.md#antes-de-abrir-um-pr)).
 - **Com `settingSources` contendo `"project"` (o default), o repositório alvo roda código na sua máquina:** hooks de
   `.cursor/hooks.json` e de `.claude/settings.json` e servidores MCP de `.cursor/mcp.json`. Não use o default em
-  repositórios em que você não confia.
+  repositórios em que você não confia. O kit não bloqueia isso, mas mostra o que vai rodar: o `wf doctor` avisa (a
+  verificação `config` fica em `warn`) e lista os comandos de hook e de servidor MCP desses três arquivos, sem o servidor
+  `workflows` do próprio kit, e cada run emite um `warning` com a mesma lista antes da primeira etapa. Para impedir que uma
+  etapa os carregue, tire `"project"` de `caps.allowedSettingSources` no `~/.cursor-workflows/config.json`; o instalador o
+  deixa na lista.
+- **Um agente em laço não abre jobs sem fim.** O `start_workflow` é uma tool que o modelo chama, e cada job gasta. O teto
+  global `caps.maxRunningJobs` (padrão 3; `null` o tira) faz o `wf start`, o `start_workflow` e o Start do dashboard
+  recusarem um job quando esse tanto já roda no repositório, sem criar o job nem o processo, e recusarem um job que roda o
+  mesmo workflow com os mesmos args de um que já roda. É um limite de taxa, não uma barreira: dois inícios no mesmo
+  instante, de dois processos, podem passar os dois.
+- **Os testes e o `setupCommand` rodam sem os seus segredos.** São código do repositório alvo que um agente acabou de
+  escrever. O `implement-issue` os roda sem as variáveis de ambiente cujo nome tem `KEY`, `TOKEN`, `SECRET` ou `PASSWORD`
+  (`CURSOR_API_KEY`, `GH_TOKEN`...), as mesmas que o redator do log trata como segredo. O `git` e o CLI do forge (`gh` ou
+  `glab`) do workflow não passam por aí e continuam com os tokens: a retirada é por comando.
+- **O `wf init` não escreve fora do repositório.** Um repositório clonado pode trazer o `.gitignore`, o `.mcp.json` ou o
+  `AGENTS.md` como link simbólico para um arquivo da sua home (um rc do shell, `~/.ssh/authorized_keys`), ou uma pasta como
+  `.cursor` apontando para fora (CWE-59). O `wf init` resolve cada caminho, e as pastas no meio dele, antes de ler ou
+  escrever, e sai com erro, nomeando o arquivo, se o caminho real cai fora do repositório. Um link para outro arquivo do
+  repositório (`AGENTS.md` para `CLAUDE.md`) segue valendo.
 - **O `start_workflow` sobe um dashboard local** (um servidor HTTP) quando nada responde na porta dele, a menos que
   `dashboard.autoStart` seja `false` no config global ou `WF_DASH_AUTOSTART=off` esteja no ambiente. Ele escuta só em
   `127.0.0.1`, recusa um `Host` estranho, abre o banco de métricas só para leitura e aceita dois `POST`, o de iniciar um
@@ -80,8 +98,15 @@ falhas de segurança.
   **inclusive as mudanças não commitadas**, para uma branch `wf/cloud-snapshot/...` no remote `cloud.remote` (padrão
   `origin`), e a etapa roda numa VM da Cursor a partir dele. O remote precisa ser `https://` ou ssh num host: um
   `http://`, `git://`, `file://`, `ext::` ou caminho local é recusado antes do snapshot, e a credencial embutida numa URL
-  (`https://usuario:token@host/...`) é tirada antes de a URL ir para a API da Cursor. Detalhes em
-  [6.2 §Etapas na nuvem](docs/reference/config.md#etapas-na-nuvem).
+  (`https://usuario:token@host/...`) é tirada antes de a URL ir para a API da Cursor. Apagar a branch depois não despublica
+  os commits: o GitHub os mantém alcançáveis pelo SHA, e os forks também. Por isso, antes de empurrar um snapshot que difere do
+  HEAD, o motor (1) o varre atrás de segredos, com a mesma varredura do commit do `implement-issue` (um `.env`, um
+  `auth.json`, uma credencial, a chave salva), e recusa se achar; e (2) pergunta ao `gh repo view` se o remote é público, e
+  recusa se for `PUBLIC` ou se o `gh` não souber dizer (um remote no GitLab, outro host que não o GitHub, sem rede, sem login). A recusa nomeia
+  `cloud.allowPublicRemote`, que só vale no arquivo global: `true` pula a pergunta, nunca a varredura. Um snapshot que é o
+  próprio HEAD não é perguntado. O `git push` do snapshot segue com `--no-verify`, e a varredura acima faz o papel de um
+  hook como o gitleaks. Uma etapa que não escreve e que o run diz ter empurrado uma branch gera um `warning` que a nomeia.
+  Detalhes em [6.2 §Etapas na nuvem](docs/reference/config.md#etapas-na-nuvem).
 
 ## A chave do Cursor
 
@@ -95,6 +120,13 @@ falhas de segurança.
   "issue com prompt injection → etapa copia a chave → PR público", mas não impede a leitura da chave nem o vazamento por
   outro caminho que não seja o diff. O sandbox ligado, que é o padrão do instalador, nega a rede e a escrita fora do
   repositório.
+- O log de eventos, o journal e o memo de um run escondem a chave salva pelo `wf login` mesmo quando nenhuma chave foi
+  passada ao run e a `CURSOR_API_KEY` não está no ambiente: o motor lê o `~/.cursor/sdk/auth.json` que o SDK lê e põe a chave
+  entre os valores que o redator troca por `[REDACTED]`.
+- O texto que o modelo escreve para um PR ou um comentário (resumo, risco, seams) não leva dado embora por um link: uma
+  imagem Markdown, uma tag HTML ou uma URL para um host que não é o do forge aparece como código, com o `https` quebrado por
+  um espaço de largura zero, porque o navegador de quem abre a página busca a imagem e uma query string carrega o que o
+  modelo leu. Um link para o `github.com` (no GitLab, `gitlab.com`) continua clicável.
 - **Revogue a chave no dashboard do Cursor** depois de testar o kit, e imediatamente em caso de suspeita.
 
 ## Privacy Mode

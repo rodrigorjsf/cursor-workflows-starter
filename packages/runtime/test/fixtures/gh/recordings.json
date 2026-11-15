@@ -87,6 +87,48 @@
       "exitCode": 0,
       "stdout": "HTTP/2.0 200 OK\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Expose-Headers: ETag, Link, Location, Retry-After, X-GitHub-OTP, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Used, X-RateLimit-Resource, X-RateLimit-Reset, X-OAuth-Scopes, X-Accepted-OAuth-Scopes, X-Poll-Interval, X-GitHub-Media-Type, X-GitHub-SSO, X-GitHub-Request-Id, Deprecation, Sunset, Warning\r\nCache-Control: private, max-age=60, s-maxage=60\r\nContent-Security-Policy: default-src 'none'\r\nContent-Type: application/json; charset=utf-8\r\nDate: Thu, 01 Jan 1970 00:00:00 GMT\r\nEtag: W/\"0000000000000000000000000000000000000000000000000000000000000000\"\r\nLast-Modified: Thu, 01 Jan 1970 00:00:00 GMT\r\nReferrer-Policy: origin-when-cross-origin, strict-origin-when-cross-origin\r\nServer: github.com\r\nStrict-Transport-Security: max-age=31536000; includeSubdomains; preload\r\nVary: Accept, Authorization, Cookie, X-GitHub-OTP,Accept-Encoding, Accept, X-Requested-With\r\nX-Accepted-Oauth-Scopes: \r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: deny\r\nX-Github-Api-Version-Selected: 2022-11-28\r\nX-Github-Edge-Region: region\r\nX-Github-Media-Type: github.v3; format=json\r\nX-Github-Request-Id: 0000:000000:0000000:0000000:00000000\r\nX-Oauth-Client-Id: 178c6fc778ccc68e1d6a\r\nX-Oauth-Scopes: admin:public_key, gist, read:org, repo, workflow\r\nX-Ratelimit-Limit: 5000\r\nX-Ratelimit-Remaining: 4999\r\nX-Ratelimit-Reset: 0\r\nX-Ratelimit-Resource: core\r\nX-Ratelimit-Used: 1\r\nX-Xss-Protection: 0\r\n\r\n",
       "stderr": ""
+    },
+    "repo-visibility-public": {
+      "args": [
+        "repo",
+        "view",
+        "https://github.com/owner/repo",
+        "--json",
+        "visibility",
+        "-q",
+        ".visibility"
+      ],
+      "exitCode": 0,
+      "stdout": "PUBLIC\n",
+      "stderr": ""
+    },
+    "repo-visibility-private": {
+      "args": [
+        "repo",
+        "view",
+        "https://github.com/owner/repo",
+        "--json",
+        "visibility",
+        "-q",
+        ".visibility"
+      ],
+      "exitCode": 0,
+      "stdout": "PRIVATE\n",
+      "stderr": ""
+    },
+    "repo-visibility-unavailable": {
+      "args": [
+        "repo",
+        "view",
+        "https://gitlab.com/owner/repo",
+        "--json",
+        "visibility",
+        "-q",
+        ".visibility"
+      ],
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "GraphQL: Field 'repository' doesn't exist on type 'Query' (query RepositoryInfo.repository), Variable $owner is declared by RepositoryInfo but not used (query RepositoryInfo), Variable $name is declared by RepositoryInfo but not used (query RepositoryInfo)\n"
     }
   }
 }

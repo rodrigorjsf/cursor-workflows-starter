@@ -82,7 +82,7 @@ test("a start with a known repository, a listed workflow, valid args and both ca
   assert.equal(card.runId, runId);
   assert.equal(detail.workflow, "echo");
   assert.equal(detail.repo, repo);
-  assert.deepEqual(detail.start, { args: { issue: 7 }, maxTokens: 50_000, maxCents: 20 }, "the job record keeps how it was started, so a resume can repeat it");
+  assert.deepEqual(detail.start, { workflow: "echo", args: { issue: 7 }, maxTokens: 50_000, maxCents: 20 }, "the job record keeps how it was started, so a resume can repeat it");
   assert.deepEqual(runStartOf(repo, runId).config.limits.maxTokens, 50_000, "the run runs under the caps the start gave");
   assert.deepEqual(runStartOf(repo, runId).config.limits.maxCents, 20);
 });
@@ -119,5 +119,5 @@ test("the browser's own client starts a run through the same door: its answer ca
   assert.equal(reply.status, 202);
   trackJob(repo, reply.body.jobId);
   const { detail } = await runOnTheBoard(reply.body.runId);
-  assert.deepEqual(detail.start, { args: { issue: 3 }, maxTokens: 50_000, maxCents: 20 });
+  assert.deepEqual(detail.start, { workflow: "echo", args: { issue: 3 }, maxTokens: 50_000, maxCents: 20 });
 });

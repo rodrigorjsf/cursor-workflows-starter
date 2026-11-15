@@ -1,4 +1,4 @@
-// Seam: the text implement-issue sends off the machine. `findSecretInText` (the guard on the staged diff, the seams comment and
+// Seam: the text implement-issue sends off the machine. `findSecretInText` (src/runtime/secret-guard.ts: the guard on the staged diff, the seams comment and
 // the PR body) and `buildPrBody` (the test output it embeds) are called directly, with fake credentials built at run time.
 process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
@@ -7,7 +7,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createRedactor } from "../src/runtime/redaction.js";
-import { findSecretInText } from "../workflows/implement-issue.js";
+import { findSecretInText } from "../src/runtime/secret-guard.js";
 import { buildPrBody } from "../workflows/implement-issue/pr-body.js";
 import type { SliceRecord } from "../workflows/implement-issue/tdd.js";
 

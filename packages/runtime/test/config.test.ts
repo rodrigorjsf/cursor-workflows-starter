@@ -243,6 +243,7 @@ test("the global caps clamp the result: numbers take the minimum, and a repo pre
     allowedSettingSources: null,
     allowedLocations: ["local"],
     maxConcurrency: null,
+    maxRunningJobs: 3,
     requireSandbox: null,
   });
 
