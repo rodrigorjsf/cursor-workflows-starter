@@ -282,7 +282,9 @@ test("no test times anything with Date.now(): a wall clock that jumps (a WSL2 re
 
 // --- TypeScript -------------------------------------------------------------------------------------------------------
 
-const BUILTINS = new Set(builtinModules.filter((m) => !m.startsWith("_")));
+/** The built-ins one could import without a prefix. Node 24 also lists the ones that exist only as `node:<name>` (`node:test`), which are no offence. */
+const bareBuiltinNames = (modules: readonly string[]) => new Set(modules.filter((m) => !m.startsWith("_") && !m.startsWith("node:")));
+const BUILTINS = bareBuiltinNames(builtinModules);
 /** Lines importing a Node built-in by its bare name. */
 const barebuiltins = (path: string, text: string) =>
   importsOf(path, text)
@@ -293,6 +295,8 @@ test("the node: prefix check fires on bare built-in names, dynamic and re-export
   const offender = 'import { readFileSync } from "fs";\nimport { join } from "path";\nexport { x } from "fs/promises";\nconst cp = await import("child_process");\n';
   assert.deepEqual(barebuiltins("a.ts", offender), [1, 2, 3, 4]);
   assert.deepEqual(barebuiltins("a.ts", 'import { readFileSync } from "node:fs";\nimport ts from "typescript";\nimport { x } from "./path.js";\n'), []);
+  assert.deepEqual(barebuiltins("a.ts", 'import { test } from "node:test";\nimport { DatabaseSync } from "node:sqlite";\n'), []);
+  assert.deepEqual([...bareBuiltinNames(["fs", "node:test", "node:sqlite", "_http_agent"])], ["fs"]);
 });
 
 test("every Node built-in is imported with the node: prefix", () => {

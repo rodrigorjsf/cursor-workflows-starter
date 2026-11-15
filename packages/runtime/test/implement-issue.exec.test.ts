@@ -30,7 +30,8 @@ const outputOf = (events: WorkflowEvent[], start: ExecStartEvent) =>
 
 test("the test runs of the TDD loop are command nodes in the event log, each with its own output", async () => {
   issue(["complexity:low"]);
-  const r = await run({});
+  // The tap reporter, named: the runner's default is spec since Node 24 and tap before it, and the assertions below read tap lines.
+  const r = await run({ testCommand: "node --test --test-reporter=tap" });
   assert.equal(r.status, "finished", r.error);
   assert.equal(res(r).status, "done", JSON.stringify(res(r)));
 
