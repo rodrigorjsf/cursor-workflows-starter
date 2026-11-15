@@ -3,8 +3,18 @@
 ## Antes de abrir um PR
 
 Rode `npm ci` e `npm run check`, que faz o `typecheck` e o `npm test` (com o Node do `mise.toml`: `mise exec -- npm run check`). Os testes são offline (SDK falso), não precisam de conta nem de rede,
-e são os mesmos do CI (Node 22.13.0 e 22.x). O `npm test` inclui o docs check ([9.2](02-convencoes-do-livro.md#o-que-o-docs-check-confere)):
+e são os mesmos do CI (Node 22.13.0, 22.x, 24.x e 26.x). O `npm test` inclui o docs check ([9.2](02-convencoes-do-livro.md#o-que-o-docs-check-confere)):
 um link quebrado, um rodapé errado ou um capítulo fora do índice reprova o PR.
+
+O `.npmrc` da raiz desliga os scripts de instalação das dependências (`ignore-scripts=true`) e faz o `engines` valer
+(`engine-strict=true`); o `install.sh` e o CI repetem `--ignore-scripts`, para que um `.npmrc` editado não os religue. No CI,
+todo `uses:` é fixado num SHA de commit com a versão no comentário (o Dependabot, que espera 7 dias antes de propor uma versão
+nova, mantém os SHAs), todo `actions/checkout` tem `persist-credentials: false`, cada job tem `timeout-minutes` e cada script
+`test` passa `--test-timeout` (120000 na raiz e no dashboard, 600000 no runtime). O prazo vale para cada arquivo de teste inteiro,
+não só para cada teste: o `doctor.process.test.ts` leva 165 s sozinho, e um arquivo que precise de mais que o valor do pacote pede um
+valor maior para o pacote, não um `timeout` no teste. O
+`test/supply-chain.test.ts` confere isso. Renomear um item da matriz de Node renomeia o check obrigatório `test (<versão>)`: quem
+mexe na matriz põe na descrição do PR o `gh api -X PUT` que atualiza o ruleset `main`, e o dono o roda ao integrar.
 
 Uma vez por clone, ative o hook de pre-commit, que passa o `gitleaks` no que está staged e recusa o commit que traz um
 segredo: `git config core.hooksPath .githooks`. Vale para todos os worktrees do clone e pede o `gitleaks` no `PATH`. O

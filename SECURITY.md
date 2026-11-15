@@ -56,6 +56,12 @@ falhas de segurança.
   imutável trava a tag no commit dela. Uma release ausente, uma que não é imutável e uma consulta que falha são erros, não
   um pulo. O `--allow-mutable-tag` pula só a consulta, para um fork instalado com `--repo`. O `INSTALL-AGENT.md` não traz o
   checksum do `install.sh`: um commit não contém o próprio hash, então a âncora é a release imutável. Detalhes em [2.1](docs/usage/01-instalacao.md#tag-movida-e-release-que-não-é-imutável).
+- **Nenhum script de instalação de dependência roda, nem na sua máquina nem no CI.** Uma dependência comprometida pode rodar
+  código no `npm install`. O `.npmrc` do kit tem `ignore-scripts=true`, e o instalador e o CI passam `--ignore-scripts` mesmo assim,
+  porque um `.npmrc` editado ou ausente religaria os scripts. No lockfile só o `esbuild` e o `fsevents` declaram um, e a medição
+  (`npm ci --ignore-scripts`, Linux x64, Node 22.23.4) passou o build do dashboard e os testes; macOS não foi medido. No CI, as
+  ações ficam fixadas num SHA de commit, o `actions/checkout` não deixa o token do workflow no clone, e o Dependabot espera 7 dias
+  antes de propor uma versão nova (ver [9.1](docs/contributing/01-contribuindo.md#antes-de-abrir-um-pr)).
 - **Com `settingSources` contendo `"project"` (o default), o repositório alvo roda código na sua máquina:** hooks de
   `.cursor/hooks.json` e de `.claude/settings.json` e servidores MCP de `.cursor/mcp.json`. Não use o default em
   repositórios em que você não confia.

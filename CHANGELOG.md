@@ -125,6 +125,20 @@
   (passo 1 do how-to [#74](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/74)); sem isso a instalação
   seguinte falha para todos. Veja [2.1](docs/usage/01-instalacao.md#tag-movida-e-release-que-não-é-imutável).
 
+- **Cadeia de suprimentos: nenhuma dependência roda script de instalação, versões novas esperam, ações fixadas num SHA, testes e jobs com
+  limite de tempo, e as linhas de Node que os usuários rodam entram no CI.** Um `.npmrc` na raiz passa a ter `ignore-scripts=true` e
+  `engine-strict=true`, e o `install.sh` e o CI também passam `--ignore-scripts` em todo `npm ci` e `npm install` (só o `esbuild` e o
+  `fsevents` declaram script; o job `mermaid` já baixa o navegador num passo explícito). O `.github/dependabot.yml` atualiza `npm` e
+  `github-actions` e espera 7 dias antes de propor uma versão nova (14 para uma major do npm; o Dependabot não aceita as chaves
+  `semver-*` no `github-actions`). Todo `uses:` do CI é fixado num SHA de commit, com a versão no comentário, e todo `actions/checkout`
+  tem `persist-credentials: false`: o token do workflow não fica no clone para o `npm ci` ler. Cada job tem `timeout-minutes: 20` (o
+  padrão do GitHub é 360), e cada script `test` passa `--test-timeout` (120000 na raiz e no dashboard, 600000 no runtime): um teste pendurado reprova em minutos, em vez de nunca.
+  O prazo vale também para o arquivo de teste inteiro, e o `doctor.process.test.ts` leva 165 s sozinho, por isso o runtime tem um valor maior.
+  A matriz do job `test` é `22.13.0`, `22.x`, `24.x` e `26.x` (o Node 22 sai de manutenção em 2027-04-30). **Os checks obrigatórios
+  `test (24.x)` e `test (26.x)` são novos:** o dono atualiza o ruleset `main` ao integrar a mudança (o comando está na descrição do PR).
+  `test/supply-chain.test.ts` confere tudo isso, e a checagem de 1º lote "ações de primeira parte por tag maior" virou "ações de primeira
+  parte" em `test/coding-standards.test.ts`; o SHA é regra do novo teste. Veja [9.1](docs/contributing/01-contribuindo.md#antes-de-abrir-um-pr).
+
 - **O arquivo de configuração global que o instalador grava liga o sandbox do SDK em toda etapa (`caps.requireSandbox: true`).**
   Uma sonda real mediu o sandbox numa etapa que escreve (8.2 §16): a rede de saída e a escrita fora do repositório pelo shell foram bloqueadas (a tool `edit`
   também não criou o arquivo fora dele), e a leitura do `~/.cursor/sdk/auth.json` também, mas só com `readBoundary: "workspace"` no

@@ -8,21 +8,30 @@ on:
 permissions:
   contents: read
 
+# Every `uses:` is pinned to a commit SHA, with its version in the comment: a tag can be moved to other code, a SHA cannot.
+# Dependabot (.github/dependabot.yml) keeps them current. Every checkout drops the workflow token from .git/config
+# (persist-credentials: false), so no later step, `npm ci` included, can read it, and every job has a timeout-minutes
+# well under GitHub's default of 360. Checked by test/supply-chain.test.ts.
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        # O mínimo declarado em package.json (engines) e a versão 22 mais nova.
-        node-version: ["22.13.0", "22.x"]
+        # The minimum declared in package.json (engines) and the lines users run: the newest 22 (end of life 2027-04-30), 24
+        # (maintenance LTS) and 26 (active LTS). Renaming an entry renames the required check `test (<version>)`: the `main`
+        # ruleset of the repository lists those names, and the owner updates it in the same change.
+        node-version: ["22.13.0", "22.x", "24.x", "26.x"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       # Typecheck e testes offline: SDK falso, sem rede, sem conta Cursor e sem segredos.
       - run: npm run check
 
@@ -33,24 +42,30 @@ jobs:
   # explícito. Com `npx`, o cache do npm restaurado pelo setup-node trazia o pacote já instalado, o postinstall do
   # puppeteer não rodava e o navegador nunca chegava a ~/.cache/puppeteer: todo bloco falhava com
   # "Could not find chrome-headless-shell". Falha no download do navegador reprova o job; não há pulo.
+  #
+  # The `npm install` below passes --ignore-scripts (no dependency script runs): puppeteer's postinstall no longer downloads
+  # the browser, so the explicit `browsers install` step is the only way it arrives.
   mermaid:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       MERMAID_CLI_VERSION: 11.17.0
       # Peer dependency do mermaid-cli (^23 || ^24 || ^25); fixar define a versão do chrome-headless-shell.
       PUPPETEER_VERSION: 25.17.0
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22.x
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Install the Mermaid renderer and its browser
         run: |
           dir="$RUNNER_TEMP/mermaid"
           mkdir -p "$dir"
-          npm install --no-save --no-package-lock --prefix "$dir" \
+          npm install --ignore-scripts --no-save --no-package-lock --prefix "$dir" \
             "@mermaid-js/mermaid-cli@$MERMAID_CLI_VERSION" "puppeteer@$PUPPETEER_VERSION"
           cd "$dir" && ./node_modules/.bin/puppeteer browsers install chrome-headless-shell
       - run: npm run docs:mermaid
@@ -65,11 +80,12 @@ jobs:
   # third-party action: CI uses first-party actions only), and the checkout keeps no token in .git/config.
   secrets:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       GITLEAKS_VERSION: 8.30.1
       GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - name: Install gitleaks

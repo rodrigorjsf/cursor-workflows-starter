@@ -173,13 +173,15 @@ check_node() {
 }
 
 # A tag install gets the lockfile's exact tree. A dev install (the kit location links to a working copy) is the
-# maintainer's: `npm ci` would empty its node_modules, so it only gets what is missing.
+# maintainer's: `npm ci` would empty its node_modules, so it only gets what is missing. Neither runs a dependency's
+# lifecycle scripts: the kit's .npmrc says so too, and the flag keeps it so if that file is edited (a compromised
+# dependency then has no install-time code to run on this machine).
 install_dependencies() {
   local kit="$1"
   if [ -L "$kit" ]; then
-    [ -x "$kit/node_modules/.bin/tsx" ] || (cd "$kit" && npm install --no-audit --no-fund)
+    [ -x "$kit/node_modules/.bin/tsx" ] || (cd "$kit" && npm install --ignore-scripts --no-audit --no-fund)
   else
-    (cd "$kit" && npm ci --no-audit --no-fund)
+    (cd "$kit" && npm ci --ignore-scripts --no-audit --no-fund)
   fi
 }
 

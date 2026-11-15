@@ -1,0 +1,20 @@
+# Keeps the npm lockfile and the SHAs of the GitHub Actions current (every `uses:` of .github/workflows is pinned to a commit,
+# which nothing else would move). A release is proposed only after its cooldown: a compromised release is usually caught and
+# pulled within days, so waiting means the kit rarely installs one. The cooldown does not delay a security update.
+# github-actions has no semver-major-days: GitHub's reference says the semver-* keys do not support that ecosystem, so only default-days applies.
+# Checked by test/supply-chain.test.ts.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

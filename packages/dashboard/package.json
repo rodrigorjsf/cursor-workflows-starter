@@ -10,7 +10,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit && tsc --noEmit -p app && tsc --noEmit -p run-view && tsc --noEmit -p test",
-    "test": "tsx --tsconfig ../runtime/tsconfig.test.json --test test/*.test.ts"
+    "test": "tsx --tsconfig ../runtime/tsconfig.test.json --test --test-timeout=120000 test/*.test.ts"
   },
   "dependencies": {
     "@cursor-workflows/runtime": "*",
