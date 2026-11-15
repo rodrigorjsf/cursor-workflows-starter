@@ -70,7 +70,7 @@ código, os fluxos das skills `tdd`, `codebase-design`, `code-review` e `pr` de
 
 | Na skill | No workflow |
 |---|---|
-| "confirme as seams com o usuário" (`tdd`) | Checkpoint em MED e HIGH: o run 1 propõe as seams na issue e devolve `seams-proposed`; o run 2, com `approveSeams`, o mesmo `runId` e o mesmo `--cwd`, executa o plano guardado (sem ele, para com `seams-not-proposed`). LOW segue sem parar, com uma fatia |
+| "confirme as seams com o usuário" (`tdd`) | Checkpoint em MED e HIGH: o run 1 propõe as seams na issue e devolve `seams-proposed`; o run 2, com `approveSeams`, o mesmo `runId` e o mesmo `--cwd`, executa o plano guardado (sem ele, para com `seams-not-proposed`) e comenta a aprovação, ou a troca das seams por `seams: [...]`, na issue. LOW segue sem parar, com uma fatia |
 | "red antes de green", "uma fatia por vez" (`tdd`) | Invariantes conferidas pelo código: só testes mudam no red e a suíte falha; nem testes nem configuração do runner mudam no green e a suíte passa; violação desfaz a etapa e tenta de novo uma vez |
 | "Design it twice" quando vale a pena (`codebase-design`) | Só no tier HIGH: três designers em `ctx.parallel` com restrições diferentes e um juiz com schema |
 | "dois sub-agents, sem misturar nem reordenar" (`code-review`) | Três eixos em `ctx.parallel` (Standards, Spec e Segurança, este do kit), cada um com o schema das suas categorias; o código roteia: requisito faltando ou errado vira fatia TDD extra (até 2), padrão violado ou falha de segurança vira refactor, e julgamento, fora do pedido e nota de segurança vão para o PR |

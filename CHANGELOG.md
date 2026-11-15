@@ -180,6 +180,16 @@
   `test/vision-and-adrs.test.ts` confere a troca e o caminho do job travado contra `job-children.ts`. Veja
   [7.10](docs/adr/0010-detached-jobs-and-how-each-is-cancelled.md).
 
+- **O `implement-issue` comenta na issue quando as seams são aprovadas ou trocadas** (issue #96). Antes, uma aprovação só chegava
+  ao log do run (`seams approved: using the plan proposed by the first run`): a issue guardava a proposta, não a decisão. Agora,
+  quando um run que propôs as seams (ou o comando de teste) é retomado, o próprio workflow posta, pelo forge (GitHub e GitLab),
+  um comentário com o id do run e a lista: `Seams approved`, com as seams do plano guardado, para `approveSeams: true`; `Seams
+  replaced`, com a lista dada, para `seams: [...]`. Vale qualquer que seja a superfície que enviou o resume (chat, CLI ou
+  dashboard). Um resume que termina em `seams-not-proposed` não posta nada, nem um run novo que já recebe `seams` (não há
+  proposta a trocar), e uma decisão igual à última gravada em `seamsDecision`, no progresso do run, não é postada de novo: um
+  resume depois de uma queda não repete o comentário. O texto passa pelo mesmo redator e pela mesma trava de segredos dos
+  outros comentários.
+
 ### Mudado
 
 - **O `npm run typecheck` pega o índice que pode não existir, o import que sobra, a promessa perdida e o `JSON.parse` com cast.** O

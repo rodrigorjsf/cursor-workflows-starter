@@ -218,6 +218,12 @@ export interface InFlight {
   execution?: number;
 }
 
+/** What a person decided about the proposed seams, with the seams it was about: the plan's seam names when approved, the given list when replaced. */
+export interface SeamsDecision {
+  decision: "approved" | "replaced";
+  seams: string[];
+}
+
 export interface Progress {
   /** A branch e o worktree que ESTE run criou: o worktree só é reaproveitado pelo run que o registrou (nunca por outro). */
   branch?: string;
@@ -227,6 +233,12 @@ export interface Progress {
   baselineGreen?: boolean;
   /** Plano mostrado na issue: `approveSeams` aprova exatamente este, não um recalculado. */
   proposedPlan?: unknown;
+  /**
+   * The seams decision a person made for this run, the last one: `approved` (the plan the issue shows) or `replaced` (their own
+   * list of seams). It is posted on the issue when the run holds a proposal, and a decision equal to this record is not posted
+   * again, so a crash-resume of a decided run posts nothing. A decision made while the run held no proposal is recorded only.
+   */
+  seamsDecision?: SeamsDecision;
   /** Relatórios de review por rodada: o resume os reaproveita em vez de pedir um review novo. */
   reviews?: Record<string, unknown>;
   refactorDone?: boolean;
@@ -263,6 +275,7 @@ const PROGRESS: z.ZodType<Progress> = z.looseObject({
   baseCommit: z.string().optional(),
   baselineGreen: z.boolean().optional(),
   proposedPlan: z.unknown().optional(),
+  seamsDecision: z.looseObject({ decision: z.enum(["approved", "replaced"]), seams: z.array(z.string()) }).optional(),
   reviews: z.record(z.string(), z.unknown()).optional(),
   refactorDone: z.boolean().optional(),
   refactorSummary: z.string().optional(),

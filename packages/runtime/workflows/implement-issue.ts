@@ -12,6 +12,10 @@
 //     `seams: [...]`, refaz o plano com as seams dadas. A skill tdd manda combinar as seams antes dos testes, e o
 //     runtime não pausa para perguntar. Sem plano proposto no progresso (outro runId ou outro --cwd), `approveSeams`
 //     para com "seams-not-proposed" em vez de aprovar um plano novo; para pular o checkpoint das seams, passe `seams`;
+//   - the issue holds the proposal, so the run also posts the decision on it when a resume approves or replaces the seams, whatever
+//     surface sent the resume (chat, CLI, dashboard): "Seams approved" with the stored plan's seams, or "Seams replaced" with the
+//     given list, naming the run. A resume that ends in "seams-not-proposed" posts nothing, and a decision the progress already
+//     records (`seamsDecision`) is not posted again;
 //   - the test command runs through `bash -c`, outside the sandbox: one the planner chose (after reading the issue body) runs only
 //     after a person saw it. It comes from `testCommand` (the user typed it), from the plan the user approved with `approveSeams`
 //     or, in LOW, it is the kit's `npm test`. With `seams` and no `testCommand` the run stores the plan, comments the command on
@@ -100,6 +104,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import { wasKilledByCancel } from "../src/runtime/job-state.js";
 import { createRedactor } from "../src/runtime/redaction.js";
@@ -129,6 +134,7 @@ import {
   runnerConfigChanged,
   sliceKey,
   snapshotTree,
+  type SeamsDecision,
   type SliceRecord,
 } from "./implement-issue/tdd.js";
 
@@ -201,6 +207,8 @@ const READ_ONLY = ["read", "grep", "glob", "ls", "semSearch"];
 const REVIEW_TOOLS = ["read", "grep", "glob", "ls"];
 const NO_SETTING_SOURCES: SettingSource[] = [];
 const SEAMS_MARKER = "<!-- wf:implement-issue:seams -->";
+/** The comment that records a person's decision on the proposed seams (approved, or replaced by their own): its own marker, apart from the proposal's. */
+const SEAMS_DECISION_MARKER = "<!-- wf:implement-issue:seams-decision -->";
 /** The comment of a stopped `test-command-proposed` run: its own marker, so a run that already posted its seams still posts the command. */
 const TEST_COMMAND_MARKER = "<!-- wf:implement-issue:test-command -->";
 /** Arquivos que orientam o desenho e o review, quando existem no repositório. */
@@ -219,9 +227,9 @@ interface Args {
   /** Roda uma vez no worktree novo antes da suíte de base (ex.: `npm ci`). */
   setupCommand?: string;
   openPr?: boolean;
-  /** Segundo run de MED/HIGH (com `--resume <runId>` e o mesmo `--cwd`): aprova o plano proposto no primeiro. */
+  /** Segundo run de MED/HIGH (com `--resume <runId>` e o mesmo `--cwd`): aprova o plano proposto no primeiro. O run comenta a aprovação na issue. */
   approveSeams?: boolean;
-  /** Seams approved by you, in place of the proposed ones: the plan is made again with them (without `testCommand`, the command the planner chooses waits for your approval). */
+  /** Seams approved by you, in place of the proposed ones: the plan is made again with them (without `testCommand`, the command the planner chooses waits for your approval). On a resume of a run that proposed seams, the run comments the replacement on the issue. */
   seams?: string[];
   /** Lifts the author gate: the run goes on although the forge does not call the issue's author the owner, a member or a collaborator. Pass it after you read the issue. */
   allowExternalAuthor?: boolean;
@@ -513,6 +521,14 @@ export default defineWorkflow<Args>({
     // The forge the run started on: a fresh run takes the one of its origin's host; a resume keeps the one its record names, and a
     // record without one (a run from before the field) is GitHub, whatever the origin says now.
     const forge = createForge(progress.existed ? forgeNameOf(progress.data) : await detectForge(cmd, ctx.cwd, ctx.forges, ctx.args.repo), cmd);
+    // Model text goes to a public issue: neutralized like the PR body's (closing keywords, mentions, `<!--`, and on GitLab its
+    // quick actions and references). The interface and the test command sit in inline code spans, where the forge gives them no effect only while
+    // the span holds: inlineCode turns their backticks and line breaks into characters that cannot close it.
+    const prose = (text: string) => sanitizeModelText(text, forge.name);
+    // Redacted with every credential format: a step result keeps the redact-only ones (a URL password in the test
+    // command, a `Bearer` header) for the workflow to run, but a public comment gets none of them.
+    const redactOutbound = (text: string) => createRedactor({ extra: savedSecrets() }).text(text);
+    const seamLine = (s: Plan["seams"][number]) => `- **${prose(s.name)}**: ${inlineCode(s.interface)} — ${prose(s.why)}`;
     // Before the first call that carries the forge's token: a `repo` of another host sends it there (`implement-issue/repo-arg.ts`).
     if (ctx.args.repo !== undefined) {
       const refusal = repoRefusal(ctx.args.repo, { forge: forge.name, originUrl: await cmd.remoteUrl(ctx.cwd), repoHosts: settings.repoHosts, forges: ctx.forges });
@@ -593,6 +609,36 @@ export default defineWorkflow<Args>({
       const ctxFiles = CONTEXT_FILES.filter((f) => existsSync(join(ctx.cwd, f)));
       const contextBlock = listBlock("Repository context files (read the ones that matter)", ctxFiles);
 
+      /**
+       * A person's decision on the proposed seams (approve the plan, or replace the seams with their own list) reaches the run as a
+       * resume, from the chat, the CLI or the dashboard, and the issue holds the proposal but not the decision: the run posts it,
+       * naming itself. Only a run that holds a proposal posts (a fresh run given `seams` replaces nothing), and a decision equal to the
+       * recorded one is not posted again: the progress records it after the post, so a crash-resume posts nothing twice. Returns
+       * the run's result when the comment would carry a secret (nothing is posted then), or undefined.
+       */
+      const decideSeams = async (decision: SeamsDecision["decision"], seams: string[], listing: string[]) => {
+        const decided: SeamsDecision = { decision, seams };
+        if (isDeepStrictEqual(progress.data.seamsDecision, decided)) return undefined;
+        if (progress.data.proposedPlan) {
+          const comment = redactOutbound(
+            [
+              SEAMS_DECISION_MARKER,
+              `## Seams ${decision} for the \`implement-issue\` run \`${ctx.runId}\``,
+              "",
+              ...listing,
+              "",
+              decision === "approved" ? "The run goes on with exactly this plan." : "The run plans again with these seams.",
+            ].join("\n"),
+          );
+          const leak = findSecretInText(comment);
+          if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the seams decision comment` };
+          await withBodyFile(comment, (f) => forge.commentOnIssue(ctx.cwd, issue.number, f, repo));
+        }
+        progress.data.seamsDecision = decided;
+        progress.save();
+        return undefined;
+      };
+
       // ── Plano (codebase-design): LOW uma fatia; MED planejador; HIGH "Design it twice" ─────
       let plan: Plan;
       if (tier === "LOW") {
@@ -607,7 +653,13 @@ export default defineWorkflow<Args>({
       } else if (ctx.args.approveSeams && !ctx.args.seams?.length && progress.data.proposedPlan) {
         plan = progress.data.proposedPlan as Plan; // aprova exatamente o que foi mostrado na issue
         ctx.log("seams approved: using the plan proposed by the first run");
+        const blocked = await decideSeams("approved", plan.seams.map((s) => s.name), plan.seams.map(seamLine));
+        if (blocked) return blocked;
       } else {
+        if (ctx.args.seams?.length) {
+          const blocked = await decideSeams("replaced", ctx.args.seams, ctx.args.seams.map((seam) => `- ${inlineCode(seam)}`));
+          if (blocked) return blocked;
+        }
         ctx.phase("Plan");
         const approved = listBlock("Approved seams (use exactly these)", ctx.args.seams ?? []);
         // O planejador sabe o teto: sem isso, propôs 5 fatias para um tier de 3 na issue #8, e o PR saiu parcial.
@@ -692,19 +744,12 @@ export default defineWorkflow<Args>({
           progress.data.proposedPlan = plan;
           progress.save();
           const relaunch = `npm run wf -- run implement-issue --args ${shellQuote(JSON.stringify(stop.relaunchArgs))} --resume ${ctx.runId}`;
-          // Model text goes to a public issue: neutralized like the PR body's (closing keywords, mentions, `<!--`, and on GitLab its
-          // quick actions and references). The interface and the test command sit in inline code spans, where the forge gives them no effect only while
-          // the span holds: inlineCode turns their backticks and line breaks into characters that cannot close it.
-          const prose = (text: string) => sanitizeModelText(text, forge.name);
-          // Redacted with every credential format: a step result keeps the redact-only ones (a URL password in the test
-          // command, a `Bearer` header) for the workflow to run, but a public comment gets none of them.
-          const redactOutbound = createRedactor({ extra: savedSecrets() }).text;
           const comment = redactOutbound([
             stop.marker,
             stop.heading,
             "",
             ...stop.intro,
-            ...plan.seams.map((s) => `- **${prose(s.name)}**: ${inlineCode(s.interface)} — ${prose(s.why)}`),
+            ...plan.seams.map(seamLine),
             "",
             "### Slices (one per red → green cycle)",
             "",
