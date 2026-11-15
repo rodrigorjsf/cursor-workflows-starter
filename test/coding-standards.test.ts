@@ -1109,6 +1109,64 @@ test("no maintainer script calls process.exit: it sets process.exitCode and retu
   assert.deepEqual(scan(scripts, processExits), [], "return the exit code from `main` and write `if (isEntryPoint(import.meta.url)) process.exitCode = main(process.argv.slice(2))` (scripts/lib/cli.ts)");
 });
 
+const LINE_COMMENT = /^\s*(?:\/\/|#)/;
+
+/** The lines of a file as a reader takes them: a line ending in `\` or `\\` (a shell continuation, or one inside a heredoc) and a comment line that leaves a backtick span open both join the next line. Each carries the number of its first physical line. */
+function logicalLines(text: string): Array<{ line: number; text: string }> {
+  const lines = text.split("\n");
+  const found: Array<{ line: number; text: string }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const first = i + 1;
+    let joined = lines[i]!;
+    for (;;) {
+      const next = lines[i + 1];
+      if (next === undefined) break;
+      const backslash = /\\{1,2}\s*$/.test(joined);
+      const openSpan = LINE_COMMENT.test(joined) && LINE_COMMENT.test(next) && (joined.match(/`/g)?.length ?? 0) % 2 === 1;
+      if (!backslash && !openSpan) break;
+      joined = `${joined.replace(/\\{1,2}\s*$/, "").trimEnd()} ${next.replace(openSpan ? /^\s*(?:\/\/|#)\s*/ : /^\s*/, "")}`;
+      i++;
+    }
+    found.push({ line: first, text: joined });
+  }
+  return found;
+}
+
+/**
+ * Lines holding a `wf run` or `wf -- run` command (one with at least one `--flag`: a mention of the subcommand in prose has none)
+ * that lacks `--max-tokens` or `--max-cents`. The command runs to the next backtick or the end of the joined line.
+ */
+function uncappedRuns(_path: string, text: string): number[] {
+  return logicalLines(text)
+    .filter(({ text: line }) => [...line.matchAll(/\bwf (?:-- )?run\b([^`]*)/g)].some(([, tail]) => / --[a-z]/.test(tail!) && !(tail!.includes("--max-tokens") && tail!.includes("--max-cents"))))
+    .map(({ line }) => line);
+}
+
+test("the caps check fires on a run command without --max-tokens or --max-cents, across a shell continuation or a comment's backtick span, and passes capped commands and prose", () => {
+  const sample = [
+    "npm run wf -- run verify-cloud --cwd ~/repo --max-tokens 60000", // 1: no cents cap
+    "npm run wf -- run verify-cache --cwd ~/repo --args '{}'", // 2: neither
+    "// HOW: `WORKFLOWS_DIR=scripts/verify npm run wf -- run", // 3: capped, across two comment lines
+    "//   verify-context --cwd <probe-repo> --max-tokens 120000 --max-cents 25`.",
+    "// HOW: `npm run wf -- run verify-sandbox --cwd <repo>", // 5: not capped, across two comment lines
+    "//   --max-tokens 150000`.",
+    "  npm run wf -- run implement-issue --cwd \"$dir\" \\\\", // 7: capped, across a heredoc continuation
+    "    --args '{}' --max-tokens 300000 --max-cents 50",
+    "  npm run wf -- run implement-issue --cwd \"$dir\" --args '{}' --resume <runId>", // 9: the resume
+    "Passed to `wf run` as `--max-tokens` and `--max-cents`; see `wf run implement-issue` and wf run smoke.",
+    "npm run wf -- cancel job-1 --cwd ~/repo",
+  ].join("\n");
+  assert.deepEqual(uncappedRuns("a.sh", sample), [1, 2, 5, 9]);
+});
+
+/** Every place that documents a command: the maintainer scripts (their `HOW:` lines and what they print), the verify README and chapter 9.4. */
+const COMMAND_DOCS = [...files("scripts", /\.(ts|sh|md)$/), "docs/contributing/04-scripts-do-mantenedor.md"];
+
+test("every documented command that runs a workflow carries --max-tokens and --max-cents: a copied command without the cents cap spends without limit", () => {
+  assert.ok(COMMAND_DOCS.some((f) => /\bwf -- run\b/.test(read(f))), "the check reads a file that documents a run");
+  assert.deepEqual(scan(COMMAND_DOCS, uncappedRuns), [], "add `--max-tokens <N> --max-cents <N>`, with the caps the first command of the same script uses");
+});
+
 // --- CI ---------------------------------------------------------------------------------------------------------------
 
 /** 0 (the file) without a top-level `permissions: contents: read`, plus the lines that grant a write permission. */
