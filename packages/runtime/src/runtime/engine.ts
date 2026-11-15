@@ -205,7 +205,7 @@ const sha = (s: string) => createHash("sha256").update(s).digest("hex");
  * that could not be pruned, a torn last line). Registers a first execution in the global runs index.
  */
 function announceRun<A>(o: {
-  def: WorkflowDefinition<A, any>;
+  def: WorkflowDefinition<A, unknown>;
   args: A;
   opts: RunOptions;
   runId: string;

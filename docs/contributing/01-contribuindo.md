@@ -16,6 +16,16 @@ valor maior para o pacote, não um `timeout` no teste. O
 `test/supply-chain.test.ts` confere isso. Renomear um item da matriz de Node renomeia o check obrigatório `test (<versão>)`: quem
 mexe na matriz põe na descrição do PR o `gh api -X PUT` que atualiza o ruleset `main`, e o dono o roda ao integrar.
 
+O `typecheck` roda o `tsc` nos seis projetos (a raiz, as duas páginas do dashboard e os testes de cada diretório) com as opções de
+`packages/runtime/tsconfig.json`, que todos estendem: `strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`,
+`noFallthroughCasesInSwitch`, `noImplicitReturns`, `noUnusedLocals`, `noUnusedParameters`, `isolatedModules`,
+`noUncheckedSideEffectImports` e `moduleDetection: "force"`. Um índice que pode não existir se resolve com uma checagem, nunca com
+`!`. O `test/typescript-strictness.test.ts` confere que nenhum projeto desliga uma delas, que o registro de workflows não tem `any` e
+que nenhum `JSON.parse(...) as T` entra no código que o kit entrega: o dado que vem de um arquivo de estado, do `.mcp.json` ou do `gh` e
+do `glab` passa pelo `parseJson` (zod) ou pelo `isRecord`, de `packages/runtime/src/runtime/parse-json.ts`, e um dado de outra forma
+dá um erro que nomeia a origem e o campo. O `test/floating-promises.test.ts` usa o checker do TypeScript e reprova uma promessa que
+ninguém espera, devolve, marca com `void` ou termina com `.catch` em `packages/*/src` e `packages/*/workflows`.
+
 Uma vez por clone, ative o hook de pre-commit, que passa o `gitleaks` no que está staged e recusa o commit que traz um
 segredo: `git config core.hooksPath .githooks`. Vale para todos os worktrees do clone e pede o `gitleaks` no `PATH`. O
 job `secrets` do CI roda o mesmo `gitleaks dir .` na árvore. Um valor falso que um teste usa de propósito entra no

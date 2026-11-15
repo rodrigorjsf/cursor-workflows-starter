@@ -104,6 +104,25 @@
 
 ### Mudado
 
+- **O `npm run typecheck` pega o índice que pode não existir, o import que sobra, a promessa perdida e o `JSON.parse` com cast.** O
+  `packages/runtime/tsconfig.json`, que os seis projetos do `tsc` estendem, liga `noUncheckedIndexedAccess`, `noImplicitOverride`,
+  `noFallthroughCasesInSwitch`, `noImplicitReturns`, `noUnusedLocals`, `noUnusedParameters`, `isolatedModules`,
+  `noUncheckedSideEffectImports` e `moduleDetection: "force"`; os pontos que as opções acusaram (o `init.ts`, o `probe-sdk.ts` e os
+  testes) viraram checagens de verdade, sem `!`, e os imports de CSS das páginas do dashboard ganharam `css-modules.d.ts`. O dado que o
+  kit lê de um arquivo de estado (o registro do job, a trava do run, o arquivo de pid do dashboard, o memo e o progresso do
+  `implement-issue`), do `.mcp.json` e das respostas do `gh` e do `glab` passa por um schema zod (`parseJson`, em
+  `packages/runtime/src/runtime/parse-json.ts`) ou por `isRecord`: um dado de outra forma dá um erro que nomeia o arquivo ou o comando
+  e o campo, e não mais um `TypeError` adiante. Um registro de job ou uma trava de run com um campo de outro tipo não vale como o que o
+  runtime grava (a trava é retomada como uma trava velha), e um `.mcp.json` que é `null` é relatado como sem o servidor `workflows`, e não
+  como JSON inválido. O `test/typescript-strictness.test.ts` reprova um projeto sem as opções, um `any` no registro de workflows e um
+  `JSON.parse(...) as T` novo; o `test/floating-promises.test.ts` usa o checker do TypeScript e reprova uma promessa que ninguém espera,
+  devolve, marca com `void` ou termina com `.catch`.
+
+- **O registro de workflows confere o módulo que carrega.** Um arquivo de workflow cujo `export default` não é um workflow (não é um
+  objeto, não tem `meta.name` ou tem um `run` que não é função) vai para `broken`, com o motivo, em vez de entrar no mapa com o tipo
+  `WorkflowDefinition<any, any>` e quebrar na hora de rodar. Um módulo sem `export default` continua sendo um módulo que os workflows
+  importam, e não é listado nem acusado. O `wf doctor` e o `list_workflows` mostram o motivo.
+
 - **`wf upgrade` e o instalador recusam um kit com mudanças locais.** Antes de buscar as tags ou mover o que for, os dois rodam
   `git status --porcelain --untracked-files=all --ignored=matching` no kit (sem o `node_modules/` do próprio kit) e param com
   `the kit at <kit> has local changes: <lista>; reinstall it` se a saída não for vazia, deixando o kit na tag em que estava. Antes, o

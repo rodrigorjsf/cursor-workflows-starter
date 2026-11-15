@@ -137,7 +137,14 @@ function Canvas({ graph, layout, now, selectedId, onOpen }: { graph: RunGraph; l
       cancelled = true;
       clearTimeout(timer);
     };
-    // Frame again when the layout, what is framed or the size of the pane (a log panel opened beside it) changes, not on every tick of the clock.
+    // Frame again when the layout, whether the run is over or the size of the pane changes, not on every tick of the clock. The list leaves
+    // out the other values the effect reads, on purpose:
+    // - `layout`: a new one only when the run's structure changes (`useLayout`), the change that needs a new frame.
+    // - `settled`: a run that is over is framed on its first failure, not on its latest node (`frameOf`), so the frame is made again when it flips.
+    // - `pane.width`, `pane.height`: a log panel opened beside the canvas resizes it.
+    // - `graph` is a new object at every event, and what the framing takes from it is in `layout` and `settled`.
+    // - `selectedId` is read as it is when one of the values above changes: selecting a node alone leaves the view where the reader put it.
+    // - `fitView` of React Flow only reads React Flow's store, so the one of an earlier render frames the same.
   }, [layout, settled, pane.width, pane.height]);
   return (
     <ReactFlow

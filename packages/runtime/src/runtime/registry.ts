@@ -8,6 +8,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { isRecord } from "./parse-json.js";
 import type { WorkflowDefinition } from "./workflow.js";
 import { recordWorkflowSource } from "./workflow-source.js";
 
@@ -16,8 +17,6 @@ export function workflowDirs(cwd: string): string[] {
   if (process.env.WORKFLOWS_DIR) dirs.push(resolve(process.env.WORKFLOWS_DIR));
   return [...new Set(dirs)].filter((d) => existsSync(d));
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
 
 /**
  * Is `value` a workflow definition? A workflow file is code the kit imports without a type check, so what its default export

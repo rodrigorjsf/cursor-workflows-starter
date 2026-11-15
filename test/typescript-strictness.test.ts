@@ -104,3 +104,75 @@ test("the registry and the source fingerprints, which hold every loaded workflow
   const offences = boundary.flatMap((path) => anyTypes(path, readFileSync(join(ROOT, path), "utf8")).map((line) => `${path}:${line}`));
   assert.deepEqual(offences, [], "type the workflow as WorkflowDefinition (unknown args and result) and check what a module exports at load");
 });
+
+// --- JSON trust boundaries ----------------------------------------------------------------------------------------------
+
+/** The code that ships or runs for the maintainer: JSON read here comes from a file or a process the code does not control. */
+const JSON_SCOPE = ["packages/runtime/src", "packages/runtime/workflows", "packages/dashboard/src", "scripts", ".agents/workflows"].flatMap((d) => files(d, /\.(ts|mts)$/));
+
+/** A `JSON.parse` result given a shape without a check. `call` is the text of the argument, which names what is read. */
+interface JsonCast {
+  line: number;
+  call: string;
+}
+
+/** The `JSON.parse(...)` call that `node` is, looking through parentheses. */
+function jsonParseCall(node: ts.Expression): ts.CallExpression | undefined {
+  let inner = node;
+  while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+  const callee = ts.isCallExpression(inner) ? inner.expression : undefined;
+  const isParse = callee !== undefined && ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === "JSON" && callee.name.text === "parse";
+  return isParse ? (inner as ts.CallExpression) : undefined;
+}
+
+/** Every `JSON.parse(text) as T`, `<T>JSON.parse(text)` and `const x: T = JSON.parse(text)`. A result typed `unknown` is the check that comes next, so it is no cast. */
+function jsonCasts(path: string, text: string): JsonCast[] {
+  const sf = parse(path, text);
+  const found: JsonCast[] = [];
+  const add = (node: ts.Node, shape: ts.TypeNode, parsed: ts.CallExpression | undefined) => {
+    if (parsed && shape.kind !== ts.SyntaxKind.UnknownKeyword) found.push({ line: lineOf(sf, node), call: parsed.arguments.map((a) => a.getText(sf)).join(", ").replace(/\s+/g, " ") });
+  };
+  walk(sf, (node) => {
+    if (ts.isAsExpression(node) || ts.isTypeAssertionExpression(node)) add(node, node.type, jsonParseCall(node.expression));
+    else if (ts.isVariableDeclaration(node) && node.type && node.initializer) add(node, node.type, jsonParseCall(node.initializer));
+  });
+  return found;
+}
+
+test("the JSON cast check fires on a result cast, asserted or declared with a shape, and stays silent on unknown, on a guard and on other casts", () => {
+  assert.deepEqual(jsonCasts("a.ts", "const x = JSON.parse(text) as Job;\n"), [{ line: 1, call: "text" }]);
+  assert.deepEqual(jsonCasts("a.ts", "const v = (JSON.parse(readFileSync(path, 'utf8')) as { version?: string }).version;\n"), [{ line: 1, call: "readFileSync(path, 'utf8')" }]);
+  assert.deepEqual(jsonCasts("a.ts", "const x = <Job>JSON.parse(text);\n"), [{ line: 1, call: "text" }]);
+  assert.deepEqual(jsonCasts("a.ts", "const x: Job = JSON.parse(text);\n"), [{ line: 1, call: "text" }]);
+  assert.deepEqual(jsonCasts("a.ts", "const x = (JSON.parse(\n  text,\n)) as Job;\n"), [{ line: 1, call: "text" }]);
+  const checked = "const x: unknown = JSON.parse(text);\nconst y = JSON.parse(text) as unknown;\nconst z = other(text) as Job;\nlet w;\nw = JSON.parse(text);\nconst v = isRecord(x) ? x : {};\n";
+  assert.deepEqual(jsonCasts("a.ts", checked), []);
+});
+
+/**
+ * The casts that stay: a manifest or schema the kit ships beside the code that reads it, and the recordings a maintainer script wrote
+ * itself. Keyed by file and by the argument of the call, so a line that moves does not break it. Everything else a `JSON.parse` brings
+ * in (a state file, a forge answer, a config of the target repo, a process's output) is checked with `parse-json.ts`.
+ */
+const ALLOWED_JSON_CASTS: Array<{ file: string; call: string; why: string }> = [
+  { file: "packages/runtime/src/kit-version.ts", call: 'readFileSync(PACKAGE_JSON, "utf8")', why: "the kit's own package.json, shipped with the code that reads it" },
+  { file: "packages/dashboard/src/web-bundle.ts", call: 'readFileSync(packageJson(pkg), "utf8")', why: "the manifest of a package the dashboard bundles: it keys the bundle cache by version" },
+  { file: "scripts/verify/validation-report.ts", call: 'readFileSync(join(kitDir, "package.json"), "utf8")', why: "the package.json of the kit the report is about, read for its version" },
+  { file: "scripts/config-reference.ts", call: "schemaText", why: "the kit's own shipped config schema" },
+  { file: "scripts/verify/record-gh-fixtures.ts", call: 'readFileSync(join(calls, name), "utf8")', why: "a recording this script wrote" },
+  { file: "scripts/verify/record-glab-fixtures.ts", call: 'readFileSync(join(this.recordDir, calls[0]!), "utf8")', why: "a recording this script wrote" },
+  { file: "scripts/verify/record-release-fixtures.ts", call: "createRedactor({ env: {} }).text(text)", why: "a recorder stores what the service answered, and types it for the one script that records it" },
+];
+
+test("no shipped code casts a JSON.parse result to a shape outside the allowlist, and every allowlist entry still names a cast", () => {
+  assert.ok(JSON_SCOPE.length >= 90, `found ${JSON_SCOPE.length} files`);
+  const found = JSON_SCOPE.flatMap((path) => jsonCasts(path, readFileSync(join(ROOT, path), "utf8")).map((cast) => ({ path, ...cast })));
+  const allowed = (cast: { path: string; call: string }) => ALLOWED_JSON_CASTS.some((a) => a.file === cast.path && a.call === cast.call);
+  assert.deepEqual(
+    found.filter((cast) => !allowed(cast)).map((cast) => `${cast.path}:${cast.line}: JSON.parse(${cast.call}) is cast`),
+    [],
+    "check the value instead (packages/runtime/src/runtime/parse-json.ts: parseJson with a zod schema, or isRecord and typeof), or allow it here with the reason it is trusted",
+  );
+  const stale = ALLOWED_JSON_CASTS.filter((a) => !found.some((cast) => cast.path === a.file && cast.call === a.call));
+  assert.deepEqual(stale.map((a) => `${a.file}: ${a.call}`), [], "the cast was removed or its argument changed: delete the entry");
+});

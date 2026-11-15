@@ -14,9 +14,11 @@
 // `wf doctor` reads the forge of the cwd's origin (`forgeOfOrigin`) and what to ask the CLI to know it is logged in, and, for GitHub, what
 // its token can do (`loginOf`).
 import { readFileSync } from "node:fs";
+import { z } from "zod";
 import { FORGE_TITLES, knownForgeOf } from "../../src/config/file.js";
 import { type PrState, prStateOfMr } from "../../src/runtime/forge-pr-state.js";
 import { type GlabHost, glabApiHost } from "../../src/runtime/glab-host.js";
+import { checkShape, parseJson } from "../../src/runtime/parse-json.js";
 import type { ForgeName } from "../../src/runtime/workflow.js";
 import type { Commands } from "./commands.js";
 
@@ -247,6 +249,21 @@ export function createForge(name: string, commands: Commands): Forge {
   throw new Error(`forge ${JSON.stringify(name)} (named by the run's record): this version of the kit does not know it. Upgrade the kit`);
 }
 
+/**
+ * What each forge CLI prints, as far as the kit reads it (every other field is left as it came). The answers are data from a service the
+ * kit does not control, so each read is checked against these, and an answer of another shape is an error naming the command and the field
+ * (`parse-json.ts`). Every field here was in the output recorded from the real CLI (`test/fixtures/glab/recordings.json` for glab).
+ */
+const GITHUB_ISSUE = z.looseObject({ number: z.number(), title: z.string(), body: z.string(), labels: z.array(z.looseObject({ name: z.string() })) });
+const GITHUB_ISSUE_REFS = z.array(z.looseObject({ number: z.number(), title: z.string(), url: z.string() }));
+const GITHUB_COMMENTS = z.looseObject({ comments: z.array(z.looseObject({ body: z.string() })) });
+const GITLAB_ISSUE = z.looseObject({ iid: z.number(), title: z.string(), description: z.string().nullable().optional(), labels: z.array(z.string()).optional() });
+const GITLAB_ISSUE_REFS = z.array(z.looseObject({ iid: z.number(), title: z.string(), web_url: z.string() }));
+/** One array per page (`jsonValues`): `glab api --paginate` prints all the pages as one array, or one array per page. */
+const GITLAB_NOTE_PAGES = z.array(z.array(z.looseObject({ body: z.string(), system: z.boolean().optional() })));
+const GITLAB_PROJECT = z.looseObject({ web_url: z.string() });
+const GITLAB_MR_PAGES = z.array(z.array(z.looseObject({ web_url: z.string(), state: z.string() })));
+
 const NO_PR_FOUND = /no pull requests? found/i;
 /** The `author_association` values of an author who is no stranger: the owner, a member of the owning organization, a collaborator. Every other value, one GitHub adds later included, is a stranger's. */
 const TRUSTED_ASSOCIATIONS: ReadonlySet<string> = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
@@ -258,7 +275,7 @@ class GithubForge implements Forge {
   constructor(private readonly commands: Commands) {}
 
   async issue(cwd: string, number: number, repo?: string): Promise<ForgeIssue> {
-    return JSON.parse(await this.gh(cwd, "issue", "view", String(number), ...repoFlag(repo), "--json", "number,title,body,labels")) as ForgeIssue;
+    return parseJson(await this.gh(cwd, "issue", "view", String(number), ...repoFlag(repo), "--json", "number,title,body,labels"), GITHUB_ISSUE, `gh issue view ${number}`);
   }
 
   async authorStanding(cwd: string, number: number, repo?: string): Promise<AuthorStanding> {
@@ -276,11 +293,11 @@ class GithubForge implements Forge {
 
   async listIssues(cwd: string, label: string): Promise<ForgeIssueRef[]> {
     // `--label=<label>`, one argument: a label that starts with `-` is still a value
-    return JSON.parse(await this.gh(cwd, "issue", "list", "--state", "open", `--label=${label}`, "--limit", String(ISSUE_LIST_LIMIT), "--json", "number,title,url")) as ForgeIssueRef[];
+    return parseJson(await this.gh(cwd, "issue", "list", "--state", "open", `--label=${label}`, "--limit", String(ISSUE_LIST_LIMIT), "--json", "number,title,url"), GITHUB_ISSUE_REFS, "gh issue list");
   }
 
   async issueComments(cwd: string, number: number, repo?: string): Promise<string[]> {
-    const { comments } = JSON.parse(await this.gh(cwd, "issue", "view", String(number), ...repoFlag(repo), "--json", "comments")) as { comments: Array<{ body: string }> };
+    const { comments } = parseJson(await this.gh(cwd, "issue", "view", String(number), ...repoFlag(repo), "--json", "comments"), GITHUB_COMMENTS, `gh issue view ${number} comments`);
     return comments.map((c) => c.body);
   }
 
@@ -469,12 +486,7 @@ class GitlabForge implements Forge {
   constructor(private readonly commands: Commands) {}
 
   async issue(cwd: string, number: number, repo?: string): Promise<ForgeIssue> {
-    const issue = JSON.parse(await this.glab(cwd, "issue", "view", String(number), ...repoFlag(repo), "--output", "json")) as {
-      iid: number;
-      title: string;
-      description?: string | null;
-      labels?: string[];
-    };
+    const issue = parseJson(await this.glab(cwd, "issue", "view", String(number), ...repoFlag(repo), "--output", "json"), GITLAB_ISSUE, `glab issue view ${number}`);
     return { number: issue.iid, title: issue.title, body: issue.description ?? "", labels: (issue.labels ?? []).map((name) => ({ name })) };
   }
 
@@ -485,13 +497,13 @@ class GitlabForge implements Forge {
 
   async listIssues(cwd: string, label: string): Promise<ForgeIssueRef[]> {
     // glab lists the open issues unless told otherwise, one page of `--per-page` (the first 100, newest first), as the REST API's own objects.
-    const issues = JSON.parse(await this.glab(cwd, "issue", "list", `--label=${label}`, "--per-page", String(ISSUE_LIST_LIMIT), "--output", "json")) as Array<{ iid: number; title: string; web_url: string }>;
+    const issues = parseJson(await this.glab(cwd, "issue", "list", `--label=${label}`, "--per-page", String(ISSUE_LIST_LIMIT), "--output", "json"), GITLAB_ISSUE_REFS, "glab issue list");
     return issues.map((issue) => ({ number: issue.iid, title: issue.title, url: issue.web_url }));
   }
 
   async issueComments(cwd: string, number: number, repo?: string): Promise<string[]> {
-    const pages = jsonValues(await this.api(cwd, repo, "--paginate", `${projectOf(repo)}/issues/${number}/notes`));
-    const notes = pages.flat() as Array<{ body: string; system?: boolean }>;
+    const pages = checkShape(jsonValues(await this.api(cwd, repo, "--paginate", `${projectOf(repo)}/issues/${number}/notes`)), GITLAB_NOTE_PAGES, "glab api issue notes");
+    const notes = pages.flat();
     return notes.filter((note) => !note.system).map((note) => note.body);
   }
 
@@ -522,7 +534,7 @@ class GitlabForge implements Forge {
   }
 
   async repoUrl(cwd: string, repo?: string): Promise<string> {
-    const project = JSON.parse(await this.api(cwd, repo, projectOf(repo))) as { web_url: string };
+    const project = parseJson(await this.api(cwd, repo, projectOf(repo)), GITLAB_PROJECT, "glab api project");
     return project.web_url.trim();
   }
 
@@ -535,7 +547,7 @@ class GitlabForge implements Forge {
     const query = `source_branch=${encodeURIComponent(branch)}&order_by=created_at&sort=desc&per_page=100`;
     const pages = jsonValues(await this.api(cwd, repo, "--paginate", `${projectOf(repo)}/merge_requests?${query}`));
     if (!pages.every(Array.isArray)) throw new Error(`glab api merge_requests (${branch}): expected a list`);
-    const mrs = pages.flat() as GitlabMr[];
+    const mrs: GitlabMr[] = checkShape(pages, GITLAB_MR_PAGES, `glab api merge_requests (${branch})`).flat();
     return mrs.find((mr) => prStateOfMr(mr.state) === "OPEN") ?? mrs[0];
   }
 

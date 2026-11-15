@@ -12,8 +12,10 @@ import { spawn } from "node:child_process";
 import { closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 import { globalConfigPath, loadConfigFile } from "../config/file.js";
 import { fromEnv } from "./job-state.js";
+import { tryParseJson } from "./parse-json.js";
 import { commandLineHas, isAlive } from "./pid.js";
 import { userDir } from "./state.js";
 import { writeFileAtomic } from "./state-files.js";
@@ -60,10 +62,11 @@ export interface DashboardInstance {
   startedAt: string;
 }
 
+const DASHBOARD_INSTANCE: z.ZodType<DashboardInstance> = z.looseObject({ pid: z.number(), port: z.number(), startedAt: z.string() });
+
 export function readInstance(): DashboardInstance | undefined {
   try {
-    const instance = JSON.parse(readFileSync(dashboardPidPath(), "utf8")) as Partial<DashboardInstance>;
-    return typeof instance.pid === "number" && typeof instance.port === "number" && typeof instance.startedAt === "string" ? (instance as DashboardInstance) : undefined;
+    return tryParseJson(readFileSync(dashboardPidPath(), "utf8"), DASHBOARD_INSTANCE);
   } catch {
     return undefined;
   }

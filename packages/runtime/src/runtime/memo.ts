@@ -13,6 +13,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { ToolName } from "@cursor/sdk";
+import { z } from "zod";
+import { parseJson } from "./parse-json.js";
 import { stateDir } from "./state.js";
 import { writeFileAtomic } from "./state-files.js";
 
@@ -50,6 +52,9 @@ export async function repoState(cwd: string): Promise<string | undefined> {
   }
 }
 
+/** A memo entry on disk: the step's result, and nothing the reader needs besides. An entry with no result is a miss. */
+const MEMO_ENTRY = z.looseObject({ result: z.unknown().optional() });
+
 export class MemoStore {
   private readonly dir: string;
   constructor(cwd: string) {
@@ -60,7 +65,7 @@ export class MemoStore {
   }
   get(key: string): unknown | undefined {
     const file = join(this.dir, `${key}.json`);
-    return existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as { result: unknown }).result : undefined;
+    return existsSync(file) ? parseJson(readFileSync(file, "utf8"), MEMO_ENTRY, file).result : undefined;
   }
   set(key: string, result: unknown): void {
     writeFileAtomic(join(this.dir, `${key}.json`), JSON.stringify({ result }));

@@ -21,6 +21,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { errorText } from "../../packages/runtime/src/runtime/error-text.js";
 import type { MrState } from "../../packages/runtime/src/runtime/forge-pr-state.js";
+import { isRecord } from "../../packages/runtime/src/runtime/parse-json.js";
 import type { Forge } from "../../packages/runtime/workflows/implement-issue/forge.js";
 import { sanitizeModelText } from "../../packages/runtime/workflows/implement-issue/pr-body.js";
 import { isEntryPoint } from "../lib/cli.js";
@@ -400,9 +401,11 @@ class Prover {
       child.on("close", (code, signal) => {
         clearTimeout(timer);
         try {
-          done({ outcome: JSON.parse(stdout) as Record<string, unknown> });
+          const outcome: unknown = JSON.parse(stdout);
+          if (!isRecord(outcome)) throw new Error("not a JSON object");
+          done({ outcome });
         } catch {
-          done({ outcome: undefined, failure: `wf run printed no JSON (${signal ? `signal ${signal}` : `exit code ${code}`}): ${stdout.trim().slice(0, 300)}` });
+          done({ outcome: undefined, failure: `wf run printed no JSON object (${signal ? `signal ${signal}` : `exit code ${code}`}): ${stdout.trim().slice(0, 300)}` });
         }
       });
     });
