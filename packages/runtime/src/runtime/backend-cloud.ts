@@ -181,13 +181,31 @@ function rememberingGit(exchange: Exchange, remember: (git: PushedBranches | und
   return Object.assign((message: string) => noting(exchange(message)), { attach: (run: Run) => noting(exchange.attach(run)) });
 }
 
+/** The branches a run says it pushed to; empty when it says nothing about where it pushed. */
+const reportedBranches = (pushed: PushedBranches | undefined): string[] => (pushed?.branches ?? []).flatMap((entry) => (entry.branch ? [entry.branch] : []));
+
 /**
  * The branches the run says it pushed to when the snapshot branch is not among them (an agent that did not work on the current
  * branch pushes to one of its own); empty when it pushed to the snapshot branch, or says nothing about where it pushed.
  */
 function pushedElsewhere(pushed: PushedBranches | undefined, snapshotBranch: string): string[] {
-  const reported = (pushed?.branches ?? []).flatMap((entry) => (entry.branch ? [entry.branch] : []));
+  const reported = reportedBranches(pushed);
   return reported.includes(snapshotBranch) ? [] : reported;
+}
+
+/**
+ * A step that does not write was told not to push (`READ_ONLY_INSTRUCTION`), and nothing but the agent's own obedience stops it: a
+ * step that read untrusted text may have been steered into one. When the run says it pushed, the attempt warns, naming the branches:
+ * the push is not undone, and a branch of the agent's own stays on the remote for the person to delete. The answer of the step is
+ * left as it is.
+ */
+function warnOfReadOnlyPush(pushed: PushedBranches | undefined, snapshotBranch: string | undefined, remote: string, onEvent: (event: AttemptEvent) => void): void {
+  const branches = reportedBranches(pushed);
+  if (!branches.length) return;
+  const own = branches.filter((branch) => branch !== snapshotBranch);
+  const stays = own.length === 1 ? "that branch stays" : "those branches stay";
+  const what = own.length ? `${stays} on ${remote}, delete ${own.length === 1 ? "it" : "them"} by hand` : "it is the snapshot branch, deleted when the step ends";
+  onEvent({ type: "warning", message: `a read-only cloud step pushed to ${branches.join(", ")}, though it was told not to push: ${what}` });
 }
 
 /**
@@ -280,8 +298,12 @@ async function runCloudAttempt({ remote, runId, allowPublicRemote, waitFloorMs =
       (exchange) => converse(rememberingGit(exchange, (git) => (pushed = git)), message, { schemaRetries: o.schemaRetries, check: schema ? check : undefined, onEvent, running: start.kind === "resumed" ? start.running : undefined }),
       settleCloudRun(o.apiKey, signal, waitFloorMs),
     );
+    if (!o.writes) {
+      warnOfReadOnlyPush(pushed, startsFrom?.branch, startsFrom?.remote ?? remote, onEvent);
+      return result;
+    }
     // The work comes back before the snapshot branch is deleted (the agent's branch is the snapshot branch).
-    if (!o.writes || result.outcome.kind !== "finished" || signal.aborted) return result;
+    if (result.outcome.kind !== "finished" || signal.aborted) return result;
     return await bringWorkBack(result, pushed, startsFrom, o, signal, onEvent);
   } finally {
     // The branch this attempt pushed, and the one an interrupted attempt left (the agent it belonged to is done with it, or gone).

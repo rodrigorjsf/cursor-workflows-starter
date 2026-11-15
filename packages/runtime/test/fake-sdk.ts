@@ -181,14 +181,15 @@ export function seedCloudAgent(agentId: string, runs: Array<{ status?: ServerRun
 }
 
 /**
- * Where a cloud run says it pushed, as the SDK's `RunResult.git` does. An agent that works on the current branch pushes to its
- * starting ref (the snapshot branch); any other pushes to a branch of its own, as the real one does with `workOnCurrentBranch` off.
- * A script's own `git` wins.
+ * Where a cloud run says it pushed, as the SDK's `RunResult.git` does. An agent that works on the current branch (a step that writes)
+ * pushes to its starting ref, the snapshot branch. Any other (a read-only step) pushes nothing and says nothing about where: a script
+ * that wants one to push gives its own `git`, which wins. (What the real API reports for a read-only agent that made no commit has not
+ * been measured: the cloud verification, issue #47, will.)
  */
-function pushedBranches(o: AgentOptions, agentId: string) {
-  if (!o.cloud) return {};
+function pushedBranches(o: AgentOptions) {
+  if (!o.cloud?.workOnCurrentBranch) return {};
   const [repo] = o.cloud.repos ?? [];
-  return { git: { branches: [{ repoUrl: repo?.url, branch: o.cloud.workOnCurrentBranch ? repo?.startingRef : `cursor/${agentId}` }] } };
+  return { git: { branches: [{ repoUrl: repo?.url, branch: repo?.startingRef }] } };
 }
 
 const artifactPath = (key: string) => (key.startsWith("artifacts/") || key.startsWith("/") ? key : `artifacts/${key}`);
@@ -314,7 +315,7 @@ function agentOf(state: AgentState) {
             await streamed;
             if (r.rejectWait) throw r.rejectWait; // the run fails after its turns, e.g. with a RateLimitError
             if (cancelled && r.stuckAfterCancel) await new Promise(() => {}); // a wait() that never settles once cancelled
-            return { id: "r", status: "finished", model: o.model, ...pushedBranches(o, state.agentId), ...r, ...(cancelled ? { status: "cancelled" } : {}) };
+            return { id: "r", status: "finished", model: o.model, ...pushedBranches(o), ...r, ...(cancelled ? { status: "cancelled" } : {}) };
           },
         });
       }
@@ -332,7 +333,7 @@ function agentOf(state: AgentState) {
           wait: () => ended,
         });
       }
-      return out({ cancel: async () => void stats.cancels++, wait: async () => ({ id: "r", status: "finished", model: o.model, ...pushedBranches(o, state.agentId), ...r }) });
+      return out({ cancel: async () => void stats.cancels++, wait: async () => ({ id: "r", status: "finished", model: o.model, ...pushedBranches(o), ...r }) });
     },
     /** Like the cloud API: paths are relative to the workspace and start with `artifacts/`. A key that already starts with `artifacts/` or `/` is the path as it is. */
     async listArtifacts() {
