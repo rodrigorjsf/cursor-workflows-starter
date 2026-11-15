@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { PRIVATE_DIR } from "./state-files.js";
 
 /** Per-user directory of the kit (`~/.cursor-workflows`): metrics database, global runs index. `WF_HOME` overrides it (tests, CI). */
 export function userDir(): string {
@@ -36,7 +37,7 @@ export function ensureIgnored(cwd: string): void {
 export function stateDir(cwd: string, ...parts: string[]): string {
   ensureIgnored(cwd);
   const dir = join(cwd, ".workflows", ...parts);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR });
   return dir;
 }
 

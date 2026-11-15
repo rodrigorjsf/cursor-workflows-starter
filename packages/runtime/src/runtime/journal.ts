@@ -9,7 +9,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { appendJsonl, readJsonl } from "./state-files.js";
+import { PRIVATE_DIR, appendJsonl, readJsonl } from "./state-files.js";
 
 export interface JournalEntry {
   key: string;
@@ -27,7 +27,7 @@ export class Journal {
   private readonly occurrences = new Map<string, number>();
 
   constructor(private readonly file: string) {
-    mkdirSync(dirname(file), { recursive: true });
+    mkdirSync(dirname(file), { recursive: true, mode: PRIVATE_DIR });
     // A torn line (crash mid-append) is skipped: the step it recorded is simply not in the journal, so it runs again.
     for (const entry of readJsonl(file, isEntry).records) this.cache.set(entry.key, entry);
   }

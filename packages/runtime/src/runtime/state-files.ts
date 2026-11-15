@@ -4,16 +4,28 @@
 //   to the target, then renamed over it. A reader sees the old content or the new content, never half of it.
 // - Append-only state (the event log, the journal, the global runs index) is JSON Lines. A crash mid-append can leave a
 //   torn last line. Readers skip any line that is not a valid record, and the next append starts on a fresh line.
+// - Private by default. The event log and the journal hold the repository's private source, so state files are created
+//   `0600` and their folders `0700` (`PRIVATE_FILE`, `PRIVATE_DIR`), whatever the user's umask says. A mode applies only
+//   when a file is created: the runtime never `chmod`s one that exists (`wf doctor` reports a state folder that is open).
 
 import { randomUUID } from "node:crypto";
 import { closeSync, fstatSync, openSync, readFileSync, readSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
-/** Writes `data` to `file` atomically (temp file + rename in the same directory). The directory must exist. */
-export function writeFileAtomic(file: string, data: string | Uint8Array): void {
+/** The mode of a state file made by the runtime: its user reads and writes it, nobody else. */
+export const PRIVATE_FILE = 0o600;
+/** The mode of a folder of runtime state: its user alone enters it. */
+export const PRIVATE_DIR = 0o700;
+
+/**
+ * Writes `data` to `file` atomically (temp file + rename in the same directory). The directory must exist. The new file is
+ * `PRIVATE_FILE` unless `mode` says otherwise: a repo file (`wf init`) takes the ordinary default, which the umask narrows.
+ * The rename replaces the old file, so a rewritten state file is a new file and takes the mode of this call.
+ */
+export function writeFileAtomic(file: string, data: string | Uint8Array, mode: number = PRIVATE_FILE): void {
   const tmp = join(dirname(file), `.${basename(file)}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`);
   try {
-    writeFileSync(tmp, data);
+    writeFileSync(tmp, data, { mode });
     renameSync(tmp, file);
   } catch (err) {
     rmSync(tmp, { force: true });
@@ -24,7 +36,7 @@ export function writeFileAtomic(file: string, data: string | Uint8Array): void {
 /** Appends one record as one line. A torn last line (no trailing newline) is closed first, so the record stays parseable. */
 export function appendJsonl(file: string, record: unknown): void {
   const line = `${JSON.stringify(record)}\n`;
-  const fd = openSync(file, "a+");
+  const fd = openSync(file, "a+", PRIVATE_FILE);
   try {
     const { size } = fstatSync(fd);
     let prefix = "";

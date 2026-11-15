@@ -20,7 +20,7 @@ import { type InterruptedCloudStep, type Ledger, interruptedCloudSteps, replayLe
 import { CREDENTIAL_FORMATS, type Redactor, createRedactor } from "./redaction.js";
 import { type RetentionPolicy, pruneContent } from "./retention.js";
 import { plainName, stateDir } from "./state.js";
-import { appendJsonl, hasTornTail, readJsonl } from "./state-files.js";
+import { PRIVATE_DIR, PRIVATE_FILE, appendJsonl, hasTornTail, readJsonl } from "./state-files.js";
 
 export const EVENTS_FILE = "events.jsonl";
 export const JOURNAL_FILE = "journal.jsonl";
@@ -114,7 +114,7 @@ function readLock(file: string): LockContent | undefined {
 function takeLock(file: string, runId: string, refuse: (holder: LockContent | undefined) => Error): () => void {
   const content: LockContent = { pid: process.pid, token: randomUUID(), startedAt: new Date().toISOString(), runId, identity: processIdentity(process.pid) };
   const aside = `${file}.${process.pid}.${content.token.slice(0, 8)}.tmp`;
-  writeFileSync(aside, JSON.stringify(content));
+  writeFileSync(aside, JSON.stringify(content), { mode: PRIVATE_FILE });
   try {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -275,7 +275,7 @@ export class RunStore {
   private ended = false;
 
   private constructor(dir: string, runId: string, options: RunStoreOptions) {
-    mkdirSync(dir, { recursive: true });
+    mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR });
     this.releaseLock = acquireLock(dir, runId);
     this.dir = dir;
     this.runId = runId;

@@ -3,7 +3,7 @@
 // `.gitignore` entry, the `AGENTS.md` block (`--no-agents-md`, `--remove`), idempotence, the diff and the absence of a commit.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { after, before, test } from "node:test";
@@ -238,6 +238,19 @@ test("wf init creates AGENTS.md with a short block of the safety rules and a poi
     assert.match(text, rule);
   }
   assert.ok(text.includes(GUIDE_URL), "pointer to the install guide");
+});
+
+test("the files wf init writes into the repo keep the ordinary mode, not the private one of run state", () => {
+  const repo = emptyRepo();
+  const umaskBefore = process.umask(0o022); // the children inherit it: a repo file is what the user's umask makes it
+  try {
+    assert.equal(init(repo).status, 0);
+  } finally {
+    process.umask(umaskBefore);
+  }
+  for (const file of ["AGENTS.md", ".mcp.json", join(".cursor", "mcp.json"), ".gitignore"]) {
+    assert.equal(statSync(join(repo, file)).mode & 0o777, 0o644, `${file} is readable by the repo's other users, like any file of the repo`);
+  }
 });
 
 test("wf init appends the block to an AGENTS.md that exists, after a blank line, keeping its content", () => {

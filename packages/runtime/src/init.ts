@@ -271,7 +271,7 @@ export function initRepo({ cwd, skipAgentsMd = false, remove = false }: InitOpti
       continue;
     }
     mkdirSync(dirname(file), { recursive: true });
-    writeFileAtomic(existsSync(file) ? realpathSync(file) : file, after); // through a symlink, not over it
+    writeFileAtomic(existsSync(file) ? realpathSync(file) : file, after, 0o666); // through a symlink, not over it; a repo file keeps the ordinary default (the umask narrows it), not the private mode of run state
   }
   // On every run, not only when this one changed AGENTS.md: a memory file added after the first init hides the block all the same.
   const note = !remove && !skipAgentsMd ? claudeCodeNote(cwd) : undefined;

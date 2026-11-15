@@ -59,35 +59,42 @@ after(() => {
 
 const stateRoot = () => join(repo, ".workflows");
 
-/** The permission bits of `.workflows/` and of everything under it but `worktrees/`, by path relative to the repo. */
-function modesUnderState(dir = stateRoot()): Record<string, number> {
-  const modes: Record<string, number> = dir === stateRoot() ? { ".workflows": statSync(dir).mode & 0o777 } : {};
+/** One entry of the state folder: its permission bits, and whether it is a folder. */
+type Entry = { mode: number; folder: boolean };
+
+/** `.workflows/` and everything under it but `worktrees/`, by path relative to the repo. */
+function entriesUnderState(dir = stateRoot()): Record<string, Entry> {
+  const entries: Record<string, Entry> = {};
+  if (dir === stateRoot()) entries[relative(repo, dir)] = { mode: statSync(dir).mode & 0o777, folder: true };
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
     if (path === join(stateRoot(), "worktrees")) continue;
     const stat = lstatSync(path);
-    modes[relative(repo, path)] = stat.mode & 0o777;
-    if (stat.isDirectory()) Object.assign(modes, modesUnderState(path));
+    entries[relative(repo, path)] = { mode: stat.mode & 0o777, folder: stat.isDirectory() };
+    if (stat.isDirectory()) Object.assign(entries, entriesUnderState(path));
   }
-  return modes;
+  return entries;
 }
 
 /** What is not private: a folder that is not 0700 or a file that is not 0600, as `path -> octal mode`. */
-function notPrivate(modes: Record<string, number>, isDir: (path: string) => boolean): Record<string, string> {
-  return Object.fromEntries(Object.entries(modes).filter(([path, mode]) => mode !== (isDir(path) ? 0o700 : 0o600)).map(([path, mode]) => [path, mode.toString(8)]));
+function notPrivate(entries: Record<string, Entry>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(entries)
+      .filter(([, { mode, folder }]) => mode !== (folder ? 0o700 : 0o600))
+      .map(([path, { mode }]) => [path, mode.toString(8)]),
+  );
 }
-const isFolder = (path: string) => !/\.[a-z]+$|\.exec-group\.\d+$/.test(path);
 
-const present = (modes: Record<string, number>, pattern: RegExp) => Object.keys(modes).some((path) => pattern.test(path));
+const present = (entries: Record<string, Entry>, pattern: RegExp) => Object.keys(entries).some((path) => pattern.test(path));
 
 test("a run writes its event log, journal, lock and memo, and the folders around them, for its user alone", async () => {
-  const seenDuringRun: { modes?: Record<string, number> } = {};
+  const seenDuringRun: { entries?: Record<string, Entry> } = {};
   const wf = defineWorkflow({
     meta: { name: "private-state", description: "one memoised read step" },
     defaults: { model: { id: "m" } },
     run: async (ctx) => {
       const answer = await ctx.agent<string>("plan", { label: "plan", tools: ["read"], memo: true });
-      seenDuringRun.modes = modesUnderState(); // the run lock is held, and the step's journal line and memo entry are written
+      seenDuringRun.entries = entriesUnderState(); // the run lock is held, and the step's journal line and memo entry are written
       return answer;
     },
   });
@@ -95,12 +102,12 @@ test("a run writes its event log, journal, lock and memo, and the folders around
   const outcome = await runWorkflow(wf, {}, { cwd: repo });
 
   assert.equal(outcome.status, "finished", outcome.error);
-  const during = seenDuringRun.modes!;
+  const during = seenDuringRun.entries!;
   for (const pattern of [/^\.workflows$/, /runs\/[^/]+\/events\.jsonl$/, /runs\/[^/]+\/journal\.jsonl$/, /runs\/[^/]+\/run\.lock$/, /memo\/[0-9a-f]+\.json$/]) {
     assert.ok(present(during, pattern), `the run created a file that matches ${pattern}`);
   }
-  assert.deepEqual(notPrivate(during, isFolder), {}, "while the run executes");
-  assert.deepEqual(notPrivate(modesUnderState(), isFolder), {}, "after the run");
+  assert.deepEqual(notPrivate(during), {}, "while the run executes");
+  assert.deepEqual(notPrivate(entriesUnderState()), {}, "after the run");
 });
 
 test("a detached job writes its record, its log and the record of its command's process group for its user alone", async () => {
@@ -119,11 +126,11 @@ test("a detached job writes its record, its log and the record of its command's 
     const first = heartbeat();
     await waitFor("the heartbeat worker to rewrite the job record", () => Date.parse(heartbeat()) - Date.parse(first) >= 150);
 
-    const modes = modesUnderState();
+    const entries = entriesUnderState();
     for (const pattern of [/jobs\/[^/]+\.json$/, /jobs\/[^/]+\.log$/, /jobs\/[^/]+\.exec-group\.\d+$/, /runs\/[^/]+\/events\.jsonl$/, /runs\/[^/]+\/run\.lock$/]) {
-      assert.ok(present(modes, pattern), `the job created a file that matches ${pattern}`);
+      assert.ok(present(entries, pattern), `the job created a file that matches ${pattern}`);
     }
-    assert.deepEqual(notPrivate(modes, isFolder), {});
+    assert.deepEqual(notPrivate(entries), {});
   } finally {
     wf("cancel", jobId, "--timeout", "20");
   }

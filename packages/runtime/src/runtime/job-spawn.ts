@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import type { LimitOverrides } from "../config/index.js";
 import { type JobRecord, type JobStart, jobLogPath, jobRefusal, writeJob } from "./job-state.js";
 import { newRunId, plainName } from "./state.js";
+import { PRIVATE_FILE } from "./state-files.js";
 
 /** What a new job record may be given; the rest is generated: a new run id, a random job id, this process's pid. */
 export interface NewJob {
@@ -79,7 +80,7 @@ export function spawnJob(o: SpawnJobOptions): { job: JobRecord; log: string } {
     ...(o.maxTokens === undefined ? [] : ["--max-tokens", String(o.maxTokens)]),
     ...(o.overrides && Object.keys(o.overrides).length ? ["--overrides", JSON.stringify(o.overrides)] : []),
   ];
-  const out = openSync(log, "a");
+  const out = openSync(log, "a", PRIVATE_FILE);
   try {
     const child = spawn(process.execPath, [...process.execArgv, cli, "run", o.workflow, "--args", JSON.stringify(o.args ?? {}), "--cwd", o.cwd, "--job", job.jobId, ...flags], {
       detached: true,

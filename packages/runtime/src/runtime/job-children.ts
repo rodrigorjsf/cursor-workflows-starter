@@ -18,6 +18,7 @@
 import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { plainName } from "./state.js";
+import { PRIVATE_FILE } from "./state-files.js";
 
 const GROUP_INFIX = ".exec-group.";
 const isGroupId = (n: number): boolean => Number.isInteger(n) && n > 1;
@@ -39,7 +40,7 @@ function forget(file: string): void {
  */
 export function recordExecGroup(jobsDir: string, jobId: string, pgid: number): () => void {
   const file = groupFile(jobsDir, jobId, pgid);
-  writeFileSync(file, "");
+  writeFileSync(file, "", { mode: PRIVATE_FILE });
   return () => forget(file);
 }
 
