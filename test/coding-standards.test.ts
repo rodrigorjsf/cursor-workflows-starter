@@ -663,25 +663,26 @@ const writableCi = (_path: string, text: string) => [
   ...(/^permissions:[ \t]*\n[ \t]+contents:[ \t]*read[ \t]*$/m.test(text) ? [] : [0]),
   ...text.split("\n").flatMap((l, i) => (/^\s*(permissions:\s*write-all|[\w-]+:\s*write)\s*$/.test(l) ? [i + 1] : [])),
 ];
-/** Lines with a `uses:` that is not a first-party action pinned by major tag. */
-const unpinnedActions = (_path: string, text: string) =>
+/** Lines with a `uses:` that is not a first-party `actions/<name>` action. How it is pinned is test/supply-chain.test.ts. */
+const thirdPartyActions = (_path: string, text: string) =>
   text.split("\n").flatMap((l, i) => {
     const uses = /^\s*(?:-\s*)?uses:\s*(\S+)/.exec(l);
-    return uses && !/^actions\/[\w-]+@v\d+$/.test(uses[1]!) ? [i + 1] : [];
+    return uses && !/^actions\/[\w-]+@/.test(uses[1]!) ? [i + 1] : [];
   });
 
-test("the CI checks fire on a missing or writable permission and on a third-party or branch-pinned action", () => {
+test("the CI checks fire on a missing or writable permission and on a third-party action, whatever its pin", () => {
   assert.deepEqual(writableCi("ci.yml", "on: push\njobs:\n  t:\n    permissions:\n      pull-requests: write\n"), [0, 5]);
   assert.deepEqual(writableCi("ci.yml", "on: push\npermissions:\n  contents: read\njobs: {}\n"), []);
-  assert.deepEqual(unpinnedActions("ci.yml", "      - uses: someone/action@v1\n      - uses: actions/checkout@main\n"), [1, 2]);
-  assert.deepEqual(unpinnedActions("ci.yml", "      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n"), []);
+  const sha = "a".repeat(40);
+  assert.deepEqual(thirdPartyActions("ci.yml", `      - uses: someone/action@${sha} # v1\n      - uses: ./local-action\n      - uses: docker://alpine:3\n`), [1, 2, 3]);
+  assert.deepEqual(thirdPartyActions("ci.yml", `      - uses: actions/checkout@${sha} # v4.4.0\n      - uses: actions/setup-node@v4\n`), []);
 });
 
-test("CI reads the repository only, and uses first-party actions by major tag", () => {
+test("CI reads the repository only, and uses first-party actions only", () => {
   const workflows = files(".github/workflows", /\.ya?ml$/);
   assert.ok(workflows.length >= 1);
   assert.deepEqual(scan(workflows, writableCi), [], "set top-level permissions: contents: read and grant no write");
-  assert.deepEqual(scan(workflows, unpinnedActions), [], "use actions/<name>@vN");
+  assert.deepEqual(scan(workflows, thirdPartyActions), [], "use first-party actions/<name> only; install any other tool by hand, pinned and checked");
 });
 
 // --- The exemplars ----------------------------------------------------------------------------------------------------

@@ -127,7 +127,7 @@ test("the installer clones the kit at the tag, installs its dependencies and wri
 
   const kit = kitOf(home);
   assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.3.0");
-  assert.deepEqual(npmCalls().slice(before), [`${kit} ci --no-audit --no-fund`]);
+  assert.deepEqual(npmCalls().slice(before), [`${kit} ci --ignore-scripts --no-audit --no-fund`]);
 
   // The shim is on the PATH the way a user has it, and runs the installed kit's CLI.
   const repo = join(home, "repo");
@@ -257,7 +257,7 @@ test("--dev points the kit location at the working copy that holds the installer
   assert.equal(r.status, 0, r.stderr);
 
   assert.equal(readlinkSync(kitOf(home)), copy);
-  assert.deepEqual(npmCalls().slice(before), [`${kitOf(home)} install --no-audit --no-fund`], "install, never ci: ci would empty a maintainer's node_modules");
+  assert.deepEqual(npmCalls().slice(before), [`${kitOf(home)} install --ignore-scripts --no-audit --no-fund`], "install, never ci: ci would empty a maintainer's node_modules");
   assert.equal(readlinkSync(join(home, ".claude", "skills", "run-workflow")), join(kitOf(home), "skills", "run-workflow"));
 
   const repo = join(home, "repo");
@@ -303,7 +303,7 @@ test("--refresh redoes the dependencies, the shim, the links and the config for 
 
   const r = install(home, ["--refresh"]);
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(npmCalls().slice(before), [`${kit} ci --no-audit --no-fund`]);
+  assert.deepEqual(npmCalls().slice(before), [`${kit} ci --ignore-scripts --no-audit --no-fund`]);
   assert.equal(readlinkSync(join(home, ".claude", "skills", "brand-new")), join(kit, "skills", "brand-new"));
   assert.ok(!existsSync(join(home, ".claude", "skills", "skill-to-workflow")) && !lstatExists(join(home, ".claude", "skills", "skill-to-workflow")), "the link to the skill that left must go");
   assert.ok(lstatSync(join(home, ".claude", "skills", "run-workflow")).isSymbolicLink());
@@ -330,7 +330,7 @@ test("--refresh on a dev install never runs npm ci in the working copy", () => {
   // Without them, only `install` fills the gap.
   rmSync(join(copy, "node_modules"));
   assert.equal(install(home, ["--refresh"]).status, 0);
-  assert.deepEqual(npmCalls().slice(before), [`${kitOf(home)} install --no-audit --no-fund`]);
+  assert.deepEqual(npmCalls().slice(before), [`${kitOf(home)} install --ignore-scripts --no-audit --no-fund`]);
 });
 
 test("a skill whose folder stays in the kit without a SKILL.md loses its link on --refresh", () => {
@@ -508,7 +508,7 @@ test("wf upgrade checks out the newest release tag, reinstalls dependencies and 
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(JSON.parse(r.stdout), { upgraded: true, from: "0.3.0", to: "0.4.0", tag: "v0.4.0" }); // v0.5.0-rc.1 is newer, but not a release
   assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.4.0");
-  assert.deepEqual(npmCalls().slice(before), [`${kit} ci --no-audit --no-fund`]);
+  assert.deepEqual(npmCalls().slice(before), [`${kit} ci --ignore-scripts --no-audit --no-fund`]);
   assert.ok(r.stderr.includes("installer 0.4.0"), `the new tag's installer must run: ${r.stderr}`);
 
   const skills = join(home, ".claude", "skills");
