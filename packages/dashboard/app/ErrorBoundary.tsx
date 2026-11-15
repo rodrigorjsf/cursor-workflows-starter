@@ -24,17 +24,17 @@ interface BoundaryState {
 }
 
 export class ErrorBoundary extends Component<{ children: ReactNode }, BoundaryState> {
-  state: BoundaryState = { failed: false };
+  override state: BoundaryState = { failed: false };
 
   static getDerivedStateFromError(error: unknown): BoundaryState {
     return { failed: true, error };
   }
 
-  componentDidCatch(error: unknown): void {
+  override componentDidCatch(error: unknown): void {
     console.error("dashboard: a component failed", error);
   }
 
-  render(): ReactNode {
+  override render(): ReactNode {
     return this.state.failed ? <ErrorFallback error={this.state.error} /> : this.props.children;
   }
 }
