@@ -18,6 +18,18 @@
   tem `readBoundary: "workspace"`: sem isso uma etapa ainda lê a chave do Cursor. Sem o teto, passa e diz que não é exigido. Veja
   [2.3](docs/usage/03-invocacao-no-cursor-ide.md#conferindo-o-ambiente-wf-doctor).
 
+- **`wf doctor` avisa quando o token do GitHub é mais largo do que o kit precisa.** Num repositório com `origin` no GitHub, depois
+  do `gh auth status`, o check `forge` roda `gh api -i --silent user` e lê só o cabeçalho `X-OAuth-Scopes`, que um token clássico
+  devolve e um fine-grained não. Se o token tem `admin:public_key`, `write:public_key`, `admin:ssh_signing_key`,
+  `write:ssh_signing_key`, `admin:gpg_key`, `write:gpg_key`, `admin:org`, `admin:repo_hook`, `delete_repo` ou `workflow`, o check
+  sai com o novo `status: "warn"`, nomeia os escopos e dá `gh auth refresh --remove-scopes <escopos>` (ou um token fine-grained
+  em `GH_TOKEN`, quando o token vem do ambiente). Um aviso não derruba o doctor: `ok` fica `true` e o código de saída, 0; o texto
+  mostra `[warn]` com a dica, e a última linha conta os avisos. **Quem lê `wf doctor --json` passa a ver `"warn"` ao lado de
+  `"pass"` e `"fail"`.** O token nunca é lido, impresso nem registrado: só os escopos. O SECURITY.md ganha a seção "O token do
+  GitHub" (o que um vazamento expõe e o token fine-grained recomendado), e o `gh` falso dos testes do doctor responde com o que o
+  `gh` de verdade imprimiu (a gravação `token-scopes` do `record-gh-fixtures.ts`). Veja
+  [2.3](docs/usage/03-invocacao-no-cursor-ide.md#conferindo-o-ambiente-wf-doctor) e [SECURITY.md](SECURITY.md#o-token-do-github).
+
 - **O dashboard inicia um workflow, sem o chat nem um terminal.** O botão **Start**, na barra de cima do app, abre um painel:
   repositório, workflow, args em JSON e os dois tetos (`maxTokens` e `maxCents`, obrigatórios). O servidor resolve o que pode
   começar: só um repositório que o índice global de runs conhece e só um workflow que o runtime lista para ele (um caminho

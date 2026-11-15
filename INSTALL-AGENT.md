@@ -86,7 +86,9 @@ wf doctor --json
 
 Done when it exits 0 (`"ok": true`). Otherwise each failing entry in `checks` has a `message` and a `hint`: do what the
 hint says if you can, hand the user what needs them (the login, a newer Node, `gh auth login --hostname <host>` or
-`glab auth login --hostname <host>`), and run the doctor again. The checks, in this order: `node`, `dependencies`, `login`, `models`, `forge`, `mcp-server`,
+`glab auth login --hostname <host>`), and run the doctor again. An entry with `"status": "warn"` does not fail the doctor: it
+passed, and its `message` and `hint` name something to fix, such as a GitHub token that holds scopes the kit does not need.
+Relay each warning to the user, and do not print the token. The checks, in this order: `node`, `dependencies`, `login`, `models`, `forge`, `mcp-server`,
 `config`, `kit-version`, `sandbox`. `forge` asks the CLI of the repository's forge (`gh` for GitHub, `glab` for GitLab) and passes
 outside a git repository. The host of `origin` picks the forge: `github.com` and `gitlab.com` are known, and any other
 host (a self-managed GitLab) must be declared under the `forges` config key: until it is, the check fails with a message

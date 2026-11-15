@@ -218,9 +218,12 @@ quando o kit está em `~/.cursor-workflows/kit`, onde o instalador ([2.1 §3](01
 
 O servidor MCP que não sobe deixa pistas só no log do MCP do IDE. O `wf doctor` (`wf doctor --cwd
 /caminho/do/repo`) roda as verificações abaixo e, a cada falha, diz o que corrigir. Sai com 1 se alguma falhar e, com
-`--json`, imprime o relatório em JSON (`ok` e `checks`, cada um com `id`, `status`, `message` e, nas falhas, `hint`).
-Sem `--json`, cada falha traz a dica depois de `how to fix:`, e a última linha é `All good: N checks passed.` ou
-`N of M checks failed.`
+`--json`, imprime o relatório em JSON (`ok` e `checks`, cada um com `id`, `status`, `message` e, nas falhas e nos avisos,
+`hint`). O `status` é `pass`, `warn` ou `fail`: um `warn` é uma verificação que passou, mas com algo que vale corrigir (hoje,
+só o token do GitHub mais largo do que o kit precisa); ele não derruba o relatório (`ok` continua `true`) nem muda o código
+de saída. Sem `--json`, cada verificação começa com `[ok]`, `[warn]` ou `[FAIL]`, cada falha e cada aviso traz a dica depois de
+`how to fix:`, e a última linha é `All good: N checks passed.`, `All N checks passed, 1 with a warning.` ou
+`N of M checks failed.` (com `, 1 with a warning` no fim, se houver aviso).
 
 | `id` | O que confere | Falha típica |
 |---|---|---|
@@ -228,7 +231,7 @@ Sem `--json`, cada falha traz a dica depois de `how to fix:`, e a última linha 
 | `dependencies` | O comando e o script que o `.cursor/mcp.json` e o `.mcp.json` mandam rodar existem | `node_modules/.bin/tsx` não existe (`ENOENT`): rode `npm ci` na pasta do kit |
 | `login` | Uma chamada autenticada ao Cursor (`Cursor.me()`); o relatório mostra o nome da chave, nunca a chave nem o e-mail | Sem login: `wf login` ou `CURSOR_API_KEY` |
 | `models` | Cada modelo que a configuração faz os workflows usarem (papéis, rótulos e o `defaults` do workflow) está no catálogo da conta, por id ou alias | O modelo de um papel não existe na conta: `wf models` |
-| `forge` | O CLI do forge do repositório, instalado e com login. O host do `origin` decide qual: `github.com` é GitHub, `gitlab.com` é GitLab e qualquer outro host vem do mapa `forges` da configuração ([6.2](../reference/config.md)). O check roda `gh auth status --hostname <host>` ou `glab auth status --hostname <host>`, com o host como o `origin` o escreve (`host:porta` num `origin` https com porta). Fora de um repositório git, ou sem `origin`, passa e diz por quê | `gh` ou `glab` ausente ou sem login (`gh auth login --hostname <host>`, `glab auth login --hostname <host>`); host fora do mapa `forges` |
+| `forge` | O CLI do forge do repositório, instalado e com login. O host do `origin` decide qual: `github.com` é GitHub, `gitlab.com` é GitLab e qualquer outro host vem do mapa `forges` da configuração ([6.2](../reference/config.md)). O check roda `gh auth status --hostname <host>` ou `glab auth status --hostname <host>`, com o host como o `origin` o escreve (`host:porta` num `origin` https com porta). No GitHub, com o login em pé, roda também `gh api -i --silent user` e lê só o cabeçalho `X-OAuth-Scopes`: se o token tem `admin:public_key`, `admin:ssh_signing_key`, `admin:gpg_key`, `admin:org`, `admin:repo_hook`, `delete_repo` ou `workflow` (ou `write:` de uma das chaves), o check **avisa** (`warn`), nomeia os escopos e dá `gh auth refresh --remove-scopes <escopos>`; um token fine-grained não devolve o cabeçalho e passa ([SECURITY.md](../../SECURITY.md#o-token-do-github)). O doctor nunca lê nem imprime o token. Fora de um repositório git, ou sem `origin`, passa e diz por quê | `gh` ou `glab` ausente ou sem login (`gh auth login --hostname <host>`, `glab auth login --hostname <host>`); host fora do mapa `forges`. Aviso: token do GitHub com escopos que o kit não usa |
 | `mcp-server` | Inicia o servidor como o IDE (comando, args e env da entrada `workflows`, no repositório), pede `tools/list` e espera até 20 s (`WF_DOCTOR_TIMEOUT_MS` muda o limite, em milissegundos) | O servidor morre ao iniciar; o relatório traz o que ele escreveu no stderr |
 | `config` | Os dois arquivos de configuração ([6.2](../reference/config.md)) são válidos e todos os workflows resolvem, com o caminho do campo errado | Papel desconhecido, JSON inválido |
 | `sandbox` | Só quando o teto global `caps.requireSandbox` é `true` (o que o instalador grava): no Linux, o `bwrap` está no PATH. O relatório também diz se o `readBoundary` de um `sandbox.json` limita as leituras ao workspace (o do repositório foi medido; o de `~/.cursor/sandbox.json`, não); sem isso, uma etapa ainda lê o `~/.cursor/sdk/auth.json` ([5.1](../operating/01-governanca-e-custos.md#segurança)). Sem o teto, passa e diz que não é exigido | `bwrap` fora do PATH: instale o `bubblewrap` (a mensagem o cita), ou ponha `caps.requireSandbox` em `false` |

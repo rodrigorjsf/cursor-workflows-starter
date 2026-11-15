@@ -75,6 +75,8 @@ async function freezeAndCancel(job: { repo: string; pid: number }, jobId: string
 test("cancelling a frozen job kills the command it started through ctx.exec: no sleep outlives the cancel", async () => {
   const job = await startJob("frozen-exec");
   assert.ok(running(job.exec), "the sleep runs before the cancel");
+  // The command writes its pid when it runs, and the job process records the group as it spawns it: two processes, so the record can land a moment after the pid.
+  await waitFor("the job to record the command's group", () => recordedExecGroups(jobsDirIn(job.repo), "frozen-exec").length > 0);
   assert.deepEqual(recordedExecGroups(jobsDirIn(job.repo), "frozen-exec"), [job.exec], "the job recorded the command's group");
   await freezeAndCancel(job, "frozen-exec");
   await waitFor("the sleep started by ctx.exec to be gone", () => !running(job.exec));

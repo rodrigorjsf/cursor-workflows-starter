@@ -72,6 +72,34 @@ falhas de segurança.
   repositório.
 - **Revogue a chave no dashboard do Cursor** depois de testar o kit, e imediatamente em caso de suspeita.
 
+## O token do GitHub
+
+- **Qualquer etapa sem sandbox lê o token do `gh`.** O kit chama o `gh` com o login que você guardou nele: o `implement-issue`
+  lê a issue e abre o pull request, e o dashboard lista o Backlog e consulta o estado de um PR. Uma etapa que rode fora do
+  sandbox pode ler esse token (`gh auth token`) e usar tudo o que ele permite. Com o sandbox ligado, o kit só mediu a leitura
+  do `~/.cursor/sdk/auth.json` (veja acima), não a do token do `gh`.
+- **O que um vazamento expõe depende dos escopos do token.** Os que o kit não precisa e que fazem mais estrago:
+  - `admin:public_key` e `write:public_key` cadastram uma chave SSH na sua conta. Ela mantém acesso de escrita a todo
+    repositório em que você escreve e **continua valendo depois que o token é revogado**. `admin:ssh_signing_key`,
+    `write:ssh_signing_key`, `admin:gpg_key` e `write:gpg_key` cadastram chaves que assinam commits como você.
+  - `workflow` cria e altera os arquivos do GitHub Actions: reescrever o CI roda código com os segredos dele.
+  - `delete_repo` apaga os repositórios que você administra; `admin:org` e `admin:repo_hook` mexem na organização e nos
+    webhooks dos repositórios.
+  Fontes: [escopos de OAuth](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps) e [gerenciar
+  tokens de acesso pessoal](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens).
+- **O `wf doctor` avisa, e não falha.** Quando o forge do repositório é o GitHub (um `origin` no GitHub, ou um `origin` sem host, que o kit trata como GitHub), depois de `gh auth status`, o check `forge`
+  roda `gh api -i --silent user` e lê só o cabeçalho `X-OAuth-Scopes`, que um token clássico devolve. Se ele lista algum dos
+  escopos acima, o check sai com `status: "warn"` (o `ok` do relatório continua `true` e o código de saída, 0), nomeia os
+  escopos e diz como tirá-los: `gh auth refresh --remove-scopes <escopos>`. O doctor não lê, não imprime nem registra o
+  token; só os escopos. Um token fine-grained não devolve esse cabeçalho, então o doctor não vê as permissões dele: com
+  `GH_TOKEN` no ambiente e sem o cabeçalho, o check passa e diz que há um token com escopo em uso. O doctor também não lê o token do `glab`.
+- **O token recomendado é um fine-grained, de um repositório só.** Crie-o em *Settings → Developer settings → Personal access
+  tokens → Fine-grained tokens*, com acesso só ao repositório alvo, as permissões **Contents**, **Pull requests** e
+  **Issues** em leitura e escrita, **Metadata** em leitura e **uma data de expiração**. Ponha-o em `GH_TOKEN` (num host do GitHub Enterprise Server, em `GH_ENTERPRISE_TOKEN`) no ambiente que
+  abre o IDE e o terminal: o `gh` o usa no lugar do login guardado
+  ([`gh help environment`](https://cli.github.com/manual/gh_help_environment)). Sem a permissão **Workflows**, o push de um
+  commit que altera um arquivo de `.github/workflows/` é recusado, o que é o desejado.
+
 ## Nunca versione
 
 `.workflows/`, `metrics-export/`, bancos `*.db` (incluindo `~/.cursor-workflows/metrics.db`), `auth.json`,

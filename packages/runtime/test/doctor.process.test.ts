@@ -1,7 +1,8 @@
 // Seam: the process. `wf doctor` is spawned (against the fake Cursor SDK) in a temporary repo with a temporary home, as
 // the IDE's environment would be: the kit sits at ~/.cursor-workflows/kit, the repo has the MCP configs `wf init` writes,
-// and `gh`, `glab` and `node` are whatever the PATH of the process says (git is the real one). The tests read the report,
-// the exit code and the messages; they never import the doctor.
+// and `gh`, `glab` and `node` are whatever the PATH of the process says (git is the real one). The fake `gh` answers `gh api -i --silent user`
+// from the recording of the real one (packages/runtime/test/fixtures/gh/recordings.json), setting only the scopes header. The tests read the
+// report, the exit code and the messages; they never import the doctor.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -10,6 +11,7 @@ import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { GH_RECORDINGS_PATH, type GhRecordingsFile, TOKEN_SCOPES_RECORDING } from "../../../scripts/verify/record-gh-fixtures.js";
 import { type Recording, recorded } from "./glab-recordings.js";
 import { copyKit } from "./kit-copy.js";
 
@@ -99,15 +101,60 @@ function homeWithConfig(config: unknown): string {
   return userHome;
 }
 
+interface FakeGhOptions {
+  /** The value of the `X-Oauth-Scopes` header in the recorded answer to `gh api -i --silent user`: a classic token's scopes. `null` leaves the header out, as GitHub does for a fine-grained token. Default: `repo`, the scope the kit needs. */
+  scopes?: string | null;
+  /** Makes `gh api` fail with this on stderr and nothing on stdout, as a gh that cannot reach GitHub does. */
+  apiFails?: string;
+  /** Makes `gh api` print the recorded headers without the scopes header and exit 1 with nothing on stderr: an answer that is an error and says nothing about why. */
+  apiFailsWithHeaders?: true;
+  /** A token this gh holds: `auth status` prints it, and `auth token` answers with it, as `gh auth status --show-token` and `gh auth token` would. */
+  token?: string;
+}
+
+const shellQuoted = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`;
+
+/**
+ * The shell that makes a fake `gh` answer `gh api -i --silent user` as the real one did when it was recorded: the recorded
+ * headers with only the scopes header set, for the host of any `--hostname` (or none), and a refusal of any other command line.
+ */
+function fakeGhApi({ scopes = "repo", apiFails, apiFailsWithHeaders }: FakeGhOptions): string[] {
+  if (apiFails !== undefined) return [`printf '%s\\n' ${shellQuoted(apiFails)} >&2`, "exit 1"];
+  const recording = (JSON.parse(readFileSync(GH_RECORDINGS_PATH, "utf8")) as GhRecordingsFile).recordings[TOKEN_SCOPES_RECORDING];
+  assert.ok(recording, `${GH_RECORDINGS_PATH} has no "${TOKEN_SCOPES_RECORDING}" recording: run scripts/verify/record-gh-fixtures.ts`);
+  const stdout = scopes === null || apiFailsWithHeaders ? recording.stdout.replace(/^X-Oauth-Scopes:.*\r?\n/m, "") : recording.stdout.replace(/^X-Oauth-Scopes:.*$/m, `X-Oauth-Scopes: ${scopes}`);
+  assert.notEqual(stdout, recording.stdout, "the recording has an X-Oauth-Scopes header to set");
+  const host = recording.args.indexOf("--hostname");
+  const withHost = `"${recording.args.slice(0, host + 1).join(" ")} "*" ${recording.args.slice(host + 2).join(" ")}"`;
+  const withoutHost = `"${recording.args.filter((_, at) => at !== host && at !== host + 1).join(" ")}"`;
+  return [
+    'case "$*" in',
+    `  ${withHost} | ${withoutHost}) printf '%s' ${shellQuoted(stdout)}; exit ${apiFailsWithHeaders ? 1 : 0} ;;`,
+    "esac",
+    'echo "gh: not the command line that was recorded: $*" >&2',
+    "exit 1",
+  ];
+}
+
 /**
  * A forge CLI that logs its arguments, then answers `auth status` as a logged-in user would. `said` makes it a logged-out one: a string
- * is what it prints on stderr before it exits 1, and a recording is the real glab's answer (its stderr and its exit code).
+ * is what it prints on stderr before it exits 1, and a recording is the real glab's answer (its stderr and its exit code). The `gh`
+ * answers `api` from the recording of the real one (`options`).
  */
-function fakeForgeCli(name: "gh" | "glab", said?: string | Recording): { dir: string; calls: () => string[] } {
+function fakeForgeCli(name: "gh" | "glab", said?: string | Recording, options: FakeGhOptions = {}): { dir: string; calls: () => string[] } {
   const log = join(sandbox, `${name}-${++counter}.log`);
   const answer = typeof said === "string" ? { exitCode: 1, stderr: `${said}\n` } : (said ?? { exitCode: 0, stderr: "" });
-  const quoted = `'${answer.stderr.replaceAll("'", `'\\''`)}'`; // printf is a builtin: the PATH of a doctor run holds no `cat`
-  const dir = fakeBin(name, `echo "$*" >> "${log}"\nprintf '%s' ${quoted} >&2\nexit ${answer.exitCode}`);
+  const quoted = shellQuoted(answer.stderr); // printf is a builtin: the PATH of a doctor run holds no `cat`
+  const { token } = options;
+  const script = [
+    `echo "$*" >> "${log}"`,
+    ...(token === undefined ? [] : [`if [ "$1 $2" = "auth token" ]; then printf '%s\\n' ${shellQuoted(token)}; exit 0; fi`]),
+    ...(name === "gh" ? ['if [ "$1" = api ]; then', ...fakeGhApi(options), "fi"] : []),
+    ...(token === undefined ? [] : [`printf '%s\\n' ${shellQuoted(`  - Token: ${token}`)}`]),
+    `printf '%s' ${quoted} >&2`,
+    `exit ${answer.exitCode}`,
+  ].join("\n");
+  const dir = fakeBin(name, script);
   return { dir, calls: () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []) };
 }
 
@@ -154,7 +201,7 @@ function wf(repo: string, args: string[], { bins = [ghLoggedIn], env: extra, kit
 
 interface Check {
   id: string;
-  status: "pass" | "fail";
+  status: "pass" | "warn" | "fail";
   message: string;
   hint?: string;
 }
@@ -325,11 +372,12 @@ test("the forge check of a GitHub repository runs `gh auth status` for the origi
   const gh = fakeForgeCli("gh");
   const ok = checkOf(reportOf(doctor(repo, { bins: [gh.dir] })), "forge");
   assert.equal(ok.status, "pass", ok.message);
-  assert.deepEqual(gh.calls(), ["auth status --hostname github.com"]);
+  assert.deepEqual(gh.calls(), ["auth status --hostname github.com", "api --hostname github.com -i --silent user"], "once logged in, the token's scopes are asked for, from the same host");
 
   const loggedOutGh = fakeForgeCli("gh", "You are not logged into any GitHub hosts.");
   const loggedOut = checkOf(reportOf(doctor(repo, { bins: [loggedOutGh.dir] })), "forge");
   assert.equal(loggedOut.status, "fail");
+  assert.deepEqual(loggedOutGh.calls(), ["auth status --hostname github.com"], "a login that failed has no token to ask about");
   assert.match(loggedOut.message, /not logged into any GitHub hosts/);
   assert.match(loggedOut.hint ?? "", /gh auth login --hostname github\.com/);
 
@@ -388,7 +436,158 @@ test("a declared GitHub host is checked with gh for that host, and a missing gla
   const gh = fakeForgeCli("gh");
   const forge = checkOf(reportOf(doctor(repo, { bins: [gh.dir] })), "forge");
   assert.equal(forge.status, "pass", forge.message);
-  assert.deepEqual(gh.calls(), ["auth status --hostname ghe.example.com"]);
+  assert.deepEqual(gh.calls(), ["auth status --hostname ghe.example.com", "api --hostname ghe.example.com -i --silent user"]);
+});
+
+test("the forge check warns, and the doctor still exits 0, when the GitHub token holds scopes the kit does not need: it names them, and the hint removes them", () => {
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  const gh = fakeForgeCli("gh", undefined, { scopes: "admin:public_key, delete_repo, repo" });
+  const r = doctor(repo, { bins: [gh.dir] });
+  assert.equal(r.status, 0, "a warning does not fail the doctor: " + r.stdout + r.stderr);
+  const report = reportOf(r);
+  assert.equal(report.ok, true);
+  const forge = checkOf(report, "forge");
+  assert.equal(forge.status, "warn");
+  assert.match(forge.message, /admin:public_key, delete_repo/);
+  assert.doesNotMatch(forge.message, /\brepo\b/, "the scope the kit needs is not named as a problem");
+  assert.match(forge.hint ?? "", /gh auth refresh --remove-scopes admin:public_key,delete_repo --hostname github\.com/);
+  assert.match(forge.hint ?? "", /fine-grained token limited to the target repository, with an expiry, in GH_TOKEN/);
+  assert.equal(report.checks.filter((c) => c.status !== "pass").length, 1, "only the forge check has something to say");
+});
+
+test("a token that holds only scopes the kit can live with passes the forge check, and a write scope that plants a key is as broad as the admin one", () => {
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  const fine = checkOf(reportOf(doctor(repo, { bins: [fakeForgeCli("gh", undefined, { scopes: "gist, read:org, repo" }).dir] })), "forge");
+  assert.equal(fine.status, "pass", fine.message);
+  assert.match(fine.message, /gist, read:org, repo/);
+  assert.equal(fine.hint, undefined);
+
+  const classic = checkOf(reportOf(doctor(repo, { bins: [fakeForgeCli("gh", undefined, { scopes: "repo, write:public_key, write:gpg_key, workflow" }).dir] })), "forge");
+  assert.equal(classic.status, "warn");
+  assert.match(classic.message, /write:public_key, write:gpg_key, workflow/);
+
+  const none = checkOf(reportOf(doctor(repo, { bins: [fakeForgeCli("gh", undefined, { scopes: "" }).dir] })), "forge");
+  assert.equal(none.status, "pass", "a classic token with no scopes has nothing broad");
+});
+
+test("a token with no scopes header is a fine-grained one: it passes, and says a scoped token is in use when GH_TOKEN holds it", () => {
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  const gh = fakeForgeCli("gh", undefined, { scopes: null });
+  const fromEnv = checkOf(reportOf(doctor(repo, { bins: [gh.dir], env: { GH_TOKEN: "fine-grained-token-from-the-environment" } })), "forge");
+  assert.equal(fromEnv.status, "pass", fromEnv.message);
+  assert.match(fromEnv.message, /a scoped token is in use/);
+  assert.match(fromEnv.message, /GH_TOKEN/);
+  assert.doesNotMatch(fromEnv.message, /fine-grained-token-from-the-environment/);
+
+  const stored = checkOf(reportOf(doctor(repo, { bins: [gh.dir] })), "forge");
+  assert.equal(stored.status, "pass", stored.message);
+  assert.match(stored.message, /no `X-OAuth-Scopes` header/);
+  assert.doesNotMatch(stored.message, /GH_TOKEN/);
+});
+
+test("a token in GH_TOKEN with broad scopes warns with the hint that fits it: `gh auth refresh` cannot narrow a token from the environment", () => {
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  const gh = fakeForgeCli("gh", undefined, { scopes: "repo, workflow" });
+  const forge = checkOf(reportOf(doctor(repo, { bins: [gh.dir], env: { GH_TOKEN: "classic-token-from-the-environment" } })), "forge");
+  assert.equal(forge.status, "warn");
+  assert.match(forge.message, /workflow/);
+  assert.match(forge.hint ?? "", /GH_TOKEN/);
+  assert.doesNotMatch(forge.hint ?? "", /--remove-scopes/, "the command that cannot work for a token from the environment is not offered");
+});
+
+test("when GitHub cannot be asked for the scopes the forge check warns with what gh said, and the doctor still exits 0", () => {
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  const r = doctor(repo, { bins: [fakeForgeCli("gh", undefined, { apiFails: "error connecting to api.github.com" }).dir] });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const forge = checkOf(reportOf(r), "forge");
+  assert.equal(forge.status, "warn");
+  assert.match(forge.message, /could not read the token's scopes/);
+  assert.match(forge.message, /error connecting to api\.github\.com/);
+  assert.match(forge.hint ?? "", /gh api --hostname github\.com -i --silent user/);
+});
+
+test("a failed `gh api` that says nothing on stderr does not put the response headers in the warning", () => {
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  const r = doctor(repo, { bins: [fakeForgeCli("gh", undefined, { scopes: null, apiFailsWithHeaders: true }).dir] });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const forge = checkOf(reportOf(r), "forge");
+  assert.equal(forge.status, "warn");
+  assert.match(forge.message, /could not read the token's scopes/);
+  assert.doesNotMatch(forge.message, /HTTP\/2|Access-Control|X-Github|Content-Type/i, "the answer's headers are not what the report says about a failure");
+});
+
+test("a token for a *.ghe.com host comes from GH_TOKEN, as for github.com, and not from the enterprise variables", () => {
+  const repo = gitRepoCopy("git@acme.ghe.com:acme/widgets.git");
+  put(repoConfigPath(repo), { forges: { "acme.ghe.com": "github" } });
+  const gh = fakeForgeCli("gh", undefined, { scopes: null });
+  const fromGhToken = checkOf(reportOf(doctor(repo, { bins: [gh.dir], env: { GH_TOKEN: "fine-grained-token-for-the-ghe-com-tenant" } })), "forge");
+  assert.equal(fromGhToken.status, "pass", fromGhToken.message);
+  assert.match(fromGhToken.message, /a scoped token is in use \(GH_TOKEN\)/);
+
+  const classic = checkOf(reportOf(doctor(repo, { bins: [fakeForgeCli("gh", undefined, { scopes: "repo, workflow" }).dir], env: { GH_TOKEN: "classic-token-for-the-ghe-com-tenant" } })), "forge");
+  assert.equal(classic.status, "warn");
+  assert.match(classic.hint ?? "", /in GH_TOKEN/, "the replacement goes where gh reads it for this host");
+
+  // A self-managed Enterprise Server host reads the enterprise variables, and GH_TOKEN there is for github.com.
+  const server = gitRepoCopy("git@ghe.example.com:acme/widgets.git");
+  put(repoConfigPath(server), { forges: { "ghe.example.com": "github" } });
+  const own = checkOf(reportOf(doctor(server, { bins: [gh.dir], env: { GH_ENTERPRISE_TOKEN: "fine-grained-token-for-the-server" } })), "forge");
+  assert.match(own.message, /a scoped token is in use \(GH_ENTERPRISE_TOKEN\)/);
+  const other = checkOf(reportOf(doctor(server, { bins: [gh.dir], env: { GH_TOKEN: "token-for-github-com-only" } })), "forge");
+  assert.doesNotMatch(other.message, /GH_TOKEN/, "a token for github.com is not the one used against this host");
+});
+
+test("the scopes are not asked for outside GitHub: a GitLab repository, and a repository with no forge, make no `gh api` call", () => {
+  const glab = fakeForgeCli("glab");
+  const gh = fakeForgeCli("gh", undefined, { scopes: "admin:org" });
+  const onGitlab = checkOf(reportOf(doctor(gitRepoCopy("https://gitlab.com/acme/widgets.git"), { bins: [glab.dir, gh.dir] })), "forge");
+  assert.equal(onGitlab.status, "pass", onGitlab.message);
+  assert.equal(checkOf(reportOf(doctor(repoCopy(), { bins: [gh.dir] })), "forge").status, "pass");
+  assert.deepEqual(gh.calls(), []);
+});
+
+test("the token never reaches the report or the console: the doctor does not ask gh for it, and prints only the scopes header", () => {
+  const token = "not-a-shaped-secret-4711-the-fake-gh-holds"; // no credential shape, so only the doctor's own care keeps it out, not the redactor
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  for (const scopes of ["admin:public_key, repo", "repo"]) {
+    const gh = fakeForgeCli("gh", undefined, { scopes, token });
+    for (const args of [["--json"], []]) {
+      const r = doctor(repo, { bins: [gh.dir], args });
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      assert.ok(!r.stdout.includes(token) && !r.stderr.includes(token), `the token appears in the output of \`wf doctor ${args.join(" ")}\` for the scopes "${scopes}"`);
+    }
+    assert.ok(gh.calls().every((call) => !/token|-t\b|--show-token/.test(call)), `gh was asked for the token: ${gh.calls().join(" | ")}`);
+    assert.deepEqual(new Set(gh.calls()), new Set(["auth status --hostname github.com", "api --hostname github.com -i --silent user"]));
+  }
+});
+
+test("--json shows a warning as `status: warn` with its hint and `ok: true`, and the checks without a warning keep their shape", () => {
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  const report = reportOf(doctor(repo, { bins: [fakeForgeCli("gh", undefined, { scopes: "admin:public_key, repo" }).dir] }));
+  assert.equal(report.ok, true);
+  assert.deepEqual(
+    report.checks.map((c) => [c.id, c.status]),
+    [["node", "pass"], ["dependencies", "pass"], ["login", "pass"], ["models", "pass"], ["forge", "warn"], ["mcp-server", "pass"], ["config", "pass"], ["kit-version", "pass"], ["sandbox", "pass"]],
+  );
+  assert.deepEqual(Object.keys(checkOf(report, "forge")), ["id", "title", "status", "message", "hint"]);
+  assert.deepEqual(Object.keys(checkOf(report, "node")), ["id", "title", "status", "message"]);
+});
+
+test("without --json a warning prints as `[warn]` with its fix hint, and the last line counts it: the exit code stays 0 unless a check failed", () => {
+  const repo = gitRepoCopy("git@github.com:acme/widgets.git");
+  const gh = fakeForgeCli("gh", undefined, { scopes: "admin:public_key, repo" });
+  const warned = doctor(repo, { bins: [gh.dir], args: [] });
+  assert.equal(warned.status, 0, warned.stdout + warned.stderr);
+  assert.match(warned.stdout, /\[warn\]\s+Forge CLI: GitHub at github\.com: .*admin:public_key/);
+  assert.match(warned.stdout, /how to fix: Remove them with `gh auth refresh --remove-scopes admin:public_key --hostname github\.com`/);
+  assert.match(warned.stdout, /\[ok\]\s+Node\.js/);
+  assert.match(warned.stdout, /All 9 checks passed, 1 with a warning\./);
+
+  const both = doctor(repo, { bins: [gh.dir], args: [], env: { FAKE_SDK_LOGGED_OUT: "1" } });
+  assert.equal(both.status, 1, "a failure still fails the doctor");
+  assert.match(both.stdout, /\[warn\]\s+Forge CLI/);
+  assert.match(both.stdout, /\[FAIL\]\s+Cursor SDK login/);
+  assert.match(both.stdout, /2 of 9 checks failed, 1 with a warning\./);
 });
 
 test("an origin on a host nobody declared fails the forge check naming the host and the `forges` key, and a hint to declare it", () => {
@@ -411,7 +610,7 @@ test("outside a git repository, or in one with no origin, the forge check passes
   const gh = fakeForgeCli("gh");
   const local = checkOf(reportOf(doctor(gitRepoCopy("/srv/git/widgets.git"), { bins: [gh.dir] })), "forge");
   assert.equal(local.status, "pass", local.message);
-  assert.deepEqual(gh.calls(), ["auth status"]);
+  assert.deepEqual(gh.calls(), ["auth status", "api -i --silent user"]);
 });
 
 test("outside a git repository the forge check passes whatever the language git speaks: git is asked in the C locale", () => {
