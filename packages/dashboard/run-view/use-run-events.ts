@@ -9,6 +9,7 @@ import type { JobStart } from "./resume-command.js";
 import { useEffect, useRef, useState } from "react";
 import { batcher } from "./batch.js";
 import { runApiPath } from "./location.js";
+import { parseRunEvent } from "./run-event.js";
 import type { RunEvent } from "./run-graph.js";
 
 /** `waiting`: the API does not know the run yet. `closed`: the stream was read to the end and shut. */
@@ -130,11 +131,9 @@ export function useRunEvents(runId: string): RunFeed {
       const id = Number(message.lastEventId);
       if (id <= lastId.current) return;
       lastId.current = id;
-      try {
-        batch.push({ id, event: JSON.parse(message.data) as RunEvent });
-      } catch {
-        return; // a line that is not JSON is not an event
-      }
+      const parsed = parseRunEvent(message.data);
+      if (parsed.ok) batch.push({ id, event: parsed.event });
+      else console.warn(`dashboard: dropped line ${id} of the event stream (${parsed.why})`); // not an event: the code that reads events would throw on it
       goQuiet();
     };
     source.onerror = () => setConnection(source.readyState === EventSource.CLOSED ? "closed" : "reconnecting");

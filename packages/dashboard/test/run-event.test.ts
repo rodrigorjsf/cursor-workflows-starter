@@ -5,8 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { argsHashOf } from "../run-view/resume-command.js";
-import { buildRunGraph } from "../run-view/run-graph.js";
-import { type RunEvent } from "../run-view/run-graph.js";
+import { buildRunGraph, type RunEvent } from "../run-view/run-graph.js";
 import { parseRunEvent } from "../run-view/run-event.js";
 
 /** What a malformed stream can hold: JSON that is not an event, and text that is not JSON. */

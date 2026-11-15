@@ -353,7 +353,7 @@ const isWorkflow = (e: ts.Expression): boolean =>
   (ts.isObjectLiteralExpression(e) && e.properties.some((p) => p.name !== undefined && ts.isIdentifier(p.name) && p.name.text === "meta")) ||
   ((ts.isSatisfiesExpression(e) || ts.isAsExpression(e) || ts.isParenthesizedExpression(e)) && isWorkflow(e.expression));
 
-/** Lines with a default export that is not a workflow definition; for a PascalCase .tsx, 0 when it exports no function of its name. */
+/** Lines with a default export that is not a workflow definition; for a PascalCase .tsx, 0 when it exports no function, constant or class of its name (an error boundary has to be a class). */
 function badExports(path: string, text: string): number[] {
   const sf = parse(path, text);
   const found: number[] = [];
@@ -363,7 +363,7 @@ function badExports(path: string, text: string): number[] {
     const isExport = modifiers.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
     if (ts.isExportAssignment(s) && !s.isExportEquals && !isWorkflow(s.expression)) found.push(lineOf(sf, s));
     if (isExport && modifiers.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword)) found.push(lineOf(sf, s));
-    if (isExport && ts.isFunctionDeclaration(s) && s.name) exported.add(s.name.text);
+    if (isExport && (ts.isFunctionDeclaration(s) || ts.isClassDeclaration(s)) && s.name) exported.add(s.name.text);
     if (isExport && ts.isVariableStatement(s)) for (const d of s.declarationList.declarations) if (ts.isIdentifier(d.name)) exported.add(d.name.text);
   }
   const name = basename(path).replace(/\.tsx$/, "");
@@ -377,6 +377,7 @@ test("the export check fires on a default export that is not a workflow and on a
   assert.deepEqual(badExports("w.ts", 'export default defineWorkflow({ meta: { name: "w" } });\n'), []);
   assert.deepEqual(badExports("w.ts", 'export default { meta: { name: "fixture" }, async run() {} };\n'), []);
   assert.deepEqual(badExports("app/Panel.tsx", "export function Panel() { return null; }\nexport function Row() { return null; }\n"), []);
+  assert.deepEqual(badExports("app/Panel.tsx", "export class Panel extends Component { render() { return null; } }\n"), [], "a class component: an error boundary cannot be a function");
 });
 
 test("exports are named: the one default export is a workflow definition, and a PascalCase component file exports its component", () => {
