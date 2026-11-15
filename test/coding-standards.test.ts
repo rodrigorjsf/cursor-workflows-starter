@@ -740,6 +740,201 @@ test("every browser module that opens an EventSource applies its messages throug
   assert.deepEqual(scan(BROWSER_CODE, unbatchedStreams), [], 'import { batcher } from "./batch.js" (packages/dashboard/run-view/batch.ts) and deliver the stream\'s messages through it');
 });
 
+interface CssDeclaration {
+  line: number;
+  /** The rule the declaration sits in: its selector list, or the prelude of an at-rule that holds declarations. */
+  rule: string;
+  /** The at-rule preludes around the rule, outermost first: `@media (prefers-reduced-motion: reduce)`. */
+  within: string[];
+  property: string;
+  /** The value, without `!important`. */
+  value: string;
+}
+
+/** Every declaration of a stylesheet, comments skipped. A `;`, `{` or `}` inside a string or a parenthesis does not split. */
+function cssDeclarations(css: string): CssDeclaration[] {
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, " "));
+  const found: CssDeclaration[] = [];
+  const preludes: string[] = [];
+  let buffer = "";
+  let bufferLine = 1;
+  let line = 1;
+  let parens = 0;
+  let quote = "";
+  const flush = () => {
+    const declaration = buffer.trim();
+    buffer = "";
+    const colon = declaration.indexOf(":");
+    if (!declaration || declaration.startsWith("@") || colon < 1) return;
+    found.push({
+      line: bufferLine,
+      rule: preludes.at(-1) ?? "",
+      within: preludes.slice(0, -1).filter((p) => p.startsWith("@")),
+      property: declaration.slice(0, colon).trim().toLowerCase(),
+      value: declaration.slice(colon + 1).replace(/\s*!important\s*$/, "").trim(),
+    });
+  };
+  for (const ch of text) {
+    if (ch === "\n") line++;
+    if (buffer.trim() === "" && ch.trim() !== "") bufferLine = line;
+    if (quote) {
+      if (ch === quote) quote = "";
+      buffer += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      buffer += ch;
+    } else if (ch === "(") {
+      parens++;
+      buffer += ch;
+    } else if (ch === ")") {
+      parens--;
+      buffer += ch;
+    } else if (parens === 0 && ch === "{") {
+      preludes.push(buffer.trim().replace(/\s+/g, " "));
+      buffer = "";
+    } else if (parens === 0 && ch === "}") {
+      flush();
+      preludes.pop();
+    } else if (parens === 0 && ch === ";") {
+      flush();
+    } else {
+      buffer += ch;
+    }
+  }
+  return found;
+}
+
+test("the stylesheet reader splits declarations at the rule they sit in, through comments, strings, parentheses and nested at-rules", () => {
+  const css = [
+    "/* a { padding: 99px; } */",
+    ".a, .b { padding: 4px 8px; content: \";}\"; margin: calc(1px + var(--x, 2px)) }",
+    "@media (max-width: 600px) {",
+    "  .c { gap: 0 !important; }",
+    "}",
+    "@import url(x.css);",
+  ].join("\n");
+  assert.deepEqual(cssDeclarations(css), [
+    { line: 2, rule: ".a, .b", within: [], property: "padding", value: "4px 8px" },
+    { line: 2, rule: ".a, .b", within: [], property: "content", value: '";}"' },
+    { line: 2, rule: ".a, .b", within: [], property: "margin", value: "calc(1px + var(--x, 2px))" },
+    { line: 4, rule: ".c", within: ["@media (max-width: 600px)"], property: "gap", value: "0" },
+  ]);
+});
+
+// --- Dashboard CSS ---
+
+/** The sizes the stylesheets space, set and round by: padding, margin, gap, font-size and border-radius, longhands included. */
+const SIZE_PROPERTY = /^(?:(?:padding|margin)(?:-[a-z-]+)?|(?:row-|column-)?gap|font-size|border(?:-[a-z]+)*-radius)$/;
+/** The parts of a value, split at the spaces outside parentheses. */
+const valueParts = (value: string): string[] => {
+  const parts: string[] = [];
+  let depth = 0;
+  let part = "";
+  for (const ch of value) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (ch.trim() === "" && depth === 0) {
+      if (part) parts.push(part);
+      part = "";
+    } else part += ch;
+  }
+  return part ? [...parts, part] : parts;
+};
+/** A length that is no token: a number with a unit, other than a 1 or 2px hairline or offset, or a share of the parent or of the viewport (`%`, `vh`, `vw`). Zero has no unit here. */
+const offScaleLengths = (text: string): string[] =>
+  (text.replace(/var\(--[\w-]+(?:\s*,[^)]*)?\)/g, "").match(/-?\d*\.?\d+[a-z%]+/gi) ?? []).filter((length) => !/^-?[12]px$/.test(length) && !/(%|vh|vw)$/.test(length));
+
+/** Lines of the padding, margin, gap, font-size and border-radius declarations that set a size by hand instead of a token, `0`, a share of the parent or the viewport, or a 1 or 2px hairline. */
+function offScaleSizes(_path: string, text: string): number[] {
+  const lines = cssDeclarations(text)
+    .filter((d) => SIZE_PROPERTY.test(d.property) && valueParts(d.value).some((part) => !part.startsWith("var(") && offScaleLengths(part).length > 0))
+    .map((d) => d.line);
+  return [...new Set(lines)];
+}
+
+test("the size token check fires on a literal size in padding, margin, gap, font-size or border-radius, and passes tokens, zero, hairlines, percentages and other properties", () => {
+  const css = [
+    ".a { padding: 6px var(--space-2); }", // 1
+    ".b { gap: var(--space-1) 10px; }", // 2
+    ".c { font-size: 11px; margin-bottom: 0.5rem; }", // 3 (two declarations, one line)
+    ".d { border-top-left-radius: 8px; }", // 4
+    ".e { padding: 0 var(--space-3) 2px; margin-top: -1px; border-radius: 50%; gap: 0; font-size: var(--text-xs); }",
+    ".f { margin: 0 calc(-1 * var(--space-4)); width: 14px; height: 14px; min-height: 32px; border: 2px solid red; }",
+    ".g { padding: var(--space-1, 4px); scroll-padding: 0 12px; margin: 15vh auto 0; }",
+    "@media (max-width: 600px) { .h { padding: 20px; } }", // 8
+  ].join("\n");
+  assert.deepEqual(offScaleSizes("a.css", css), [1, 2, 3, 4, 8]);
+});
+
+/** The stylesheets of the two dashboard pages. */
+const DASHBOARD_CSS = ["packages/dashboard/app", "packages/dashboard/run-view"].flatMap((d) => files(d, /\.css$/));
+
+test("the dashboard stylesheets take every padding, margin, gap, font size and corner radius from the token scales", () => {
+  assert.ok(DASHBOARD_CSS.length >= 3, `found ${DASHBOARD_CSS.join(", ")}`);
+  assert.deepEqual(scan(DASHBOARD_CSS, offScaleSizes), [], "use --space-1…6, --text-xs…2xl or --radius-* (app/tokens.css); a literal stays only as 0, a percentage or a 1 or 2px hairline");
+});
+
+/** The selectors of a rule's list, split at the commas outside parentheses (`:is(a, b)` stays whole). */
+const selectorList = (rule: string): string[] => {
+  const selectors: string[] = [];
+  let depth = 0;
+  let selector = "";
+  for (const ch of rule) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (ch === "," && depth === 0) {
+      selectors.push(selector.trim());
+      selector = "";
+    } else selector += ch;
+  }
+  return [...selectors, selector.trim()].filter(Boolean);
+};
+
+const REDUCED_MOTION = /^@media\s+\(prefers-reduced-motion:\s*reduce\)$/;
+/** `animation` for `animation` and its longhands, `transition` for `transition` and its longhands, otherwise undefined. */
+const motionOf = (property: string): "animation" | "transition" | undefined => (/^animation(-|$)/.test(property) ? "animation" : /^transition(-|$)/.test(property) ? "transition" : undefined);
+
+/**
+ * Lines of the declarations that set an `animation` or a `transition` for a selector the same file does not set to `none` of
+ * that kind under `@media (prefers-reduced-motion: reduce)`. A selector is compared as written, one by one of its list.
+ */
+function unresetMotion(_path: string, text: string): number[] {
+  const declarations = cssDeclarations(text);
+  const reset = new Set(
+    declarations
+      .filter((d) => d.within.some((w) => REDUCED_MOTION.test(w)) && d.value === "none" && motionOf(d.property))
+      .flatMap((d) => selectorList(d.rule).map((selector) => `${motionOf(d.property)} ${selector}`)),
+  );
+  const lines = declarations
+    .filter((d) => motionOf(d.property) && d.value !== "none" && !d.within.some((w) => REDUCED_MOTION.test(w) || w.startsWith("@keyframes")))
+    .filter((d) => selectorList(d.rule).some((selector) => !reset.has(`${motionOf(d.property)} ${selector}`)))
+    .map((d) => d.line);
+  return [...new Set(lines)];
+}
+
+test("the reduced-motion check fires on an animation or a transition with no reset to none under prefers-reduced-motion in the same file, and passes the pairs", () => {
+  const css = [
+    ".a { animation: pulse 1s infinite; }", // 1: no reset
+    ".b { transition: color 1s; }", // 2: reset is for the animation only
+    ".c, .d { animation: spin 1s; }", // 3: .d has no reset
+    ".e { transition-property: opacity; }", // 4: no reset
+    "@media (prefers-reduced-motion: reduce) { .b { animation: none; } .c { animation: none; } .x { transition: none; } }",
+    ".f { animation: pulse 1s; }", // 6: its reset is in a media query of another kind
+    "@media (max-width: 600px) { .f { animation: none; } }",
+    ".g, .h { animation: pulse 1s; transition: opacity 1s; }",
+    "@media (prefers-reduced-motion: reduce) { .g, .h { animation: none; transition: none; } }",
+    ".i { animation: none; }",
+    "@keyframes pulse { 50% { opacity: 0.5; } }",
+  ].join("\n");
+  assert.deepEqual(unresetMotion("a.css", css), [1, 2, 3, 4, 6]);
+  assert.deepEqual(unresetMotion("a.css", ".a { animation: spin 1s; }\n@media (prefers-reduced-motion: reduce) { .a { animation: none; } }\n"), []);
+});
+
+test("every animation and transition of the dashboard stylesheets is reset to none under prefers-reduced-motion, in the file that sets it", () => {
+  assert.ok(DASHBOARD_CSS.some((f) => /\banimation:/.test(read(f))), "the check reads a stylesheet that animates");
+  assert.deepEqual(scan(DASHBOARD_CSS, unresetMotion), [], "add the selector to the `@media (prefers-reduced-motion: reduce)` block of the same file, set to `animation: none` or `transition: none`");
+});
+
 // --- Security ---------------------------------------------------------------------------------------------------------
 
 const HTML_SINKS = new Set(["innerHTML", "outerHTML", "insertAdjacentHTML", "dangerouslySetInnerHTML"]);
