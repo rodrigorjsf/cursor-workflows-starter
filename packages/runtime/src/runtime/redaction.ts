@@ -17,6 +17,9 @@ export const REDACTED = "[REDACTED]";
 /** Variables named like this hold secrets. Case-insensitive, anywhere in the name. */
 const SECRET_NAME = /KEY|TOKEN|SECRET|PASSWORD/i;
 
+/** Is `name` the name of a variable that holds a secret? The one rule the redactor and the scrubbed environment of a command (`CommandSpec.scrubSecrets`) share. */
+export const isSecretName = (name: string): boolean => SECRET_NAME.test(name);
+
 /**
  * Values shorter than this are not redacted: replacing a 2-letter value (`KEYBOARD_LAYOUT=us`) would mangle ordinary words
  * everywhere. Real credentials are longer.

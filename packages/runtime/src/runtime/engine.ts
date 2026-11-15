@@ -1205,7 +1205,7 @@ async function executeRun<A, R>(
     const flushing = setInterval(() => log.flush(), EXEC_FLUSH_MS);
     let done: CommandOutcome;
     try {
-      done = await runCommand({ command, args, cwd, env: callOpts.env, timeoutMs, signal, onGroup: recordGroup }, log.push);
+      done = await runCommand({ command, args, cwd, env: callOpts.env, scrubSecrets: callOpts.scrubSecrets, timeoutMs, signal, onGroup: recordGroup }, log.push);
     } finally {
       clearInterval(flushing);
       log.end();

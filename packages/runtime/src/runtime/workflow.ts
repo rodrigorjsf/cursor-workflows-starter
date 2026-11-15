@@ -155,6 +155,13 @@ export interface ExecOptions {
   cwd?: string;
   /** Environment variables added to this process's own. A variable set to `undefined` is removed from the command's environment. */
   env?: Record<string, string | undefined>;
+  /**
+   * Start the command without the variables of this process's environment whose name holds a secret (KEY, TOKEN, SECRET or
+   * PASSWORD, in any case: the names the log's redactor treats as secrets), such as `CURSOR_API_KEY` and `GH_TOKEN`. Use it for a
+   * command that runs code the run does not trust (a test suite, a setup script of the target repository): code an agent
+   * just wrote inherits nothing it could send away. What `env` sets stays, and the log's redaction is unchanged. Default: false.
+   */
+  scrubSecrets?: boolean;
 }
 
 /** What a `ctx.exec` call hands back. A command that fails, times out or cannot start is a result: the workflow decides what it means. */
