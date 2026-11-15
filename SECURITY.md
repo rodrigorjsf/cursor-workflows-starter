@@ -118,9 +118,10 @@ falhas de segurança.
   repositório (`AGENTS.md` para `CLAUDE.md`) segue valendo.
 - **O `start_workflow` sobe um dashboard local** (um servidor HTTP) quando nada responde na porta dele, a menos que
   `dashboard.autoStart` seja `false` no config global ou `WF_DASH_AUTOSTART=off` esteja no ambiente. Ele escuta só em
-  `127.0.0.1`, recusa um `Host` estranho, abre o banco de métricas só para leitura e aceita dois `POST`, o de iniciar um
-  workflow e o de cancelar um run, os dois protegidos por token CSRF. O de iniciar só vale para um repositório em que o
-  dashboard já viu um run e para um workflow que o runtime lista nele, e exige os dois tetos (`maxTokens` e `maxCents`);
+  `127.0.0.1`, recusa um `Host` estranho, abre o banco de métricas só para leitura e aceita três `POST`, o de iniciar um
+  workflow, o de retomar um run e o de cancelar um run, os três protegidos por token CSRF. O de iniciar só vale para um repositório em que o
+  dashboard já viu um run e para um workflow que o runtime lista nele, e exige os dois tetos (`maxTokens` e `maxCents`); o de
+  retomar só vale para um run que o dashboard já viu, e repete o que o registro do job do próprio run diz;
   listar os workflows de um repositório importa os arquivos dele no processo do dashboard, e o Backlog roda o `gh` ou o `glab`
   (com o seu login) na pasta de cada repositório que o dashboard conhece, para listar as issues abertas com a label de
   pronta. Num run cujo processo morreu, o

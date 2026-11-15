@@ -45,6 +45,11 @@ export function withoutResults(journal: string): string | undefined {
   return changed ? lines.join("\n") : undefined;
 }
 
+/** Whether the journal file holds an entry retention emptied (`withoutResults`): the run cannot be resumed from it. Only reads: nothing is created, and a file that is not there is not pruned. */
+export function journalPruned(file: string): boolean {
+  return readJsonl(file, isEntry).records.some((entry) => entry.pruned === true);
+}
+
 export class Journal {
   private readonly cache = new Map<string, JournalEntry>();
   private readonly occurrences = new Map<string, number>();

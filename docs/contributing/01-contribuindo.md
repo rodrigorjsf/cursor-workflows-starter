@@ -46,8 +46,8 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 ├── CLAUDE.md               # guia canônico do mantenedor, em inglês (AGENTS.md é um link simbólico para ele)
 ├── CODING_STANDARDS.md     # as regras de julgamento que o review aplica, em inglês (o review do implement-issue o lê)
 ├── packages/
-│   ├── dashboard/          # o dashboard local (workspace npm @cursor-workflows/dashboard): servidor HTTP sobre os runs e as métricas, que só lê, a não ser para iniciar um workflow num repositório que conhece e para cancelar um run
-│   │   ├── src/            # server.ts (API JSON, stream SSE e páginas), main.ts (o processo), board.ts (as colunas do quadro), pr-state.ts (estado das PRs e MRs, com cache, pelo `observe` do runtime), start.ts (o que o Start diz ao navegador e recebe dele: o corpo do `POST /api/start`, as respostas e o esqueleto dos args), backlog.ts (o Backlog: o `GET /api/backlog` e o cache de 60 segundos da resposta do forge por repositório),
+│   ├── dashboard/          # o dashboard local (workspace npm @cursor-workflows/dashboard): servidor HTTP sobre os runs e as métricas, que só lê, a não ser para iniciar um workflow num repositório que conhece, para retomar um run parado e para cancelar um run
+│   │   ├── src/            # server.ts (API JSON, stream SSE e páginas), main.ts (o processo), board.ts (as colunas do quadro), pr-state.ts (estado das PRs e MRs, com cache, pelo `observe` do runtime), start.ts (o que o Start diz ao navegador e recebe dele: o corpo do `POST /api/start`, as respostas e o esqueleto dos args), resume.ts (as respostas do `POST /api/runs/<runId>/resume`), backlog.ts (o Backlog: o `GET /api/backlog` e o cache de 60 segundos da resposta do forge por repositório),
 │   │   │                   # web-bundle.ts (o esbuild que empacota as duas páginas quando o dashboard sobe, com cache por hash), pages.ts (o HTML delas)
 │   │   ├── app/            # a página `/`, em React (menus Runs, Board e Metrics, e o painel Start: StartPanel.tsx, start-form.ts, start-api.ts; BoardView.tsx e backlog-board.ts, a coluna Backlog do quadro); o esbuild a empacota quando o dashboard sobe
 │   │   ├── run-view/       # a página do run, `/runs/<runId>` (React, React Flow, elkjs; tsconfig próprio, sem Node nem runtime):
@@ -74,7 +74,8 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   │   ├── run-view.ts     # os runs de todos os repositórios, lidos do índice global e do log, para quem observa de fora (o dashboard), e de que issue cada run do `implement-issue` trata (`runOriginsOf`)
 │       │   │   ├── run-tail.ts     # o log de eventos de um run lido por posição (cada linha tem um id): o stream ao vivo e o conteúdo de uma etapa
 │       │   │   ├── run-cancel.ts   # cancela um run de fora do processo que o executa (o botão Cancel do dashboard), pelo mesmo `cancelJob` do `wf cancel`
-│       │   │   ├── run-start.ts    # inicia um job de fora do processo que o executa (o painel Start do dashboard): só num repositório do índice global e num workflow que o runtime lista; sem o engine
+│       │   │   ├── run-start.ts    # inicia um job de fora do processo que o executa (o painel Start do dashboard): só num repositório do índice global e num workflow que o runtime lista, com o `launchJob` que o resume também usa; sem o engine
+│       │   │   ├── run-resume.ts   # retoma um run parado de fora do processo que o executava (o botão Resume run do dashboard): repete o start do registro do job pelo mesmo caminho do Start (`launchJob`); sem o engine
 │       │   │   ├── args-schema.ts  # confere os args com o `argsSchema` do workflow, para o engine e para o Start; sem o engine
 │       │   │   ├── inside-workflow.ts  # a variável `WF_INSIDE_WORKFLOW` que marca um processo dentro de uma etapa
 │       │   │   ├── pr-by-url.ts    # o estado de uma PR (`gh`) ou MR (`glab api`) pela URL exata, nos hosts permitidos (github.com, gitlab.com e os do config do glab), para o dashboard

@@ -1,4 +1,4 @@
-// What the buttons of the Run view ask of the dashboard.
+// What the buttons of the Run view ask of the dashboard, and what the header says of what came of it.
 import { postAction } from "../app/dashboard-api.js";
 import { runApiPath } from "./location.js";
 
@@ -39,4 +39,18 @@ export async function cancelRun(runId: string): Promise<CancelOutcome> {
   const reply = await postAction<{ status?: string; note?: string }>(`${runApiPath(runId)}/cancel`);
   if (!reply.ok) return { ok: false, error: reply.error };
   return { ok: true, status: reply.body.status ?? "running", note: reply.body.note ?? "" };
+}
+
+/** What a resume came to: the server started a job over the run, or says why not (`error`, its own sentence). */
+export type ResumeOutcome = { ok: true; jobId: string } | { ok: false; error: string };
+
+/** What the header shows after a resume: `started` (the job is on its way, and the page waits for the run to be `running`), or why nothing was started. */
+export function resumeResult(outcome: ResumeOutcome): { step: "started" } | { step: "failed"; message: string } {
+  return outcome.ok ? { step: "started" } : { step: "failed", message: sentence(outcome.error) };
+}
+
+/** Resumes the run as a job, with the args, caps and overrides of its latest start (the server reads them from the job's record), through the same POST-with-token path as every action. */
+export async function resumeRun(runId: string, origin?: string): Promise<ResumeOutcome> {
+  const reply = await postAction<{ jobId: string }>(`${runApiPath(runId)}/resume`, undefined, origin);
+  return reply.ok ? { ok: true, jobId: reply.body.jobId } : { ok: false, error: reply.error };
 }

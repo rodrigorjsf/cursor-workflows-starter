@@ -1,13 +1,16 @@
 // The dashboard's HTTP server: a JSON API over the runs of every repo and the metrics database, plus the web app that draws
-// them (its two pages, built at start, see web-bundle.ts). It reads, and it has two actions: starting a run and cancelling one.
+// them (its two pages, built at start, see web-bundle.ts). It reads, and it has three actions: starting a run, resuming a stopped one
+// and cancelling one.
 //
 // - It listens on 127.0.0.1 only and refuses any `Host` that is not a loopback name (DNS rebinding protection). It sends
 //   no CORS headers, so another site's script cannot read it.
-// - The two POSTs are `/api/runs/<runId>/cancel` and `/api/start`. Both sit behind one gate: the CSRF token (`/api/csrf`, one
+// - The three POSTs are `/api/runs/<runId>/cancel`, `/api/runs/<runId>/resume` and `/api/start`. All sit behind one gate: the CSRF token (`/api/csrf`, one
 //   random value per dashboard process) in the `X-CSRF-Token` header, which only a script that can read an answer of this
 //   origin has, and a request that does not say it comes from another origin. Cancel ends in `cancelRun`, which is `wf cancel`'s
 //   path (`cancelJob`). Start ends in `startRun`, which starts a detached job as `wf start` does, but only in a repository the
-//   runs index already names and only a workflow the runtime lists for it (`/api/repos` and `/api/workflows` feed the form).
+//   runs index already names and only a workflow the runtime lists for it (`/api/repos` and `/api/workflows` feed the form). Resume
+//   ends in `resumeRun`, which starts a job over a failed or cancelled run through the same path as start, with what the run's latest job
+//   was started with (read from that job's record on the server; the request has no body).
 // - It reads: the global runs index and each run's event log (`@cursor-workflows/runtime/observe`), and the metrics
 //   database, opened read-only the first time it exists. A machine with no history gets empty states, not an error.
 // - A run's event log is also served live: `/api/runs/<runId>/events` is a Server-Sent Events stream that replays the log and
@@ -19,11 +22,12 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
-import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, dashboardUrl, type RunTail, cancelRun, defaultDbPath, errorText, issuesWithRuns, knownRepos, leftAgentsNote, listRepoWorkflows, listRuns, openDb, readRun, readStepContent, startRun, summary, tailRun } from "@cursor-workflows/runtime/observe";
+import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, dashboardUrl, type RunTail, cancelRun, defaultDbPath, errorText, issuesWithRuns, knownRepos, leftAgentsNote, listRepoWorkflows, listRuns, openDb, readRun, readStepContent, resumeRun, startRun, summary, tailRun } from "@cursor-workflows/runtime/observe";
 import { Backlogs, backlogReply } from "./backlog.js";
 import { buildBoards } from "./board.js";
 import { PAGE_POLICY, assetPath, pageHtml } from "./pages.js";
 import { PrStates } from "./pr-state.js";
+import { resumeReply } from "./resume.js";
 import { MAX_START_BODY_BYTES, parseStartBody, startReply, unknownRepoError, workflowEntry } from "./start.js";
 import { type PageName, buildWeb } from "./web-bundle.js";
 
@@ -248,6 +252,13 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
     send(res, reply.status, reply.body);
   }
 
+  /** The resume action: the gate first, then `resumeRun`, which reads from the run's job record what to start. The request has no body to read. */
+  async function resume(req: IncomingMessage, res: ServerResponse, runId: string): Promise<void> {
+    if (!gate(req, res)) return;
+    const reply = resumeReply(await resumeRun(runId));
+    send(res, reply.status, reply.body);
+  }
+
   /** The Backlog: what each known repository's forge says (kept a while), without the issues a run has taken on (looked at on every request). Waits for the forge, which the Board does not. */
   async function backlog(res: ServerResponse): Promise<void> {
     const readings = await Promise.all(
@@ -268,6 +279,8 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
     if (req.method === "POST") {
       const target = /^\/api\/runs\/([^/]+)\/cancel$/.exec(url.pathname);
       if (target) return cancel(req, res, decodeSegment(target[1]!));
+      const resuming = /^\/api\/runs\/([^/]+)\/resume$/.exec(url.pathname);
+      if (resuming) return resume(req, res, decodeSegment(resuming[1]!));
       if (url.pathname === "/api/start") return start(req, res);
     }
     if (req.method !== "GET" && req.method !== "HEAD") {
@@ -342,7 +355,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
           const content = readStepContent(runId, decodeSegment(step[1]!));
           return content ? send(res, 200, content) : send(res, 404, { error: "run or step not found" });
         }
-        if (rest === "cancel") {
+        if (rest === "cancel" || rest === "resume") {
           res.setHeader("allow", "POST");
           return send(res, 405, { error: "method not allowed" });
         }

@@ -253,11 +253,12 @@ o encerra.
 | `/api/runs/<runId>/events` | stream de eventos (SSE) do log do run, ao vivo: veja [Acompanhar um run ao vivo](#acompanhar-um-run-ao-vivo) |
 | `/runs/<runId>` | a página do run: o grafo ao vivo, veja [Ver um run como grafo](#ver-um-run-como-grafo) (HTML, com o script e o estilo em `/assets/…`) |
 | `/api/runs/<runId>/steps/<stepId>/content` | o conteúdo de uma etapa: prompt, mensagens do agente, chamadas de tool e saída de comandos |
-| `/api/csrf` | `{csrfToken}`: o token que os `POST` de iniciar e de cancelar exigem |
+| `/api/csrf` | `{csrfToken}`: o token que os `POST` de iniciar, de retomar e de cancelar exigem |
 | `/api/repos` | `{repos}`: os repositórios em que o dashboard inicia um workflow: os que o índice global de runs conhece e cuja pasta ainda existe, o de run mais recente primeiro |
 | `/api/workflows?repo=<caminho>` | `{repo, workflows, broken}`: os workflows que o runtime lista para o repositório (cada um com `name`, `description`, `whenToUse`, `argsSkeleton` e `optionalArgs`) e os arquivos de workflow que não carregaram, com o erro; `404` para um repositório que o índice não conhece |
 | `POST /api/start` | inicia um workflow como job (cabeçalho `X-CSRF-Token`; corpo `{repo, workflow, args, maxTokens, maxCents}`) e responde `202` com `{jobId, runId, repo, workflow}`, mais `violations` quando um teto global cortou o pedido; as recusas estão em [Iniciar um workflow](#iniciar-um-workflow) |
 | `POST /api/runs/<runId>/cancel` | cancela o job que executa o run (cabeçalho `X-CSRF-Token`); num run travado, encerra o processo com `SIGKILL`, mata os comandos de `ctx.exec` que ele tinha em andamento e cancela pela API da Cursor os cloud agents que o run deixou rodando; num run que não está executando, cancela por essa API os cloud agents que o processo morto deixou rodando e responde `200` com um `note`, ou `409` se não havia nada a cancelar: veja [Cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume) |
+| `POST /api/runs/<runId>/resume` | retoma um run `failed` ou `cancelled` como job, com os args, os tetos e os `overrides` do último start dele (cabeçalho `X-CSRF-Token`, sem corpo: o servidor lê tudo do registro do job) e responde `202` com `{jobId, runId}`, mais `violations` quando um teto global cortou o pedido; as recusas estão em [Retomar um run](#cancelar-um-run-e-copiar-o-comando-de-resume) |
 | `/api/summary?days=` | o resumo de métricas dos painéis abaixo |
 | `/api/health` | `{app, pid}`: como quem chama sabe que é o dashboard que responde na porta |
 
@@ -397,9 +398,27 @@ No cabeçalho da página do run:
   cancelados; um resume depois disso cria agentes novos, que custam de novo
   ([ADR-0007](../adr/0007-cancel-stops-cloud-agents.md)). O botão desse run é o **Cancel run**, com ou sem etapa na nuvem:
   a página o oferece quando o erro da API começa com `no heartbeat for`, e mostra a nota no lugar dele. Enquanto o processo
-  segura o lock, o **Copy resume command** leva a um `already running`: cancele antes de retomar. Quando a nota diz que um
+  segura o lock, o **Copy resume command** leva a um `already running` e o **Resume run** não aparece: cancele antes de retomar. Quando a nota diz que um
   agente não foi alcançado ou que o processo ainda não saiu, a página a mostra como falha e mantém o botão, para cancelar
   de novo. Fora do dashboard, `wf cancel <jobId>` (o `wf jobs` lista os jobs do repositório) faz o mesmo.
+- **Resume run** (num run `failed` ou `cancelled`, ao lado de **Copy resume command**) retoma o run como job, sem o terminal:
+  `POST /api/runs/<runId>/resume`, atrás do mesmo token CSRF e das mesmas checagens de origem do cancelamento. O navegador não
+  manda nada além do id do run. O servidor lê o registro do job da última execução (`.workflows/jobs/<jobId>.json`, campo
+  `start`) e inicia um job novo sobre o mesmo run (`wf start --resume`) com os mesmos args, os mesmos tetos e os mesmos
+  `overrides`, pelo mesmo caminho do [Iniciar um workflow](#iniciar-um-workflow): o repositório é o que o índice global de
+  runs dá ao run, o workflow tem de estar na lista do runtime e os args têm de passar no `argsSchema`, e os tetos globais
+  continuam valendo por cima. As etapas que terminaram vêm do journal, sem repetir. Como o orçamento de um run acumula entre
+  as execuções, um run que parou por teto precisa de um teto maior: retome-o pelo comando que o botão abaixo copia, com o
+  novo `--max-cents` ou `--max-tokens`. A resposta `202` não espera o job: a página pergunta pelo status do run a cada segundo
+  (por até 30 s) até ele mostrar `running` e passa a segui-lo como a qualquer run em andamento. As recusas trazem `{error}` com uma frase:
+
+  | Status | Quando |
+  |---|---|
+  | `403` | o token CSRF falta ou está errado, ou o pedido declara outra origem |
+  | `404` | o índice global de runs não conhece o run |
+  | `409` | o run não está parado (`running`, `finished` ou `missing`); o run está travado (`failed`, mas o processo dele ainda o segura: cancele antes); o run saiu da retenção (o journal dele foi esvaziado, e a frase é a do motor, `run <id> cannot be resumed: the retention policy deleted the step results its journal held…`: inicie um run novo); nenhum registro de job diz como ele começou (um `wf run` num terminal, ou um job de um kit antigo: a frase manda retomar pelo terminal, com o comando copiado); o repositório já não lista o workflow, os args já não passam no `argsSchema`, o kit está fora da faixa do repositório, a configuração dele não é utilizável, ou outro job já roda o mesmo workflow com os mesmos args |
+
+  O botão só aparece num run `failed` ou `cancelled` que não está travado.
 - **Copy resume command** (num run `failed` ou `cancelled`) copia
   `wf start <workflow> --args '<args>' --resume <runId> --cwd <repositório>`, com os mesmos `--max-cents`, `--max-tokens` e
   `--overrides` do start. O registro do job da última execução (`.workflows/jobs/<jobId>.json`, campo `start`) guarda os
@@ -410,8 +429,8 @@ No cabeçalho da página do run:
   de `{}`, e o comando já sai com `--args '{}'`. Nesse caso um aviso ao lado do campo lembra de repor os tetos.
   O comando aparece num campo de texto, para copiar à mão quando o navegador não deixa escrever na área de transferência.
 
-O cancelamento exige o token CSRF (veja [Segurança](#segurança-do-dashboard)): a página lê o token em `/api/csrf` a cada
-cancelamento e o manda em `X-CSRF-Token`.
+O cancelamento e o resume exigem o token CSRF (veja [Segurança](#segurança-do-dashboard)): a página lê o token em `/api/csrf` a
+cada ação e o manda em `X-CSRF-Token`.
 
 A página do run tem um app à parte (React, React Flow e elkjs), empacotado junto com o app principal quando o dashboard
 sobe e guardado no mesmo cache por hash (veja [O app](#o-app)): `/assets/run.<hash>.js` e `.css`, com cache de um ano.
@@ -483,8 +502,8 @@ trazem `{error}` com uma frase que diz o motivo, e nada é criado no repositóri
 O botão "run" de um card do [Backlog](#o-backlog) abre este mesmo painel já preenchido (o repositório do card, o workflow
 `implement-issue` e os args `{"issue": <n>}`); só os tetos ficam para quem clica dar, e vale tudo o que está acima.
 
-Retomar um run parado e aprovar as seams do `implement-issue` pelo dashboard não existem ainda: o resume continua sendo o
-comando que o botão [Copy resume command](#cancelar-um-run-e-copiar-o-comando-de-resume) copia.
+Aprovar as seams do `implement-issue` pelo dashboard não existe ainda. Retomar um run parado existe: o botão **Resume run**
+do [Run view](#cancelar-um-run-e-copiar-o-comando-de-resume).
 
 ### O quadro (Board)
 
@@ -571,7 +590,7 @@ que estão prontas e ninguém começou, e um botão **run** em cada card:
 
 - escuta só em `127.0.0.1`;
 - recusa `Host` diferente de `127.0.0.1` e `localhost` (proteção contra DNS rebinding);
-- aceita `GET` e `HEAD`, e dois `POST`, o de iniciar um workflow e o de cancelar um run: os dois passam pela mesma porta, que
+- aceita `GET` e `HEAD`, e três `POST`, o de iniciar um workflow, o de retomar um run e o de cancelar um run: os três passam pela mesma porta, que
   exige o token CSRF (`/api/csrf`, um valor aleatório por processo do dashboard, comparado em tempo constante, que só um
   script lendo uma resposta desta origem consegue ter) e recusa um pedido que declare outra origem (`Origin` ou
   `Sec-Fetch-Site`) antes de ler o corpo; os outros métodos e as outras rotas dão `405`;
@@ -579,7 +598,9 @@ que estão prontas e ninguém começou, e um botão **run** em cada card:
   dois resolvidos no servidor (um caminho ou um nome que o navegador mande e que não esteja lá é recusado), com os dois
   tetos de custo e de tokens obrigatórios; um corpo de início maior que 256 KiB é recusado sem ser guardado. Listar os
   workflows de um repositório importa os arquivos dele no processo do dashboard, o que roda o código de nível superior
-  desses arquivos, como o servidor MCP já faz para o repositório dele;
+  desses arquivos, como o servidor MCP já faz para o repositório dele; o de retomar só vale para um run que o índice conhece,
+  na pasta que o índice dá a ele, e começa pelo que o registro do job do próprio run diz (nada do que o navegador manda além
+  do id), pelas mesmas checagens do início;
 - lê o Backlog só dos repositórios que o índice global de runs conhece, e só pelo `gh` e pelo `glab`, com argumentos fixos e
   sem shell, na pasta do repositório, com o login do usuário (a label vem da configuração do repositório, validada pelo
   esquema, e vai em um argumento só, `--label=<label>`); o título de uma issue é texto na página, nunca HTML, e o link de um

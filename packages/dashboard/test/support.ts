@@ -150,11 +150,14 @@ export function repoWithOrigin(box: Sandbox, name: string, origin: string): stri
   return repo;
 }
 
-/** Writes the record of a job of `repo` (`.workflows/jobs/<jobId>.json`): the run it started and how (`start`, left out as an older kit's record has it). Nothing says its process is alive. */
-export function writeJobRecord(repo: string, job: { jobId: string; runId: string; start?: unknown }): void {
+/**
+ * Writes the record of a job of `repo` (`.workflows/jobs/<jobId>.json`): the run it started and how (`start`, left out as an older kit's record has it).
+ * Its process is pid 1 and its last heartbeat long ago, unless `pid` says which process executes the job.
+ */
+export function writeJobRecord(repo: string, job: { jobId: string; runId: string; start?: unknown; pid?: number }): void {
   const dir = join(repo, ".workflows", "jobs");
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, `${job.jobId}.json`), JSON.stringify({ jobId: job.jobId, runId: job.runId, pid: 1, heartbeat: "2026-01-10T10:00:00.000Z", ...(job.start === undefined ? {} : { start: job.start }) }));
+  writeFileSync(join(dir, `${job.jobId}.json`), JSON.stringify({ jobId: job.jobId, runId: job.runId, pid: job.pid ?? 1, heartbeat: "2026-01-10T10:00:00.000Z", ...(job.start === undefined ? {} : { start: job.start }) }));
 }
 
 /** Writes `.agents/workflows/config.json` of `repo`: the repo layer of the config. */
@@ -169,15 +172,92 @@ export const JOB_ENV = { WF_METRICS: "off", WF_DASH_AUTOSTART: "off", TSX_TSCONF
 /** How long to wait for a job's process, which has to load TypeScript and the runtime: seconds on a loaded machine. */
 export const JOB_WAIT = { timeoutMs: 60_000, intervalMs: 100 };
 
+/** Whether a process with this pid is there (signal 0 only asks). */
+export function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The record of a job of `repo`, as the runtime wrote it (`.workflows/jobs/<jobId>.json`). */
+export function jobRecordOf(repo: string, jobId: string): { pid: number; runId: string; start?: unknown } {
+  return JSON.parse(readFileSync(join(repo, ".workflows", "jobs", `${jobId}.json`), "utf8")) as { pid: number; runId: string; start?: unknown };
+}
+
 /** The pid of a job's process, read from its record, so a test that fails halfway does not leave the process running. */
 export function jobPidOf(repo: string, jobId: string): number {
-  return (JSON.parse(readFileSync(join(repo, ".workflows", "jobs", `${jobId}.json`), "utf8")) as { pid: number }).pid;
+  return jobRecordOf(repo, jobId).pid;
+}
+
+/** What `GET /api/runs/<runId>` answers on the dashboard at `url`: the run's detail (`json`, undefined when the answer is not JSON). */
+export async function runDetail(url: string, runId: string): Promise<any> {
+  return (await http(url, `/api/runs/${runId}`)).json;
 }
 
 /** `POST /api/start` on the dashboard at `url`, with its CSRF token unless `headers` replaces the headers, and `body`. */
 export async function startRequest(url: string, body: unknown, headers?: Record<string, string>): Promise<Reply> {
   const token = headers === undefined ? ((await http(url, "/api/csrf")).json.csrfToken as string) : "";
   return http(url, "/api/start", { method: "POST", headers: headers ?? { "x-csrf-token": token }, body });
+}
+
+/** `POST path` on the dashboard at `url`, with its CSRF token unless `headers` replaces the headers: any action that takes no body (cancel, resume). */
+export async function postWithToken(url: string, path: string, headers?: Record<string, string>): Promise<Reply> {
+  const token = headers === undefined ? ((await http(url, "/api/csrf")).json.csrfToken as string) : "";
+  return http(url, path, { method: "POST", headers: headers ?? { "x-csrf-token": token } });
+}
+
+/** A workflow of two steps, for the runs a resume is for: its second step hangs, when `hang` is set, until the run is cancelled or its process is killed. */
+export const RESUMABLE_WORKFLOW = `export default {
+  meta: {
+    name: "resumable",
+    description: "Two steps; the second hangs on args.hang.",
+    argsSchema: { type: "object", additionalProperties: false, properties: { hang: { type: "boolean" } } },
+  },
+  defaults: { model: { id: "m" } },
+  async run(ctx) {
+    await ctx.agent("one", { label: "one" });
+    await ctx.agent(ctx.args.hang ? "[fake:hang] two" : "two", { label: "two", retries: 0, timeoutMs: 120000 });
+    return { status: "done" };
+  },
+};
+`;
+
+/** The events in a run's log, as parsed lines. Empty while the run has no log yet. */
+export function eventsOfRun(repo: string, runId: string): Array<{ type: string } & Record<string, any>> {
+  try {
+    return readFileSync(logPath(repo, runId), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as { type: string });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * What a test that starts real job processes needs: the environment those processes inherit (`JOB_ENV`), and the pids of the jobs it
+ * started, so that `restore()` kills what a test that failed halfway left running, and puts the environment back.
+ */
+export function jobProcesses(): { track(repo: string, jobId: string): void; restore(): void } {
+  const previous = Object.fromEntries(Object.keys(JOB_ENV).map((name) => [name, process.env[name]]));
+  Object.assign(process.env, JOB_ENV);
+  const pids: number[] = [];
+  return {
+    track: (repo, jobId) => void pids.push(jobPidOf(repo, jobId)),
+    restore() {
+      for (const pid of pids) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          /* the job ended on its own, which is what the tests wait for */
+        }
+      }
+      for (const [name, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    },
+  };
 }
 
 export interface Frame {
