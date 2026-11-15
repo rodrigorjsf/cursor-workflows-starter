@@ -38,13 +38,17 @@ Pick the task, then run its steps in order. Each step ends on a stated result.
 
 ## Check the setup
 
-1. Run `wf doctor --json`. Its `checks`, always in this order: `node`, `dependencies`, `login`, `models`, `forge`,
-   `mcp-server`, `config`, `kit-version`, `sandbox`, `kit`. `ok: true` and exit code 0 mean the setup works. A check's `status` is
+1. Run `wf doctor --json`. Its `checks`, always in this order: `node`, `dependencies`, `endpoints`, `login`, `models`,
+   `forge`, `mcp-server`, `config`, `kit-version`, `sandbox`, `kit`. `ok: true` and exit code 0 mean the setup works. A check's `status` is
    `pass`, `warn` or `fail`: a `warn` passed, and names something worth fixing. Done when no check is `fail`, or each failing
    check's `message` and `hint` went to the user, and each `warn`'s `message` and `hint` went to the user too.
    - On a Node older than 22.13 the report holds the `node` check alone.
    - `node` and `mcp-server` depend on the environment the IDE starts: run `wf doctor` from a terminal the IDE opened.
 2. Fix what a `hint` lets you fix. Hand the user what needs them:
+   - `endpoints`: `CURSOR_BACKEND_URL` or `CURSOR_WEBSITE_URL` holds something other than an https URL on `cursor.sh` or
+     `cursor.com`, and the SDK would send the user's API key to it. Tell the user which variable and where it is set (the
+     message names the file when it is an MCP entry's `env`); unsetting it is their call. `login` and `models` do not run until
+     it passes.
    - `login`: `wf login` opens a browser, so the user runs it; `NO_OPEN_BROWSER=1 wf login` prints the URL on stderr for
      a machine with no browser. The Cursor API key is the user's secret: keep it out of every command, log and reply.
      A passing `login` ends with a reminder that Privacy Mode cannot be read through the SDK: if the user has not said

@@ -4,6 +4,28 @@
 
 ### Adicionado
 
+- **O kit confere para onde vão a chave do Cursor, o token do forge e o script do instalador** (issue #71). Três entradas que ninguém
+  conferia decidiam esses destinos:
+  - **A chave só vai para o endpoint do Cursor.** O SDK (1.3.1) lê `CURSOR_BACKEND_URL` (a API e a troca de token) e
+    `CURSOR_WEBSITE_URL` (o login) do ambiente e manda a chave para o que elas trazem. O motor recusa o run (`failed`, `refused`,
+    sem escrever nada) antes de qualquer agente, e o `wf login`, o `wf models`, o `wf whoami`, o `wf metrics reconcile` e o
+    cancelamento de um run morto (que chamaria `Agent.listRuns`) recusam também, quando uma das duas não é uma URL `https` em
+    `cursor.sh` ou `cursor.com`; vazia ou desligada vale. O `wf doctor` ganhou a verificação `endpoints`, depois de
+    `dependencies`: ela lê o ambiente e o `env` das entradas do MCP, mostra só o esquema e o host do valor, e deixa `login` e
+    `models` sem rodar (`not run`) enquanto falha. O relatório passa de dez para onze verificações. `test/sdk-environment.test.ts`
+    lê o bundle do SDK e reprova quando uma versão nova lê outra variável `CURSOR_*` que ninguém classificou.
+  - **O `repo` do `implement-issue` não escolhe o host que recebe o token.** O argumento passa a casar com `^[A-Za-z0-9][A-Za-z0-9_.:/@-]*$`
+    (nada de espaço, `?`, `;` ou um `-` na frente) e só nomeia o host próprio do forge, o do `origin`, um declarado em `forges` ou
+    um do novo ajuste `workflows.implement-issue.settings.repoHosts` (padrão: nenhum). `example.invalid/o/r`, `ghe/o/r` e uma URL
+    `http://`, `git://` ou `ext::` terminam o run antes da primeira chamada ao `gh` ou ao `glab`. O `wf gc` aplica a mesma regra
+    ao `repo` que um run gravou no registro dele, que é um arquivo do `.workflows/` do repositório.
+  - **O instalador é baixado por `https` para um arquivo que o `mktemp` escolheu**: `curl --proto '=https' --tlsv1.2 -fsSL ... -o
+    "$installer"`, no `INSTALL-AGENT.md`, nos dois READMEs e no capítulo [2.1](docs/usage/01-instalacao.md#pelo-instalador).
+  - **Os comandos `git` de rede só usam `https`, `ssh` e caminhos locais.** O `push` e o `ls-remote` do `implement-issue`, o
+    `wf gc` e o fetch e a exclusão do snapshot de uma etapa na nuvem rodam com `GIT_ALLOW_PROTOCOL=file:https:ssh`: um remote
+    `http://`, `git://` ou `ext::` falha, dizendo o transporte recusado, antes de uma conexão ou de um comando, também para quem
+    tem `protocol.ext.allow=always`. O git aplica a regra à URL que o comando de fato usa (a de push, a de fetch).
+
 - **O runtime recusa mais cedo o que passa de um limite que ele quer manter.** Sete frentes do mesmo endurecimento (issue #70):
   - **Teto de jobs simultâneos.** O teto global `caps.maxRunningJobs` (padrão 3; `null` o tira) faz o `wf start`, o
     `start_workflow` e o Start do dashboard recusarem um job quando esse tanto já roda no repositório, sem criar o job nem o
