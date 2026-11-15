@@ -409,7 +409,9 @@ test("the next line approves the stored plan: no seams in it, and resuming it ru
   assert.equal(names().filter((n) => n === "plan").length, plannerCalls, "the stored plan is used: the planner does not run again");
   assert.ok(ranAsSuite(eventsOf(first.runId), "touch PWNED"), "the approved plan's command is the suite command");
   assert.ok(existsSync(join(worktreeOf(first.runId), "PWNED")), "and it ran, in the run's worktree");
-  assert.equal(forgeState().comments.length, 1, "the resume posts no new comment");
+  const comments = forgeState().comments;
+  assert.equal(comments.length, 2, "the resume posts the approval and no second test command comment");
+  assert.match(comments[1]!, /Seams approved/);
 });
 
 test("seams with a test command the user typed: that command runs, the planner's is ignored, and the run does not stop", async () => {
@@ -477,7 +479,10 @@ test("the same stopped run resumed with the same args stops again and posts the 
   const again = await run({ seams: ["x"], testCommand: undefined }, first.runId);
   assert.equal(res(again).status, "test-command-proposed", JSON.stringify(res(again)));
   assert.equal(names().filter((n) => n === "plan").length, 1, "the planner's answer comes from the journal");
-  assert.equal(forgeState().comments.length, 1, "one comment per run");
+  const comments = forgeState().comments;
+  assert.equal(comments.filter((body) => body.includes("<!-- wf:implement-issue:test-command -->")).length, 1, "one test command comment per run");
+  assert.equal(comments.length, 2, "and the resume with seams is a decision of its own");
+  assert.match(comments[1]!, /Seams replaced/);
 });
 
 test("a run that proposed seams and is then resumed with seams still posts the test command: the two comments have their own markers", async () => {
@@ -488,6 +493,7 @@ test("a run that proposed seams and is then resumed with seams still posts the t
   const second = await run({ seams: ["x"], testCommand: undefined }, first.runId);
   assert.equal(res(second).status, "test-command-proposed", JSON.stringify(res(second)));
   const comments = forgeState().comments;
-  assert.equal(comments.length, 2);
-  assert.ok(comments[1]!.includes("`touch PWNED`") && /Test command proposed/.test(comments[1]!));
+  assert.equal(comments.length, 3, "the seams, the decision to replace them, and the test command");
+  assert.match(comments[1]!, /Seams replaced/);
+  assert.ok(comments[2]!.includes("`touch PWNED`") && /Test command proposed/.test(comments[2]!));
 });

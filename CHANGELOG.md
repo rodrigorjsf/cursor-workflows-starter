@@ -211,6 +211,16 @@
   pulado, como antes. As instruções do planejador e do texto do PR deixaram de citar `GLOSSARY.md` pelo nome: mandam ler o glossário
   que a lista traz. Este repositório ganhou o próprio `.agents/workflows/config.json`, que aponta `docs/vision/03-conceitos.md`.
 
+- **O `implement-issue` comenta na issue quando as seams são aprovadas ou trocadas** (issue #96). Antes, uma aprovação só chegava
+  ao log do run (`seams approved: using the plan proposed by the first run`): a issue guardava a proposta, não a decisão. Agora,
+  quando um run que propôs as seams (ou o comando de teste) é retomado, o próprio workflow posta, pelo forge (GitHub e GitLab),
+  um comentário com o id do run e a lista: `Seams approved`, com as seams do plano guardado, para `approveSeams: true`; `Seams
+  replaced`, com a lista dada, para `seams: [...]`. Vale qualquer que seja a superfície que enviou o resume (chat, CLI ou
+  dashboard). Um resume que termina em `seams-not-proposed` não posta nada, nem um run novo que já recebe `seams` (não há
+  proposta a trocar), e uma decisão igual à última gravada em `seamsDecision`, no progresso do run, não é postada de novo: um
+  resume depois de uma queda não repete o comentário, mesmo quando a queda veio entre o post e a gravação, porque o run confere
+  os comentários da issue antes de postar. O texto passa pelo mesmo redator e pela mesma trava de segredos dos outros comentários.
+
 ### Mudado
 
 - **O `npm run typecheck` pega o índice que pode não existir, o import que sobra, a promessa perdida e o `JSON.parse` com cast.** O

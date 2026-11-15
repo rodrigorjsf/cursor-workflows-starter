@@ -51,7 +51,10 @@ test("MED: primeiro run propõe as seams na issue e para; o resume com approveSe
   const second = await run({ approveSeams: true }, first.runId);
   assert.equal((second.result as any).status, "done", JSON.stringify(second.result));
   assert.equal(names().filter((n) => n === "plan").length, 1, "o plano vem do progresso do run");
-  assert.equal(forgeState().comments.length, 1, "o comentário não se repete");
+  const after = forgeState().comments;
+  assert.equal(after.filter((body) => body.includes("<!-- wf:implement-issue:seams -->")).length, 1, "o comentário da proposta não se repete");
+  assert.equal(after.length, 2, "o resume só acrescenta a aprovação das seams");
+  assert.match(after[1]!, /Seams approved/);
 });
 
 test("seams editadas por args replanejam com as seams aprovadas no prompt", async () => {

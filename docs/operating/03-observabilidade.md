@@ -665,7 +665,7 @@ Para validar a entrega depois, por exemplo quando o PR é aceito ou recusado, us
     entrega do `implement-issue` (JWT, `Bearer`, a senha ou o token numa URL): o workflow pode rodar o que a etapa
     devolve, e um comando de teste como `DATABASE_URL=postgres://u:senha@localhost/db npm test` não pode chegar a ele
     com `[REDACTED]`. Esses formatos ficam em claro no journal e no memo, e continuam redigidos no log de eventos e no que o
-    `implement-issue` publica no forge, GitHub ou GitLab (o comentário das seams e o corpo do PR passam inteiros pelo redator). É um esforço, não uma garantia: um segredo de outro
+    `implement-issue` publica no forge, GitHub ou GitLab (os comentários das seams, a proposta e a decisão, e o corpo do PR passam inteiros pelo redator). É um esforço, não uma garantia: um segredo de outro
     formato, numa variável com outro nome, passa;
   - cada texto é cortado em 32768 caracteres (`truncated` e `chars` dizem o quanto havia);
   - **retenção:** ao iniciar um run, o `text` dos runs do repositório fora dos 30 mais recentes (contando o que
