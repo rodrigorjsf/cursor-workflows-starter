@@ -4,6 +4,7 @@
 // what is checked here is what only the browser sees: that the args box holds JSON, and that a cap box holds a number.
 import type { WorkflowEntry } from "../src/start.js";
 import { errorText } from "./error-text.js";
+import { isRecord } from "./is-record.js";
 
 /** What the form's boxes hold. The caps are text, as typed: an empty box is a cap that is not given, which the server refuses by name. */
 export interface StartFormState {
@@ -68,13 +69,13 @@ export function startBody(form: StartFormState): { ok: true; body: StartRequestB
   } catch (err) {
     return { ok: false, error: `the args are not valid JSON: ${errorText(err)}` };
   }
-  if (typeof args !== "object" || args === null || Array.isArray(args)) return { ok: false, error: "the args must be a JSON object" };
+  if (!isRecord(args)) return { ok: false, error: "the args must be a JSON object" };
   const maxTokens = capNumber(form.maxTokens);
   const maxCents = capNumber(form.maxCents);
   if (Number.isNaN(maxTokens)) return { ok: false, error: "maxTokens must be a number" };
   if (Number.isNaN(maxCents)) return { ok: false, error: "maxCents must be a number" };
   return {
     ok: true,
-    body: { repo: form.repo, workflow: form.workflow, args: args as Record<string, unknown>, ...(maxTokens === undefined ? {} : { maxTokens }), ...(maxCents === undefined ? {} : { maxCents }) },
+    body: { repo: form.repo, workflow: form.workflow, args, ...(maxTokens === undefined ? {} : { maxTokens }), ...(maxCents === undefined ? {} : { maxCents }) },
   };
 }

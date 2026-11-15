@@ -6,7 +6,8 @@
 // its own workflow listing, and the args are checked there against the workflow's `argsSchema`. What is checked here is the
 // shape of the request, so a refusal for a missing cap or a body that is not JSON never reaches the runtime.
 import type { StartRunOutcome, StartRunRequest, StartableWorkflow } from "@cursor-workflows/runtime/observe";
-import { isObject, jsonObjectOf } from "./request-body.js";
+import { isRecord } from "../app/is-record.js";
+import { jsonObjectOf } from "./request-body.js";
 
 type StartRunOutcomeStarted = Extract<StartRunOutcome, { kind: "started" }>;
 
@@ -61,7 +62,7 @@ export function parseStartBody(raw: string): ParsedStart {
   if (typeof repo !== "string") return { ok: false, error: "repo must be text: the path of a repository the dashboard knows" };
   if (workflow === undefined || workflow === "") return { ok: false, error: "workflow is required: the name of a workflow the repository lists" };
   if (typeof workflow !== "string") return { ok: false, error: "workflow must be text: the name of a workflow the repository lists" };
-  if (!isObject(args)) return { ok: false, error: "args must be a JSON object" };
+  if (!isRecord(args)) return { ok: false, error: "args must be a JSON object" };
   const maxTokens = readCap(body, "maxTokens");
   if (typeof maxTokens === "string") return { ok: false, error: maxTokens };
   const maxCents = readCap(body, "maxCents");
@@ -91,7 +92,7 @@ export function startReply(outcome: StartRunOutcome, request: StartRunRequest): 
 
 /** The value a schema suggests for a field the user must fill in: its default, its first enum value, or an empty one of its type that the schema will turn down. */
 function placeholder(schema: unknown): unknown {
-  if (!isObject(schema)) return null;
+  if (!isRecord(schema)) return null;
   if ("default" in schema) return schema.default;
   if ("const" in schema) return schema.const;
   if (Array.isArray(schema.enum) && schema.enum.length > 0) return schema.enum[0];
@@ -120,14 +121,14 @@ function placeholder(schema: unknown): unknown {
  * are not required are left out (`optionalArgs` names them); `{}` when the workflow declares no schema.
  */
 export function argsSkeleton(schema: unknown): Record<string, unknown> {
-  if (!isObject(schema) || !isObject(schema.properties)) return {};
+  if (!isRecord(schema) || !isRecord(schema.properties)) return {};
   const required = Array.isArray(schema.required) ? schema.required.filter((name): name is string => typeof name === "string") : [];
   return Object.fromEntries(required.map((name) => [name, placeholder((schema.properties as Record<string, unknown>)[name])]));
 }
 
 /** The fields of the schema's top level that are not required: what the box's hint offers on top of the skeleton. */
 function optionalArgs(schema: unknown): string[] {
-  if (!isObject(schema) || !isObject(schema.properties)) return [];
+  if (!isRecord(schema) || !isRecord(schema.properties)) return [];
   const required = new Set(Array.isArray(schema.required) ? schema.required : []);
   return Object.keys(schema.properties).filter((name) => !required.has(name));
 }

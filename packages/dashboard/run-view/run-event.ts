@@ -2,6 +2,7 @@
 // runtime wrote it, and a kit older or newer than this page may have. `run-graph.ts` reads an event defensively (a field it does not
 // know is left alone), but only if it is an object with a `type`; a message that is `null`, a number or an array would throw in the
 // code that reads `event.type`, and an error there blanks the whole page. So the page asks here first, and drops what fails.
+import { isRecord } from "../app/is-record.js";
 import type { RunEvent } from "./run-graph.js";
 
 export type ParsedEvent = { ok: true; event: RunEvent } | { ok: false; why: string };
@@ -14,7 +15,7 @@ export function parseRunEvent(text: string): ParsedEvent {
   } catch {
     return { ok: false, why: "not JSON" };
   }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return { ok: false, why: "not an object" };
-  if (typeof (value as { type?: unknown }).type !== "string") return { ok: false, why: "no string `type`" };
+  if (!isRecord(value)) return { ok: false, why: "not an object" };
+  if (typeof value.type !== "string") return { ok: false, why: "no string `type`" };
   return { ok: true, event: value as RunEvent };
 }

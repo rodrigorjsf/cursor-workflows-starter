@@ -3,6 +3,8 @@
 // takes. Pure: no DOM, no clock, no network. The proposal's type is declared here, not imported: this folder is checked without the
 // runtime's or the server's types (see its tsconfig), and the answer is untrusted JSON until `isSeamsProposal` has looked at it.
 
+import { isRecord } from "../app/is-record.js";
+
 export interface ProposedSeam {
   name: string;
   interface: string;
@@ -28,14 +30,13 @@ export interface SeamsProposalInfo {
   decidable: boolean;
 }
 
-const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
-const hasTexts = (value: unknown, names: string[]): boolean => isObject(value) && names.every((name) => typeof value[name] === "string");
+const hasTexts = (value: unknown, names: string[]): boolean => isRecord(value) && names.every((name) => typeof value[name] === "string");
 const isListOf = (value: unknown, names: string[]): boolean => Array.isArray(value) && value.every((item) => hasTexts(item, names));
 
 /** Whether `value`, parsed from the API's answer, is a proposal this page can show: every field it reads is there, of its type. */
 export function isSeamsProposal(value: unknown): value is SeamsProposalInfo {
   return (
-    isObject(value) &&
+    isRecord(value) &&
     (value.stop === "seams-proposed" || value.stop === "test-command-proposed") &&
     typeof value.testCommand === "string" &&
     typeof value.digest === "string" &&

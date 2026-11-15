@@ -1,9 +1,7 @@
 // What the dashboard's POST actions that take a body share: the body is a JSON object, and anything else is refused with a sentence. Pure:
 // the request has been read (server.ts) and nothing here touches the runtime, a clock or a disk.
 import { errorText } from "@cursor-workflows/runtime/observe";
-
-/** Whether `value` is a JSON object: not `null`, not a list. */
-export const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+import { isRecord } from "../app/is-record.js";
 
 export type JsonObject = { ok: true; body: Record<string, unknown> } | { ok: false; error: string };
 
@@ -16,5 +14,5 @@ export function jsonObjectOf(raw: string, shape: string): JsonObject {
   } catch (err) {
     return { ok: false, error: `the request body is not valid JSON: ${errorText(err)}` };
   }
-  return isObject(body) ? { ok: true, body } : { ok: false, error: shape };
+  return isRecord(body) ? { ok: true, body } : { ok: false, error: shape };
 }
