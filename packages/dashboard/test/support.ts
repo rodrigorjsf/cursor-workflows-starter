@@ -203,10 +203,10 @@ export async function startRequest(url: string, body: unknown, headers?: Record<
   return http(url, "/api/start", { method: "POST", headers: headers ?? { "x-csrf-token": token }, body });
 }
 
-/** `POST path` on the dashboard at `url`, with its CSRF token unless `headers` replaces the headers: any action that takes no body (cancel, resume). */
-export async function postWithToken(url: string, path: string, headers?: Record<string, string>): Promise<Reply> {
+/** `POST path` on the dashboard at `url`, with its CSRF token unless `headers` replaces the headers, and `body` when the action takes one (text as it is, anything else as JSON): cancel and resume take none. */
+export async function postWithToken(url: string, path: string, headers?: Record<string, string>, body?: unknown): Promise<Reply> {
   const token = headers === undefined ? ((await http(url, "/api/csrf")).json.csrfToken as string) : "";
-  return http(url, path, { method: "POST", headers: headers ?? { "x-csrf-token": token } });
+  return http(url, path, { method: "POST", headers: headers ?? { "x-csrf-token": token }, body });
 }
 
 /** A workflow of two steps, for the runs a resume is for: its second step hangs, when `hang` is set, until the run is cancelled or its process is killed. */
@@ -221,6 +221,72 @@ export const RESUMABLE_WORKFLOW = `export default {
     await ctx.agent("one", { label: "one" });
     await ctx.agent(ctx.args.hang ? "[fake:hang] two" : "two", { label: "two", retries: 0, timeoutMs: 120000 });
     return { status: "done" };
+  },
+};
+`;
+
+/** The plan an `implement-issue` run stores when it stops to ask about its seams (`proposedPlan` of its progress file). */
+export const SEAMS_PLAN = {
+  seams: [{ name: "math.subtract", interface: "subtract(a, b): number", why: "the behaviour the issue asks for" }],
+  slices: [{ behavior: "subtract returns the difference", seam: "math.subtract", testIdea: "subtract(5, 3) is 2" }],
+  testCommand: "node --test",
+};
+
+/** Writes the progress file of a run (`.workflows/runs/<runId>/tdd-progress.json`) as `implement-issue` writes it: the plan it stopped at, and no slice done. */
+export function writeSeamsProgress(repo: string, runId: string, plan: unknown): void {
+  const dir = join(repo, ".workflows", "runs", runId);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "tdd-progress.json"), JSON.stringify({ slices: [], proposedPlan: plan }));
+}
+
+/**
+ * An `implement-issue` run that stopped to ask about its seams, started by the job `job-0001` whose record says `start`: its log ends
+ * `finished` with the result `stop`, and its progress file holds `plan`. Written the way the runtime writes them.
+ */
+export function seamsProposedRun(box: Sandbox, repo: string, runId: string, options: { start?: unknown; stop?: "seams-proposed" | "test-command-proposed"; plan?: unknown } = {}): void {
+  const stop = options.stop ?? "seams-proposed";
+  const plan = options.plan ?? SEAMS_PLAN;
+  writeRun(box.home, repo, {
+    runId,
+    workflow: "implement-issue",
+    startedAt: "2026-11-12T10:00:00.000Z",
+    jobId: "job-0001",
+    events: [{ type: "run-end", status: "finished", outcomeStatus: stop, result: { status: stop, runId, seams: SEAMS_PLAN.seams } }],
+  });
+  writeJobRecord(repo, { jobId: "job-0001", runId, ...("start" in options ? { start: options.start } : { start: { workflow: "implement-issue", args: { issue: 7 }, maxTokens: 500_000, maxCents: 200 } }) });
+  writeSeamsProgress(repo, runId, plan);
+}
+
+/**
+ * Stands in for `implement-issue` in a repo's `.agents/workflows/` (which shadows the kit's workflow of the name): it stops at the seams
+ * proposal as the real one does (its plan in the progress file, a result with that status), stops again at the planner's test command when
+ * given `seams` and no `testCommand`, and answers `done` with the args it was given once approved. It spends nothing.
+ */
+export const SEAMS_WORKFLOW = `import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+const PLAN = ${JSON.stringify({ ...SEAMS_PLAN, testCommand: "echo chosen-by-the-planner" })};
+const store = (ctx) => {
+  const dir = join(ctx.cwd, ".workflows", "runs", ctx.runId);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "tdd-progress.json"), JSON.stringify({ slices: [], proposedPlan: PLAN }));
+};
+export default {
+  meta: {
+    name: "implement-issue",
+    description: "Stops at its seams like implement-issue.",
+    argsSchema: {
+      type: "object",
+      required: ["issue"],
+      additionalProperties: false,
+      properties: { issue: { type: "number" }, testCommand: { type: "string" }, approveSeams: { type: "boolean" }, seams: { type: "array", items: { type: "string" } } },
+    },
+  },
+  async run(ctx) {
+    if (ctx.args.approveSeams) return { status: "done", args: ctx.args };
+    if (ctx.args.seams && ctx.args.testCommand !== undefined) return { status: "done", args: ctx.args };
+    store(ctx);
+    const status = ctx.args.seams ? "test-command-proposed" : "seams-proposed";
+    return { status, runId: ctx.runId, seams: PLAN.seams, ...(ctx.args.seams ? { testCommand: PLAN.testCommand } : {}) };
   },
 };
 `;

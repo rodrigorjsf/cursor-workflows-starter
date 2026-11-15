@@ -5,7 +5,8 @@
 // It decides nothing about what may start: the repository and the workflow are resolved by the runtime from the runs index and
 // its own workflow listing, and the args are checked there against the workflow's `argsSchema`. What is checked here is the
 // shape of the request, so a refusal for a missing cap or a body that is not JSON never reaches the runtime.
-import { type StartRunOutcome, type StartRunRequest, type StartableWorkflow, errorText } from "@cursor-workflows/runtime/observe";
+import type { StartRunOutcome, StartRunRequest, StartableWorkflow } from "@cursor-workflows/runtime/observe";
+import { isObject, jsonObjectOf } from "./request-body.js";
 
 type StartRunOutcomeStarted = Extract<StartRunOutcome, { kind: "started" }>;
 
@@ -41,8 +42,6 @@ export interface WorkflowsReply {
   broken: Array<{ file: string; error: string }>;
 }
 
-const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
-
 /** `maxTokens` or `maxCents` of the body: a number above 0, or the sentence that says what is wrong with it. */
 function readCap(body: Record<string, unknown>, field: "maxTokens" | "maxCents"): number | string {
   const value = body[field];
@@ -54,15 +53,9 @@ function readCap(body: Record<string, unknown>, field: "maxTokens" | "maxCents")
 
 /** The request a body (`raw`, the text received) holds, or why it is not one. Args left out are `{}`. */
 export function parseStartBody(raw: string): ParsedStart {
-  const shape = "the request body must be a JSON object with repo, workflow, args, maxTokens and maxCents";
-  if (raw.trim() === "") return { ok: false, error: shape };
-  let body: unknown;
-  try {
-    body = JSON.parse(raw);
-  } catch (err) {
-    return { ok: false, error: `the request body is not valid JSON: ${errorText(err)}` };
-  }
-  if (!isObject(body)) return { ok: false, error: shape };
+  const parsed = jsonObjectOf(raw, "the request body must be a JSON object with repo, workflow, args, maxTokens and maxCents");
+  if (!parsed.ok) return parsed;
+  const { body } = parsed;
   const { repo, workflow, args = {} } = body;
   if (repo === undefined || repo === "") return { ok: false, error: "repo is required: the path of a repository the dashboard knows" };
   if (typeof repo !== "string") return { ok: false, error: "repo must be text: the path of a repository the dashboard knows" };

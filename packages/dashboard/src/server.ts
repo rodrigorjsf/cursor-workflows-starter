@@ -22,12 +22,13 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
-import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, dashboardUrl, type RunTail, cancelRun, defaultDbPath, errorText, issuesWithRuns, knownRepos, leftAgentsNote, listRepoWorkflows, listRuns, openDb, readRun, readStepContent, resumeRun, startRun, summary, tailRun } from "@cursor-workflows/runtime/observe";
+import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, dashboardUrl, type RunTail, approveSeams, cancelRun, defaultDbPath, errorText, issuesWithRuns, knownRepos, leftAgentsNote, listRepoWorkflows, listRuns, openDb, readRun, readStepContent, replaceSeams, resumeRun, seamsProposalOf, startRun, summary, tailRun } from "@cursor-workflows/runtime/observe";
 import { Backlogs, backlogReply } from "./backlog.js";
 import { buildBoards } from "./board.js";
 import { PAGE_POLICY, assetPath, pageHtml } from "./pages.js";
 import { PrStates } from "./pr-state.js";
 import { resumeReply } from "./resume.js";
+import { MAX_SEAMS_BODY_BYTES, type SeamsDecision, parseSeamsBody, seamsReply } from "./seams.js";
 import { MAX_START_BODY_BYTES, parseStartBody, startReply, unknownRepoError, workflowEntry } from "./start.js";
 import { type PageName, buildWeb } from "./web-bundle.js";
 
@@ -178,6 +179,13 @@ function readBody(req: IncomingMessage, maxBytes: number): Promise<string | unde
   });
 }
 
+/** The request body as text, or undefined after answering 400 because it is larger than `maxBytes`: the body of an action is a few lines of JSON. */
+async function readSmallBody(req: IncomingMessage, res: ServerResponse, maxBytes: number): Promise<string | undefined> {
+  const body = await readBody(req, maxBytes);
+  if (body === undefined) send(res, 400, { error: `the request body is larger than ${maxBytes} bytes` });
+  return body;
+}
+
 /** Whether `candidate` is the CSRF token, compared in constant time. */
 function sameToken(candidate: string | string[] | undefined, token: string): boolean {
   if (typeof candidate !== "string") return false;
@@ -244,8 +252,8 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
   /** The start action: the gate first, then the body checked into a request, then `startRun`, which resolves the repository and the workflow and starts the job. */
   async function start(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!gate(req, res)) return;
-    const body = await readBody(req, MAX_START_BODY_BYTES);
-    if (body === undefined) return send(res, 400, { error: `the request body is larger than ${MAX_START_BODY_BYTES} bytes` });
+    const body = await readSmallBody(req, res, MAX_START_BODY_BYTES);
+    if (body === undefined) return;
     const parsed = parseStartBody(body);
     if (!parsed.ok) return send(res, 400, { error: parsed.error });
     const reply = startReply(await startRun(parsed.request), parsed.request);
@@ -256,6 +264,18 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
   async function resume(req: IncomingMessage, res: ServerResponse, runId: string): Promise<void> {
     if (!gate(req, res)) return;
     const reply = resumeReply(await resumeRun(runId));
+    send(res, reply.status, reply.body);
+  }
+
+  /** The seams decision (`approve` or `replace`) on the proposal run `runId` waits on: the gate first, then the body checked into a decision, then `approveSeams` or `replaceSeams`, which resume the run with it. */
+  async function decideSeams(req: IncomingMessage, res: ServerResponse, runId: string, action: SeamsDecision["kind"]): Promise<void> {
+    if (!gate(req, res)) return;
+    const body = await readSmallBody(req, res, MAX_SEAMS_BODY_BYTES);
+    if (body === undefined) return;
+    const parsed = parseSeamsBody(action, body);
+    if (!parsed.ok) return send(res, 400, { error: parsed.error });
+    const { decision } = parsed;
+    const reply = seamsReply(decision.kind === "approve" ? await approveSeams(runId, decision.digest) : await replaceSeams(runId, decision.seams));
     send(res, reply.status, reply.body);
   }
 
@@ -281,6 +301,8 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
       if (target) return cancel(req, res, decodeSegment(target[1]!));
       const resuming = /^\/api\/runs\/([^/]+)\/resume$/.exec(url.pathname);
       if (resuming) return resume(req, res, decodeSegment(resuming[1]!));
+      const deciding = /^\/api\/runs\/([^/]+)\/seams\/(approve|replace)$/.exec(url.pathname);
+      if (deciding) return decideSeams(req, res, decodeSegment(deciding[1]!), deciding[2] === "approve" ? "approve" : "replace");
       if (url.pathname === "/api/start") return start(req, res);
     }
     if (req.method !== "GET" && req.method !== "HEAD") {
@@ -342,7 +364,9 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
         const rest = match[2];
         if (rest === undefined) {
           const detail = readRun(runId);
-          return detail ? send(res, 200, detail) : send(res, 404, { error: "run not found" });
+          if (!detail) return send(res, 404, { error: "run not found" });
+          const seamsProposal = seamsProposalOf(detail);
+          return send(res, 200, seamsProposal ? { ...detail, seamsProposal } : detail);
         }
         if (rest === "events") {
           const after = resumeId(req, url);
@@ -355,7 +379,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
           const content = readStepContent(runId, decodeSegment(step[1]!));
           return content ? send(res, 200, content) : send(res, 404, { error: "run or step not found" });
         }
-        if (rest === "cancel" || rest === "resume") {
+        if (rest === "cancel" || rest === "resume" || rest === "seams/approve" || rest === "seams/replace") {
           res.setHeader("allow", "POST");
           return send(res, 405, { error: "method not allowed" });
         }
