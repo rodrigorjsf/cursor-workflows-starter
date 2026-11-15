@@ -4,6 +4,21 @@
 
 ### Adicionado
 
+- **O dashboard aprova ou troca as seams que um run do `implement-issue` propôs** (issue #98). Um run MED ou HIGH que parou em
+  `seams-proposed` (ou, com `seams` e sem `testCommand`, em `test-command-proposed`) mostra no Run view o painel **Seams
+  proposed** (ou **Test command proposed**): as seams, as fatias e o comando de teste que o run executa depois da aprovação,
+  como texto, com dois botões. **Approve** chama o novo `POST /api/runs/<runId>/seams/approve` e retoma o run com os args, os
+  tetos e os `overrides` do último start dele mais `approveSeams: true`; **Replace seams** abre uma caixa de uma seam por linha
+  (uma lista vazia é recusada ali mesmo) e chama `POST /api/runs/<runId>/seams/replace`, que retoma o run com `seams: [...]`.
+  Não há botão de rejeitar: uma proposta que ninguém aprova não é retomada. Os dois `POST` passam pela mesma porta do cancelar
+  e do retomar (token CSRF e origem) e recusam com `409` um run que não espera decisão alguma, como o segundo clique de um clique
+  duplo; `GET /api/runs/<runId>` traz a proposta em `seamsProposal`. **A aprovação nomeia a proposta que a página mostrou**
+  (`digest`, o hash do tipo de parada, das seams, das fatias e do comando de teste): um plano que mudou entre a página e o clique é
+  recusado com `409`, em vez de aprovar sem ser visto um comando de teste que roda por `bash -c`. O plano vem do arquivo de
+  progresso do run, e o comentário na issue continua sendo do workflow (o dashboard não comenta). O `observe` do runtime ganhou
+  `seamsProposalOf`, `approveSeams` e `replaceSeams`; o resume do botão **Resume run** e a decisão passaram a dividir o `launchResume`;
+  e o plano do `implement-issue` e a regra do comando de teste foram para `implement-issue/plan.ts`. Veja
+  [5.3 §Decidir as seams](docs/operating/03-observabilidade.md#decidir-as-seams-de-um-run-do-implement-issue).
 - **O kit confere para onde vão a chave do Cursor, o token do forge e o script do instalador** (issue #71). Três entradas que ninguém
   conferia decidiam esses destinos:
   - **A chave só vai para o endpoint do Cursor.** O SDK (1.3.1) lê `CURSOR_BACKEND_URL` (a API e a troca de token) e

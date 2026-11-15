@@ -1,16 +1,19 @@
 // The dashboard's HTTP server: a JSON API over the runs of every repo and the metrics database, plus the web app that draws
-// them (its two pages, built at start, see web-bundle.ts). It reads, and it has three actions: starting a run, resuming a stopped one
-// and cancelling one.
+// them (its two pages, built at start, see web-bundle.ts). It reads, and it has four actions: starting a run, resuming a stopped one,
+// deciding the seams an `implement-issue` run proposed (approve them, or replace them) and cancelling a run.
 //
 // - It listens on 127.0.0.1 only and refuses any `Host` that is not a loopback name (DNS rebinding protection). It sends
 //   no CORS headers, so another site's script cannot read it.
-// - The three POSTs are `/api/runs/<runId>/cancel`, `/api/runs/<runId>/resume` and `/api/start`. All sit behind one gate: the CSRF token (`/api/csrf`, one
+// - The POSTs are `/api/runs/<runId>/cancel`, `/api/runs/<runId>/resume`, `/api/runs/<runId>/seams/approve`, `/api/runs/<runId>/seams/replace` and `/api/start`. All sit behind one gate: the CSRF token (`/api/csrf`, one
 //   random value per dashboard process) in the `X-CSRF-Token` header, which only a script that can read an answer of this
 //   origin has, and a request that does not say it comes from another origin. Cancel ends in `cancelRun`, which is `wf cancel`'s
 //   path (`cancelJob`). Start ends in `startRun`, which starts a detached job as `wf start` does, but only in a repository the
 //   runs index already names and only a workflow the runtime lists for it (`/api/repos` and `/api/workflows` feed the form). Resume
 //   ends in `resumeRun`, which starts a job over a failed or cancelled run through the same path as start, with what the run's latest job
-//   was started with (read from that job's record on the server; the request has no body).
+//   was started with (read from that job's record on the server; the request has no body). The seams decision ends in `approveSeams` or
+//   `replaceSeams`, which resume a run that stopped at a proposal the same way with `approveSeams: true` or `seams: [...]` on top of those
+//   args; an approval names the proposal the page showed (`digest`, which `GET /api/runs/<runId>` offers as `seamsProposal`), so a plan
+//   that changed since is refused. The dashboard posts no comment: the workflow records the decision on the issue when it resumes.
 // - It reads: the global runs index and each run's event log (`@cursor-workflows/runtime/observe`), and the metrics
 //   database, opened read-only the first time it exists. A machine with no history gets empty states, not an error.
 // - A run's event log is also served live: `/api/runs/<runId>/events` is a Server-Sent Events stream that replays the log and
