@@ -432,8 +432,9 @@ function readBoundaryOf(file: string): unknown {
   try {
     const config: unknown = JSON.parse(readFileSync(file, "utf8"));
     return isRecord(config) ? config.readBoundary : undefined;
-  } catch {
-    return undefined;
+  } catch (err) {
+    if (err instanceof SyntaxError || (err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw err;
   }
 }
 

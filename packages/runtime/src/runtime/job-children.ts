@@ -49,8 +49,9 @@ export function recordedExecGroups(jobsDir: string, jobId: string): number[] {
   let names: string[];
   try {
     names = readdirSync(jobsDir);
-  } catch {
-    return [];
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw err;
   }
   const prefix = `${plainName(jobId, "jobId")}${GROUP_INFIX}`;
   return names.filter((name) => name.startsWith(prefix)).map((name) => Number(name.slice(prefix.length))).filter(isGroupId);
