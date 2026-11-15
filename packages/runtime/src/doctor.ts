@@ -111,11 +111,17 @@ function checkDependencies(mcp: McpLaunches): CheckResult {
   return pass("dependencies", found.join("\n"));
 }
 
+/**
+ * What a passing login adds: the SDK exposes no public way to read Privacy Mode (`Cursor.me()` has no such field, and an internal export
+ * is not an interface), so the doctor cannot check it and reminds the reader to. `INSTALL-AGENT.md` quotes the first words.
+ */
+const PRIVACY_MODE_REMINDER = "Privacy Mode cannot be read through the SDK: confirm it is on in Cursor Settings > General";
+
 /** The SDK login: an authenticated call, so an expired or revoked key fails here and not in the middle of a run. */
 async function checkLogin(): Promise<CheckResult> {
   try {
     const me = await within(Cursor.me(), timeoutMs(), "Cursor");
-    return pass("login", `key "${me.apiKeyName}"`);
+    return pass("login", `key "${me.apiKeyName}"\n${PRIVACY_MODE_REMINDER}`);
   } catch (err) {
     return fail("login", errorText(err), "Log in with `wf login` (it opens the browser) or set CURSOR_API_KEY in the environment that starts the IDE.");
   }

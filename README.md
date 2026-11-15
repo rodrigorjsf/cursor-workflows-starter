@@ -49,6 +49,9 @@ wf init                                # no seu repositório: grava os arquivos 
 wf doctor                              # confere Node, login, modelos, o CLI do forge (gh ou glab), servidor MCP, configuração, sandbox do SDK e o kit instalado
 ```
 
+O kit não consegue ler o Privacy Mode da sua conta: confirme que ele está ligado em *Cursor Settings → General* antes de rodar um
+workflow ([5.1](docs/operating/01-governanca-e-custos.md#políticas-de-admin-que-se-aplicam)).
+
 No Cursor IDE, habilite o MCP server `workflows` e digite `/run-workflow implement-issue 123`
 ([2.1 §6](docs/usage/01-instalacao.md#6-habilitar-no-cursor-ide)). Os tetos de custo vêm de uma configuração global com
 valores padrão, que você ajusta: [2.2 §3](docs/usage/02-configuracao-inicial.md#3-teto-de-custo).

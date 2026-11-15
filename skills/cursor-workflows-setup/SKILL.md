@@ -47,6 +47,8 @@ Pick the task, then run its steps in order. Each step ends on a stated result.
 2. Fix what a `hint` lets you fix. Hand the user what needs them:
    - `login`: `wf login` opens a browser, so the user runs it; `NO_OPEN_BROWSER=1 wf login` prints the URL on stderr for
      a machine with no browser. The Cursor API key is the user's secret: keep it out of every command, log and reply.
+     A passing `login` ends with a reminder that Privacy Mode cannot be read through the SDK: if the user has not said
+     yet that it is on (Cursor Settings → General, or enforced by their team admin), ask, and do not guess the answer.
    - `forge`: `gh` (GitHub) or `glab` (GitLab) is missing or logged out: the user runs `gh auth login` or
      `glab auth login --hostname <host>`. A host the kit does not know fails with a message that names the `forges` key:
      declaring it is the user's call (see "Read or change the config").

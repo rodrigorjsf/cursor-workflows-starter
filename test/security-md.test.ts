@@ -34,3 +34,14 @@ test("the GitHub-token section names every scope the doctor warns about, how to 
     assert.ok(section.includes(needle), `the section does not mention ${needle}`);
   }
 });
+
+// Privacy Mode is the user's setting on their Cursor account: the SDK cannot read it, so SECURITY.md is where a reader learns what it
+// changes and what the kit does about it (the install guide asks, the doctor reminds, the book's chapter 5.1 holds the model advice).
+test("SECURITY.md has a Privacy Mode section that links Cursor's data-use page, says where to confirm the mode, and points the model advice to the allowedModels cap", () => {
+  const section = sectionOf(SECURITY, "Privacy Mode");
+  assert.ok(section, 'SECURITY.md has no "## Privacy Mode" section');
+  assert.ok(parseMarkdown(SECURITY).links.some((l) => l.target === "https://cursor.com/data-use"), "SECURITY.md does not link https://cursor.com/data-use");
+  for (const needle of ["Cursor Settings → General", "wf doctor", "INSTALL-AGENT.md", "allowedModels", "ZDR"]) {
+    assert.ok(section.includes(needle), `the Privacy Mode section does not mention ${needle}`);
+  }
+});

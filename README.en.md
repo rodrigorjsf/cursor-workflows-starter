@@ -49,6 +49,9 @@ wf init                                # in your repo: writes the kit's files, s
 wf doctor                              # checks Node, login, models, the forge CLI (gh or glab), the MCP server, the config, the SDK sandbox and the installed kit
 ```
 
+The kit cannot read your account's Privacy Mode: confirm it is on in Cursor Settings → General before you run a workflow
+([5.1](docs/operating/01-governanca-e-custos.md#políticas-de-admin-que-se-aplicam)).
+
 In the Cursor IDE, enable the `workflows` MCP server and type `/run-workflow implement-issue 123`
 ([2.1 §6](docs/usage/01-instalacao.md#6-habilitar-no-cursor-ide)). The cost caps come from a global config with default
 values that you tune: [2.2 §3](docs/usage/02-configuracao-inicial.md#3-teto-de-custo).

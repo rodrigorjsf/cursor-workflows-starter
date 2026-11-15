@@ -306,11 +306,17 @@ test("a repo with no MCP server entry for the kit fails the dependencies check a
   assert.match(missing.hint ?? "", /wf init/);
 });
 
-test("the login check names the key it authenticated with, and a logged-out SDK fails with how to log in, without echoing the API key", () => {
+test("the login check names the key it authenticated with and reminds the user that Privacy Mode cannot be read through the SDK, and a logged-out SDK fails with how to log in, without echoing the API key", () => {
   const repo = repoCopy();
   const loggedIn = checkOf(reportOf(doctor(repo)), "login");
   assert.equal(loggedIn.status, "pass", loggedIn.message);
   assert.match(loggedIn.message, /fake-key/);
+  // The SDK has no way to read the mode (`Cursor.me()` carries no such field), so a passing login can only remind.
+  assert.ok(
+    loggedIn.message.includes("Privacy Mode cannot be read through the SDK: confirm it is on in Cursor Settings > General"),
+    `the passing login check carries the Privacy Mode reminder: ${loggedIn.message}`,
+  );
+  assert.equal(loggedIn.hint, undefined, "a reminder is part of the message: a passing check has no hint");
   assert.doesNotMatch(loggedIn.message, /dev@example\.com/); // the account's email stays out of a report that may end up in a chat or an issue
 
   // The fake SDK fails like a rejected key does: with a message that carries the key it was given.
@@ -318,6 +324,7 @@ test("the login check names the key it authenticated with, and a logged-out SDK 
   const r = doctor(repo, { env: { FAKE_SDK_LOGGED_OUT: "1", CURSOR_API_KEY: secret } });
   const loggedOut = checkOf(reportOf(r), "login");
   assert.equal(loggedOut.status, "fail");
+  assert.doesNotMatch(loggedOut.message, /Privacy Mode/, "a failed login says why it failed, not the reminder");
   assert.match(loggedOut.hint ?? "", /wf login/);
   assert.match(loggedOut.hint ?? "", /CURSOR_API_KEY/);
   assert.ok(!r.stdout.includes(secret) && !r.stderr.includes(secret), "the key must not appear in the report");

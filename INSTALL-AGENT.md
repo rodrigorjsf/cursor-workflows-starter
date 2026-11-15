@@ -73,7 +73,20 @@ in `~/.cursor/sdk/auth.json`), or to export `CURSOR_API_KEY`. On a machine with 
 `NO_OPEN_BROWSER=1 wf login` in the background and give the user the URL it prints on stderr right away: it expires
 within minutes. A plan without SDK access fails here with `plan_required`; relay that to the user as it is.
 
-## 4. Set up the repo
+## 4. Confirm Privacy Mode
+
+With Privacy Mode off, Cursor may store the code, prompts and command output that every step of a workflow sends, and
+train on them (<https://cursor.com/data-use>). SDK runs follow the same Privacy Mode rules as the IDE. The SDK does not
+say whether the mode is on, so you cannot check it: ask the user.
+
+Ask the user to confirm that Privacy Mode is on: under Cursor Settings → General for an individual account, or enforced
+by their team admin for a team account. Do not go on until they answer. Never guess the answer, and never change the
+setting for them.
+
+Done when the user has answered. A user who says it is off, or that they do not know, finds the setting (or asks their
+team admin) and tells you what it says. Going on with it off is the user's call, not yours.
+
+## 5. Set up the repo
 
 From the root of the repo the user wants to use the kit in:
 
@@ -91,7 +104,7 @@ line that starts with `wf init: Claude Code reads`. That line means a Claude Cod
 `wf init` does not write Claude Code's memory files. It never runs git: the user reviews the diff and commits. The user can decline the `AGENTS.md` block with `wf init --no-agents-md` and undo it later with
 `wf init --remove`.
 
-## 5. Run the doctor
+## 6. Run the doctor
 
 ```bash
 wf doctor --json
@@ -101,7 +114,7 @@ Done when it exits 0 (`"ok": true`). Otherwise each failing entry in `checks` ha
 hint says if you can, hand the user what needs them (the login, a newer Node, `gh auth login --hostname <host>` or
 `glab auth login --hostname <host>`), and run the doctor again. An entry with `"status": "warn"` does not fail the doctor: it
 passed, and its `message` and `hint` name something to fix, such as a GitHub token that holds scopes the kit does not need.
-Relay each warning to the user, and do not print the token. The checks, in this order: `node`, `dependencies`, `login`, `models`, `forge`, `mcp-server`,
+Relay each warning to the user, and do not print the token. The message of a passing `login` check ends with a reminder that starts `Privacy Mode cannot be read through the SDK`: the doctor cannot read the mode, and step 4 already asked the user, so nothing more is due for it. The checks, in this order: `node`, `dependencies`, `login`, `models`, `forge`, `mcp-server`,
 `config`, `kit-version`, `sandbox`, `kit`. `kit` fails when the installed kit has local changes or is not on exactly the tag of its version: reinstall it as step 2 says. `forge` asks the CLI of the repository's forge (`gh` for GitHub, `glab` for GitLab) and passes
 outside a git repository. The host of `origin` picks the forge: `github.com` and `gitlab.com` are known, and any other
 host (a self-managed GitLab) must be declared under the `forges` config key: until it is, the check fails with a message
@@ -110,7 +123,7 @@ that names the key. Declaring the host is the user's call.
 Run the doctor from a terminal the IDE opened when you can: `node` and `mcp-server` follow the environment the IDE
 starts.
 
-## 6. Hand over
+## 7. Hand over
 
 Tell the user:
 

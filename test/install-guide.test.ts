@@ -43,11 +43,12 @@ test("the installer the guide fetches exists in the repo and takes the flags the
   for (const flag of new Set(GUIDE.match(/install\.sh (--[a-z-]+)/g)?.map((m) => m.split(" ")[1]))) assert.ok(help.includes(flag!), `install.sh --help does not list ${flag}`);
 });
 
-test("the guide runs install, login check, init, doctor, in that order, and every wf command in it exists", () => {
+test("the guide runs install, login check, Privacy Mode confirmation, init, doctor, in that order, and every wf command in it exists", () => {
   const sections = GUIDE.split(/^## /m).slice(1);
   const steps = [
     [/^\d+\. Install the kit/, "install.sh --tag"],
     [/^\d+\. Log in/, "wf whoami"],
+    [/^\d+\. Confirm Privacy Mode/, "Privacy Mode"],
     [/^\d+\. Set up the repo/, "wf init"],
     [/^\d+\. Run the doctor/, "wf doctor"],
   ] as const;
@@ -65,12 +66,31 @@ test("the guide runs install, login check, init, doctor, in that order, and ever
   for (const command of named) assert.ok(commands.includes(command), `the guide names wf ${command}, which the CLI does not have`);
 });
 
-test("step 4 relays wf init's Claude Code note: the setup skill that also says so comes in only after the install", () => {
+test("the repo setup step relays wf init's Claude Code note: the setup skill that also says so comes in only after the install", () => {
   const step = GUIDE.split(/^## /m).find((section) => /^\d+\. Set up the repo/.test(section));
   assert.ok(step, "no section 'Set up the repo'");
-  assert.ok(step.includes("`wf init: Claude Code reads"), "step 4 names the note by the prefix wf init prints");
-  assert.match(step, /\bstderr\b/, "step 4 says the note comes on stderr");
+  assert.ok(step.includes("`wf init: Claude Code reads"), "the step names the note by the prefix wf init prints");
+  assert.match(step, /\bstderr\b/, "the step says the note comes on stderr");
   assert.match(step.replace(/\s+/g, " "), /Done when[^.]*relayed/, "relaying the note is part of the step's Done when");
+});
+
+// The SDK exposes no way to read Privacy Mode (`Cursor.me()` has no such field), so the guide cannot check it: the user confirms it.
+test("between the login and the repo setup, the guide has the user confirm Privacy Mode, says where, and goes no further until they answer", () => {
+  const sections = GUIDE.split(/^## /m).slice(1);
+  const login = sections.findIndex((s) => /^\d+\. Log in/.test(s));
+  const setup = sections.findIndex((s) => /^\d+\. Set up the repo/.test(s));
+  assert.ok(login !== -1 && setup > login, "the guide has a login section before the repo setup");
+  const between = sections.slice(login + 1, setup);
+  assert.ok(between.some((s) => s.includes("Privacy Mode")), "no section between the login and the repo setup mentions Privacy Mode");
+  assert.ok(!sections.slice(0, login + 1).concat(sections.slice(setup)).some((s) => /^\d+\. Confirm Privacy Mode/.test(s)), "the confirmation is one step, between the login and the repo setup");
+  const step = between.find((s) => /^\d+\. Confirm Privacy Mode/.test(s));
+  assert.ok(step, "the step between the login and the repo setup is titled 'Confirm Privacy Mode'");
+  const flat = step.replace(/\s+/g, " ");
+  assert.match(flat, /Cursor Settings → General/, "the step says where an individual account finds the setting");
+  assert.match(flat, /team admin/, "the step says a team admin can enforce the setting");
+  assert.match(flat, /\bask\b/i, "the agent asks: it cannot read the setting");
+  assert.match(flat, /Do not (?:go on|continue)[^.]*until/, "the step does not go on before the user answers");
+  assert.match(flat, /Done when the user has answered/, "the answer is the step's Done when");
 });
 
 test("the setup skill only names wf commands that exist", () => {
@@ -152,6 +172,12 @@ test("no tag fetch of the installer or of wf upgrade forces over a moved tag, an
     assert.match(text, /releases\/tags\//, `${file} never asks the releases API about the tag`);
     assert.match(text, /\bimmutable\b/, `${file} never tests the release's immutable field`);
   }
+});
+
+test("the guide quotes the start of the Privacy Mode reminder the doctor's passing login check prints, word for word", () => {
+  const quoted = "Privacy Mode cannot be read through the SDK";
+  assert.ok(GUIDE.includes(`\`${quoted}\``), `INSTALL-AGENT.md no longer quotes \`${quoted}\``);
+  assert.ok(read("packages", "runtime", "src", "doctor.ts").includes(`"${quoted}: confirm it is on in Cursor Settings > General"`), `the doctor no longer starts its reminder with "${quoted}"`);
 });
 
 test("the installer and wf upgrade say the same four things about a tag, and the guide quotes only words both say", () => {
