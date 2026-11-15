@@ -217,14 +217,14 @@ const checkOf = (report: Report, id: string): Check => {
   return check;
 };
 
-test("on a healthy setup every check passes: exit 0, and --json lists the ten checks in a fixed order, none with a hint", () => {
+test("on a healthy setup every check passes: exit 0, and --json lists the eleven checks in a fixed order, none with a hint", () => {
   const r = doctor(repoCopy());
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const report = reportOf(r);
   assert.equal(report.ok, true);
   assert.deepEqual(
     report.checks.map((c) => c.id),
-    ["node", "dependencies", "login", "models", "forge", "mcp-server", "config", "kit-version", "sandbox", "kit"],
+    ["node", "dependencies", "endpoints", "login", "models", "forge", "mcp-server", "config", "kit-version", "sandbox", "kit"],
   );
   for (const c of report.checks) assert.ok(c.status === "pass" && c.hint === undefined, `${c.id}: ${c.message}`);
   assert.equal(r.stderr, "", "the doctor writes its report to stdout and nothing to stderr");
@@ -234,7 +234,7 @@ test("without --json the report is text, one block per check with the fix hint u
   const healthy = doctor(repoCopy(), { args: [] });
   assert.equal(healthy.status, 0, healthy.stdout + healthy.stderr);
   assert.match(healthy.stdout, /\[ok\]\s+Node\.js: v\d+/);
-  assert.match(healthy.stdout, /All good: 10 checks passed\./);
+  assert.match(healthy.stdout, /All good: 11 checks passed\./);
 
   // Logged out and no gh in a GitHub repository: login, models (no catalog without a login) and forge fail.
   const r = doctor(gitRepoCopy("https://github.com/acme/widgets.git"), { args: [], bins: [], env: { FAKE_SDK_LOGGED_OUT: "1" } });
@@ -244,7 +244,7 @@ test("without --json the report is text, one block per check with the fix hint u
   assert.match(r.stdout, /\[FAIL\]\s+Cursor SDK login: /);
   assert.match(r.stdout, /how to fix: Log in with `wf login`/);
   assert.match(r.stdout, /\[FAIL\]\s+Forge CLI: /);
-  assert.match(r.stdout, /3 of 10 checks failed\./);
+  assert.match(r.stdout, /3 of 11 checks failed\./);
 });
 
 /** The hooks and MCP servers a cloned repository can bring: the three files a step that loads the project's settings runs code from. */
@@ -382,6 +382,62 @@ test("the login check names the key it authenticated with and reminds the user t
   assert.match(loggedOut.hint ?? "", /wf login/);
   assert.match(loggedOut.hint ?? "", /CURSOR_API_KEY/);
   assert.ok(!r.stdout.includes(secret) && !r.stderr.includes(secret), "the key must not appear in the report");
+});
+
+// The SDK sends the API key to the address in CURSOR_BACKEND_URL (and CURSOR_WEBSITE_URL for login) with no check of its own. The
+// `endpoints` check is the kit's: an https URL on cursor.sh or cursor.com, or nothing. Until it passes, the checks that call the SDK
+// (login, models) do not run, because running them is what would send the key.
+test("the endpoints check passes with CURSOR_BACKEND_URL unset or a Cursor https address, and fails for http or another host, naming the variable and what is accepted", () => {
+  const repo = repoCopy();
+  const unset = checkOf(reportOf(doctor(repo)), "endpoints");
+  assert.equal(unset.status, "pass", unset.message);
+  assert.match(unset.message, /no endpoint variable is set|neither CURSOR_BACKEND_URL nor CURSOR_WEBSITE_URL/);
+
+  const cursor = checkOf(reportOf(doctor(repo, { env: { CURSOR_BACKEND_URL: "https://api2.cursor.sh", CURSOR_WEBSITE_URL: "https://cursor.com" } })), "endpoints");
+  assert.equal(cursor.status, "pass", cursor.message);
+  assert.match(cursor.message, /CURSOR_BACKEND_URL=https:\/\/api2\.cursor\.sh/);
+
+  for (const value of ["http://api.cursor.sh", "https://evil.example"]) {
+    const r = doctor(repo, { env: { CURSOR_BACKEND_URL: value } });
+    assert.equal(r.status, 1, value);
+    const bad = checkOf(reportOf(r), "endpoints");
+    assert.equal(bad.status, "fail", value);
+    assert.match(bad.message, new RegExp(`CURSOR_BACKEND_URL is ${value.replace(/[.]/g, "\\.")}, which is not an https URL on cursor\\.sh or cursor\\.com`));
+    assert.match(bad.hint ?? "", /Unset CURSOR_BACKEND_URL/);
+  }
+});
+
+test("a bad CURSOR_WEBSITE_URL fails the endpoints check too, and a value's userinfo, path and query never reach the report", () => {
+  const secret = "s3cr3t-in-a-url";
+  const r = doctor(repoCopy(), { env: { CURSOR_WEBSITE_URL: `https://user:${secret}@evil.example/login?token=${secret}` } });
+  const bad = checkOf(reportOf(r), "endpoints");
+  assert.equal(bad.status, "fail");
+  assert.match(bad.message, /CURSOR_WEBSITE_URL is https:\/\/evil\.example,/);
+  assert.ok(!r.stdout.includes(secret) && !r.stderr.includes(secret), "the report repeats part of the URL");
+});
+
+test("while the endpoints check fails, login and models do not run: they say so, and the SDK is not asked for anything", () => {
+  const r = doctor(repoCopy(), { env: { CURSOR_BACKEND_URL: "https://evil.example" } });
+  const report = reportOf(r);
+  for (const id of ["login", "models"]) {
+    const check = checkOf(report, id);
+    assert.equal(check.status, "fail", id);
+    assert.match(check.message, /^not run: /, id);
+    assert.match(check.hint ?? "", /endpoints check/, id);
+    assert.doesNotMatch(check.message, /fake-key|catalog/, `${id} asked the SDK: ${check.message}`);
+  }
+  assert.equal(report.ok, false);
+});
+
+test("an endpoint variable in the entry's env of the repo's MCP config is checked too: the server the IDE starts gets it", () => {
+  const repo = repoCopy();
+  rmSync(join(repo, ".mcp.json"));
+  setEntryEnv(repo, ".cursor/mcp.json", { CURSOR_BACKEND_URL: "https://evil.example" });
+  const bad = checkOf(reportOf(doctor(repo)), "endpoints");
+  assert.equal(bad.status, "fail");
+  assert.match(bad.message, /\.cursor\/mcp\.json: CURSOR_BACKEND_URL is https:\/\/evil\.example,/);
+  setEntryEnv(repo, ".cursor/mcp.json", { CURSOR_BACKEND_URL: "https://api2.cursor.sh" });
+  assert.equal(checkOf(reportOf(doctor(repo)), "endpoints").status, "pass");
 });
 
 test("the models check compares every model the repo's config ends up using with the account's catalog, ids and aliases alike", () => {
@@ -629,7 +685,7 @@ test("--json shows a warning as `status: warn` with its hint and `ok: true`, and
   assert.equal(report.ok, true);
   assert.deepEqual(
     report.checks.map((c) => [c.id, c.status]),
-    [["node", "pass"], ["dependencies", "pass"], ["login", "pass"], ["models", "pass"], ["forge", "warn"], ["mcp-server", "pass"], ["config", "pass"], ["kit-version", "pass"], ["sandbox", "pass"], ["kit", "pass"]],
+    [["node", "pass"], ["dependencies", "pass"], ["endpoints", "pass"], ["login", "pass"], ["models", "pass"], ["forge", "warn"], ["mcp-server", "pass"], ["config", "pass"], ["kit-version", "pass"], ["sandbox", "pass"], ["kit", "pass"]],
   );
   assert.deepEqual(Object.keys(checkOf(report, "forge")), ["id", "title", "status", "message", "hint"]);
   assert.deepEqual(Object.keys(checkOf(report, "node")), ["id", "title", "status", "message"]);
@@ -643,13 +699,13 @@ test("without --json a warning prints as `[warn]` with its fix hint, and the las
   assert.match(warned.stdout, /\[warn\]\s+Forge CLI: GitHub at github\.com: .*admin:public_key/);
   assert.match(warned.stdout, /how to fix: Remove them with `gh auth refresh --remove-scopes admin:public_key --hostname github\.com`/);
   assert.match(warned.stdout, /\[ok\]\s+Node\.js/);
-  assert.match(warned.stdout, /All 10 checks passed, 1 with a warning\./);
+  assert.match(warned.stdout, /All 11 checks passed, 1 with a warning\./);
 
   const both = doctor(repo, { bins: [gh.dir], args: [], env: { FAKE_SDK_LOGGED_OUT: "1" } });
   assert.equal(both.status, 1, "a failure still fails the doctor");
   assert.match(both.stdout, /\[warn\]\s+Forge CLI/);
   assert.match(both.stdout, /\[FAIL\]\s+Cursor SDK login/);
-  assert.match(both.stdout, /2 of 10 checks failed, 1 with a warning\./);
+  assert.match(both.stdout, /2 of 11 checks failed, 1 with a warning\./);
 });
 
 test("an origin on a host nobody declared fails the forge check naming the host and the `forges` key, and a hint to declare it", () => {
@@ -866,7 +922,7 @@ test("a check that throws is a failed check naming the workflow, not a crashed d
   const r = doctor(repo);
   assert.equal(r.status, 1, r.stderr);
   const report = reportOf(r);
-  assert.equal(report.checks.length, 10);
+  assert.equal(report.checks.length, 11);
   const config = checkOf(report, "config");
   assert.equal(config.status, "fail");
   assert.match(config.message, /bad-roles/);
