@@ -19,9 +19,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # O mínimo declarado em package.json (engines) e as linhas que os usuários rodam: a 22 mais nova (fim de vida em
-        # 2027-04-30), a 24 (LTS de manutenção) e a 26 (LTS ativa). Renomear um item renomeia o check obrigatório
-        # `test (<versão>)`: o ruleset `main` do repositório lista esses nomes e o dono o atualiza na mesma mudança.
+        # The minimum declared in package.json (engines) and the lines users run: the newest 22 (end of life 2027-04-30), 24
+        # (maintenance LTS) and 26 (active LTS). Renaming an entry renames the required check `test (<version>)`: the `main`
+        # ruleset of the repository lists those names, and the owner updates it in the same change.
         node-version: ["22.13.0", "22.x", "24.x", "26.x"]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -41,9 +41,10 @@ jobs:
   # O renderizador e o puppeteer ficam fixados e instalados num diretório próprio, e o Chromium é baixado num passo
   # explícito. Com `npx`, o cache do npm restaurado pelo setup-node trazia o pacote já instalado, o postinstall do
   # puppeteer não rodava e o navegador nunca chegava a ~/.cache/puppeteer: todo bloco falhava com
-  # "Could not find chrome-headless-shell". Falha no download do navegador reprova o job; não há pulo. O `npm install`
-  # leva `--ignore-scripts` (nenhum script de dependência roda): o postinstall do puppeteer não é mais o que baixa o
-  # navegador, e este passo explícito é o único caminho.
+  # "Could not find chrome-headless-shell". Falha no download do navegador reprova o job; não há pulo.
+  #
+  # The `npm install` below passes --ignore-scripts (no dependency script runs): puppeteer's postinstall no longer downloads
+  # the browser, so the explicit `browsers install` step is the only way it arrives.
   mermaid:
     runs-on: ubuntu-latest
     timeout-minutes: 20
