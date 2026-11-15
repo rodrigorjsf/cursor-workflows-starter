@@ -255,7 +255,7 @@ function announceRun<A>(o: {
     try {
       registerRun({ runId, repo: resolve(opts.cwd), workflow: def.meta.name, startedAt });
     } catch (err) {
-      emit({ type: "warning", message: `could not register the run in the global runs index: ${err instanceof Error ? err.message : String(err)}` });
+      emit({ type: "warning", message: `could not register the run in the global runs index: ${errorText(err)}` });
     }
   }
   for (const { runId: prunedRun, error } of pruned.failed) {
@@ -292,7 +292,7 @@ class RevertQueue {
           await revertToSnapshot(o.snapshot);
           return true;
         } catch (err) {
-          o.warn(`step "${o.label}" ${why}: could not undo the changes in ${o.stepCwd}: ${err instanceof Error ? err.message : String(err)}`);
+          o.warn(`step "${o.label}" ${why}: could not undo the changes in ${o.stepCwd}: ${errorText(err)}`);
           return false;
         }
       });
@@ -331,7 +331,7 @@ async function openEventChannel(store: RunStore, runId: string, opts: RunOptions
       const { createRecorder } = await import("../observability/recorder.js");
       recorder = await createRecorder(opts.metricsDb || undefined);
     } catch (err) {
-      recorderWarning = `metrics off: ${err instanceof Error ? err.message : String(err)}`;
+      recorderWarning = `metrics off: ${errorText(err)}`;
     }
   }
   // Every event is stamped and redacted here, once: the log, the recorder and the listeners all get the same redacted event.
@@ -343,7 +343,7 @@ async function openEventChannel(store: RunStore, runId: string, opts: RunOptions
     } catch (err) {
       if (logFailed) return;
       logFailed = true; // one warning only: the log is the source of truth, but a full disk must not take the run down
-      opts.onEvent?.(stamp({ type: "warning", message: `could not write the event log: ${err instanceof Error ? err.message : String(err)}` }));
+      opts.onEvent?.(stamp({ type: "warning", message: `could not write the event log: ${errorText(err)}` }));
     }
   };
   const emit = (e: NewEvent) => {
@@ -352,7 +352,7 @@ async function openEventChannel(store: RunStore, runId: string, opts: RunOptions
     try {
       recorder?.record(event);
     } catch (err) {
-      const warning = stamp({ type: "warning", message: `could not write a metric: ${err instanceof Error ? err.message : String(err)}` });
+      const warning = stamp({ type: "warning", message: `could not write a metric: ${errorText(err)}` });
       append(warning);
       opts.onEvent?.(warning);
     }
@@ -1106,7 +1106,7 @@ async function executeRun<A, R>(
               lastError = outcome.message;
               break;
             case "aborted": {
-              lastError = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+              lastError = errorText(outcome.reason);
               if (abort.isCutBy(outcome.reason)) {
                 // Over a token cap: the attempt fails as "budget" and is not retried. The run's cap ends the run, the step's cap only the step.
                 errorKind = "budget";
@@ -1264,7 +1264,7 @@ async function executeRun<A, R>(
       runGroup("parallel", thunks, (thunk) =>
         thunk().catch((err: unknown) => {
           if (err instanceof FatalRunError) throw err; // teto de custo ou conta sem acesso aborta o workflow inteiro
-          emit({ type: "warning", message: `parallel: ${err instanceof Error ? err.message : String(err)}` });
+          emit({ type: "warning", message: `parallel: ${errorText(err)}` });
           return null;
         }),
       ),
@@ -1276,7 +1276,7 @@ async function executeRun<A, R>(
           return prev;
         } catch (err) {
           if (err instanceof FatalRunError) throw err;
-          emit({ type: "warning", message: `pipeline item ${index}: ${err instanceof Error ? err.message : String(err)}` });
+          emit({ type: "warning", message: `pipeline item ${index}: ${errorText(err)}` });
           return null;
         }
       }),
@@ -1302,7 +1302,7 @@ async function executeRun<A, R>(
     ended = { status: "finished", result: await (abandoned ? Promise.race([workflow, abandoned]) : workflow) };
   } catch (err) {
     if (err instanceof RunCancelledError) interrupted = true;
-    ended = { status: "failed", error: err instanceof Error ? err.message : String(err) };
+    ended = { status: "failed", error: errorText(err) };
   }
   // A run that hit its token cap cancelled its active steps; they finish their accounting before the run is closed, so no
   // step event trails the run-end and their tokens are in the outcome.

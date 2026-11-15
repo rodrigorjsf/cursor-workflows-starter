@@ -3,6 +3,7 @@
 // The server decides what may start (which repository, which workflow, whether the args fit) and says why not in its own words;
 // what is checked here is what only the browser sees: that the args box holds JSON, and that a cap box holds a number.
 import type { WorkflowEntry } from "../src/start.js";
+import { errorText } from "./error-text.js";
 
 /** What the form's boxes hold. The caps are text, as typed: an empty box is a cap that is not given, which the server refuses by name. */
 export interface StartFormState {
@@ -65,7 +66,7 @@ export function startBody(form: StartFormState): { ok: true; body: StartRequestB
   try {
     args = JSON.parse(form.argsText);
   } catch (err) {
-    return { ok: false, error: `the args are not valid JSON: ${err instanceof Error ? err.message : String(err)}` };
+    return { ok: false, error: `the args are not valid JSON: ${errorText(err)}` };
   }
   if (typeof args !== "object" || args === null || Array.isArray(args)) return { ok: false, error: "the args must be a JSON object" };
   const maxTokens = capNumber(form.maxTokens);

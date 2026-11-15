@@ -1,4 +1,4 @@
-// Seam 3, the docs: the events reference page is generated from the event interfaces, and `npm test` fails when the
+// Seam: the docs. The events reference page is generated from the event interfaces, and `npm test` fails when the
 // committed page drifts from them. Regenerate with `npm run docs:events`.
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";

@@ -1,4 +1,4 @@
-// Seam 1, the run: known secret formats, and the values of environment variables named like secrets, are redacted before
+// Seam: the run. Known secret formats, and the values of environment variables named like secrets, are redacted before
 // anything is written to the run's event log, and before any listener sees an event. Runs `runWorkflow` with the fake
 // Cursor SDK and reads the log back.
 process.env.WF_METRICS = "off";

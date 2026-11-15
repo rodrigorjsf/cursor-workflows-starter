@@ -185,6 +185,24 @@ test("every test that runs a workflow isolates the home, itself or through a fix
   assert.deepEqual(offenders, [], 'import "./isolate-home.js" before the modules under test, or import a fixture that does');
 });
 
+/** 0 (the file) unless line 1 is `// Seam: <the seam, in words>`. A numbered `// Seam 1, ...` or any other opening is no header. */
+const seamless = (_path: string, text: string): number[] => (/^\/\/ Seam: \S/.test(text) ? [] : [0]);
+
+test("the seam header check fires on a numbered seam, a comment of another kind and a file that opens with code, and passes `// Seam: <name>`", () => {
+  assert.deepEqual(seamless("a.test.ts", "// Seam 1, the run: the engine.\n"), [0]);
+  assert.deepEqual(seamless("a.test.ts", "// Seam:\n"), [0], "a header with no seam named");
+  assert.deepEqual(seamless("a.test.ts", "// The engine, offline.\n"), [0]);
+  assert.deepEqual(seamless("a.test.ts", '// A comment first\n// Seam: the engine.\nimport "x";\n'), [0], "the header is line 1");
+  assert.deepEqual(seamless("a.test.ts", 'import "x";\n'), [0]);
+  assert.deepEqual(seamless("a.test.ts", "// Seam: the engine; the event log.\nimport \"x\";\n"), []);
+});
+
+test("every test file opens with `// Seam: <the seam, in words>` on line 1; a file that tests several seams names them on one line, `// Seam: a; b`", () => {
+  const tests = ALL_CODE.filter((f) => f.endsWith(".test.ts"));
+  assert.ok(tests.length >= 140, `found ${tests.length}`);
+  assert.deepEqual(scan(tests, seamless), [], "open the file with `// Seam: <the interface the file asserts at, and what is real and what is a stand-in>`");
+});
+
 /** Lines importing jsdom or a wrapper of it. */
 const jsdomImports = (path: string, text: string) => importsOf(path, text).filter((i) => /^(jsdom|global-jsdom|jsdom-global)(\/|$)/.test(i.spec)).map((i) => i.line);
 /** The jsdom packages a manifest declares, in any dependency group. */
@@ -347,6 +365,65 @@ test("`npm run typecheck` checks every test: each directory that holds tests has
   }
 });
 
+/** The `type X = { ... }` the code keeps because only an alias will do: the file, the name, and why an interface does not. */
+interface AllowedTypeLiteral {
+  file: string;
+  name: string;
+  why: string;
+}
+
+/** Each `type X = { ... }` of a file: an object shape written as an alias of a type literal. A union, an intersection, a mapped or a utility type is no type literal. */
+function typeLiteralAliases(path: string, text: string): Array<{ name: string; line: number }> {
+  const sf = parse(path, text);
+  const found: Array<{ name: string; line: number }> = [];
+  walk(sf, (node) => {
+    if (ts.isTypeAliasDeclaration(node) && ts.isTypeLiteralNode(node.type)) found.push({ name: node.name.text, line: lineOf(sf, node) });
+  });
+  return found;
+}
+
+/** The lines of a file's type-literal aliases that no allowlist entry names. */
+const unallowedTypeLiterals = (path: string, text: string, allowed: AllowedTypeLiteral[]): number[] =>
+  typeLiteralAliases(path, text)
+    .filter((alias) => !allowed.some((a) => a.file === path && a.name === alias.name))
+    .map((alias) => alias.line);
+
+test("the object shape check fires on an alias of a type literal, generic or exported or declared inside a function, and passes an interface, the aliases that compute a type and an allowlisted name", () => {
+  const offender = "type A = { a: string };\nexport type B<T> = { b: T };\nfunction f() {\n  type C = { c: 1 };\n}\n";
+  assert.deepEqual(unallowedTypeLiterals("a.ts", offender, []), [1, 2, 4]);
+  const legit = [
+    "interface A { a: string }",
+    'type Mode = "a" | "b";',
+    "type Reply = Ok | Failed;",
+    "type Both = A & { extra: string };",
+    "type Keys = { [K in keyof A]: boolean };",
+    "type Partial2 = Partial<{ a: string }>;",
+    "type Fn = (a: string) => void;",
+  ].join("\n");
+  assert.deepEqual(unallowedTypeLiterals("a.ts", legit, []), []);
+  assert.deepEqual(unallowedTypeLiterals("a.ts", offender, [{ file: "a.ts", name: "B", why: "needs the alias" }]), [1, 4]);
+  assert.deepEqual(unallowedTypeLiterals("b.ts", offender, [{ file: "a.ts", name: "B", why: "needs the alias" }]), [1, 2, 4], "an entry names its own file only");
+});
+
+/** The aliases of a type literal that stay. An interface has no implicit index signature, so it is not assignable to a `Record<string, unknown>`; a type literal is. */
+const ALLOWED_TYPE_LITERALS: AllowedTypeLiteral[] = [
+  {
+    file: "packages/runtime/workflows/implement-issue.ts",
+    name: "Settings",
+    why: "the workflow's `meta.settings` is a `Record<string, unknown>`, and an interface is not assignable to one",
+  },
+];
+
+test("an object shape is an interface: `type X = { ... }` is kept out unless the allowlist says why, and every allowlist entry still names an alias", () => {
+  assert.deepEqual(
+    scan(ALL_CODE, (path, text) => unallowedTypeLiterals(path, text, ALLOWED_TYPE_LITERALS)),
+    [],
+    "write `interface X { ... }`; keep `type` for unions, intersections, mapped and utility types, or allow the alias here with the reason an interface will not do",
+  );
+  const stale = ALLOWED_TYPE_LITERALS.filter((a) => !typeLiteralAliases(a.file, read(a.file)).some((alias) => alias.name === a.name));
+  assert.deepEqual(stale.map((a) => `${a.file}: ${a.name}`), [], "the alias was removed or became an interface: delete the entry");
+});
+
 /** True when a default-exported expression is a workflow definition: `defineWorkflow(...)` or an object with `meta`. */
 const isWorkflow = (e: ts.Expression): boolean =>
   (ts.isCallExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === "defineWorkflow") ||
@@ -437,6 +514,63 @@ test("the pin check accepts only an exact version", () => {
 test("@cursor/sdk is pinned to an exact version, so the hand-written fake SDK never drifts from it silently", () => {
   const range = JSON.parse(read("packages/runtime/package.json")).dependencies["@cursor/sdk"];
   assert.ok(exactVersion(range), `@cursor/sdk is "${range}": pin it to an exact version, with no caret`);
+});
+
+// --- Error handling ---------------------------------------------------------------------------------------------------
+
+/**
+ * The two files that define `errorText`: the runtime's, and the browser pages' own (a page imports only types from the runtime,
+ * so it cannot take the runtime's). Everything else calls one of them.
+ */
+const ERROR_TEXT_HELPERS = ["packages/runtime/src/runtime/error-text.ts", "packages/dashboard/app/error-text.ts"];
+
+const unparenthesized = (e: ts.Expression): ts.Expression => (ts.isParenthesizedExpression(e) ? unparenthesized(e.expression) : e);
+
+/** Lines of `x instanceof Error ? x.message : String(...)`, spelled out by hand: the body of `errorText`. The tested value `x` is the one whose message is read. */
+function inlineErrorText(path: string, text: string): number[] {
+  if (ERROR_TEXT_HELPERS.includes(path)) return [];
+  const sf = parse(path, text);
+  const found: number[] = [];
+  walk(sf, (node) => {
+    if (!ts.isConditionalExpression(node)) return;
+    const test = unparenthesized(node.condition);
+    const message = unparenthesized(node.whenTrue);
+    const fallback = unparenthesized(node.whenFalse);
+    if (!ts.isBinaryExpression(test) || test.operatorToken.kind !== ts.SyntaxKind.InstanceOfKeyword) return;
+    if (!ts.isIdentifier(test.right) || test.right.text !== "Error") return;
+    if (!ts.isPropertyAccessExpression(message) || message.name.text !== "message") return;
+    if (!ts.isCallExpression(fallback) || !ts.isIdentifier(fallback.expression) || fallback.expression.text !== "String" || fallback.arguments.length !== 1) return;
+    if (message.expression.getText(sf) === test.left.getText(sf)) found.push(lineOf(sf, node));
+  });
+  return found;
+}
+
+test("the errorText check fires on the inline conversion, whatever the value or the layout, and passes errorText, other fallbacks and the helpers' own body", () => {
+  const offender = [
+    "const a = err instanceof Error ? err.message : String(err);",
+    "const b = `x: ${outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)}`;",
+    "const c = (e instanceof Error)",
+    "  ? e.message",
+    "  : String(e);",
+    "const d = err instanceof Error ? err.message : String(other);",
+  ].join("\n");
+  assert.deepEqual(inlineErrorText("a.ts", offender), [1, 2, 3, 6]);
+  const legit = [
+    "const a = errorText(err);",
+    'const b = err instanceof Error ? err.message : "unknown";',
+    "const c = err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300);",
+    "const d = err instanceof Error ? other.message : String(err);",
+    "const e = err instanceof TypeError ? err.message : String(err);",
+    '// err instanceof Error ? err.message : String(err)',
+    'const f = "err instanceof Error ? err.message : String(err)";',
+  ].join("\n");
+  assert.deepEqual(inlineErrorText("a.ts", legit), []);
+  assert.deepEqual(inlineErrorText(ERROR_TEXT_HELPERS[0]!, offender), [], "the helper's own body");
+});
+
+test("a caught value becomes text through errorText: no inline `x instanceof Error ? x.message : String(x)` outside the two helpers", () => {
+  for (const helper of ERROR_TEXT_HELPERS) assert.match(read(helper), /export const errorText = /, `${helper} defines errorText`);
+  assert.deepEqual(scan(ALL_CODE, inlineErrorText), [], "import errorText (packages/runtime/src/runtime/error-text.ts; packages/dashboard/app/error-text.ts in the browser pages) and call errorText(err)");
 });
 
 // --- Persistence ------------------------------------------------------------------------------------------------------
@@ -576,6 +710,218 @@ test("the inline style check fires on a style attribute and passes a class name"
 
 test("the app page has no style= attribute: its CSP has no style-src-attr", () => {
   assert.deepEqual(scan(files("packages/dashboard/app", /\.tsx$/), inlineStyles), [], "style the element with a class in styles.css");
+});
+
+/** Lines of `new EventSource(...)` in a file that does not import `batcher` from `batch.js`, which is what makes a burst of events one render. */
+function unbatchedStreams(path: string, text: string): number[] {
+  const sf = parse(path, text);
+  const batches = importsOf(path, text).some((i) => /(^|\/)batch\.js$/.test(i.spec) && !i.typeOnly && i.names.includes("batcher"));
+  const found: number[] = [];
+  if (!batches) {
+    walk(sf, (node) => {
+      if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "EventSource") found.push(lineOf(sf, node));
+    });
+  }
+  return found;
+}
+
+test("the SSE check fires on a module that opens an EventSource without importing batcher, and passes one that does and one that opens none", () => {
+  const open = "const source = new EventSource(url);\nsource.onmessage = (e) => setState(e.data);\n";
+  assert.deepEqual(unbatchedStreams("run-view/a.ts", open), [1]);
+  assert.deepEqual(unbatchedStreams("run-view/a.ts", 'import type { batcher } from "./batch.js";\n' + open), [2], "a type-only import loads nothing");
+  assert.deepEqual(unbatchedStreams("run-view/a.ts", 'import { BATCH_MS } from "./batch.js";\n' + open), [2], "batch.js, but not batcher");
+  assert.deepEqual(unbatchedStreams("run-view/a.ts", 'import { batcher } from "./batch.js";\n' + open), []);
+  assert.deepEqual(unbatchedStreams("app/a.ts", 'import { batcher } from "../run-view/batch.js";\n' + open), []);
+  assert.deepEqual(unbatchedStreams("run-view/a.ts", "// new EventSource(url) is opened in use-run-events.ts\nlet source: EventSource | undefined;\n"), []);
+});
+
+test("every browser module that opens an EventSource applies its messages through batcher, so a burst of events is one render", () => {
+  assert.ok(BROWSER_CODE.some((f) => readFileSync(join(ROOT, f), "utf8").includes("new EventSource")), "the check reads the modules that open a stream");
+  assert.deepEqual(scan(BROWSER_CODE, unbatchedStreams), [], 'import { batcher } from "./batch.js" (packages/dashboard/run-view/batch.ts) and deliver the stream\'s messages through it');
+});
+
+interface CssDeclaration {
+  line: number;
+  /** The rule the declaration sits in: its selector list, or the prelude of an at-rule that holds declarations. */
+  rule: string;
+  /** The at-rule preludes around the rule, outermost first: `@media (prefers-reduced-motion: reduce)`. */
+  within: string[];
+  property: string;
+  /** The value, without `!important`. */
+  value: string;
+}
+
+/** Every declaration of a stylesheet, comments skipped. A `;`, `{` or `}` inside a string or a parenthesis does not split. */
+function cssDeclarations(css: string): CssDeclaration[] {
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, " "));
+  const found: CssDeclaration[] = [];
+  const preludes: string[] = [];
+  let buffer = "";
+  let bufferLine = 1;
+  let line = 1;
+  let parens = 0;
+  let quote = "";
+  const flush = () => {
+    const declaration = buffer.trim();
+    buffer = "";
+    const colon = declaration.indexOf(":");
+    if (!declaration || declaration.startsWith("@") || colon < 1) return;
+    found.push({
+      line: bufferLine,
+      rule: preludes.at(-1) ?? "",
+      within: preludes.slice(0, -1).filter((p) => p.startsWith("@")),
+      property: declaration.slice(0, colon).trim().toLowerCase(),
+      value: declaration.slice(colon + 1).replace(/\s*!important\s*$/, "").trim(),
+    });
+  };
+  for (const ch of text) {
+    if (ch === "\n") line++;
+    if (buffer.trim() === "" && ch.trim() !== "") bufferLine = line;
+    if (quote) {
+      if (ch === quote) quote = "";
+      buffer += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      buffer += ch;
+    } else if (ch === "(") {
+      parens++;
+      buffer += ch;
+    } else if (ch === ")") {
+      parens--;
+      buffer += ch;
+    } else if (parens === 0 && ch === "{") {
+      preludes.push(buffer.trim().replace(/\s+/g, " "));
+      buffer = "";
+    } else if (parens === 0 && ch === "}") {
+      flush();
+      preludes.pop();
+    } else if (parens === 0 && ch === ";") {
+      flush();
+    } else {
+      buffer += ch;
+    }
+  }
+  return found;
+}
+
+test("the stylesheet reader splits declarations at the rule they sit in, through comments, strings, parentheses and nested at-rules", () => {
+  const css = [
+    "/* a { padding: 99px; } */",
+    ".a, .b { padding: 4px 8px; content: \";}\"; margin: calc(1px + var(--x, 2px)) }",
+    "@media (max-width: 600px) {",
+    "  .c { gap: 0 !important; }",
+    "}",
+    "@import url(x.css);",
+  ].join("\n");
+  assert.deepEqual(cssDeclarations(css), [
+    { line: 2, rule: ".a, .b", within: [], property: "padding", value: "4px 8px" },
+    { line: 2, rule: ".a, .b", within: [], property: "content", value: '";}"' },
+    { line: 2, rule: ".a, .b", within: [], property: "margin", value: "calc(1px + var(--x, 2px))" },
+    { line: 4, rule: ".c", within: ["@media (max-width: 600px)"], property: "gap", value: "0" },
+  ]);
+});
+
+// --- Dashboard CSS ---
+
+/** The sizes the stylesheets space, set and round by: padding, margin, gap, font-size and border-radius, longhands included. */
+const SIZE_PROPERTY = /^(?:(?:padding|margin)(?:-[a-z-]+)?|(?:row-|column-)?gap|font-size|border(?:-[a-z]+)*-radius)$/;
+/** `text` split at the characters `isSeparator` accepts that sit outside parentheses (`calc(1px + 2px)` and `:is(a, b)` stay whole); empty parts are dropped. */
+const splitOutsideParens = (text: string, isSeparator: (ch: string) => boolean): string[] => {
+  const parts: string[] = [];
+  let depth = 0;
+  let part = "";
+  for (const ch of text) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (depth === 0 && isSeparator(ch)) {
+      parts.push(part.trim());
+      part = "";
+    } else part += ch;
+  }
+  return [...parts, part.trim()].filter(Boolean);
+};
+/** The parts of a value, split at the spaces outside parentheses. */
+const valueParts = (value: string): string[] => splitOutsideParens(value, (ch) => ch.trim() === "");
+/** A length that is no token: a number with a unit, other than a 1 or 2px hairline or offset, or a share of the parent or of the viewport (`%`, `vh`, `vw`). Zero has no unit here. */
+const offScaleLengths = (text: string): string[] =>
+  (text.replace(/var\(--[\w-]+(?:\s*,[^)]*)?\)/g, "").match(/-?\d*\.?\d+[a-z%]+/gi) ?? []).filter((length) => !/^-?[12]px$/.test(length) && !/(%|vh|vw)$/.test(length));
+
+/** Lines of the padding, margin, gap, font-size and border-radius declarations that set a size by hand instead of a token, `0`, a share of the parent or the viewport, or a 1 or 2px hairline. */
+function offScaleSizes(_path: string, text: string): number[] {
+  const lines = cssDeclarations(text)
+    .filter((d) => SIZE_PROPERTY.test(d.property) && valueParts(d.value).some((part) => !part.startsWith("var(") && offScaleLengths(part).length > 0))
+    .map((d) => d.line);
+  return [...new Set(lines)];
+}
+
+test("the size token check fires on a literal size in padding, margin, gap, font-size or border-radius, and passes tokens, zero, hairlines, percentages and other properties", () => {
+  const css = [
+    ".a { padding: 6px var(--space-2); }", // 1
+    ".b { gap: var(--space-1) 10px; }", // 2
+    ".c { font-size: 11px; margin-bottom: 0.5rem; }", // 3 (two declarations, one line)
+    ".d { border-top-left-radius: 8px; }", // 4
+    ".e { padding: 0 var(--space-3) 2px; margin-top: -1px; border-radius: 50%; gap: 0; font-size: var(--text-xs); }",
+    ".f { margin: 0 calc(-1 * var(--space-4)); width: 14px; height: 14px; min-height: 32px; border: 2px solid red; }",
+    ".g { padding: var(--space-1, 4px); scroll-padding: 0 12px; margin: 15vh auto 0; }",
+    "@media (max-width: 600px) { .h { padding: 20px; } }", // 8
+  ].join("\n");
+  assert.deepEqual(offScaleSizes("a.css", css), [1, 2, 3, 4, 8]);
+});
+
+/** The stylesheets of the two dashboard pages. */
+const DASHBOARD_CSS = ["packages/dashboard/app", "packages/dashboard/run-view"].flatMap((d) => files(d, /\.css$/));
+
+test("the dashboard stylesheets take every padding, margin, gap, font size and corner radius from the token scales", () => {
+  assert.ok(DASHBOARD_CSS.length >= 3, `found ${DASHBOARD_CSS.join(", ")}`);
+  assert.deepEqual(scan(DASHBOARD_CSS, offScaleSizes), [], "use --space-1…6, --text-xs…2xl or --radius-* (app/tokens.css); a literal stays only as 0, a percentage or a 1 or 2px hairline");
+});
+
+/** The selectors of a rule's list, split at the commas outside parentheses. */
+const selectorList = (rule: string): string[] => splitOutsideParens(rule, (ch) => ch === ",");
+
+const REDUCED_MOTION = /^@media\s+\(prefers-reduced-motion:\s*reduce\)$/;
+/** `animation` for `animation` and its longhands, `transition` for `transition` and its longhands, otherwise undefined. */
+const motionOf = (property: string): "animation" | "transition" | undefined => (/^animation(-|$)/.test(property) ? "animation" : /^transition(-|$)/.test(property) ? "transition" : undefined);
+
+/**
+ * Lines of the declarations that set an `animation` or a `transition` for a selector the same file does not set to `none` of
+ * that kind under `@media (prefers-reduced-motion: reduce)`. A selector is compared as written, one by one of its list.
+ */
+function unresetMotion(_path: string, text: string): number[] {
+  const declarations = cssDeclarations(text);
+  const reset = new Set(
+    declarations
+      .filter((d) => d.within.some((w) => REDUCED_MOTION.test(w)) && d.value === "none" && motionOf(d.property))
+      .flatMap((d) => selectorList(d.rule).map((selector) => `${motionOf(d.property)} ${selector}`)),
+  );
+  const lines = declarations
+    .filter((d) => motionOf(d.property) && d.value !== "none" && !d.within.some((w) => REDUCED_MOTION.test(w) || w.startsWith("@keyframes")))
+    .filter((d) => selectorList(d.rule).some((selector) => !reset.has(`${motionOf(d.property)} ${selector}`)))
+    .map((d) => d.line);
+  return [...new Set(lines)];
+}
+
+test("the reduced-motion check fires on an animation or a transition with no reset to none under prefers-reduced-motion in the same file, and passes the pairs", () => {
+  const css = [
+    ".a { animation: pulse 1s infinite; }", // 1: no reset
+    ".b { transition: color 1s; }", // 2: reset is for the animation only
+    ".c, .d { animation: spin 1s; }", // 3: .d has no reset
+    ".e { transition-property: opacity; }", // 4: no reset
+    "@media (prefers-reduced-motion: reduce) { .b { animation: none; } .c { animation: none; } .x { transition: none; } }",
+    ".f { animation: pulse 1s; }", // 6: its reset is in a media query of another kind
+    "@media (max-width: 600px) { .f { animation: none; } }",
+    ".g, .h { animation: pulse 1s; transition: opacity 1s; }",
+    "@media (prefers-reduced-motion: reduce) { .g, .h { animation: none; transition: none; } }",
+    ".i { animation: none; }",
+    "@keyframes pulse { 50% { opacity: 0.5; } }",
+  ].join("\n");
+  assert.deepEqual(unresetMotion("a.css", css), [1, 2, 3, 4, 6]);
+  assert.deepEqual(unresetMotion("a.css", ".a { animation: spin 1s; }\n@media (prefers-reduced-motion: reduce) { .a { animation: none; } }\n"), []);
+});
+
+test("every animation and transition of the dashboard stylesheets is reset to none under prefers-reduced-motion, in the file that sets it", () => {
+  assert.ok(DASHBOARD_CSS.some((f) => /\banimation:/.test(read(f))), "the check reads a stylesheet that animates");
+  assert.deepEqual(scan(DASHBOARD_CSS, unresetMotion), [], "add the selector to the `@media (prefers-reduced-motion: reduce)` block of the same file, set to `animation: none` or `transition: none`");
 });
 
 // --- Security ---------------------------------------------------------------------------------------------------------
@@ -727,6 +1073,93 @@ test("every shell script starts strict, locates itself through BASH_SOURCE, and 
   assert.deepEqual(scan(SHELL, lax), [], "open with #!/usr/bin/env bash and set -euo pipefail");
   assert.deepEqual(scan(SHELL, dollarZero), [], 'use "$(dirname "${BASH_SOURCE[0]}")", not $0');
   assert.deepEqual(scan(SHELL, unexplainedDisables), [], "put the reason on the same line: # shellcheck disable=SCnnnn # <why>");
+});
+
+/** Lines calling `process.exit(...)`: it ends the process before the stdout and stderr of a piped run are flushed. */
+function processExits(path: string, text: string): number[] {
+  const sf = parse(path, text);
+  const found: number[] = [];
+  walk(sf, (node) => {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "process" && node.expression.name.text === "exit") {
+      found.push(lineOf(sf, node));
+    }
+  });
+  return found;
+}
+
+test("the process.exit check fires on a call, in a function or at the top level, and passes process.exitCode, a string that holds the call and a comment", () => {
+  assert.deepEqual(processExits("s.ts", 'if (bad) process.exit(2);\nfunction f() {\n  process.exit();\n}\n'), [1, 3]);
+  assert.deepEqual(processExits("s.ts", 'process.exitCode = 2;\nconst child = "process.exit(1)";\n// process.exit(0) cuts the output\nconst exit = () => 1;\n'), []);
+});
+
+test("no maintainer script calls process.exit: it sets process.exitCode and returns, so a piped run keeps its output", () => {
+  const scripts = files("scripts", CODE);
+  assert.ok(scripts.length >= 20, `found ${scripts.length}`);
+  assert.deepEqual(scan(scripts, processExits), [], "return the exit code from `main` and write `if (isEntryPoint(import.meta.url)) process.exitCode = main(process.argv.slice(2))` (scripts/lib/cli.ts)");
+});
+
+const LINE_COMMENT = /^\s*(?:\/\/|#)/;
+
+/** The lines of a file as a reader takes them: a line ending in `\` or `\\` (a shell continuation, or one inside a heredoc) and a comment line that leaves a backtick span open both join the next line. Each carries the number of its first physical line. */
+function logicalLines(text: string): Array<{ line: number; text: string }> {
+  const lines = text.split("\n");
+  const found: Array<{ line: number; text: string }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const first = i + 1;
+    let joined = lines[i]!;
+    for (;;) {
+      const next = lines[i + 1];
+      if (next === undefined) break;
+      const backslash = /\\{1,2}\s*$/.test(joined);
+      const openSpan = LINE_COMMENT.test(joined) && LINE_COMMENT.test(next) && (joined.match(/`/g)?.length ?? 0) % 2 === 1;
+      if (!backslash && !openSpan) break;
+      joined = `${joined.replace(/\\{1,2}\s*$/, "").trimEnd()} ${next.replace(openSpan ? /^\s*(?:\/\/|#)\s*/ : /^\s*/, "")}`;
+      i++;
+    }
+    found.push({ line: first, text: joined });
+  }
+  return found;
+}
+
+/**
+ * Lines holding a run command that lacks `--max-tokens` or `--max-cents`. `npm run wf -- run <name>` is a command whatever follows it;
+ * a bare `wf run <name>` is one only with a `--flag`, which tells it from a mention of the subcommand in prose. The command runs
+ * to the next backtick or the end of the joined line.
+ */
+function uncappedRuns(_path: string, text: string): number[] {
+  const isCommand = (npmForm: boolean, tail: string) => (npmForm ? /\S/.test(tail) : / --[a-z]/.test(tail));
+  return logicalLines(text)
+    .filter(({ text: line }) =>
+      [...line.matchAll(/\bwf (-- )?run\b([^`]*)/g)].some(([, npmForm, tail]) => isCommand(npmForm !== undefined, tail!) && !(tail!.includes("--max-tokens") && tail!.includes("--max-cents"))),
+    )
+    .map(({ line }) => line);
+}
+
+test("the caps check fires on a run command without --max-tokens or --max-cents, across a shell continuation or a comment's backtick span, and passes capped commands and prose", () => {
+  const sample = [
+    "npm run wf -- run verify-cloud --cwd ~/repo --max-tokens 60000", // 1: no cents cap
+    "npm run wf -- run verify-cache --cwd ~/repo --args '{}'", // 2: neither
+    "// HOW: `WORKFLOWS_DIR=scripts/verify npm run wf -- run", // 3: capped, across two comment lines
+    "//   verify-context --cwd <probe-repo> --max-tokens 120000 --max-cents 25`.",
+    "// HOW: `npm run wf -- run verify-sandbox --cwd <repo>", // 5: not capped, across two comment lines
+    "//   --max-tokens 150000`.",
+    "  npm run wf -- run implement-issue --cwd \"$dir\" \\\\", // 7: capped, across a heredoc continuation
+    "    --args '{}' --max-tokens 300000 --max-cents 50",
+    "  npm run wf -- run implement-issue --cwd \"$dir\" --args '{}' --resume <runId>", // 9: the resume
+    "Passed to `wf run` as `--max-tokens` and `--max-cents`; see `wf run implement-issue` and wf run smoke.",
+    "npm run wf -- cancel job-1 --cwd ~/repo",
+    "npm run wf -- run verify-cloud", // 12: a bare command
+    "Run it with `npm run wf -- run` and the caps.",
+  ].join("\n");
+  assert.deepEqual(uncappedRuns("a.sh", sample), [1, 2, 5, 9, 12]);
+});
+
+/** Every place that documents a command: the maintainer scripts (their `HOW:` lines and what they print), the verify README and chapter 9.4. */
+const COMMAND_DOCS = [...files("scripts", /\.(ts|sh|md)$/), "docs/contributing/04-scripts-do-mantenedor.md"];
+
+test("every documented command that runs a workflow carries --max-tokens and --max-cents: a copied command without the cents cap spends without limit", () => {
+  assert.ok(COMMAND_DOCS.some((f) => /\bwf -- run\b/.test(read(f))), "the check reads a file that documents a run");
+  assert.deepEqual(scan(COMMAND_DOCS, uncappedRuns), [], "add `--max-tokens <N> --max-cents <N>`, with the caps the first command of the same script uses");
 });
 
 // --- CI ---------------------------------------------------------------------------------------------------------------

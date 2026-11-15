@@ -179,6 +179,26 @@
   cloud agents cancelados. O ADR-0003 passa a `superseded by ADR-0010`, os capítulos que o citavam apontam para o novo, e
   `test/vision-and-adrs.test.ts` confere a troca e o caminho do job travado contra `job-children.ts`. Veja
   [7.10](docs/adr/0010-detached-jobs-and-how-each-is-cancelled.md).
+- **Nove regras do `CODING_STANDARDS.md` passam a ter teste** (issue #76). Todas saíram da lista `[check candidate]`; cada uma é um
+  teste de `test/coding-standards.test.ts` (ou de `test/typescript-strictness.test.ts`) com uma amostra que o faz falhar, e o código
+  que as violava foi corrigido junto:
+  - **A primeira linha de todo `*.test.ts` é `// Seam: <o seam>`**: 46 cabeçalhos numerados (`Seam 1, ...`), em português ou ausentes
+    foram reescritos; um arquivo com vários seams os nomeia numa linha só.
+  - **Uma forma de objeto é uma `interface`**, não `type X = { ... }` (nove dos dez aliases viraram interface; o `Settings` do `implement-issue`
+    fica numa lista curta, porque o `meta.settings` pede um `Record<string, unknown>`).
+  - **Nenhum `any` fora de uma lista curta** (o encadeamento de estágios do `ctx.pipeline`), em todo código que o kit entrega: o
+    `implement-issue.ts` e o `dash-fixtures.ts` passaram a tipar o que antes era `any`.
+  - **Um valor capturado vira texto por `errorText(err)`**: 28 cópias de `err instanceof Error ? err.message : String(err)` foram
+    trocadas. As páginas do navegador só importam tipos do runtime, então têm o próprio `app/error-text.ts`.
+  - **O `new EventSource` só entra num módulo que importa o `batcher`**, a conferência (heurística) de que uma rajada de eventos é
+    um render só.
+  - **`padding`, `margin`, `gap`, `font-size` e `border-radius` do dashboard usam os tokens**: nove declarações com 6px, 10px e 11px
+    passaram para a escala (`--space-1`, `--space-2`, `--text-xs`), uma diferença de até 2px no `.pill`, no `.count` e nos nós
+    do Run view. Todo `animation` e `transition` já tinha o seu `prefers-reduced-motion`; agora o teste confere seletor por seletor.
+  - **Nenhum script chama `process.exit`**: o `probe-sdk.ts` e o `dash-fixtures.ts` devolvem o código de saída de uma `main` atrás de
+    `isEntryPoint`.
+  - **Todo comando `wf run` que os scripts documentam ou imprimem leva `--max-tokens` e `--max-cents`**: o `setup-sandbox-repo.sh`
+    imprimia o comando de retomada sem os tetos, e um resume não reaplica os do primeiro comando.
 
 - **Um repositório diz ao `implement-issue` onde moram o glossário e os outros arquivos de contexto** (issue #75). A lista que os
   agentes de plano, de design e de texto do PR recebem ("Repository context files") era fixa no código

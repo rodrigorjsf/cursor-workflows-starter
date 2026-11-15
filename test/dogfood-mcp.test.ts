@@ -19,7 +19,11 @@ function owningPackage(file: string): string | undefined {
   return undefined;
 }
 
-type ServerConfig = { command: string; args: string[]; env?: Record<string, string> };
+interface ServerConfig {
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+}
 
 for (const file of [".mcp.json", ".cursor/mcp.json"]) {
   test(`${file}: the configured server is the runtime package and answers tools/list`, async () => {

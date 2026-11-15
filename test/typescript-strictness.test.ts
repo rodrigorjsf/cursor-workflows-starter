@@ -71,7 +71,7 @@ test("every tsc project of the repo resolves with the strictness flags on, so no
 
 // --- The workflow-module boundary ---------------------------------------------------------------------------------------
 
-const parse = (path: string, text: string) => ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+const parse = (path: string, text: string) => ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
 const lineOf = (sf: ts.SourceFile, node: ts.Node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
 
 /** Visits every node of `sf`. */
@@ -83,7 +83,7 @@ function walk(sf: ts.SourceFile, visit: (node: ts.Node) => void) {
   go(sf);
 }
 
-/** The lines where a file writes the `any` type: a workflow module the registry loads is typed `WorkflowDefinition`, and checked at load. */
+/** The lines where a file writes the `any` type. */
 function anyTypes(path: string, text: string): number[] {
   const sf = parse(path, text);
   const lines: number[] = [];
@@ -93,16 +93,56 @@ function anyTypes(path: string, text: string): number[] {
   return lines;
 }
 
-test("the any check fires on an any type and stays silent on the word in text and on unknown", () => {
+/** One `any` the code keeps: the file, the line's text (trimmed, so an edit above it moves nothing), and why the type cannot be `unknown`. */
+interface AllowedAny {
+  file: string;
+  line: string;
+  why: string;
+}
+
+/** `path:line` for each `any` of the file that no allowlist entry names. */
+function anyOutsideAllowlist(path: string, text: string, allowed: AllowedAny[]): string[] {
+  const lines = text.split("\n");
+  return anyTypes(path, text)
+    .filter((line) => !allowed.some((a) => a.file === path && a.line === lines[line - 1]?.trim()))
+    .map((line) => `${path}:${line}`);
+}
+
+test("the any check fires on an any type that no allowlist entry names, and stays silent on the word in text, on unknown and on a named line", () => {
   assert.deepEqual(anyTypes("a.ts", "const m = new Map<string, WorkflowDefinition<any, any>>();\n"), [1, 1]);
   assert.deepEqual(anyTypes("a.ts", "const m = (await import(x)) as { default?: any };\n"), [1]);
   assert.deepEqual(anyTypes("a.ts", '// any workflow\nconst note = "any";\nconst m: Map<string, WorkflowDefinition<unknown, unknown>> = new Map();\n'), []);
+  const allowed = [{ file: "a.ts", line: "): Promise<any[]>;", why: "the stage chain" }];
+  assert.deepEqual(anyOutsideAllowlist("a.ts", "pipeline<I>(\n  items: I[],\n): Promise<any[]>;\nconst x: any = 1;\n", allowed), ["a.ts:4"]);
+  assert.deepEqual(anyOutsideAllowlist("b.ts", "): Promise<any[]>;\n", allowed), ["b.ts:1"], "an entry names its own file only");
+  assert.deepEqual(anyOutsideAllowlist("a.ts", "\n\n  ): Promise<any[]>;\n", allowed), [], "the entry holds wherever the line moves to");
 });
 
-test("the registry and the source fingerprints, which hold every loaded workflow, type none of it any", () => {
-  const boundary = ["packages/runtime/src/runtime/registry.ts", "packages/runtime/src/runtime/workflow-source.ts"];
-  const offences = boundary.flatMap((path) => anyTypes(path, readFileSync(join(ROOT, path), "utf8")).map((line) => `${path}:${line}`));
-  assert.deepEqual(offences, [], "type the workflow as WorkflowDefinition (unknown args and result) and check what a module exports at load");
+/** The code that ships or runs for the maintainer, browser pages included: the sources, the workflows, the scripts. */
+const ANY_SCOPE = ["packages/runtime/src", "packages/runtime/workflows", "packages/dashboard/src", "packages/dashboard/app", "packages/dashboard/run-view", "scripts", ".agents/workflows"].flatMap((d) =>
+  files(d, /\.(ts|tsx|mts)$/),
+);
+
+/**
+ * The `any` the shipped code keeps. The workflow registry and the source fingerprints, which hold every loaded workflow, are not here:
+ * a workflow is a `WorkflowDefinition` (`unknown` args and result), checked at load.
+ */
+const ALLOWED_ANY: AllowedAny[] = [
+  {
+    file: "packages/runtime/src/runtime/workflow.ts",
+    line: "...stages: Array<(prev: any, item: I, index: number) => Promise<any> | any>",
+    why: "the stages of ctx.pipeline: each takes the previous stage's output, a chain no generic parameter list of unknown length types",
+  },
+  { file: "packages/runtime/src/runtime/workflow.ts", line: "): Promise<any[]>;", why: "the same chain: the result is the last stage's output, per item" },
+];
+
+test("no shipped code writes `any` outside the allowlist, and every allowlist entry still names an `any`", () => {
+  assert.ok(ANY_SCOPE.length >= 120, `found ${ANY_SCOPE.length} files`);
+  const sources = new Map(ANY_SCOPE.map((path) => [path, readFileSync(join(ROOT, path), "utf8")]));
+  const offences = ANY_SCOPE.flatMap((path) => anyOutsideAllowlist(path, sources.get(path)!, ALLOWED_ANY));
+  assert.deepEqual(offences, [], "write `unknown` and narrow it, or allow the line here with the reason a boundary needs `any`");
+  const stale = ALLOWED_ANY.filter((a) => !anyTypes(a.file, sources.get(a.file) ?? "").some((line) => sources.get(a.file)?.split("\n")[line - 1]?.trim() === a.line));
+  assert.deepEqual(stale.map((a) => `${a.file}: ${a.line}`), [], "the `any` was removed or its line changed: delete or update the entry");
 });
 
 // --- JSON trust boundaries ----------------------------------------------------------------------------------------------

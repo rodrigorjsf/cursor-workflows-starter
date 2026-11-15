@@ -1,4 +1,4 @@
-// Seam 1, the run: `implement-issue` against the fake SDK, the fake gh and a temporary git repository (the environment is in
+// Seam: the run. `implement-issue` against the fake SDK, the fake gh and a temporary git repository (the environment is in
 // implement-issue.fixture.ts). The tier comes from the highest matching label, a step that crashes the process again and
 // again stops being resumed, and every retry of a write step starts from a clean tree.
 import assert from "node:assert/strict";

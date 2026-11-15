@@ -1,5 +1,5 @@
-// Testes offline do fluxo do implement-issue (tdd → review em 3 eixos → PR). O ambiente (SDK falso, gh falso,
-// repositório temporário) está em implement-issue.fixture.ts.
+// Seam: the run, on the `implement-issue` flow, offline (tdd → three-axis review → PR). The environment (fake SDK, fake gh,
+// temporary repository) is in implement-issue.fixture.ts.
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

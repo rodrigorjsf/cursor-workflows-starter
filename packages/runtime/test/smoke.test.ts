@@ -1,4 +1,4 @@
-// Seam 1, the run: `runWorkflow` with the fake Cursor SDK. The `smoke` workflow proves the chat -> MCP -> SDK -> structured
+// Seam: the run. `runWorkflow` with the fake Cursor SDK. The `smoke` workflow proves the chat -> MCP -> SDK -> structured
 // result path as cheaply as possible: one step, a model the plan includes, a low token cap. Assertions are on the outcome,
 // the replayed event log and what the SDK was asked.
 process.env.WF_METRICS = "off";

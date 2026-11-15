@@ -1,4 +1,4 @@
-// Seam 1 on the shipped workflow: `implement-issue` is safe to run repeatedly and to resume. Each run owns its branch and
+// Seam: the run, on the shipped workflow. `implement-issue` is safe to run repeatedly and to resume. Each run owns its branch and
 // its worktree, starts from the current head of the default branch and takes a lock on the issue; delivery after a resume
 // redelivers with a lease-protected force push and never overwrites commits the workflow did not make. Runs `runWorkflow`
 // with the fake SDK and the environment of implement-issue.fixture.ts (fake gh, temp repo with a bare origin, real git).

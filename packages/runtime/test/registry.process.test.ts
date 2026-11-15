@@ -1,4 +1,4 @@
-// Seam 2, the process: one broken workflow file in the target repo must not take the MCP server down. The server starts,
+// Seam: the process. One broken workflow file in the target repo must not take the MCP server down. The server starts,
 // still serves the good workflows, and reports the broken file in list_workflows.
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

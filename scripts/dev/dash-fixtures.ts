@@ -14,63 +14,49 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, writeFil
 import { homedir, tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
+import type { WorkflowContext, WorkflowDefinition } from "../../packages/runtime/src/runtime/workflow.js";
+import { isEntryPoint } from "../lib/cli.js";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
 const RUNTIME = join(ROOT, "packages", "runtime");
 const FAKE_SDK_TSCONFIG = join(RUNTIME, "tsconfig.test.json");
 const SELF = import.meta.filename;
 
-const { values } = parseArgs({
-  options: {
-    home: { type: "string" },
-    live: { type: "boolean", default: false },
-    child: { type: "string" }, // internal: the process the interrupted run is killed in
-  },
-});
-
-// 1. The fake SDK, always. tsx reads TSX_TSCONFIG_PATH, and the tsconfig maps `@cursor/sdk` to test/fake-sdk.ts. The
-// variable is inherited, so the job and child processes this script starts get the fake too.
-if (resolve(process.env.TSX_TSCONFIG_PATH ?? "") !== FAKE_SDK_TSCONFIG) {
-  if (process.env.WF_DASH_FIXTURES_REEXEC) fail(`TSX_TSCONFIG_PATH is not ${FAKE_SDK_TSCONFIG}`);
-  const again = spawnSync(process.execPath, [...process.execArgv, SELF, ...process.argv.slice(2)], {
-    stdio: "inherit",
-    env: { ...process.env, TSX_TSCONFIG_PATH: FAKE_SDK_TSCONFIG, WF_DASH_FIXTURES_REEXEC: "1" },
-  });
-  process.exit(again.status ?? 1);
-}
+/** A refusal the maintainer can act on: `main` prints it and the script exits with 2. */
+class FixtureError extends Error {}
 
 function fail(message: string): never {
-  process.stderr.write(`dash-fixtures: ${message}\n`);
-  process.exit(2);
+  throw new FixtureError(message);
 }
 
-// The Metrics page reads the metrics database, which the engine writes with node:sqlite (Node 22.13 and later).
-await import("node:sqlite").catch(() => fail(`Node ${process.version} has no node:sqlite: the runs would leave the Metrics page empty (use Node 22.13 or later)`));
+// What the script uses of the runtime modules it loads by a computed path, as far as it uses it. The root typecheck checks
+// this file against the real SDK and must not follow those modules into the fake one, so it sees these shapes instead.
+interface FixtureRun {
+  runId: string;
+  status: string;
+}
+interface FixtureEvent {
+  type: string;
+  label?: string;
+  runId: string;
+}
+interface EngineModule {
+  runWorkflow(def: WorkflowDefinition, args: object, options: { cwd: string; signal?: AbortSignal; onEvent?: (e: FixtureEvent) => void }): Promise<FixtureRun>;
+}
+interface FakeSdkModule {
+  script: Array<(options: unknown, message: string, n: number) => unknown>;
+}
+interface CloudFixturesModule {
+  repoWithRemote(repo: string, remote: string): void;
+}
+interface JobsModule {
+  spawnJob(options: { cwd: string; workflow: string; args: object; maxRunningJobs: number | null }): { job: { runId: string; jobId: string; pid: number } };
+}
+interface RunViewModule {
+  readRun(runId: string): { status: string } | undefined;
+}
 
-// 2. The home: a new directory, never the user's own. Set before the runtime is imported.
-const home = values.home ? resolve(values.home) : mkdtempSync(join(tmpdir(), "wf-dash-fixtures-"));
-const real = (path: string) => (existsSync(path) ? realpathSync(path) : resolve(path));
-const kitHome = real(join(homedir(), ".cursor-workflows"));
-if (real(home) === real(homedir()) || real(home) === kitHome || real(home).startsWith(`${kitHome}${sep}`)) fail(`refusing to write fixtures into ${home}`);
-if (!values.child && existsSync(home) && readdirSync(home).length > 0) fail(`${home} is not empty: give a new directory`);
-mkdirSync(home, { recursive: true });
-process.env.WF_HOME = home;
-process.env.WF_METRICS_DB = join(home, "metrics.db");
-process.env.WF_DASH_AUTOSTART = "off";
-delete process.env.WF_METRICS;
-const repo = join(home, "repos", "web-app");
-const workflowsDir = join(home, "workflows");
-
-// Dynamic imports with computed paths: the root typecheck checks this file against the real SDK, and must not follow
-// these modules into the fake one.
-const load = (path: string): Promise<any> => import(join(RUNTIME, path));
-// The engine first: the fake marks itself loaded, so the flag says which SDK the engine got. Then the same fake module,
-// for its `script`.
-const { runWorkflow } = await load("src/runtime/engine.ts");
-if ((globalThis as { __fakeSdkLoaded?: boolean }).__fakeSdkLoaded !== true) fail("the engine did not load the fake SDK");
-const sdk = await load("test/fake-sdk.ts");
-
-// 3. What every agent step answers: a few sentences, a tool call and a turn's usage. `[fake:hang]` in the prompt makes a
+// What every agent step answers: a few sentences, a tool call and a turn's usage. `[fake:hang]` in the prompt makes a
 // step that never ends (for the cancelled and the interrupted runs). The fake takes one entry per send, in any order.
 const usage = { inputTokens: 18400, outputTokens: 2200, cacheReadTokens: 12000, cacheWriteTokens: 800 };
 const answer = (_o: unknown, msg: string, n: number) =>
@@ -85,10 +71,6 @@ const answer = (_o: unknown, msg: string, n: number) =>
           { type: "turn-ended", usage },
         ],
       };
-const refill = () => {
-  sdk.script.length = 0;
-  for (let i = 0; i < 50; i++) sdk.script.push(answer);
-};
 
 type Mode = "finished" | "failed" | "cancelled" | "interrupted";
 const ISSUES: Record<Mode, [number, string]> = {
@@ -106,7 +88,7 @@ const FOCUS: Record<Mode, string> = { finished: "review", failed: "npm test", ca
  * An `onEvent` that calls `ready` once the run is stopped in the hung step and nothing else is in flight: the step started,
  * and its siblings in the group (the lint command, the UI pipeline) have ended. Every build then stops in the same place.
  */
-function whenOnlyHangLeft(ready: (runId: string) => void): (e: any) => void {
+function whenOnlyHangLeft(ready: (runId: string) => void): (e: FixtureEvent) => void {
   const seen = new Set<string>();
   let fired = false;
   return (e) => {
@@ -121,10 +103,10 @@ function whenOnlyHangLeft(ready: (runId: string) => void): (e: any) => void {
 }
 
 /** An implement-issue-like workflow: five phases, a card, a parallel group with a pipeline in it, commands, a cloud review. */
-function shipFeature(mode: Mode) {
+function shipFeature(mode: Mode): WorkflowDefinition<unknown, string> {
   const [n, title] = ISSUES[mode];
   const card = { title: `#${n} ${title}`, subtitle: `wf/${n}-branch`, badges: ["tier: medium", "frontend"] };
-  const node = (code: string) => ["node", ["-e", code]] as const;
+  const node = (code: string): [string, string[]] => ["node", ["-e", code]];
   return {
     meta: {
       name: "ship-feature",
@@ -136,7 +118,7 @@ function shipFeature(mode: Mode) {
       ],
     },
     defaults: { model: { id: "composer-2.5" }, retries: 0 },
-    async run(ctx: any) {
+    async run(ctx: WorkflowContext) {
       ctx.phase("Triage");
       await ctx.agent("Triage the issue", { label: "triage", role: "work" });
       ctx.card(card);
@@ -144,7 +126,7 @@ function shipFeature(mode: Mode) {
       await ctx.agent("Plan the change", { label: "plan", role: "work" });
       ctx.phase("Build");
       const stops = mode === "cancelled" || mode === "interrupted";
-      await ctx.parallel([
+      await ctx.parallel<unknown>([
         async () => {
           await ctx.agent("Implement the UI", { label: "implement-ui", role: "work" });
           await ctx.agent("Write the UI tests", { label: "ui-tests", role: "work" });
@@ -167,56 +149,109 @@ function shipFeature(mode: Mode) {
   };
 }
 
-/** Runs the fixture workflow in this process; `onEvent` sees its events. */
-async function runShip(mode: Mode, opts: { signal?: AbortSignal; onEvent?: (e: any) => void } = {}): Promise<{ runId: string; status: string }> {
-  refill();
-  return runWorkflow(shipFeature(mode), {}, { cwd: repo, ...opts });
-}
-
-// The interrupted run's process: it starts the run, says so when the step that never ends starts, and waits to be killed.
-if (values.child === "interrupted") {
-  await runShip("interrupted", { onEvent: whenOnlyHangLeft((runId) => process.stdout.write(`started ${runId}\n`)) });
-  process.exit(0);
-}
-
-// 4. The repository the runs execute in, with an origin (a cloud step snapshots the worktree to it), and the config that
-// sends the review role to the cloud.
-const { repoWithRemote } = await load("test/cloud-fixtures.ts");
-repoWithRemote(repo, join(home, "repos", "origin.git"));
-writeFileSync(
-  join(home, "config.json"),
-  JSON.stringify({ caps: { allowedLocations: ["local", "cloud"] }, workflows: { "ship-feature": { roles: { review: { location: "cloud" } } } } }, null, 2),
-);
-
-const finished = await runShip("finished");
-const failed = await runShip("failed");
-
-const abort = new AbortController();
-const cancelled = await runShip("cancelled", {
-  signal: abort.signal,
-  onEvent: whenOnlyHangLeft(() => abort.abort()),
-});
-
-const interrupted = await new Promise<string>((done, reject) => {
-  const child = spawn(process.execPath, [...process.execArgv, SELF, "--home", home, "--child", "interrupted"], { stdio: ["ignore", "pipe", "inherit"] });
-  let out = "";
-  child.stdout.on("data", (chunk: Buffer) => {
-    out += chunk;
-    const started = /started (\S+)/.exec(out);
-    if (!started) return;
-    child.kill("SIGKILL"); // no run-end, no lock release: the run's process is simply gone
-    child.once("exit", () => done(started[1]!));
+/** Builds the fixture home and prints its manifest. Returns the exit code: 0, or what the re-executed copy of itself returns. */
+async function main(argv: string[]): Promise<number> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      home: { type: "string" },
+      live: { type: "boolean", default: false },
+      child: { type: "string" }, // internal: the process the interrupted run is killed in
+    },
   });
-  child.once("exit", (code) => !/started/.test(out) && reject(new Error(`the interrupted run's process exited (${code}) before its step started`)));
-});
 
-// 5. Optional: a live run, as a real detached job that only sleeps (no agent step, so nothing could reach the SDK).
-let live: { runId: string; jobId: string; pid: number } | undefined;
-if (values.live) {
-  mkdirSync(workflowsDir, { recursive: true });
+  // 1. The fake SDK, always. tsx reads TSX_TSCONFIG_PATH, and the tsconfig maps `@cursor/sdk` to test/fake-sdk.ts. The
+  // variable is inherited, so the job and child processes this script starts get the fake too.
+  if (resolve(process.env.TSX_TSCONFIG_PATH ?? "") !== FAKE_SDK_TSCONFIG) {
+    if (process.env.WF_DASH_FIXTURES_REEXEC) fail(`TSX_TSCONFIG_PATH is not ${FAKE_SDK_TSCONFIG}`);
+    const again = spawnSync(process.execPath, [...process.execArgv, SELF, ...argv], {
+      stdio: "inherit",
+      env: { ...process.env, TSX_TSCONFIG_PATH: FAKE_SDK_TSCONFIG, WF_DASH_FIXTURES_REEXEC: "1" },
+    });
+    return again.status ?? 1;
+  }
+
+  // The Metrics page reads the metrics database, which the engine writes with node:sqlite (Node 22.13 and later).
+  await import("node:sqlite").catch(() => fail(`Node ${process.version} has no node:sqlite: the runs would leave the Metrics page empty (use Node 22.13 or later)`));
+
+  // 2. The home: a new directory, never the user's own. Set before the runtime is imported.
+  const home = values.home ? resolve(values.home) : mkdtempSync(join(tmpdir(), "wf-dash-fixtures-"));
+  const real = (path: string) => (existsSync(path) ? realpathSync(path) : resolve(path));
+  const kitHome = real(join(homedir(), ".cursor-workflows"));
+  if (real(home) === real(homedir()) || real(home) === kitHome || real(home).startsWith(`${kitHome}${sep}`)) fail(`refusing to write fixtures into ${home}`);
+  if (!values.child && existsSync(home) && readdirSync(home).length > 0) fail(`${home} is not empty: give a new directory`);
+  mkdirSync(home, { recursive: true });
+  process.env.WF_HOME = home;
+  process.env.WF_METRICS_DB = join(home, "metrics.db");
+  process.env.WF_DASH_AUTOSTART = "off";
+  delete process.env.WF_METRICS;
+  const repo = join(home, "repos", "web-app");
+  const workflowsDir = join(home, "workflows");
+
+  // Dynamic imports with computed paths: the root typecheck checks this file against the real SDK, and must not follow
+  // these modules into the fake one.
+  const load = <T>(path: string): Promise<T> => import(join(RUNTIME, path));
+  // The engine first: the fake marks itself loaded, so the flag says which SDK the engine got. Then the same fake module,
+  // for its `script`.
+  const { runWorkflow } = await load<EngineModule>("src/runtime/engine.ts");
+  if ((globalThis as { __fakeSdkLoaded?: boolean }).__fakeSdkLoaded !== true) fail("the engine did not load the fake SDK");
+  const sdk = await load<FakeSdkModule>("test/fake-sdk.ts");
+
+  const refill = () => {
+    sdk.script.length = 0;
+    for (let i = 0; i < 50; i++) sdk.script.push(answer);
+  };
+
+  /** Runs the fixture workflow in this process; `onEvent` sees its events. */
+  async function runShip(mode: Mode, opts: { signal?: AbortSignal; onEvent?: (e: FixtureEvent) => void } = {}): Promise<FixtureRun> {
+    refill();
+    return runWorkflow(shipFeature(mode), {}, { cwd: repo, ...opts });
+  }
+
+  // The interrupted run's process: it starts the run, says so when the step that never ends starts, and waits to be killed.
+  if (values.child === "interrupted") {
+    await runShip("interrupted", { onEvent: whenOnlyHangLeft((runId) => process.stdout.write(`started ${runId}\n`)) });
+    return 0;
+  }
+
+  // 3. The repository the runs execute in, with an origin (a cloud step snapshots the worktree to it), and the config that
+  // sends the review role to the cloud.
+  const { repoWithRemote } = await load<CloudFixturesModule>("test/cloud-fixtures.ts");
+  repoWithRemote(repo, join(home, "repos", "origin.git"));
   writeFileSync(
-    join(workflowsDir, "sleeper.ts"),
-    `// Dashboard fixture: an exec-only workflow that stays running for 10 minutes.
+    join(home, "config.json"),
+    JSON.stringify({ caps: { allowedLocations: ["local", "cloud"] }, workflows: { "ship-feature": { roles: { review: { location: "cloud" } } } } }, null, 2),
+  );
+
+  const finished = await runShip("finished");
+  const failed = await runShip("failed");
+
+  const abort = new AbortController();
+  const cancelled = await runShip("cancelled", {
+    signal: abort.signal,
+    onEvent: whenOnlyHangLeft(() => abort.abort()),
+  });
+
+  const interrupted = await new Promise<string>((done, reject) => {
+    const child = spawn(process.execPath, [...process.execArgv, SELF, "--home", home, "--child", "interrupted"], { stdio: ["ignore", "pipe", "inherit"] });
+    let out = "";
+    child.stdout.on("data", (chunk: Buffer) => {
+      out += chunk;
+      const started = /started (\S+)/.exec(out);
+      if (!started) return;
+      child.kill("SIGKILL"); // no run-end, no lock release: the run's process is simply gone
+      child.once("exit", () => done(started[1]!));
+    });
+    child.once("exit", (code) => !/started/.test(out) && reject(new Error(`the interrupted run's process exited (${code}) before its step started`)));
+  });
+
+  // 4. Optional: a live run, as a real detached job that only sleeps (no agent step, so nothing could reach the SDK).
+  let live: { runId: string; jobId: string; pid: number } | undefined;
+  if (values.live) {
+    mkdirSync(workflowsDir, { recursive: true });
+    writeFileSync(
+      join(workflowsDir, "sleeper.ts"),
+      `// Dashboard fixture: an exec-only workflow that stays running for 10 minutes.
 export default {
   meta: { name: "sleeper", description: "Dashboard fixture: sleeps.", phases: [{ title: "Setup" }, { title: "Wait" }], argsSchema: { type: "object", properties: {} } },
   defaults: { model: { id: "composer-2.5" } },
@@ -229,34 +264,44 @@ export default {
   },
 };
 `,
-  );
-  process.env.WORKFLOWS_DIR = workflowsDir;
-  const { spawnJob } = await load("src/runtime/jobs.ts");
-  const { job } = spawnJob({ cwd: repo, workflow: "sleeper", args: {}, maxRunningJobs: null });
-  live = { runId: job.runId, jobId: job.jobId, pid: job.pid };
+    );
+    process.env.WORKFLOWS_DIR = workflowsDir;
+    const { spawnJob } = await load<JobsModule>("src/runtime/jobs.ts");
+    const { job } = spawnJob({ cwd: repo, workflow: "sleeper", args: {}, maxRunningJobs: null });
+    live = { runId: job.runId, jobId: job.jobId, pid: job.pid };
+  }
+
+  // 5. Check what the dashboard will read, through the runtime's own read side, before saying the fixtures are there.
+  const { readRun } = await load<RunViewModule>("src/runtime/run-view.ts");
+  const expected: Array<[string, string, string]> = [
+    ["finished", finished.runId, "finished"],
+    ["failed", failed.runId, "failed"],
+    ["cancelled", cancelled.runId, "cancelled"],
+    ["interrupted", interrupted, "failed"], // a run whose process died shows as failed, with its steps interrupted
+  ];
+  for (const [name, runId, status] of expected) {
+    const seen = readRun(runId)?.status;
+    if (seen !== status) fail(`the ${name} run ${runId} is "${seen}", expected "${status}"`);
+  }
+
+  const manifest = {
+    home,
+    repo,
+    runs: { finished: finished.runId, failed: failed.runId, cancelled: cancelled.runId, interrupted, ...(live && { live: live.runId }) },
+    cloudStep: { runId: finished.runId, label: "review" },
+    focus: FOCUS,
+    ...(live && { liveJob: { jobId: live.jobId, pid: live.pid, cancel: `WF_HOME=${home} npm run wf -- cancel ${live.jobId} --cwd ${repo}` } }),
+    dashboard: `WF_HOME=${home} WF_DASH_PORT=4399 npm run dash`,
+  };
+  writeFileSync(join(home, "fixtures.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify(manifest, null, 2)}\n`);
+  return 0;
 }
 
-// 6. Check what the dashboard will read, through the runtime's own read side, before saying the fixtures are there.
-const { readRun } = await load("src/runtime/run-view.ts");
-const expected: Array<[string, string, string]> = [
-  ["finished", finished.runId, "finished"],
-  ["failed", failed.runId, "failed"],
-  ["cancelled", cancelled.runId, "cancelled"],
-  ["interrupted", interrupted, "failed"], // a run whose process died shows as failed, with its steps interrupted
-];
-for (const [name, runId, status] of expected) {
-  const seen = readRun(runId)?.status;
-  if (seen !== status) fail(`the ${name} run ${runId} is "${seen}", expected "${status}"`);
+if (isEntryPoint(import.meta.url)) {
+  process.exitCode = await main(process.argv.slice(2)).catch((e: unknown) => {
+    if (!(e instanceof FixtureError)) throw e;
+    process.stderr.write(`dash-fixtures: ${e.message}\n`);
+    return 2;
+  });
 }
-
-const manifest = {
-  home,
-  repo,
-  runs: { finished: finished.runId, failed: failed.runId, cancelled: cancelled.runId, interrupted, ...(live && { live: live.runId }) },
-  cloudStep: { runId: finished.runId, label: "review" },
-  focus: FOCUS,
-  ...(live && { liveJob: { jobId: live.jobId, pid: live.pid, cancel: `WF_HOME=${home} npm run wf -- cancel ${live.jobId} --cwd ${repo}` } }),
-  dashboard: `WF_HOME=${home} WF_DASH_PORT=4399 npm run dash`,
-};
-writeFileSync(join(home, "fixtures.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-process.stdout.write(`${JSON.stringify(manifest, null, 2)}\n`);

@@ -19,6 +19,7 @@ import { tryParseJson } from "./parse-json.js";
 import { commandLineHas, isAlive } from "./pid.js";
 import { userDir } from "./state.js";
 import { writeFileAtomic } from "./state-files.js";
+import { errorText } from "./error-text.js";
 
 /** What `/api/health` answers as `app`: how a caller knows the program on the port is the dashboard and not something else. */
 export const DASHBOARD_APP = "cursor-workflows-dashboard";
@@ -197,7 +198,7 @@ export async function ensureDashboard(options: EnsureOptions = {}): Promise<Dash
       await sleep(100);
     }
   } catch (err) {
-    return { status: "unavailable", reason: err instanceof Error ? err.message : String(err) };
+    return { status: "unavailable", reason: errorText(err) };
   }
 }
 

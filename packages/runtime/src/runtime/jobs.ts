@@ -18,6 +18,7 @@ import { HEARTBEAT_MS, type JobRecord, type JobState, fromEnv, jobsDir, readJob,
 import { resumeHint } from "./projection.js";
 import { abortOpenRuns } from "./run-store.js";
 import type { WorkflowDefinition } from "./workflow.js";
+import { errorText } from "./error-text.js";
 
 export { JobRefusedError, type NewJob, type SpawnJobOptions, createJob, spawnJob } from "./job-spawn.js";
 
@@ -28,7 +29,7 @@ export { JobRefusedError, type NewJob, type SpawnJobOptions, createJob, spawnJob
  */
 export function installCrashHandlers(): void {
   process.on("unhandledRejection", (reason) => {
-    process.stderr.write(`[wf] unhandledRejection ignored: ${reason instanceof Error ? reason.message : String(reason)}\n`);
+    process.stderr.write(`[wf] unhandledRejection ignored: ${errorText(reason)}\n`);
   });
   process.on("uncaughtException", (err) => {
     // A job's state comes from the run's log: end this process's runs in it, with the reason and how to resume.

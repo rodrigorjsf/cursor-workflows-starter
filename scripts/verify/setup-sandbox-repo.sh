@@ -69,6 +69,6 @@ Repository ready: $dir ($repo), issue #$issue.
 The command measured in docs/research/verificacoes-locais.md section 9 (run it from $kit):
   WF_METRICS_DB=~/tmp/wf-verify.db npm run wf -- run implement-issue --cwd "$dir" \\
     --args '{"issue":$issue,"testCommand":"npm test","openPr":true}' --max-tokens 300000 --max-cents 50
-And the resume, with the runId printed at the end:
-  npm run wf -- run implement-issue --cwd "$dir" --args '{"issue":$issue,"testCommand":"npm test","openPr":true}' --resume <runId>
+And the resume, with the runId printed at the end (a resume does not re-apply the caps of the first command, so it passes them again):
+  npm run wf -- run implement-issue --cwd "$dir" --args '{"issue":$issue,"testCommand":"npm test","openPr":true}' --resume <runId> --max-tokens 300000 --max-cents 50
 MSG

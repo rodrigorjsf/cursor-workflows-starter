@@ -1,4 +1,4 @@
-// Seam 2, the AgentBackend interface, from the other side: the local backend called directly, the way the engine calls it,
+// Seam: the AgentBackend interface, from the other side. The local backend called directly, the way the engine calls it,
 // with the fake Cursor SDK underneath. It holds the contract the engine relies on (see backend.ts): events streamed through
 // the callback, an abort that cancels the run in flight and reports the signal's reason, the usage read, the agent disposed.
 process.env.WF_METRICS = "off";

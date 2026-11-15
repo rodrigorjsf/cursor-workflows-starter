@@ -1,4 +1,4 @@
-// Contract: the run graph is built from what the engine really writes. The other tests of the graph use events written by
+// Seam: the run graph, built from what the engine really writes. The other tests of the graph use events written by
 // hand; this one runs a workflow with the real engine (and the fake Cursor SDK that the dashboard's tests run with, see
 // `package.json`), reads the event log it left, and checks that the structure the engine gives the step, parent and group ids
 // is the structure the graph derives: a parallel group, a pipeline, a command, a nested group, a step after a group, and a

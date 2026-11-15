@@ -1,6 +1,6 @@
-// Regressões da revisão adversarial do implement-issue (lentes: laço TDD, resume e idempotência, segurança e custo).
-// Cada teste reproduz um cenário em que a versão anterior entregava "done" com o laço TDD burlado, entregava suíte
-// vermelha, vazava segredo, perdia trabalho no resume ou travava.
+// Seam: the run, on `implement-issue`, for the regressions of its adversarial review (lenses: TDD loop, resume and idempotence,
+// security and cost). Each test reproduces a scenario where the earlier version delivered "done" with the TDD loop dodged,
+// delivered a red suite, leaked a secret, lost work on resume or hung.
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

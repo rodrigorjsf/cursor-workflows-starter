@@ -1,4 +1,4 @@
-// Seam 1 on the shipped workflow: `implement-issue` puts its issue on the dashboard's Board (`ctx.card`). The card appears once
+// Seam: the run, on the shipped workflow. `implement-issue` puts its issue on the dashboard's Board (`ctx.card`). The card appears once
 // the issue is known (after triage), and is updated on delivery with the pull request, or merge request, of its forge. Runs
 // `runWorkflow` with the fake SDK and the environment of implement-issue.fixture.ts, on each forge; asserts on the run's event log.
 import assert from "node:assert/strict";

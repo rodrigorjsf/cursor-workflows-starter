@@ -1,4 +1,4 @@
-// Seam 2, the process: `wf init` is spawned (against the fake Cursor SDK) in a temporary repo with a temporary home, and
+// Seam: the process. `wf init` is spawned (against the fake Cursor SDK) in a temporary repo with a temporary home, and
 // the tests read what it prints and the files it leaves. Covers the MCP configs of both clients, the repo config, the
 // `.gitignore` entry, the `AGENTS.md` block (`--no-agents-md`, `--remove`), idempotence, the diff and the absence of a commit.
 import assert from "node:assert/strict";

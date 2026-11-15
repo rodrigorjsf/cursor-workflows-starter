@@ -1,4 +1,4 @@
-// Seam 1, the run, for the life of a cloud step: `runWorkflow` with the fake Cursor SDK in cloud mode (which keeps cloud agents
+// Seam: the run, for the life of a cloud step. `runWorkflow` with the fake Cursor SDK in cloud mode (which keeps cloud agents
 // on a fake server that outlives the process talking to it), a temp repository and a temporary bare repository as its `origin`.
 // It holds what makes a cloud step survive the machine: the agent's id in the event log the moment the agent exists, a resume
 // that picks the running agent up instead of starting another, a cancellation that reaches the cloud, and a client wait limit

@@ -76,7 +76,12 @@ function probeNode(path: string | undefined, nodeRange: string): { ok: boolean; 
 function checkNode(mcp: McpLaunches): CheckResult {
   const { nodeRange } = readKitPackage();
   const minimum = semver.minVersion(nodeRange);
-  type NodeProbe = { file: string | undefined; ownPath: boolean; ok: boolean; line: string };
+  interface NodeProbe {
+    file: string | undefined;
+    ownPath: boolean;
+    ok: boolean;
+    line: string;
+  }
   const probes: NodeProbe[] = mcp.launches.length
     ? mcp.launches.map((l) => ({ file: l.file, ownPath: l.env.PATH !== undefined, ...probeNode(l.env.PATH ?? process.env.PATH, nodeRange) }))
     : [{ file: undefined, ownPath: false, ...probeNode(process.env.PATH, nodeRange) }];

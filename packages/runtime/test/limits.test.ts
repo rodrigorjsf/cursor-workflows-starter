@@ -1,5 +1,5 @@
-// The per-run limits are one table (config/resolve.ts LIMITS). The shipped JSON Schema and the MCP override schema must
-// agree with it, so adding a limit in one place and forgetting another fails here.
+// Seam: the shipped files that declare the per-run limits. `config/resolve.ts` LIMITS is the one table; the shipped JSON Schema
+// and the MCP override schema must agree with it, so adding a limit in one place and forgetting another fails here.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

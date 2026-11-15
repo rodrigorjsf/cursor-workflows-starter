@@ -8,6 +8,7 @@ import { Ajv, type ValidateFunction } from "ajv";
 import type { ResultVia, StepLocation } from "../runtime/backend.js";
 import { userDir } from "../runtime/state.js";
 import type { ForgeName } from "../runtime/workflow.js";
+import { errorText } from "../runtime/error-text.js";
 
 /** Pointer into a JSON document (RFC 6901): `/workflows/implement-issue/roles/review`. */
 export type Pointer = string;
@@ -151,7 +152,7 @@ export function loadConfigFile(path: string): LoadedConfig | undefined {
   try {
     data = JSON.parse(readFileSync(path, "utf8"));
   } catch (err) {
-    throw new ConfigError([{ ref: path, path: "", message: `invalid JSON: ${err instanceof Error ? err.message : String(err)}` }]);
+    throw new ConfigError([{ ref: path, path: "", message: `invalid JSON: ${errorText(err)}` }]);
   }
   const errors = validateConfigData(data);
   if (errors.length) throw new ConfigError(errors.map((e) => ({ ref: path, ...e })));

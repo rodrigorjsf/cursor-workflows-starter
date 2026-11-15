@@ -1,4 +1,4 @@
-// Seam 1, the run: the full content of a step (prompts, agent messages, tool calls, command output) lives in the run's
+// Seam: the run. The full content of a step (prompts, agent messages, tool calls, command output) lives in the run's
 // local event log, with secrets redacted, and nowhere else: not in the metrics database, not in its exports, not in what
 // `onEvent` listeners receive. Runs `runWorkflow` with the fake Cursor SDK and asserts on the replayed log and the files.
 import assert from "node:assert/strict";

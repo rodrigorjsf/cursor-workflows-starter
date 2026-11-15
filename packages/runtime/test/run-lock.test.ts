@@ -1,4 +1,4 @@
-// Seam 2, the process: a second process that tries to execute a run id that is already being executed is refused.
+// Seam: the process. A second process that tries to execute a run id that is already being executed is refused.
 // The first process is a real child (test/hold-run.ts) running against the fake Cursor SDK.
 process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";

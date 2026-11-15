@@ -1,4 +1,4 @@
-// implement-issue's crash limit against real process deaths: each execution is a job in its own process
+// Seam: the process, on `implement-issue`'s crash limit against real process deaths: each execution is a job in its own process
 // (implement-issue-job.ts), stopped in the middle of its red write step. A frozen job that `cancelJob` kills (SIGKILL, the
 // path of `wf cancel`, `cancel_workflow` and the dashboard for a job with no heartbeat) was cancelled, not crashed: no number
 // of those uses up `maxStepCrashes`. A process that dies on its own is a crash, also when its job is cancelled after it died.

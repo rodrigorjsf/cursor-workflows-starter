@@ -1,4 +1,4 @@
-// Seam 1, the run, for a step that runs in the cloud: `runWorkflow` with the fake Cursor SDK in cloud mode, a temp repository
+// Seam: the run, for a step that runs in the cloud. `runWorkflow` with the fake Cursor SDK in cloud mode, a temp repository
 // and a temporary bare repository as its `origin`. The config files are written to disk; the assertions are on the outcome,
 // the agent the SDK was asked for, the replayed event log and the git state of the worktree and of the remote.
 process.env.WF_METRICS = "off";

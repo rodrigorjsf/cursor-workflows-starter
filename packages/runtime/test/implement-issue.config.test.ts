@@ -1,4 +1,4 @@
-// Seam 1 on the shipped workflow: `implement-issue` declares its eight roles, runs with their default models, and
+// Seam: the run, on the shipped workflow. `implement-issue` declares its eight roles, runs with their default models, and
 // takes a different model or setting sources for a role from the config files or from WF_MODEL_*. Its limits (slice caps,
 // extra slices, fix rounds, red/green attempts, diff size, label-to-tier map, crash limit) are settings of the workflow
 // that the same files tune. The environment (fake SDK, fake gh, temp repo) is in implement-issue.fixture.ts.

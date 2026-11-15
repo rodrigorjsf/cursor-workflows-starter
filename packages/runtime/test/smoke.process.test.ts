@@ -1,4 +1,4 @@
-// Seam 2, the process: the `smoke` workflow through the `wf` CLI and through the MCP server, the way the chat reaches it
+// Seam: the process. The `smoke` workflow through the `wf` CLI and through the MCP server, the way the chat reaches it
 // (list_workflows, start_workflow, wait_workflow). Both are real child processes against the fake Cursor SDK, a
 // temporary repo and a temporary home. `FAKE_SDK_AUTO_SUBMIT=1` makes the fake agent answer a structured step with an
 // object that satisfies the step's schema, which is what a model does when it follows the prompt.

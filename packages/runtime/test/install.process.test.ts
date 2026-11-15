@@ -1,4 +1,4 @@
-// Seam 2, the process: the installer (`scripts/install.sh`) and `wf upgrade` run against a temporary home. A local git
+// Seam: the process. The installer (`scripts/install.sh`) and `wf upgrade` run against a temporary home. A local git
 // repository stands in for GitHub (see kit-origin.ts) and a fake `npm` on the PATH stands in for the registry: it logs
 // how it was called and links `node_modules` to this checkout's. The tests read the files the installer leaves in the
 // home (the kit, the `wf` shim, the skill links, the global config), what the shim runs, the exit codes and the messages.
