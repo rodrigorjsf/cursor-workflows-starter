@@ -327,7 +327,7 @@ function checkConfig(cwd: string, resolution: Resolution): CheckResult {
   return warn(
     "config",
     `${resolved}\n${REPO_CODE_INTRO}:\n${repoCommandLines(commands).join("\n")}`,
-    `Read these commands, and run a workflow here only if you trust this repository. To keep a step from loading them, take "project" out of \`caps.allowedSettingSources\` in ~/.cursor-workflows/config.json (the installer's default lists it). See "O que o kit faz na sua máquina" in ${kitFileUrl("SECURITY.md", readKitPackage().version)}.`,
+    `Read these commands, and run a workflow here only if you trust this repository. To keep a step from loading them, take "project" out of \`caps.allowedSettingSources\` in ~/.cursor-workflows/config.json (the installer's default lists it). What the kit does on your machine is in ${kitFileUrl("SECURITY.md", readKitPackage().version)}.`,
   );
 }
 

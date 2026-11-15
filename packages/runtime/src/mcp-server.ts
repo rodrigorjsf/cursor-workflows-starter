@@ -7,6 +7,7 @@
 //   list_workflows                                  → name, description, when to use, args schema; broken files with their error
 //   start_workflow {name, args, resumeRunId?, overrides?} → {jobId, runId, dashboardUrl?, dashboardWarning?, violations?}
 //                                                   overrides: limits for this run, tighten-only
+//                                                   refused (isError, no job) past caps.maxRunningJobs running jobs, and for a job that already runs (same workflow, same args)
 //                                                   dashboardUrl: the run's page on the local dashboard, started detached if it was not running
 //                                                   (once, for every repo); dashboardWarning: why it could not be
 //   wait_workflow  {jobId, timeoutSec?}             → state (status, phase, recent summary lines, spend, result)
@@ -109,7 +110,9 @@ if (nested) {
       description:
         "Starts a workflow by name. The workflow runs to the end on its own (steps, models and reviews are " +
         "defined in code). Returns a jobId; then call wait_workflow until status != running. When the local " +
-        "dashboard is running it also returns dashboardUrl, where the user can watch the run. Available: " +
+        "dashboard is running it also returns dashboardUrl, where the user can watch the run. It is refused (isError, nothing started) when " +
+        "the repository already runs as many jobs as caps.maxRunningJobs allows (3 by default), or already runs this workflow with the same args: " +
+        "wait for that job instead of starting another. Available: " +
         [...workflows.values()].map((w) => `${w.meta.name} (${w.meta.whenToUse ?? w.meta.description})`).join("; "),
       inputSchema: z.strictObject({
         // The handler answers a name it does not know with `unknown workflow`; the list is for the model.

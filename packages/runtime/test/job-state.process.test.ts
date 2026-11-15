@@ -77,7 +77,7 @@ test("wf start, wait, status and jobs return the state projected from the event 
   assert.deepEqual(listed, [{ jobId: started.jobId, workflow: "proc", status: "finished", phase: "work", runId: started.runId }]);
 
   assert.deepEqual(Object.keys(jobRecord(started.jobId)).sort(), ["heartbeat", "jobId", "pid", "runId", "start"]);
-  assert.deepEqual(jobRecord(started.jobId).start, { args: {}, maxCents: 300 }, "what an exact resume command repeats");
+  assert.deepEqual(jobRecord(started.jobId).start, { workflow: "proc", args: {}, maxCents: 300 }, "what an exact resume command repeats");
   assert.deepEqual(readdirSync(join(repo, ".workflows", "jobs")).filter((f) => f.endsWith(".json")), [`${started.jobId}.json`]);
 });
 
@@ -99,7 +99,7 @@ test("the MCP tools get_workflow_status and wait_workflow return the same projec
     assertFinishedState(waited, String(started.jobId), "wait_workflow");
     assertFinishedState(await call("get_workflow_status", { jobId: started.jobId }), String(started.jobId), "get_workflow_status");
     assert.deepEqual(Object.keys(jobRecord(String(started.jobId))).sort(), ["heartbeat", "jobId", "pid", "runId", "start"]);
-    assert.deepEqual(jobRecord(String(started.jobId)).start, { args: {} });
+    assert.deepEqual(jobRecord(String(started.jobId)).start, { workflow: "proc", args: {} });
 
     const fromCli = wf("start", "proc") as { jobId: string };
     wf("wait", fromCli.jobId, "--timeout", "60");
