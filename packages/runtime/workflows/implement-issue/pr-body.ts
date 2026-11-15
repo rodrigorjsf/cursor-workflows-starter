@@ -44,9 +44,51 @@ const fence = (s: string) => "```text\n" + s.replace(/```/g, "ˋˋˋ") + "\n```"
  */
 export const inlineCode = (s: string) => "`" + s.replace(/`/g, "ˋ").replace(/\r\n|\r|\n/g, " ") + "`";
 
+const ZERO_WIDTH_SPACE = "\u200B";
+
+/** The host whose links stay clickable in model text, by forge: the forge's own. A link anywhere else is shown as code. */
+const OWN_LINK_HOST: Readonly<Record<ForgeName, string>> = { github: "github.com", gitlab: "gitlab.com" };
+
+/**
+ * What can carry data away in model text: a Markdown link or image (group 1 is its destination), an HTML tag or an autolink, and a
+ * bare URL. A reader's browser fetches an image and follows a link, so a URL whose query string holds what the model read leaks it.
+ */
+const OUTBOUND_LINK = /!?\[[^\]\n]*\]\(\s*<?([^)\s>]*)>?(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)|<[a-zA-Z][^>]*>|https?:\/\/[^\s<>"'`]+/gi;
+/** A URL inside an HTML tag: absolute, or protocol-relative after the `=`, a quote or a space of an attribute. */
+const URL_IN_TAG = /(?:https?:\/\/|(?<=["'=\s])\/\/)[^\s"'<>]+/gi;
+/** A URL a browser would take for one: absolute (`http`, `https`) or protocol-relative (`//host`). A relative path is not. */
+const ABSOLUTE_URL = /^(?:https?:)?\/\//i;
+
+/** Is `url` (absolute or protocol-relative) on a host other than the forge's own? A URL that does not parse is. */
+function isOutside(url: string, forge: ForgeName): boolean {
+  try {
+    return new URL(url.startsWith("//") ? `https:${url}` : url).hostname !== OWN_LINK_HOST[forge];
+  } catch {
+    return true;
+  }
+}
+
+/** Does `match`, a link, a tag or a URL found by `OUTBOUND_LINK`, lead outside the forge? `destination` is a Markdown link's. */
+function leadsOutside(match: string, destination: string | undefined, forge: ForgeName): boolean {
+  if (destination !== undefined) return ABSOLUTE_URL.test(destination) && isOutside(destination, forge);
+  if (match.startsWith("<")) return [...match.matchAll(URL_IN_TAG)].some(([url]) => isOutside(url, forge));
+  return isOutside(match, forge);
+}
+
+/**
+ * `text` with the scheme of every URL in it broken by a zero-width space (`https://` becomes `https<ZWSP>://`, `//host` becomes
+ * `/<ZWSP>/host`): no parser takes it for a URL, which is not a link, an image or a request. The span of code that follows is for the
+ * reader; this is what holds when a backtick the model wrote pairs with the span's and leaves the link outside it.
+ */
+const withoutLiveUrls = (text: string): string => text.replace(/\bhttps?(?=:\/\/)/gi, (scheme) => scheme + ZERO_WIDTH_SPACE).replace(/(?<=^|["'=(\s])\/\//g, `/${ZERO_WIDTH_SPACE}/`);
+
 /**
  * Texto do modelo vai para um PR público: neutraliza o que teria efeito no GitHub. Palavras de fechamento citando
  * outra issue (fecharia a issue errada), menções (notificariam pessoas) e `<!--` (esconderia o resto do corpo).
+ *
+ * A link, an image or an HTML tag that points at a host other than the forge's own (`OWN_LINK_HOST`), and a bare URL there, is shown as
+ * an inline code span (`inlineCode`), because the model read untrusted text and the URL's query string can carry what it read to
+ * whoever serves it (an image is fetched by every reader's browser). A link to the forge itself stays clickable.
  *
  * The same filters serve GitLab, which reads more as a command. Its closing keywords also include `Closing`, `Fixing`,
  * `Resolving` and `Implement*`, and its issue reference can follow the word `issue` and be a path through subgroups or the
@@ -55,7 +97,9 @@ export const inlineCode = (s: string) => "`" + s.replace(/`/g, "ˋ").replace(/\r
  * runs there only, since what it does to a fence or a sigil would change how GitHub renders the text and protect nothing.
  */
 export function sanitizeModelText(text: string, forge: ForgeName): string {
+  // Links first: what it shows as code has its scheme broken, so the filters below, which look for what GitHub and GitLab act on, see it as inert.
   const shared = text
+    .replace(OUTBOUND_LINK, (match, destination: string | undefined) => (leadsOutside(match, destination, forge) ? inlineCode(withoutLiveUrls(match)) : match))
     .replace(
       /\b(clos(?:e[sd]?|ing)|fix(?:e[sd]|ing)?|resolv(?:e[sd]?|ing)|implement(?:s|ed|ing)?)(\s*:?\s+)((?:issues?\s+)?(?:(?:[\w.-]+\/)+[\w.-]+)?#\d+|(?:issues?\s+)?https?:\/\/\S+?\/-\/(?:issues|work_items)\/\d+)/gi,
       "$1$2`$3`",
