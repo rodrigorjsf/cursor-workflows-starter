@@ -21,6 +21,7 @@ import { kitCompatibility, kitFileUrl, readKitPackage } from "./kit-version.js";
 import { MCP_CONFIG_FILES, type McpLaunch, type McpLaunches, readMcpLaunches } from "./mcp-launch.js";
 import { errorText } from "./runtime/error-text.js";
 import { createRedactor } from "./runtime/redaction.js";
+import { REPO_CODE_INTRO, loadsProjectSettings, repoCommandLines, repoCommandsIn } from "./runtime/repo-code.js";
 import { loadWorkflows } from "./runtime/registry.js";
 import { userDir } from "./runtime/state.js";
 import type { WorkflowDefinition } from "./runtime/workflow.js";
@@ -313,9 +314,21 @@ async function resolveWorkflows(cwd: string): Promise<Resolution> {
   return problems.length ? { ok: false, message: problems.join("\n") } : { ok: true, workflows };
 }
 
-function checkConfig(resolution: Resolution): CheckResult {
+/**
+ * The configuration resolves, and, when a step can load the project's settings (`settingSources` includes "project", the default), the
+ * hooks and MCP servers this repository declares are listed, because they run on this machine: a warning, since the repository may be one
+ * you trust. The kit's own `workflows` server is not listed.
+ */
+function checkConfig(cwd: string, resolution: Resolution): CheckResult {
   if (!resolution.ok) return fail("config", resolution.message, "Fix the fields named above. The file's `$schema` gives autocompletion and validation in the editor.");
-  return pass("config", `${resolution.workflows.length} workflow(s) resolved with the global and the repository config`);
+  const resolved = `${resolution.workflows.length} workflow(s) resolved with the global and the repository config`;
+  const commands = resolution.workflows.some(({ resolved: { config } }) => loadsProjectSettings(config)) ? repoCommandsIn(cwd) : [];
+  if (commands.length === 0) return pass("config", resolved);
+  return warn(
+    "config",
+    `${resolved}\n${REPO_CODE_INTRO}:\n${repoCommandLines(commands).join("\n")}`,
+    `Read these commands, and run a workflow here only if you trust this repository. To keep a step from loading them, take "project" out of \`caps.allowedSettingSources\` in ~/.cursor-workflows/config.json (the installer's default lists it). See "O que o kit faz na sua máquina" in ${kitFileUrl("SECURITY.md", readKitPackage().version)}.`,
+  );
 }
 
 /** Every model id the workflows end up using, each with the places that ask for it (`implement-issue.roles.review`). */
@@ -478,7 +491,7 @@ export async function runDoctor({ cwd }: { cwd: string }): Promise<DoctorReport>
     guarded("models", async () => checkModels(await resolution)),
     guarded("forge", async () => checkForge(cwd, await resolution)),
     guarded("mcp-server", async () => checkMcpServer(mcp, await servers)),
-    guarded("config", async () => checkConfig(await resolution)),
+    guarded("config", async () => checkConfig(cwd, await resolution)),
     guarded("kit-version", async () => checkKitVersion(cwd, await servers)),
     guarded("sandbox", async () => checkSandbox(cwd, await resolution)),
     guarded("kit", checkKit),

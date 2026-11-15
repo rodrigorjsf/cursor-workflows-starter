@@ -29,6 +29,7 @@ import { jobsDirIn } from "./job-state.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
 import { type InterruptedCloudStep, addUsage, emptyUsage, resumeHint, subtractUsage, turnTokens, withRatio } from "./projection.js";
 import { CONTENT_MAX_CHARS, RunLockedError, RunStore } from "./run-store.js";
+import { DEFAULT_SETTING_SOURCES, loadsProjectSettings, repoCodeWarning, repoCommandsIn } from "./repo-code.js";
 import { savedSecrets } from "./secret-guard.js";
 import type { RetentionPolicy } from "./retention.js";
 import { registerRun } from "./runs-index.js";
@@ -235,6 +236,9 @@ function announceRun<A>(o: {
     violations: resolved.violations,
   });
   for (const v of resolved.violations) emit({ type: "warning", message: `config: ${v.message} (${v.ref ?? v.layer}${v.path ? ` ${v.path}` : ""})` });
+  // A step that loads the project's settings runs the repository's own hooks and MCP servers: say which, before the first step.
+  const repoCommands = loadsProjectSettings(resolved.config, opts.settingSources) ? repoCommandsIn(opts.cwd) : [];
+  if (repoCommands.length) emit({ type: "warning", message: repoCodeWarning(repoCommands) });
   if (recorderWarning) emit({ type: "warning", message: recorderWarning });
   if (store.previousStart && store.previousStart.workflowHash !== workflowHash) {
     emit({
@@ -580,7 +584,7 @@ async function executeRun<A, R>(
   const journal = store.journal;
   const memo = new MemoStore(opts.cwd);
   const sem = new Semaphore(limits.concurrency);
-  const settingSources = opts.settingSources ?? ["project", "team", "mdm"];
+  const settingSources = opts.settingSources ?? DEFAULT_SETTING_SOURCES;
   const roles = new Map((def.meta.roles ?? []).map((r) => [r.name, r]));
   // The backend of each location. A backend handed in through the options serves its own location; the cloud one is made on
   // first use, so a run that never goes to the cloud never touches it.
