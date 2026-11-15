@@ -23,6 +23,8 @@ export interface ConfigCaps {
   allowedSettingSources?: SettingSource[] | null;
   allowedLocations?: StepLocation[] | null;
   maxConcurrency?: number | null;
+  /** Jobs that may run at once in one repository (`wf start`, `start_workflow`). Absent: 3; `null`: no cap. */
+  maxRunningJobs?: number | null;
   requireSandbox?: boolean | null;
 }
 

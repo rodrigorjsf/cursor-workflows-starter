@@ -12,6 +12,7 @@
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type { LimitOverrides } from "../config/index.js";
 import { cancelLeftCloudAgents, leftAgentsNote } from "./cloud-cancel.js";
 import type { RunStatus } from "./events.js";
@@ -24,6 +25,8 @@ import { writeFileAtomic } from "./state-files.js";
 
 /** How a job was started: what `wf start` (or `start_workflow`) was given, which a resume of its run gives again. */
 export interface JobStart {
+  /** The workflow's `meta.name`. Absent in records an older kit wrote. */
+  workflow?: string;
   /** The workflow's args. */
   args: unknown;
   /** The flag layer of the config (`--max-cents`, `--max-tokens`). */
@@ -253,6 +256,29 @@ export function runningJobOf(cwd: string, runId: string): JobState | undefined {
     if (record?.runId !== runId) continue;
     const { state, liveness } = inspect(cwd, record);
     if (liveness === "alive" || liveness === "silent") return state;
+  }
+  return undefined;
+}
+
+/**
+ * Why a new job of `workflow` with `args` may not start in `cwd` now, or undefined when it may: a job that runs the same workflow
+ * with the same args is already running (a looping agent that calls `start_workflow` again and again would pay for each copy), or
+ * `maxRunningJobs` jobs (the `caps.maxRunningJobs` cap; `null` for none) already run. A job runs while its process is there and
+ * beating and its run has not ended: a frozen one, which `readJob` reports as failed, does not count. Only reads; the check and
+ * the job record that follows it must not be split by an `await`, or two starts can both pass.
+ */
+export function jobRefusal(cwd: string, workflow: string, args: unknown, maxRunningJobs: number | null): string | undefined {
+  const dir = jobsDirIn(cwd);
+  if (!existsSync(dir)) return undefined;
+  const running: JobRecord[] = [];
+  for (const file of readdirSync(dir)) {
+    const record = file.endsWith(".json") ? parseJobRecord(join(dir, file)) : undefined;
+    if (record && isAlive(record.pid) && inspect(cwd, record).liveness === "alive") running.push(record);
+  }
+  const same = running.find((r) => r.start?.workflow === workflow && isDeepStrictEqual(r.start.args, args));
+  if (same) return `job ${same.jobId} already runs workflow ${workflow} with the same args (run ${same.runId}): wait for it (\`wf wait ${same.jobId}\`, \`wait_workflow\`) instead of starting it again`;
+  if (maxRunningJobs !== null && running.length >= maxRunningJobs) {
+    return `${running.length} ${running.length === 1 ? "job is" : "jobs are"} already running in this repository (caps.maxRunningJobs is ${maxRunningJobs}): wait for one to end, or cancel it, before starting another`;
   }
   return undefined;
 }

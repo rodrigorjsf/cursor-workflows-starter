@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { closeSync, openSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { LimitOverrides } from "../config/index.js";
-import { type JobRecord, type JobStart, jobLogPath, writeJob } from "./job-state.js";
+import { type JobRecord, type JobStart, jobLogPath, jobRefusal, writeJob } from "./job-state.js";
 import { newRunId, plainName } from "./state.js";
 
 /** What a new job record may be given; the rest is generated: a new run id, a random job id, this process's pid. */
@@ -35,10 +35,15 @@ export function createJob(cwd: string, workflow: string, { runId, jobId = random
   return record;
 }
 
+/** The caps do not allow this job to start now (`jobRefusal` says why): nothing was written and no process started. */
+export class JobRefusedError extends Error {}
+
 export interface SpawnJobOptions {
   cwd: string;
   /** The workflow's name (`meta.name`). */
   workflow: string;
+  /** The `caps.maxRunningJobs` in force (`null`: no cap). Required, so that no door that starts a job can forget the cap. */
+  maxRunningJobs: number | null;
   /** The workflow's args: they go to the process as JSON. */
   args: unknown;
   /** The run to resume (a new job over an existing run). */
@@ -53,10 +58,14 @@ export interface SpawnJobOptions {
 /**
  * Starts a job in a detached process (`wf run <workflow> --job <jobId>`, a new session, no pipe to the caller) and returns
  * at once. The process outlives the caller: the MCP server can be restarted, the terminal closed. Its output goes to the
- * job's log file. Where it cannot be started, the job is recorded as refused, with the reason.
+ * job's log file. Where it cannot be started, the job is recorded as refused, with the reason. Throws `JobRefusedError`, before
+ * anything is written, when the job is already running or too many jobs run (`jobRefusal`).
  */
 export function spawnJob(o: SpawnJobOptions): { job: JobRecord; log: string } {
+  const refusal = jobRefusal(o.cwd, o.workflow, o.args ?? {}, o.maxRunningJobs);
+  if (refusal !== undefined) throw new JobRefusedError(refusal);
   const start: JobStart = {
+    workflow: o.workflow,
     args: o.args ?? {},
     ...(o.maxCents === undefined ? {} : { maxCents: o.maxCents }),
     ...(o.maxTokens === undefined ? {} : { maxTokens: o.maxTokens }),

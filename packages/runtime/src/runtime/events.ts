@@ -162,6 +162,8 @@ export interface EffectiveCaps {
   allowedLocations: Array<"local" | "cloud"> | null;
   /** Agentes simultâneos; `null` = sem teto. */
   maxConcurrency: number | null;
+  /** Jobs que rodam ao mesmo tempo num repositório (`wf start`, `start_workflow`): um início além disso é recusado. Sem a chave no arquivo global, 3; `null` = sem teto. */
+  maxRunningJobs: number | null;
   /** `true` liga o sandbox do SDK em toda etapa, mesmo que o código do workflow o desligue; `null` deixa o código decidir. */
   requireSandbox: boolean | null;
 }

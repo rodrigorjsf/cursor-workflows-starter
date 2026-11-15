@@ -331,6 +331,7 @@ Os tetos globais em vigor (o `caps` do arquivo global). `null` = sem teto.
 | `allowedSettingSources` | `SettingSource[] \| null` | sim | Camadas de configuração que uma etapa pode carregar; `null` libera todas. |
 | `allowedLocations` | `Array<"local" \| "cloud"> \| null` | sim | Onde uma etapa pode rodar; `null` libera todos. Sem a chave no arquivo global, só `local`: a nuvem é decisão do dono da máquina. |
 | `maxConcurrency` | `number \| null` | sim | Agentes simultâneos; `null` = sem teto. |
+| `maxRunningJobs` | `number \| null` | sim | Jobs que rodam ao mesmo tempo num repositório (`wf start`, `start_workflow`): um início além disso é recusado. Sem a chave no arquivo global, 3; `null` = sem teto. |
 | `requireSandbox` | `boolean \| null` | sim | `true` liga o sandbox do SDK em toda etapa, mesmo que o código do workflow o desligue; `null` deixa o código decidir. |
 
 ### EffectiveRole

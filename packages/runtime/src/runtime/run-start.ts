@@ -13,7 +13,7 @@ import { kitCompatibility } from "../kit-version.js";
 import { argsError } from "./args-schema.js";
 import { errorText } from "./error-text.js";
 import { INSIDE_WORKFLOW_ENV } from "./inside-workflow.js";
-import { spawnJob } from "./job-spawn.js";
+import { JobRefusedError, spawnJob } from "./job-spawn.js";
 import { type BrokenWorkflow, discoverWorkflows } from "./registry.js";
 import { readRunsIndex } from "./runs-index.js";
 import type { ConfigViolation } from "./events.js";
@@ -95,13 +95,21 @@ export async function startRun(request: StartRunRequest): Promise<StartRunOutcom
   const { problem } = kitCompatibility(repo);
   if (problem) return { kind: "refused", error: `${problem.message}. ${problem.hint}` };
   let violations: ConfigViolation[];
+  let maxRunningJobs: number | null;
   try {
     // Read afresh, so an unusable config is refused before a job exists, and a cap the global ones cut is reported now.
-    violations = loadEffectiveConfig(def, { cwd: repo, flags: { maxTokens, maxCents } }).violations;
+    const resolved = loadEffectiveConfig(def, { cwd: repo, flags: { maxTokens, maxCents } });
+    violations = resolved.violations;
+    maxRunningJobs = resolved.config.caps.maxRunningJobs;
   } catch (err) {
     if (err instanceof ConfigError) return { kind: "refused", error: errorText(err) };
     throw err;
   }
-  const { job } = spawnJob({ cwd: repo, workflow: def.meta.name, args, maxTokens, maxCents });
-  return { kind: "started", jobId: job.jobId, runId: job.runId, violations };
+  try {
+    const { job } = spawnJob({ cwd: repo, workflow: def.meta.name, args, maxRunningJobs, maxTokens, maxCents });
+    return { kind: "started", jobId: job.jobId, runId: job.runId, violations };
+  } catch (err) {
+    if (err instanceof JobRefusedError) return { kind: "refused", error: err.message };
+    throw err;
+  }
 }

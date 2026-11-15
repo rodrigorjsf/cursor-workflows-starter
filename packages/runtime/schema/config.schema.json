@@ -99,6 +99,7 @@
           "description": "Onde as etapas podem rodar: `local`, `cloud` ou os dois. Sem a chave, só `local`: mandar código para uma VM na nuvem é decisão do dono da máquina, e o arquivo do repositório nunca a toma. Listas: vale a interseção. `null` libera todos. Um papel com `location: \"cloud\"` que a lista não permite roda local, e o pedido vira uma violação."
         },
         "maxConcurrency": { "type": ["integer", "null"], "minimum": 1, "description": "Máximo de agentes simultâneos num run. `null` desliga." },
+        "maxRunningJobs": { "type": ["integer", "null"], "minimum": 1, "description": "Máximo de jobs rodando ao mesmo tempo num repositório. Um `wf start` ou `start_workflow` além do teto é recusado, sem criar job, e o mesmo vale para um job que roda o mesmo workflow com os mesmos args de um que já roda. Sem a chave, 3. `null` desliga o teto (a recusa do job repetido continua)." },
         "requireSandbox": {
           "type": ["boolean", "null"],
           "description": "`true` liga o sandbox local do SDK em toda etapa, mesmo quando o código do workflow o desliga: um pull request que edita um workflow não afrouxa o sandbox. O arquivo que o instalador grava traz `true`: uma sonda real, de 2026-11-14, mostrou a rede e a escrita fora do repositório bloqueadas (a leitura da chave do Cursor só com `readBoundary: \"workspace\"` num `sandbox.json`). No Linux exige `bubblewrap`; o `wf doctor` falha sem ele. Ausente, `false` ou `null`: vale o `sandbox` de cada etapa."

@@ -232,7 +232,7 @@ export default {
   );
   process.env.WORKFLOWS_DIR = workflowsDir;
   const { spawnJob } = await load("src/runtime/jobs.ts");
-  const { job } = spawnJob({ cwd: repo, workflow: "sleeper", args: {} });
+  const { job } = spawnJob({ cwd: repo, workflow: "sleeper", args: {}, maxRunningJobs: null });
   live = { runId: job.runId, jobId: job.jobId, pid: job.pid };
 }
 

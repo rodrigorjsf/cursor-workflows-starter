@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { after, afterEach, before, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 
 const PACKAGE = join(import.meta.dirname, "..");
 let sandbox: string;
@@ -50,6 +51,13 @@ const jobIds = (): string[] => {
     return []; // nothing was ever started here
   }
 };
+/** Waits until the job's step is running: from then on its process handles a cancel the way a running job's does. */
+async function stepRunning(started: { out: Record<string, any> }): Promise<void> {
+  for (const stop = performance.now() + 30_000; performance.now() < stop; await new Promise((r) => setTimeout(r, 50))) {
+    if (readEventLog(eventLogPath(repo, started.out.runId)).events.some((e) => e.type === "step-start")) return;
+  }
+  throw new Error("timed out waiting for the job's step to start");
+}
 const globalCaps = (caps: Record<string, unknown>) => writeFileSync(join(sandbox, "home", "config.json"), JSON.stringify({ caps }));
 
 /** Runs `wf <args>` in the temporary repo: its exit code, its stderr and its stdout parsed as JSON (when it has any). */
@@ -84,9 +92,10 @@ test("wf start refuses a job past caps.maxRunningJobs, names the cap, and starts
   assert.deepEqual(jobIds(), [first.out.jobId], "no job record for the refused start");
 });
 
-test("a job that has ended no longer counts toward the cap", () => {
+test("a job that has ended no longer counts toward the cap", async () => {
   globalCaps({ maxRunningJobs: 1 });
   const first = start({ n: 1 });
+  await stepRunning(first);
   assert.equal(wf("cancel", first.out.jobId, "--timeout", "20").out.status, "cancelled");
 
   const second = start({ n: 2 });

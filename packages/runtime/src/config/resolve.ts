@@ -79,6 +79,8 @@ interface Cell {
 }
 
 const DEFAULT_CONCURRENCY = 4;
+/** How many jobs may run at once in a repository when the global config sets no `caps.maxRunningJobs`. */
+const DEFAULT_MAX_RUNNING_JOBS = 3;
 /** The git remote that cloud snapshots go to when the config names none. */
 const DEFAULT_CLOUD_REMOTE = "origin";
 /** How long a `ctx.exec` command may run when neither the call nor the config says: a long test run is of this order. */
@@ -330,6 +332,8 @@ export function resolveConfig(input: ResolveInput): ResolvedConfig {
     // Sending code to a cloud VM is the machine owner's decision: without the key, only local. An explicit `null` allows every location.
     allowedLocations: rawCaps.allowedLocations === undefined ? ["local"] : rawCaps.allowedLocations,
     maxConcurrency: rawCaps.maxConcurrency ?? null,
+    // A looping agent can call `start_workflow` for ever, and every job spends money: without the key, three jobs at once. An explicit `null` lifts the cap.
+    maxRunningJobs: rawCaps.maxRunningJobs === undefined ? DEFAULT_MAX_RUNNING_JOBS : rawCaps.maxRunningJobs,
     requireSandbox: rawCaps.requireSandbox ?? null,
   };
   /** The numeric cap of each limit field; `settingSources` and model ids have their own checks. */
