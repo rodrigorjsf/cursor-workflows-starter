@@ -97,12 +97,13 @@
 // review que bloqueia e o alreadySatisfied só têm testes offline.
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
 import { wasKilledByCancel } from "../src/runtime/job-state.js";
-import { createRedactor, findCredential, findSecretEnvValue } from "../src/runtime/redaction.js";
+import { createRedactor } from "../src/runtime/redaction.js";
+import { findSecretInChange, findSecretInText, savedSecrets } from "../src/runtime/secret-guard.js";
 import { NamedLockedError, acquireNamedLock, eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { defineWorkflow, type AgentCallOptions, type WorkflowCard } from "../src/runtime/workflow.js";
 import { buildPrBody, inlineCode, sanitizeModelText, type PrText } from "./implement-issue/pr-body.js";
@@ -445,52 +446,6 @@ async function diffSinceBase(cmd: Commands, cwd: string, base: string, maxChars:
   if (diff.length <= maxChars) return block(diff);
   const stat = await cmd.gitRead(cwd, "diff", "--cached", "--stat", base);
   return `(diff truncated: read the files for the rest)\n\n${stat}\n\n${block(diff.slice(0, maxChars))}`;
-}
-
-/**
- * Regras de segredo para qualquer texto que vai sair da máquina. Devolve a regra que disparou, nunca o trecho.
- * The credential formats are the event-log redactor's (redaction.ts, one list for both), plus the saved Cursor key and the
- * value of every secret-named environment variable (16 characters or more) of `env`.
- */
-export function findSecretInText(text: string, knownSecrets: string[] = savedSecrets(), env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const format = findCredential(text);
-  if (format) return format;
-  if (knownSecrets.some((k) => k.length >= 16 && text.includes(k))) return "the saved SDK key or CURSOR_API_KEY";
-  const variable = findSecretEnvValue(text, env, 16);
-  return variable ? `the value of the secret-named environment variable ${variable}` : undefined;
-}
-
-/**
- * Trava de segredos antes do commit. Uma issue com prompt injection poderia fazer uma etapa copiar
- * ~/.cursor/sdk/auth.json para o worktree, e o sandbox do SDK não restringe leitura. Olha o diff staged desde `base`
- * (default: HEAD, ou a árvore vazia num repo sem commits), para pegar também o que um agente tenha commitado. Devolve a regra que disparou, nunca o trecho.
- */
-export async function findStagedSecret(cmd: Commands, worktree: string, knownSecrets: string[] = savedSecrets(), base?: string): Promise<string | undefined> {
-  const git = (...a: string[]) => cmd.gitRead(worktree, ...a);
-  for (const name of (await git("diff", "--cached", "--name-only", ...(base ? [base] : []))).split("\n").filter(Boolean)) {
-    const file = basename(name);
-    if (file === "auth.json") return "auth.json file in the commit";
-    if (file === ".env" || file.startsWith(".env.")) return "a .env file in the commit";
-  }
-  const added = (await git("diff", "--cached", "--no-color", "-U0", ...(base ? [base] : [])))
-    .split("\n")
-    .filter((l) => l.startsWith("+") && !l.startsWith("+++"))
-    .join("\n");
-  const hit = findSecretInText(added, knownSecrets);
-  return hit ? `${hit} in the diff` : undefined;
-}
-
-/** A chave salva por `wf login` e a de CURSOR_API_KEY, lidas só em memória para a comparação. */
-function savedSecrets(): string[] {
-  const keys: string[] = [];
-  if (process.env.CURSOR_API_KEY) keys.push(process.env.CURSOR_API_KEY);
-  try {
-    const stored = JSON.parse(readFileSync(join(homedir(), ".cursor", "sdk", "auth.json"), "utf8")) as { apiKey?: unknown };
-    if (typeof stored.apiKey === "string") keys.push(stored.apiKey);
-  } catch {
-    // sem login salvo
-  }
-  return keys;
 }
 
 export default defineWorkflow<Args>({
@@ -1163,7 +1118,7 @@ export default defineWorkflow<Args>({
         // Commits feitos por agentes (a instrução pede para não fazer) são desfeitos, mantendo a árvore.
         if (head !== baseCommit) await cmd.git(worktree, "reset", "--soft", baseCommit);
         await cmd.git(worktree, "add", "-A");
-        const secret = await findStagedSecret(cmd, worktree, undefined, baseCommit);
+        const secret = await findSecretInChange((...args) => cmd.gitRead(worktree, ...args), ["--cached", ...(baseCommit ? [baseCommit] : [])]);
         if (secret) {
           // Nada de commit, push ou PR. O worktree fica para inspeção; o motivo não repete o segredo.
           ctx.metric("secret_blocked", 1);
