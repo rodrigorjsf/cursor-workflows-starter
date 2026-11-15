@@ -245,7 +245,7 @@ if (route === "issue view" && a[0] === "issue") {
   const level = Number(member[1]) === st.issue.author_id ? st.issue.access_level : null;
   if (level === null || level === undefined) { const stranger = printed("author-stranger"); save(); process.stderr.write(fill(stranger.stderr)); process.stdout.write(fill(stranger.stdout)); process.exit(stranger.exitCode); }
   // the recording of the same form: the project of the cwd, or a named one; the member's own is the recording of its level, the closest one else
-  const name = endpoint.startsWith("projects/:fullpath/") ? ({ 50: "author-owner", 30: "author-developer", 20: "author-reporter" }[level] || "author-developer") : "author-owner-repo";
+  const name = endpoint.startsWith("projects/:fullpath/") ? ({ 50: "author-owner", 30: "author-developer", 20: "author-reporter" }[level] ?? "author-developer") : "author-owner-repo";
   out({ ...recordedJson(name), id: st.issue.author_id, access_level: level }, name);
 } else if (route === "repo view") {
   // the project of the cwd is the one its origin names; a named one comes back in GitLab's case (lower case here), on the host asked for

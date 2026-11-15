@@ -47,10 +47,8 @@ export interface ForgeIssueRef {
 export interface AuthorStanding {
   /** The forge's own word for it, shown to the person who decides: GitHub's `author_association` (`OWNER`, `CONTRIBUTOR`, `NONE`...), GitLab's access level (`Developer (30)`, or `not a member`). */
   association: string;
-  /** The author is no stranger: whoever `trusts` names. */
+  /** The author is no stranger: whoever the forge's `trusts` names. */
   trusted: boolean;
-  /** Who the forge's rule trusts, for the sentence that tells the user why the run stopped: `the repository's owner, a member of its organization or a collaborator`. */
-  trusts: string;
 }
 
 /** The most issues one `listIssues` reads: a backlog longer than this is not one an agent works through. */
@@ -67,6 +65,8 @@ export interface NewPr {
 /** What the workflow asks of a forge. `repo` (`owner/repo`, `group/sub/project`, or a repository URL): where the issue or the PR lives; absent, the repository of `cwd`. */
 export interface Forge {
   readonly name: ForgeName;
+  /** Who the forge's author rule trusts, for the sentence that tells the user why a run stopped: `the repository's owner, a member of its organization or a collaborator`. */
+  readonly trusts: string;
   /** The issue `number`. */
   issue(cwd: string, number: number, repo?: string): Promise<ForgeIssue>;
   /** How the author of the issue `number` stands to the repository. Reads only. A failure is an error, never "trusted". */
@@ -273,19 +273,18 @@ type GitlabMr = z.infer<typeof GITLAB_MR>;
 const NO_PR_FOUND = /no pull requests? found/i;
 /** The `author_association` values of an author who is no stranger: the owner, a member of the owning organization, a collaborator. Every other value, one GitHub adds later included, is a stranger's. */
 const TRUSTED_ASSOCIATIONS: ReadonlySet<string> = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
-const GITHUB_TRUSTS = "the repository's owner, a member of its organization or a collaborator";
 
-/** GitLab's answer to a user that is no member of the project: its REST API's 404, which glab prints with the status. */
-const GITLAB_NOT_A_MEMBER = /\b404\b/;
+/** GitLab's answer to a user that is no member of the project: `glab: 404 Not found (HTTP 404)` (recorded from a real GitLab). Another 404, such as `404 Project Not Found`, is a failure. */
+const GITLAB_NOT_A_MEMBER = /\b404 Not found\b/i;
 /** GitLab's access levels by number (its "Roles and permissions" page). The lowest one that is no stranger is Developer: who may push code to the project; Reporter and below only read it or triage it. */
 const GITLAB_ACCESS_LEVELS: Readonly<Record<number, string>> = { 5: "Minimal access", 10: "Guest", 15: "Planner", 20: "Reporter", 30: "Developer", 40: "Maintainer", 50: "Owner" };
 const GITLAB_TRUSTED_ACCESS_LEVEL = 30;
-const GITLAB_TRUSTS = "a member of the project with Developer access or above";
 const repoFlag = (repo: string | undefined): string[] => (repo ? ["--repo", repo] : []);
 
 /** GitHub, through `gh`. */
 class GithubForge implements Forge {
   readonly name = "github";
+  readonly trusts = "the repository's owner, a member of its organization or a collaborator";
   constructor(private readonly commands: Commands) {}
 
   async issue(cwd: string, number: number, repo?: string): Promise<ForgeIssue> {
@@ -302,7 +301,7 @@ class GithubForge implements Forge {
     const route = `repos/${where.path}/issues/${number}`;
     const association = (await this.gh(cwd, "api", ...(where.host === undefined ? [] : ["--hostname", where.host]), route, "--jq", ".author_association")).trim();
     if (!/^[A-Z_]+$/.test(association)) throw new Error(`gh api ${route}: unexpected author_association ${JSON.stringify(association.slice(0, 40))}: pass allowExternalAuthor: true after reading the issue`);
-    return { association, trusted: TRUSTED_ASSOCIATIONS.has(association), trusts: GITHUB_TRUSTS };
+    return { association, trusted: TRUSTED_ASSOCIATIONS.has(association) };
   }
 
   async listIssues(cwd: string, label: string): Promise<ForgeIssueRef[]> {
@@ -502,6 +501,7 @@ function jsonValues(text: string): unknown[] {
 /** GitLab, through `glab`. */
 class GitlabForge implements Forge {
   readonly name = "gitlab";
+  readonly trusts = "a member of the project with Developer access or above";
   constructor(private readonly commands: Commands) {}
 
   async issue(cwd: string, number: number, repo?: string): Promise<ForgeIssue> {
@@ -510,14 +510,15 @@ class GitlabForge implements Forge {
   }
 
   async authorStanding(cwd: string, number: number, repo?: string): Promise<AuthorStanding> {
-    // GitLab has no `author_association`: the issue names its author by id, and `members/all` says what the author is in the project, the
-    // members it has itself and the ones it inherits from its groups. GitLab answers 404 for an account that is no member: a stranger.
+    // GitLab has no `author_association`: the issue names its author by id (read again here, not kept from `issue()`: the forge holds no
+    // state between calls), and `members/all` says what the author is in the project, the members it has itself and the ones it inherits
+    // from its groups. GitLab answers 404 for an account that is no member: a stranger.
     const { author } = parseJson(await this.glab(cwd, "issue", "view", String(number), ...repoFlag(repo), "--output", "json"), GITLAB_ISSUE_AUTHOR, `glab issue view ${number} author`);
     const host = apiHost(repo);
     const member = await this.commands.forgeReadOrNothingWith("glab", cwd, host.env, GITLAB_NOT_A_MEMBER, "api", ...host.args, `${projectOf(repo)}/members/all/${author.id}`);
-    if (member === undefined) return { association: "not a member", trusted: false, trusts: GITLAB_TRUSTS };
+    if (member === undefined) return { association: "not a member", trusted: false };
     const { access_level: level } = parseJson(member, GITLAB_MEMBER, `glab api project member ${author.id}`);
-    return { association: `${GITLAB_ACCESS_LEVELS[level] ?? "access level"} (${level})`, trusted: level >= GITLAB_TRUSTED_ACCESS_LEVEL, trusts: GITLAB_TRUSTS };
+    return { association: `${GITLAB_ACCESS_LEVELS[level] ?? "access level"} (${level})`, trusted: level >= GITLAB_TRUSTED_ACCESS_LEVEL };
   }
 
   async listIssues(cwd: string, label: string): Promise<ForgeIssueRef[]> {

@@ -581,7 +581,7 @@ export default defineWorkflow<Args>({
             runId: ctx.runId,
             authorAssociation: author.association,
             reason:
-              `the author of issue #${issue.number} is not ${author.trusts} (the forge says: ${author.association}), ` +
+              `the author of issue #${issue.number} is not ${forge.trusts} (the forge says: ${author.association}), ` +
               "and the issue's text reaches steps that write code and run commands with your credentials. Read the issue; if you trust it, run again with allowExternalAuthor: true",
             next: `npm run wf -- run implement-issue --args ${shellQuote(JSON.stringify({ ...ctx.args, allowExternalAuthor: true }))} --resume ${ctx.runId}`,
           };

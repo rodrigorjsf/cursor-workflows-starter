@@ -127,7 +127,8 @@ test("GitLab: any answer about the author that is not a member's or a 404 is an 
   const standing = (member: Recording, issueText = issue) => createForge("gitlab", new Commands(answeringAuthor(issueText, member), LIMITS)).authorStanding("/x", 1);
   await assert.rejects(standing({ ...member, exitCode: 1, stdout: "", stderr: "glab: 401 Unauthorized (HTTP 401)" }), /401 Unauthorized/);
   await assert.rejects(standing({ ...member, exitCode: 1, stdout: "", stderr: "glab: 403 Forbidden (HTTP 403)" }), /403 Forbidden/);
-  await assert.rejects(standing({ ...member, exitCode: 2, stdout: "", stderr: "glab: 404 Not Found (HTTP 404)" }), /404 Not Found/, "only the exit code glab gave for the recorded 404 is that answer");
+  await assert.rejects(standing({ ...member, exitCode: 2, stdout: "", stderr: recorded("author-stranger").stderr }), /404 Not found/, "only the exit code glab gave for the recorded 404 is that answer");
+  await assert.rejects(standing({ ...member, exitCode: 1, stdout: "", stderr: "glab: 404 Project Not Found (HTTP 404)" }), /404 Project Not Found/, "a 404 for another reason than a missing member is no stranger's answer");
   await assert.rejects(standing({ ...member, stdout: JSON.stringify({ id: 5, access_level: "30" }) }), /^Error: glab api project member 1: access_level: .*expected number/);
   await assert.rejects(standing({ ...member, stdout: "<html>502</html>" }), /^Error: glab api project member 1: not valid JSON \(/);
   const record: Record<string, unknown> = JSON.parse(issue);
