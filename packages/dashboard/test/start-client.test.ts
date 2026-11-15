@@ -3,8 +3,11 @@
 // answer that is a refusal. The page's `fetch` is the same function with an empty origin. No job is started here (the start that
 // works is in start.process.test.ts).
 import assert from "node:assert/strict";
+import { type Server, createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, test } from "node:test";
 import { postAction } from "../app/dashboard-api.js";
+import { isRecord } from "../app/is-record.js";
 import { loadRepos, loadWorkflows, postStart } from "../app/start-api.js";
 import { type DashboardServer, startDashboard } from "../src/server.js";
 import { ECHO_WORKFLOW, type Sandbox, repoWithWorkflows, sandbox } from "./support.js";
@@ -52,9 +55,9 @@ test("an answer that is a refusal comes back as data with the server's own sente
 });
 
 test("a POST of an action goes behind the token, and a POST the server has no action for is reported with its status", async () => {
-  const unknownRun = await postAction("/api/runs/nope-00000000/cancel", undefined, dash.url);
+  const unknownRun = await postAction("/api/runs/nope-00000000/cancel", isRecord, undefined, dash.url);
   assert.deepEqual(unknownRun, { ok: false, status: 404, error: "run not found" }, "the cancel route took the client's token");
-  const noAction = await postAction("/api/no-such-action", {}, dash.url);
+  const noAction = await postAction("/api/no-such-action", isRecord, {}, dash.url);
   assert.deepEqual(noAction, { ok: false, status: 405, error: "method not allowed" });
 });
 
@@ -62,6 +65,24 @@ test("a dashboard that cannot be reached is reported as a sentence that says so"
   const gone = await loadRepos("http://127.0.0.1:1");
   assert.equal(gone.ok, false);
   assert.match(gone.ok ? "" : gone.error, /^could not reach the dashboard: /);
-  const goneToo = await postAction("/api/start", {}, "http://127.0.0.1:1");
+  const goneToo = await postAction("/api/start", isRecord, {}, "http://127.0.0.1:1");
   assert.match(goneToo.ok ? "" : goneToo.error, /^could not reach the dashboard: /);
+});
+
+/** A server that answers every GET with `body` (status 200): a dashboard of another version, or something else on the port. */
+async function answering(body: string): Promise<{ origin: string; server: Server }> {
+  const server = createServer((_req, res) => res.writeHead(200, { "content-type": "application/json" }).end(body));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return { origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, server };
+}
+
+test("an answer of another shape is a failure that says so, never a body of the wrong type", async () => {
+  const { origin, server } = await answering(JSON.stringify({ repos: "not a list" }));
+  try {
+    assert.deepEqual(await loadRepos(origin), { ok: false, status: 200, error: "the dashboard answered 200 with a body this page cannot read" });
+    const noToken = await postStart({ repo: "r", workflow: "w", args: {}, maxTokens: 1, maxCents: 1 }, origin);
+    assert.deepEqual(noToken, { ok: false, status: 200, error: "the dashboard answered 200 to the token request with no token" });
+  } finally {
+    server.close();
+  }
 });

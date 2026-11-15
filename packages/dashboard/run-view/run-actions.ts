@@ -1,5 +1,6 @@
 // What the buttons of the Run view ask of the dashboard (cancel, resume, and the decision on proposed seams), and what the page says of what came of it.
 import { postAction } from "../app/dashboard-api.js";
+import { isRecord } from "../app/is-record.js";
 import { runApiPath } from "./location.js";
 
 /** What a cancel came to: the job's state and what was done (`note`), or why nothing was done (`error`). */
@@ -34,9 +35,13 @@ export function cancelResult(outcome: CancelOutcome, cloudOnly: boolean): { step
   return { step, message: sentence(note) };
 }
 
+const optionalText = (value: unknown): boolean => value === undefined || typeof value === "string";
+const isCancelReply = (value: unknown): value is { status?: string; note?: string } => isRecord(value) && optionalText(value.status) && optionalText(value.note);
+const isResumeReply = (value: unknown): value is { jobId: string } => isRecord(value) && typeof value.jobId === "string";
+
 /** Cancels the run, through the same POST-with-token path every dashboard action takes (`postAction`). */
 export async function cancelRun(runId: string): Promise<CancelOutcome> {
-  const reply = await postAction<{ status?: string; note?: string }>(`${runApiPath(runId)}/cancel`);
+  const reply = await postAction(`${runApiPath(runId)}/cancel`, isCancelReply);
   if (!reply.ok) return { ok: false, error: reply.error };
   return { ok: true, status: reply.body.status ?? "running", note: reply.body.note ?? "" };
 }
@@ -51,7 +56,7 @@ export function resumeResult(outcome: ResumeOutcome): { step: "started" } | { st
 
 /** What a POST that resumes the run came to: the job it started (`jobId`), or the server's sentence. */
 async function resumed(path: string, body: unknown, origin?: string): Promise<ResumeOutcome> {
-  const reply = await postAction<{ jobId: string }>(path, body, origin);
+  const reply = await postAction(path, isResumeReply, body, origin);
   return reply.ok ? { ok: true, jobId: reply.body.jobId } : { ok: false, error: reply.error };
 }
 
