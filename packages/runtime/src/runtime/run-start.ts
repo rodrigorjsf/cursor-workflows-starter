@@ -12,7 +12,7 @@ import { ConfigError, type LimitOverrides, loadEffectiveConfig } from "../config
 import { kitCompatibility } from "../kit-version.js";
 import { argsError } from "./args-schema.js";
 import { errorText } from "./error-text.js";
-import { INSIDE_WORKFLOW_ENV } from "./inside-workflow.js";
+import { insideWorkflow } from "./inside-workflow.js";
 import { JobRefusedError, spawnJob } from "./job-spawn.js";
 import { type BrokenWorkflow, discoverWorkflows } from "./registry.js";
 import { readRunsIndex } from "./runs-index.js";
@@ -98,7 +98,7 @@ export interface JobLaunch {
  * within the global ones), then `spawnJob`. Nothing is created in the repository until every check has passed.
  */
 export async function launchJob(repo: string, workflow: string, { args, maxTokens, maxCents, overrides, resumeRunId }: JobLaunch): Promise<StartRunOutcome> {
-  if (process.env[INSIDE_WORKFLOW_ENV] === "1") return { kind: "refused", error: "workflows cannot be started from inside a workflow step" };
+  if (insideWorkflow()) return { kind: "refused", error: "workflows cannot be started from inside a workflow step" };
   if (!knownRepos().includes(repo)) return { kind: "unknown-repo" };
   const { workflows } = await discoverWorkflows(repo, { fresh: true });
   const def = workflows.get(workflow);

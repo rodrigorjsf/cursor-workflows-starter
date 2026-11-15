@@ -6,3 +6,8 @@
 
 /** Set to `"1"` in a process that runs inside a workflow step. */
 export const INSIDE_WORKFLOW_ENV = "WF_INSIDE_WORKFLOW";
+
+/** Whether this process runs inside a workflow step: the one place that reads `INSIDE_WORKFLOW_ENV`. */
+export function insideWorkflow(): boolean {
+  return process.env[INSIDE_WORKFLOW_ENV] === "1";
+}

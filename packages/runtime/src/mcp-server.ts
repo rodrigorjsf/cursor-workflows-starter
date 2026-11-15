@@ -52,7 +52,7 @@ import { type LimitOverrides, limitOverridesSchema, loadEffectiveConfig, parseLi
 import { assertKitCompatible, readKitPackage } from "./kit-version.js";
 import { argsError } from "./runtime/args-schema.js";
 import { type DashboardStatus, ensureDashboard, runPageUrl } from "./runtime/dashboard-instance.js";
-import { INSIDE_WORKFLOW_ENV } from "./runtime/inside-workflow.js";
+import { insideWorkflow } from "./runtime/inside-workflow.js";
 import { installCrashHandlers, spawnJob } from "./runtime/jobs.js";
 import { cancelJob, readJob, waitJob, waitSeconds } from "./runtime/job-state.js";
 import { type BrokenWorkflow, discoverWorkflows } from "./runtime/registry.js";
@@ -63,7 +63,7 @@ installCrashHandlers();
 // Step agents load the project's .cursor/mcp.json (settingSources "project") and, with the "mcp" tool allowed, could
 // start this same server and launch workflows recursively. The engine marks the environment; here, inside a step, the
 // server exposes no tools.
-const nested = process.env[INSIDE_WORKFLOW_ENV] === "1";
+const nested = insideWorkflow();
 
 const cwd = process.env.WF_CWD ?? process.cwd();
 // A broken workflow file must not take the server down: it is listed in list_workflows with its error instead.

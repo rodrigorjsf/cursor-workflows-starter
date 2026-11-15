@@ -45,7 +45,7 @@ import { unifiedDiff } from "./unified-diff.js";
 import { upgradeKit } from "./upgrade.js";
 import { assertCursorEndpoints } from "./runtime/cursor-endpoints.js";
 import { type RunStatus, runWorkflow } from "./runtime/engine.js";
-import { INSIDE_WORKFLOW_ENV } from "./runtime/inside-workflow.js";
+import { insideWorkflow } from "./runtime/inside-workflow.js";
 import { cancelOnSignals, installCrashHandlers, spawnJob, startJob } from "./runtime/jobs.js";
 import { cancelJob, listJobs, readJob, readJobRecord, waitJob } from "./runtime/job-state.js";
 import { loadWorkflows } from "./runtime/registry.js";
@@ -159,7 +159,7 @@ async function resolveWorkflow() {
 async function main(): Promise<number> {
   installCrashHandlers();
   // `run --job` (the child mode of `start`) included: a step must not start a workflow through a job record either.
-  if ((command === "run" || command === "start") && process.env[INSIDE_WORKFLOW_ENV] === "1") {
+  if ((command === "run" || command === "start") && insideWorkflow()) {
     throw new Error("workflows cannot be started from inside a workflow step");
   }
   if (command === "run" || command === "start") assertKitCompatible(cwd); // before anything starts: a kit outside the repo's declared range is refused
