@@ -14,6 +14,7 @@
 //   a caller keeps it for a while, while a run started a moment ago must take its issue off the Backlog at once.
 import { loadEffectiveConfig } from "../../src/config/index.js";
 import { errorText } from "../../src/runtime/error-text.js";
+import { isRecord } from "../../src/runtime/parse-json.js";
 import { discoverWorkflows } from "../../src/runtime/registry.js";
 import { type RunOrigin, runOriginsOf } from "../../src/runtime/run-view.js";
 import { knownRepos } from "../../src/runtime/run-start.js";
@@ -98,7 +99,7 @@ function namesRepository(arg: string, repository: string | undefined): boolean {
  */
 function issueOf({ start, card }: RunOrigin, repository: string | undefined): number | undefined {
   if (start !== undefined) {
-    const { issue, repo } = (typeof start.args === "object" && start.args !== null ? start.args : {}) as { issue?: unknown; repo?: unknown };
+    const { issue, repo } = isRecord(start.args) ? start.args : {};
     if (repo !== undefined && !(typeof repo === "string" && namesRepository(repo, repository))) return undefined;
     return typeof issue === "number" && Number.isInteger(issue) ? issue : undefined;
   }
