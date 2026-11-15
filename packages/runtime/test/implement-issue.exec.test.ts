@@ -140,6 +140,63 @@ test("a suite that was killed (not by its limit) is not a red: tests-killed, and
   assert.equal(res(r).status, "tests-killed", JSON.stringify(res(r)));
 });
 
+/** Runs `fn` with `secrets` in the environment of this process, and restores it. */
+async function withEnv(secrets: Record<string, string>, fn: () => Promise<void>): Promise<void> {
+  const saved = Object.fromEntries(Object.keys(secrets).map((name) => [name, process.env[name]]));
+  Object.assign(process.env, secrets);
+  try {
+    await fn();
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+}
+
+/** Fake secrets built at run time, so no literal in this file has the shape of a credential (gitleaks reads the file). */
+const fake = (what: string) => `${what}-${"x".repeat(24)}`;
+const SECRETS = { CURSOR_API_KEY: fake("cursor"), GH_TOKEN: fake("github") };
+
+test("the test command does not inherit a secret of the environment: `env` prints neither CURSOR_API_KEY nor GH_TOKEN", async () => {
+  issue(["complexity:low"]);
+  await withEnv({ ...SECRETS, DEPLOY_PASSWORD: fake("deploy"), NPM_CONFIG_REGISTRY: "https://registry.example/" }, async () => {
+    const r = await run({ testCommand: "env; node --test" });
+    assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+    const events = eventsOf(r.runId);
+    const baseline = execStarts(events).find((s) => s.label === "suite:baseline")!;
+    const printed = outputOf(events, baseline);
+    assert.match(printed, /NPM_CONFIG_REGISTRY=/, "the rest of the environment is still there");
+    for (const name of ["CURSOR_API_KEY", "GH_TOKEN", "DEPLOY_PASSWORD"]) assert.doesNotMatch(printed, new RegExp(name), `${name} reached the test command`);
+  });
+});
+
+test("the setup command gets the same scrubbed environment as the tests", async () => {
+  issue(["complexity:low"]);
+  await withEnv(SECRETS, async () => {
+    const r = await run({ setupCommand: "env" });
+    assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+    const events = eventsOf(r.runId);
+    const setup = execStarts(events).find((s) => s.label === "setup")!;
+    assert.match(outputOf(events, setup), /PATH=/, "the command ran and printed its environment");
+    for (const name of Object.keys(SECRETS)) assert.doesNotMatch(outputOf(events, setup), new RegExp(name), `${name} reached the setup command`);
+  });
+});
+
+test("the workflow's own gh and git calls still see GH_TOKEN: only the commands that run the target repository's code are scrubbed", async () => {
+  issue(["complexity:low"]);
+  const hook = join(fx.repo, ".git", "hooks", "pre-push");
+  writeFileSync(hook, `#!/bin/sh\nprintf '%s' "\${GH_TOKEN-unset}" > "${join(fx.root, "git-saw-token")}"\n`);
+  chmodSync(hook, 0o755);
+  await withEnv(SECRETS, async () => {
+    const r = await run({ openPr: true });
+    assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  });
+  assert.equal(readFileSync(join(fx.root, "git-saw-token"), "utf8"), SECRETS.GH_TOKEN, "git push ran its hook with the token");
+  const seen = forgeState().ghToken!;
+  assert.ok(seen.length > 0 && seen.every((s) => s === "set"), `gh calls without the token: ${seen.join(",")}`);
+});
+
 test("a failing suite is red even when the workflow itself runs under `node --test` (NODE_TEST_CONTEXT is not inherited)", async () => {
   // Measured: a nested `node --test` inherits NODE_TEST_CONTEXT=child-v8 and exits 0 with a test failing.
   const saved = process.env.NODE_TEST_CONTEXT;
