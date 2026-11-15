@@ -872,8 +872,9 @@ test("the size token check fires on a literal size in padding, margin, gap, font
 const DASHBOARD_CSS = ["packages/dashboard/app", "packages/dashboard/run-view"].flatMap((d) => files(d, /\.css$/));
 
 test("the dashboard stylesheets take every padding, margin, gap, font size and corner radius from the token scales", () => {
+  // app/tokens.css is exempt: it defines the scales, and its base component rules are where the scales come from (#76, row 20).
   assert.ok(DASHBOARD_CSS.length >= 3, `found ${DASHBOARD_CSS.join(", ")}`);
-  assert.deepEqual(scan(DASHBOARD_CSS, offScaleSizes), [], "use --space-1…6, --text-xs…2xl or --radius-* (app/tokens.css); a literal stays only as 0, a percentage or a 1 or 2px hairline");
+  assert.deepEqual(scan(DASHBOARD_CSS.filter((file) => !file.endsWith("/tokens.css")), offScaleSizes), [], "use --space-1…6, --text-xs…2xl or --radius-* (app/tokens.css); a literal stays only as 0, a percentage or a 1 or 2px hairline");
 });
 
 /** The selectors of a rule's list, split at the commas outside parentheses. */

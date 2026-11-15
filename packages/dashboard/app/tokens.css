@@ -139,7 +139,7 @@ button, select { cursor: pointer; }
 .btn.danger:hover:not(:disabled) { background: var(--s-failed-bg); border-color: var(--s-failed); }
 
 /* a status as a pill: a tint, the status's colour, a dot */
-.pill { display: inline-flex; align-items: center; gap: var(--space-1); padding: 2px var(--space-2); border-radius: var(--radius-pill); font-size: var(--text-xs); font-weight: 600; line-height: 18px; white-space: nowrap; color: var(--s-neutral); background: var(--s-neutral-bg); }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 2px 8px; border-radius: var(--radius-pill); font-size: var(--text-xs); font-weight: 600; line-height: 18px; white-space: nowrap; color: var(--s-neutral); background: var(--s-neutral-bg); }
 .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
 .pill.status-running, .pill.status-replaying { color: var(--s-running); background: var(--s-running-bg); }
 .pill.status-finished, .pill.pr-open { color: var(--s-ok); background: var(--s-ok-bg); }

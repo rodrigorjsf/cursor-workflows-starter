@@ -222,9 +222,9 @@
     trocadas. As páginas do navegador só importam tipos do runtime, então têm o próprio `app/error-text.ts`.
   - **O `new EventSource` só entra num módulo que importa o `batcher`**, a conferência (heurística) de que uma rajada de eventos é
     um render só.
-  - **`padding`, `margin`, `gap`, `font-size` e `border-radius` do dashboard usam os tokens**: nove declarações com 6px, 10px e 11px
-    passaram para a escala (`--space-1`, `--space-2`, `--text-xs`), uma diferença de até 2px no `.pill`, no `.count` e nos nós
-    do Run view. Todo `animation` e `transition` já tinha o seu `prefers-reduced-motion`; agora o teste confere seletor por seletor.
+  - **`padding`, `margin`, `gap`, `font-size` e `border-radius` do dashboard usam os tokens**: as declarações com 6px, 10px e 11px
+    passaram para a escala (`--space-1`, `--space-2`, `--text-xs`), uma diferença de até 2px no `.count` e nos nós do Run view;
+    o `app/tokens.css`, que define as escalas, fica de fora. Todo `animation` e `transition` já tinha o seu `prefers-reduced-motion`; agora o teste confere seletor por seletor.
   - **Nenhum script chama `process.exit`**: o `probe-sdk.ts` e o `dash-fixtures.ts` devolvem o código de saída de uma `main` atrás de
     `isEntryPoint`.
   - **Todo comando `wf run` que os scripts documentam ou imprimem leva `--max-tokens` e `--max-cents`**: o `setup-sandbox-repo.sh`
