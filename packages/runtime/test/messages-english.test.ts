@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { test } from "node:test";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 
 const SRC = join(import.meta.dirname, "..", "src");
 const PORTUGUESE = /[ãõçáéíóúâêôà]|\b(não|para|uma|que|dos|das|são|também|você|com o|de um|de|da|em|ou|sem|nenhuma?|chave|desconhecid[oa]s?|encontrad[oa]s?|arquivo|pasta|rode|banco|uso|falha|nem|autenticado|servidor|fatias?|teste|falhando|adiad[oa]s?|corpo)\b/i;

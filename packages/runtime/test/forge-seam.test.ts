@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { test } from "node:test";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 
 const RUNTIME = join(import.meta.dirname, "..");
 const FORGE = join(RUNTIME, "workflows", "implement-issue", "forge.ts");

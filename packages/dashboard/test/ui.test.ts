@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 import { type DashboardServer, startDashboard } from "../src/server.js";
 import { PACKAGE } from "./render.js";
 import { http, sandbox, type Sandbox } from "./support.js";

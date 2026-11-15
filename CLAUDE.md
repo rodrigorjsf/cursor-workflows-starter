@@ -84,3 +84,4 @@ When something fails repeatedly, when User has to re-explain, or when a workarou
 - Fresh worktree has no node_modules: `mise exec -- npm ci --prefer-offline`.
 - Piped `gh issue view --comments` prints only comments: use `--json body,comments`.
 - Test repos: set `core.autocrlf=false`; global git here converts line endings.
+- `node_modules/.bin/tsc` is TypeScript 6; TS 7 is `node_modules/typescript/bin/tsc`.

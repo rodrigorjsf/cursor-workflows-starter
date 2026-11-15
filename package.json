@@ -16,7 +16,7 @@
     "mcp": "tsx packages/runtime/src/mcp-server.ts",
     "check": "npm run typecheck && npm test",
     "check:log": "npm run check > .check.log 2>&1; e=$?; grep -E '^# (tests|pass|fail) |^not ok' .check.log; echo EXIT=$e; exit $e",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p packages/dashboard/app && tsc --noEmit -p packages/dashboard/run-view && tsc --noEmit -p test && tsc --noEmit -p packages/runtime/test && tsc --noEmit -p packages/dashboard/test",
+    "typecheck": "PATH=node_modules/typescript/bin:$PATH; tsc --noEmit && tsc --noEmit -p packages/dashboard/app && tsc --noEmit -p packages/dashboard/run-view && tsc --noEmit -p test && tsc --noEmit -p packages/runtime/test && tsc --noEmit -p packages/dashboard/test",
     "models": "tsx packages/runtime/src/cli.ts models",
     "test": "npm run test --workspaces --if-present; w=$?; tsx --test --test-timeout=120000 test/*.test.ts; r=$?; exit $((w || r))",
     "dash": "tsx packages/dashboard/src/main.ts",
@@ -29,6 +29,7 @@
   "devDependencies": {
     "@types/node": "^22.13.0",
     "@types/semver": "^7.8.0",
-    "typescript": "^5.9.0"
+    "@typescript/typescript6": "^6.0.2",
+    "typescript": "^7.0.2"
   }
 }

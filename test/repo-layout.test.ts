@@ -6,7 +6,7 @@ import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpat
 import { dirname, join, relative, resolve } from "node:path";
 import { builtinModules } from "node:module";
 import { test } from "node:test";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const read = (...p: string[]) => readFileSync(join(ROOT, ...p), "utf8");
