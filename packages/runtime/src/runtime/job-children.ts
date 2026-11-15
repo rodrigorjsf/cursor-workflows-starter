@@ -12,7 +12,8 @@
 // are children the process cannot record: the shell commands of its tools, spawned detached in a group of their own, and the
 // MCP servers of the project's config, spawned in the job's own group (a job runs detached, so it leads one). The kill finds
 // the first in the process table and signals the second with the job's group. Where there is no /proc, only the recorded
-// commands and the job's group are reached.
+// commands and the job's group are reached. How the SDK spawns them was read in its source and tested with stand-ins, not
+// with a real agent (see #104).
 //
 // No engine and no SDK here: the dashboard cancels through job-state.ts, which imports this.
 import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
