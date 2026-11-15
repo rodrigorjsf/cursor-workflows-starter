@@ -11,6 +11,7 @@ import { batcher } from "./batch.js";
 import { runApiPath } from "./location.js";
 import { parseRunEvent } from "./run-event.js";
 import type { RunEvent } from "./run-graph.js";
+import { errorText } from "../app/error-text.js";
 
 /** `waiting`: the API does not know the run yet. `closed`: the stream was read to the end and shut. */
 export type Connection = "waiting" | "live" | "reconnecting" | "closed" | "not-found";
@@ -90,7 +91,7 @@ export function useRunEvents(runId: string): RunFeed {
           } else if (reply.status === 404 && Date.now() - since > NOT_FOUND_AFTER_MS) setConnection("not-found");
         } catch (err) {
           // the dashboard is not answering: say so, and try again
-          if (!stopped) setUnreachable(err instanceof Error ? err.message : String(err));
+          if (!stopped) setUnreachable(errorText(err));
         }
       }
       if (!stopped) timer = setTimeout(poll, latest === "running" || latest === undefined ? POLL_RUNNING_MS : POLL_SETTLED_MS);

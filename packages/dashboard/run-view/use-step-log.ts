@@ -11,6 +11,7 @@ import { batcher } from "./batch.js";
 import { runApiPath } from "./location.js";
 import { readable } from "./run-graph.js";
 import type { ContentItem } from "./step-log.js";
+import { errorText } from "../app/error-text.js";
 
 /** `loading`: nothing read yet. `ready`: read (the step may have no content yet). `error`: the dashboard could not give it. */
 export type StepLogStatus = "loading" | "ready" | "error";
@@ -62,7 +63,7 @@ export function useStepLog(runId: string, stepId: string, live: boolean): StepLo
         setStatus("ready");
       } catch (err) {
         if (stopped) return;
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errorText(err));
         setStatus("error");
         return;
       }

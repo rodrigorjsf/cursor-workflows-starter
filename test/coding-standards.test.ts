@@ -516,6 +516,63 @@ test("@cursor/sdk is pinned to an exact version, so the hand-written fake SDK ne
   assert.ok(exactVersion(range), `@cursor/sdk is "${range}": pin it to an exact version, with no caret`);
 });
 
+// --- Error handling ---------------------------------------------------------------------------------------------------
+
+/**
+ * The two files that define `errorText`: the runtime's, and the browser pages' own (a page imports only types from the runtime,
+ * so it cannot take the runtime's). Everything else calls one of them.
+ */
+const ERROR_TEXT_HELPERS = ["packages/runtime/src/runtime/error-text.ts", "packages/dashboard/app/error-text.ts"];
+
+const unparenthesized = (e: ts.Expression): ts.Expression => (ts.isParenthesizedExpression(e) ? unparenthesized(e.expression) : e);
+
+/** Lines of `x instanceof Error ? x.message : String(x)`, spelled out by hand (one expression `x`, three times): the body of `errorText`. */
+function inlineErrorText(path: string, text: string): number[] {
+  if (ERROR_TEXT_HELPERS.includes(path)) return [];
+  const sf = parse(path, text);
+  const found: number[] = [];
+  walk(sf, (node) => {
+    if (!ts.isConditionalExpression(node)) return;
+    const test = unparenthesized(node.condition);
+    const message = unparenthesized(node.whenTrue);
+    const fallback = unparenthesized(node.whenFalse);
+    if (!ts.isBinaryExpression(test) || test.operatorToken.kind !== ts.SyntaxKind.InstanceOfKeyword) return;
+    if (!ts.isIdentifier(test.right) || test.right.text !== "Error") return;
+    if (!ts.isPropertyAccessExpression(message) || message.name.text !== "message") return;
+    if (!ts.isCallExpression(fallback) || !ts.isIdentifier(fallback.expression) || fallback.expression.text !== "String" || fallback.arguments.length !== 1) return;
+    const caught = test.left.getText(sf);
+    if (message.expression.getText(sf) === caught && fallback.arguments[0]!.getText(sf) === caught) found.push(lineOf(sf, node));
+  });
+  return found;
+}
+
+test("the errorText check fires on the inline conversion, whatever the value or the layout, and passes errorText, other fallbacks and the helpers' own body", () => {
+  const offender = [
+    "const a = err instanceof Error ? err.message : String(err);",
+    "const b = `x: ${outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)}`;",
+    "const c = (e instanceof Error)",
+    "  ? e.message",
+    "  : String(e);",
+  ].join("\n");
+  assert.deepEqual(inlineErrorText("a.ts", offender), [1, 2, 3]);
+  const legit = [
+    "const a = errorText(err);",
+    'const b = err instanceof Error ? err.message : "unknown";',
+    "const c = err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300);",
+    "const d = err instanceof Error ? err.message : String(other);",
+    "const e = err instanceof TypeError ? err.message : String(err);",
+    '// err instanceof Error ? err.message : String(err)',
+    'const f = "err instanceof Error ? err.message : String(err)";',
+  ].join("\n");
+  assert.deepEqual(inlineErrorText("a.ts", legit), []);
+  assert.deepEqual(inlineErrorText(ERROR_TEXT_HELPERS[0]!, offender), [], "the helper's own body");
+});
+
+test("a caught value becomes text through errorText: no inline `x instanceof Error ? x.message : String(x)` outside the two helpers", () => {
+  for (const helper of ERROR_TEXT_HELPERS) assert.match(read(helper), /export const errorText = /, `${helper} defines errorText`);
+  assert.deepEqual(scan(ALL_CODE, inlineErrorText), [], "import errorText (packages/runtime/src/runtime/error-text.ts; packages/dashboard/app/error-text.ts in the browser pages) and call errorText(err)");
+});
+
 // --- Persistence ------------------------------------------------------------------------------------------------------
 
 const OBSERVABILITY = "packages/runtime/src/observability/";

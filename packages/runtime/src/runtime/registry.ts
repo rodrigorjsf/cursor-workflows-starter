@@ -11,6 +11,7 @@ import { pathToFileURL } from "node:url";
 import { isRecord } from "./parse-json.js";
 import type { WorkflowDefinition } from "./workflow.js";
 import { recordWorkflowSource } from "./workflow-source.js";
+import { errorText } from "./error-text.js";
 
 export function workflowDirs(cwd: string): string[] {
   const dirs = [resolve(import.meta.dirname, "..", "..", "workflows"), join(cwd, ".agents", "workflows")];
@@ -76,7 +77,7 @@ export async function discoverWorkflows(
         recordWorkflowSource(def, path);
         workflows.set(def.meta.name, def);
       } catch (err) {
-        broken.push({ file: path, error: err instanceof Error ? err.message : String(err) });
+        broken.push({ file: path, error: errorText(err) });
       }
     }
   }

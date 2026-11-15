@@ -50,6 +50,7 @@ import { cancelOnSignals, installCrashHandlers, spawnJob, startJob } from "./run
 import { cancelJob, listJobs, readJob, readJobRecord, waitJob } from "./runtime/job-state.js";
 import { loadWorkflows } from "./runtime/registry.js";
 import { applyGc, directCommands, formatPlan, planGc } from "../workflows/implement-issue/gc.js";
+import { errorText } from "./runtime/error-text.js";
 
 const isStringList = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");
 
@@ -58,7 +59,7 @@ class UsageError extends Error {}
 
 /** Exit codes: 0 done; 1 an error; 2 a usage error, printed as one line on stderr. */
 function exitWithError(err: unknown): never {
-  process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+  process.stderr.write(`${errorText(err)}\n`);
   process.exit(err instanceof UsageError ? 2 : 1);
 }
 

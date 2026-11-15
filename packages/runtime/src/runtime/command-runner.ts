@@ -5,6 +5,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import type { ExecOutcome, OutputStream } from "./events.js";
 import { isSecretName } from "./redaction.js";
 import type { ExecResult } from "./workflow.js";
+import { errorText } from "./error-text.js";
 
 /** How much of a command's output a call hands back: the last characters of stdout and stderr, in arrival order. */
 export const TAIL_MAX_CHARS = 32_768;
@@ -99,7 +100,7 @@ export function runCommand(spec: CommandSpec, onOutput: (stream: OutputStream, t
     try {
       child = spawn(spec.command, spec.args, { cwd: spec.cwd, env: environmentOf(spec), stdio: ["ignore", "pipe", "pipe"], detached: OWN_GROUP });
     } catch (err) {
-      return resolve(result("spawn-error", null, null, err instanceof Error ? err.message : String(err)));
+      return resolve(result("spawn-error", null, null, errorText(err)));
     }
     if (!exitHookInstalled) {
       exitHookInstalled = true;

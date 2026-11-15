@@ -17,6 +17,7 @@ import { type ExecutionState, type RunCard, boundedPhase, latestCard, projectLat
 import { EVENTS_FILE, isRunExecuting, readEventLog, runDirIn } from "./run-store.js";
 import { type RunsIndexEntry, readRunsIndex } from "./runs-index.js";
 import type { UsageTotals } from "./workflow.js";
+import { errorText } from "./error-text.js";
 
 /** How a run stands: the status of its latest execution, or `missing` when its log cannot be read or projected (the repo or the run's directory is gone, or the log is damaged). */
 export type RunViewStatus = "running" | RunStatus | "missing";
@@ -100,7 +101,7 @@ function projectLog(log: string): Projected {
       ? { execution, executions: events.filter((e) => e.type === "run-start").length, phases: runPhases(events), card: latestCard(events), jobId }
       : { error: `no run-start in ${log}` };
   } catch (err) {
-    projected = { error: `could not read ${log}: ${err instanceof Error ? err.message : String(err)}` };
+    projected = { error: `could not read ${log}: ${errorText(err)}` };
   }
   if (stamp !== undefined) {
     projections.delete(log); // re-inserted: the Map's order is the order of the latest reads

@@ -24,6 +24,7 @@ import { eventLogPath, readEventLog, runLockHolder } from "./run-store.js";
 import { isPlainName, stateDir } from "./state.js";
 import { tryParseJson } from "./parse-json.js";
 import { writeFileAtomic } from "./state-files.js";
+import { errorText } from "./error-text.js";
 
 /** How a job was started: what `wf start` (or `start_workflow`) was given, which a resume of its run gives again. */
 export interface JobStart {
@@ -362,7 +363,7 @@ export async function cancelJob(cwd: string, jobId: string, timeoutMs: number): 
     if (signal === "SIGKILL") killFrozenJob(jobsDirIn(cwd), record.jobId, record.pid);
     else process.kill(record.pid, signal);
   } catch (err) {
-    return { ...before, note: `could not signal process ${record.pid}: ${err instanceof Error ? err.message : String(err)}` };
+    return { ...before, note: `could not signal process ${record.pid}: ${errorText(err)}` };
   }
   // The killed process writes no run end and runs no code again (not even its heartbeat): the record says the cancel killed
   // it, so a resume tells this end from a crash (`wasKilledByCancel`). Written now, not once the process is gone: a process

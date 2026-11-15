@@ -19,7 +19,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
-import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, dashboardUrl, type RunTail, cancelRun, defaultDbPath, issuesWithRuns, knownRepos, leftAgentsNote, listRepoWorkflows, listRuns, openDb, readRun, readStepContent, startRun, summary, tailRun } from "@cursor-workflows/runtime/observe";
+import { DASHBOARD_APP, DASHBOARD_HOST, HEALTH_PATH, type Db, dashboardUrl, type RunTail, cancelRun, defaultDbPath, errorText, issuesWithRuns, knownRepos, leftAgentsNote, listRepoWorkflows, listRuns, openDb, readRun, readStepContent, startRun, summary, tailRun } from "@cursor-workflows/runtime/observe";
 import { Backlogs, backlogReply } from "./backlog.js";
 import { buildBoards } from "./board.js";
 import { PAGE_POLICY, assetPath, pageHtml } from "./pages.js";
@@ -354,7 +354,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
   const server = createServer((req, res) => {
     route(req, res).catch((err: unknown) => {
       if (res.headersSent) res.destroy();
-      else send(res, 500, { error: err instanceof Error ? err.message : String(err) });
+      else send(res, 500, { error: errorText(err) });
     });
   });
   await new Promise<void>((resolve, reject) => {

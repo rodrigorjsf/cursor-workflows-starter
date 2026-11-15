@@ -256,7 +256,7 @@ async function readUsage(agent: SDKAgent): Promise<UsageReading> {
     });
     const unavailable = (lastErr as { code?: unknown } | undefined)?.code === "feature_unavailable";
     if (report?.cost || i === 2 || unavailable) {
-      return report ? { report } : { failed: lastErr instanceof Error ? lastErr.message : String(lastErr) };
+      return report ? { report } : { failed: errorText(lastErr) };
     }
     await sleep(1000);
   }

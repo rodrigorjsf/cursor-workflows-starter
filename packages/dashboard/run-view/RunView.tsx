@@ -13,6 +13,7 @@ import { type RunGraph, buildRunGraph, isWork } from "./run-graph.js";
 import { headerStatus, offeredActions, runElapsed } from "./run-status.js";
 import { type RunLayout, layoutRunGraph } from "./run-layout.js";
 import { type Connection, useRunEvents } from "./use-run-events.js";
+import { errorText } from "../app/error-text.js";
 
 // `group` is a node type of React Flow's own (a grey box): the fork and the join are `junction`s.
 const NODE_TYPES = { work: WorkNode, junction: JunctionNode, start: StartNode, lane: LaneNode };
@@ -37,7 +38,7 @@ function useLayout(graph: RunGraph): { layout?: RunLayout; error?: string } {
     let stale = false;
     layoutRunGraph(graph).then(
       (layout) => !stale && setState({ layout }),
-      (err: unknown) => !stale && setState((before) => ({ ...before, error: err instanceof Error ? err.message : String(err) })),
+      (err: unknown) => !stale && setState((before) => ({ ...before, error: errorText(err) })),
     );
     return () => {
       stale = true;

@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { isRecord } from "./runtime/parse-json.js";
+import { errorText } from "./runtime/error-text.js";
 
 /** The repo files that can register the server, relative to the repo, in the order the doctor reports them. */
 export const MCP_CONFIG_FILES = [".cursor/mcp.json", ".mcp.json"];
@@ -49,7 +50,7 @@ export function readMcpLaunches(cwd: string): McpLaunches {
       const workflows = isRecord(servers) ? servers.workflows : undefined;
       entry = isRecord(workflows) ? workflows : undefined;
     } catch (err) {
-      problems.push(`${file}: invalid JSON (${err instanceof Error ? err.message : String(err)})`);
+      problems.push(`${file}: invalid JSON (${errorText(err)})`);
       continue;
     }
     if (typeof entry?.command !== "string") {

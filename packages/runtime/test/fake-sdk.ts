@@ -22,6 +22,7 @@ import type {
   SdkLoginResult,
   SendOptions,
 } from "../../../node_modules/@cursor/sdk/dist/esm/index.js";
+import { errorText } from "../src/runtime/error-text.js";
 export type * from "../../../node_modules/@cursor/sdk/dist/esm/index.js";
 /** Set when this module is loaded: lets a test prove that a module graph never imports the SDK. */
 (globalThis as { __fakeSdkLoaded?: boolean }).__fakeSdkLoaded = true;
@@ -280,7 +281,7 @@ function agentOf(state: AgentState) {
         const run = serverRun(state, raw);
         raw.wait().then(
           (result) => run.settle(result),
-          (err: unknown) => run.settle({ id: run.id, status: "error", error: { message: err instanceof Error ? err.message : String(err) } }),
+          (err: unknown) => run.settle({ id: run.id, status: "error", error: { message: errorText(err) } }),
         );
         return cloudHandle(run);
       };

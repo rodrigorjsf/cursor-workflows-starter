@@ -7,6 +7,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { isDeepStrictEqual } from "node:util";
 import { kitFileUrl, readKitPackage } from "./kit-version.js";
 import { writeFileAtomic } from "./runtime/state-files.js";
+import { errorText } from "./runtime/error-text.js";
 
 /** One file `wf init` changed. `before` is undefined for a new file, `after` for a deleted one. */
 export interface FileChange {
@@ -107,7 +108,7 @@ function parseObject(file: string, text: string | undefined): Json {
   try {
     value = JSON.parse(text);
   } catch (err) {
-    throw new Error(`${file}: invalid JSON (${err instanceof Error ? err.message : String(err)}); fix the file and run \`wf init\` again`);
+    throw new Error(`${file}: invalid JSON (${errorText(err)}); fix the file and run \`wf init\` again`);
   }
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`${file}: expected a JSON object`);
   return value as Json;
