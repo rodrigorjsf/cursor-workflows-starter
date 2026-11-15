@@ -100,7 +100,7 @@ function assertOfficialOrigin(kit: string): void {
  * release, one that is not immutable and a failed call are all errors, never a skip.
  */
 async function assertImmutableRelease(tag: string): Promise<void> {
-  const url = `${process.env[API_URL_ENV] || "https://api.github.com"}/repos/${KIT_REPO}/releases/tags/${tag}`;
+  const url = `${process.env[API_URL_ENV] ?? "https://api.github.com"}/repos/${KIT_REPO}/releases/tags/${tag}`;
   const unreadable = (reason: string) => new Error(`could not read the release of ${tag} from ${url} (${reason}). Check the network and run again, or pass --allow-mutable-tag to skip the check.`);
   let response: Response;
   try {
