@@ -5,8 +5,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { crashText } from "../app/crash.js";
 import { ErrorBoundary, ErrorFallback } from "../app/ErrorBoundary.js";
+import { errorText } from "../app/error-text.js";
 import { render, textOf } from "./render.js";
 
 test("the fallback shows the error and a link that reloads the page", () => {
@@ -19,11 +19,11 @@ test("the fallback shows the error and a link that reloads the page", () => {
 });
 
 test("what a thrown value says: an Error's message, a string, and something that is neither", () => {
-  assert.equal(crashText(new Error("boom")), "boom");
-  assert.equal(crashText("plain text"), "plain text");
-  assert.equal(crashText(undefined), "an unknown error (nothing was thrown with it)");
-  assert.equal(crashText({ code: 7 }), '{"code":7}');
-  assert.equal(crashText(null), "an unknown error (nothing was thrown with it)");
+  assert.equal(errorText(new Error("boom")), "boom");
+  assert.equal(errorText("plain text"), "plain text");
+  assert.equal(errorText(undefined), "an unknown error (nothing was thrown with it)");
+  assert.equal(errorText({ code: 7 }), '{"code":7}');
+  assert.equal(errorText(null), "an unknown error (nothing was thrown with it)");
 });
 
 test("a boundary around a child that renders shows the child, and a thrown value of any kind becomes a failed state", () => {

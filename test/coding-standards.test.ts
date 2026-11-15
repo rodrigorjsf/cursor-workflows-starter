@@ -569,7 +569,7 @@ test("the errorText check fires on the inline conversion, whatever the value or 
 });
 
 test("a caught value becomes text through errorText: no inline `x instanceof Error ? x.message : String(x)` outside the two helpers", () => {
-  for (const helper of ERROR_TEXT_HELPERS) assert.match(read(helper), /export const errorText = /, `${helper} defines errorText`);
+  for (const helper of ERROR_TEXT_HELPERS) assert.match(read(helper), /export (const errorText = |function errorText\()/, `${helper} defines errorText`);
   assert.deepEqual(scan(ALL_CODE, inlineErrorText), [], "import errorText (packages/runtime/src/runtime/error-text.ts; packages/dashboard/app/error-text.ts in the browser pages) and call errorText(err)");
 });
 

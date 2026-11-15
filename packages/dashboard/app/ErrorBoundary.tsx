@@ -4,14 +4,15 @@
 // boundary caught (React has already unmounted the tree then, so a component cannot show it). Its style, `crash.css`, is imported by the
 // two entry files, which esbuild bundles: a test that renders this file has no loader for a style.
 import { Component, type ReactNode } from "react";
-import { CRASH_TITLE, RELOAD_LABEL, crashText } from "./crash.js";
+import { CRASH_TITLE, RELOAD_LABEL } from "./crash.js";
+import { errorText } from "./error-text.js";
 
 /** The error and the way back. An empty `href` is the address of the page itself: following it reloads it. */
 export function ErrorFallback({ error }: { error: unknown }) {
   return (
     <div className="crash" role="alert">
       <h1>{CRASH_TITLE}</h1>
-      <pre>{crashText(error)}</pre>
+      <pre>{errorText(error)}</pre>
       <a href="">{RELOAD_LABEL}</a>
     </div>
   );
@@ -55,7 +56,7 @@ export function showCrashIn(container: HTMLElement): (error: unknown) => void {
       const title = doc.createElement("h1");
       title.textContent = CRASH_TITLE;
       const message = doc.createElement("pre");
-      message.textContent = crashText(error);
+      message.textContent = errorText(error);
       const reload = doc.createElement("a");
       reload.setAttribute("href", "");
       reload.textContent = RELOAD_LABEL;
