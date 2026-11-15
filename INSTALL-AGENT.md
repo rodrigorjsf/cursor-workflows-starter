@@ -24,8 +24,9 @@ Stop until they have.
 ## 2. Install the kit, once per machine
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/scripts/install.sh -o /tmp/wf-install.sh
-bash /tmp/wf-install.sh --tag v0.4.0
+installer="$(mktemp)"
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/scripts/install.sh -o "$installer"
+bash "$installer" --tag v0.4.0
 ```
 
 The installer:
@@ -114,8 +115,8 @@ Done when it exits 0 (`"ok": true`). Otherwise each failing entry in `checks` ha
 hint says if you can, hand the user what needs them (the login, a newer Node, `gh auth login --hostname <host>` or
 `glab auth login --hostname <host>`), and run the doctor again. An entry with `"status": "warn"` does not fail the doctor: it
 passed, and its `message` and `hint` name something to fix, such as a GitHub token that holds scopes the kit does not need.
-Relay each warning to the user, and do not print the token. The message of a passing `login` check ends with a reminder that starts `Privacy Mode cannot be read through the SDK`: the doctor cannot read the mode, and step 4 already asked the user, so nothing more is due for it. The checks, in this order: `node`, `dependencies`, `login`, `models`, `forge`, `mcp-server`,
-`config`, `kit-version`, `sandbox`, `kit`. `kit` fails when the installed kit has local changes or is not on exactly the tag of its version: reinstall it as step 2 says. `forge` asks the CLI of the repository's forge (`gh` for GitHub, `glab` for GitLab) and passes
+Relay each warning to the user, and do not print the token. The message of a passing `login` check ends with a reminder that starts `Privacy Mode cannot be read through the SDK`: the doctor cannot read the mode, and step 4 already asked the user, so nothing more is due for it. The checks, in this order: `node`, `dependencies`, `endpoints`, `login`, `models`, `forge`, `mcp-server`,
+`config`, `kit-version`, `sandbox`, `kit`. `endpoints` fails when `CURSOR_BACKEND_URL` or `CURSOR_WEBSITE_URL` is set to anything but an https URL on `cursor.sh` or `cursor.com`: the SDK would send the user's API key there, so `login` and `models` do not run until it passes. Do not fix it by editing the value: tell the user which variable it is and where it is set (the message names the file when it is an MCP entry's `env`), and let them unset it. `kit` fails when the installed kit has local changes or is not on exactly the tag of its version: reinstall it as step 2 says. `forge` asks the CLI of the repository's forge (`gh` for GitHub, `glab` for GitLab) and passes
 outside a git repository. The host of `origin` picks the forge: `github.com` and `gitlab.com` are known, and any other
 host (a self-managed GitLab) must be declared under the `forges` config key: until it is, the check fails with a message
 that names the key. Declaring the host is the user's call.
