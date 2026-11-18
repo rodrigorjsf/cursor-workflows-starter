@@ -379,7 +379,7 @@ export function forgeTest(title: string, fn: (forge: TestForge) => unknown, forg
 }
 
 export const run = (args: Record<string, unknown>, runId?: string) =>
-  runWorkflow(implementIssue, { issue: 7, testCommand: "node --test", ...args } as any, { cwd: fx.repo, runId });
+  runWorkflow(implementIssue, { issue: 7, testCommand: "node --test", openPr: false, ...args } as any, { cwd: fx.repo, runId });
 
 /** A suíte passa no worktree entregue? (a verdade, fora do que o workflow diz) */
 export function suitePasses(cwd: string): boolean {

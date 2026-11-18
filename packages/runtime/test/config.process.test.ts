@@ -3,7 +3,7 @@
 // call, and an unusable config refused up front with the field path.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -40,6 +40,15 @@ before(() => {
   defaults: { model: { id: "m" } },
   budget: { maxTokens: 3000000 },
   async run() { return "done"; },
+};\n`,
+  );
+  put(
+    join(repo, ".agents", "workflows", "echoargs.mjs"),
+    `export default {
+  meta: { name: "echoargs", description: "returns its args" },
+  defaults: { model: { id: "m" } },
+  budget: { maxTokens: 3000000 },
+  async run(ctx) { return ctx.args; },
 };\n`,
   );
 });
@@ -232,4 +241,194 @@ test("wf start refuses an unusable config in the parent, before it spawns anythi
   assert.ok(r.stderr.includes("/workflows/cfgwf/concurrency"), r.stderr);
   assert.equal(r.stdout, "", "no job was created");
   rmSync(repoConfig(), { force: true });
+});
+
+const IMPLEMENT_ISSUE_SETTINGS = "workflows.implement-issue.settings";
+const fileOf = (path: string) => JSON.parse(readFileSync(path, "utf8"));
+const settingsFile = (settings: Record<string, unknown>) => ({ workflows: { "implement-issue": { settings } } });
+const clearConfig = () => {
+  rmSync(globalConfig(), { force: true });
+  rmSync(repoConfig(), { force: true });
+};
+const implementIssue = () => {
+  const r = wf("config", "show", "implement-issue");
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout).workflows["implement-issue"] as { config: { settings: Record<string, unknown> }; provenance: Record<string, unknown> };
+};
+const jobCount = () => (existsSync(join(repo, ".workflows", "jobs")) ? readdirSync(join(repo, ".workflows", "jobs")).length : 0);
+
+test("wf config show names the layer each delivery setting came from: the code default, the global file, the repo file over it", () => {
+  clearConfig();
+  const delivery = () => {
+    const { config, provenance } = implementIssue();
+    return { values: { worktree: config.settings.worktree, openPr: config.settings.openPr }, worktree: provenance["/settings/worktree"], openPr: provenance["/settings/openPr"] };
+  };
+  assert.deepEqual(delivery(), { values: { worktree: false, openPr: true }, worktree: { layer: "default" }, openPr: { layer: "default" } });
+
+  put(globalConfig(), settingsFile({ worktree: true, openPr: false }));
+  assert.deepEqual(delivery(), {
+    values: { worktree: true, openPr: false },
+    worktree: { layer: "global", ref: globalConfig() },
+    openPr: { layer: "global", ref: globalConfig() },
+  });
+
+  put(repoConfig(), settingsFile({ openPr: true }));
+  assert.deepEqual(delivery(), {
+    values: { worktree: true, openPr: true },
+    worktree: { layer: "global", ref: globalConfig() },
+    openPr: { layer: "repo", ref: repoConfig() },
+  });
+  clearConfig();
+});
+
+test("wf config set writes the global file by default, and wf config show then names that file as the layer", () => {
+  clearConfig();
+  const r = wf("config", "set", `${IMPLEMENT_ISSUE_SETTINGS}.openPr`, "false");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout), { file: globalConfig(), scope: "global", path: `${IMPLEMENT_ISSUE_SETTINGS}.openPr`, value: false });
+  assert.deepEqual(fileOf(globalConfig()), settingsFile({ openPr: false }));
+  assert.equal(existsSync(repoConfig()), false);
+  const { config, provenance } = implementIssue();
+  assert.equal(config.settings.openPr, false);
+  assert.deepEqual(provenance["/settings/openPr"], { layer: "global", ref: globalConfig() });
+  clearConfig();
+});
+
+test("wf config set --repo writes the repo file, keeps what the file already holds and leaves the global file alone", () => {
+  clearConfig();
+  put(globalConfig(), { caps: { maxCents: 100 } });
+  const globalBefore = readFileSync(globalConfig(), "utf8");
+  put(repoConfig(), { kit: ">=0.4.0 <0.5.0", workflows: { "implement-issue": { settings: { fixRounds: 1 } } } });
+  const r = wf("config", "set", "--repo", `${IMPLEMENT_ISSUE_SETTINGS}.worktree`, "true");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).file, repoConfig());
+  assert.deepEqual(fileOf(repoConfig()), { kit: ">=0.4.0 <0.5.0", workflows: { "implement-issue": { settings: { fixRounds: 1, worktree: true } } } });
+  assert.equal(readFileSync(globalConfig(), "utf8"), globalBefore);
+  assert.deepEqual(implementIssue().provenance["/settings/worktree"], { layer: "repo", ref: repoConfig() });
+  clearConfig();
+});
+
+test("wf config set takes a JSON value as JSON, and any other text as a string; a name with a dot is written with a backslash", () => {
+  clearConfig();
+  assert.equal(wf("config", "set", `${IMPLEMENT_ISSUE_SETTINGS}.backlogLabel`, "triaged").status, 0);
+  assert.equal(wf("config", "set", `${IMPLEMENT_ISSUE_SETTINGS}.contextFiles`, '["docs/a.md","docs/adr"]').status, 0);
+  assert.equal(wf("config", "set", `${IMPLEMENT_ISSUE_SETTINGS}.sliceCaps`, '{"LOW":2,"MED":3,"HIGH":5}').status, 0);
+  assert.equal(wf("config", "set", "workflows.implement-issue.roles.implement\\.low.retries", "0").status, 0);
+  assert.deepEqual(fileOf(globalConfig()), {
+    workflows: {
+      "implement-issue": {
+        settings: { backlogLabel: "triaged", contextFiles: ["docs/a.md", "docs/adr"], sliceCaps: { LOW: 2, MED: 3, HIGH: 5 } },
+        roles: { "implement.low": { retries: 0 } },
+      },
+    },
+  });
+  clearConfig();
+});
+
+test("wf config set refuses a value the schema rejects, with the schema error, and the file is not touched", () => {
+  clearConfig();
+  const path = `${IMPLEMENT_ISSUE_SETTINGS}.openPr`;
+  const missing = wf("config", "set", path, '"yes"');
+  assert.equal(missing.status, 1);
+  assert.equal(missing.stdout, "");
+  assert.ok(missing.stderr.includes(globalConfig()), missing.stderr);
+  assert.match(missing.stderr, /\/workflows\/implement-issue\/settings\/openPr: must be boolean/);
+  assert.equal(existsSync(globalConfig()), false, "no file was made");
+
+  put(globalConfig(), settingsFile({ fixRounds: 1 }));
+  const before = readFileSync(globalConfig(), "utf8");
+  const present = wf("config", "set", `${IMPLEMENT_ISSUE_SETTINGS}.redGreenAttempts`, "0");
+  assert.equal(present.status, 1);
+  assert.match(present.stderr, /\/workflows\/implement-issue\/settings\/redGreenAttempts/);
+  assert.equal(readFileSync(globalConfig(), "utf8"), before, "the file holds the same bytes");
+  clearConfig();
+});
+
+test("wf config set refuses an unknown path: a key the schema does not know, and a setting the workflow does not declare", () => {
+  clearConfig();
+  const unknownKey = wf("config", "set", "nonsense", "1");
+  assert.equal(unknownKey.status, 1);
+  assert.match(unknownKey.stderr, /\/nonsense: unknown key/);
+  const unknownSection = wf("config", "set", "workflows.implement-issue.nope.x", "1");
+  assert.equal(unknownSection.status, 1);
+  assert.match(unknownSection.stderr, /\/workflows\/implement-issue\/nope: unknown key/);
+  const typo = wf("config", "set", `${IMPLEMENT_ISSUE_SETTINGS}.openPrr`, "false");
+  assert.equal(typo.status, 1);
+  assert.match(typo.stderr, /\/workflows\/implement-issue\/settings\/openPrr: unknown setting \(workflow implement-issue declares: .*worktree, openPr\)/);
+  assert.equal(existsSync(globalConfig()), false);
+  assert.equal(existsSync(repoConfig()), false);
+});
+
+test("wf config set refuses a path below a value that is not an object, a file that is not JSON, and a path that is not dotted names", () => {
+  clearConfig();
+  put(repoConfig(), { kit: ">=0.4.0 <0.5.0" });
+  const below = wf("config", "set", "--repo", "kit.minor", "1");
+  assert.equal(below.status, 1);
+  assert.match(below.stderr, /\/kit: is not an object/);
+
+  put(globalConfig(), "{ not json");
+  const broken = wf("config", "set", `${IMPLEMENT_ISSUE_SETTINGS}.openPr`, "false");
+  assert.equal(broken.status, 1);
+  assert.match(broken.stderr, /invalid JSON/);
+  assert.equal(readFileSync(globalConfig(), "utf8"), "{ not json");
+
+  const empty = wf("config", "set", "workflows..settings", "1");
+  assert.equal(empty.status, 1);
+  assert.match(empty.stderr, /is not a dotted path/);
+  clearConfig();
+});
+
+test("wf config set without a path and a value is a usage error: exit 2, nothing written", () => {
+  clearConfig();
+  for (const args of [["config", "set"], ["config", "set", `${IMPLEMENT_ISSUE_SETTINGS}.openPr`]]) {
+    const r = wf(...args);
+    assert.equal(r.status, 2, r.stderr);
+    assert.equal(r.stdout, "");
+    assert.match(r.stderr, /^usage: wf config set <dotted\.path> <value> \[--repo\]$/m);
+  }
+  assert.equal(existsSync(globalConfig()), false);
+});
+
+test("wf run takes --worktree and --no-pr as args.worktree = true and args.openPr = false, next to the args it was given", () => {
+  const r = wf("run", "echoargs", "--args", '{"issue":5}', "--worktree", "--no-pr");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout).result, { issue: 5, worktree: true, openPr: false });
+  const one = wf("run", "echoargs", "--no-pr");
+  assert.deepEqual(JSON.parse(one.stdout).result, { openPr: false });
+  const none = wf("run", "echoargs", "--args", '{"openPr":true}');
+  assert.deepEqual(JSON.parse(none.stdout).result, { openPr: true }, "without a shortcut the args are the user's alone");
+});
+
+test("wf start takes the same shortcuts: the job's workflow receives them", () => {
+  const started = wf("start", "echoargs", "--worktree", "--no-pr");
+  assert.equal(started.status, 0, started.stderr);
+  const waited = wf("wait", JSON.parse(started.stdout).jobId, "--timeout", "120");
+  assert.equal(waited.status, 0, waited.stderr);
+  const state = JSON.parse(waited.stdout);
+  assert.equal(state.status, "finished", waited.stdout);
+  assert.deepEqual(state.result, { worktree: true, openPr: false });
+});
+
+test("a shortcut that contradicts the same key in --args is refused: exit 2, one line naming both, no job and no run", () => {
+  const jobs = jobCount();
+  for (const command of ["run", "start"]) {
+    for (const [flag, args, key] of [["--worktree", '{"worktree":false}', "worktree"], ["--no-pr", '{"openPr":true}', "openPr"]] as const) {
+      const r = wf(command, "echoargs", "--args", args, flag);
+      assert.equal(r.status, 2, `${command} ${flag}: ${r.stderr}`);
+      assert.equal(r.stdout, "");
+      const lines = r.stderr.trimEnd().split("\n");
+      assert.equal(lines.length, 1, r.stderr);
+      assert.ok(lines[0]!.includes(flag) && lines[0]!.includes(`"${key}"`), lines[0]);
+    }
+  }
+  assert.equal(jobCount(), jobs, "no job was created");
+});
+
+test("a shortcut that agrees with the same key in --args is accepted, and the shortcuts need --args to be a JSON object", () => {
+  const agrees = wf("run", "echoargs", "--args", '{"openPr":false}', "--no-pr");
+  assert.equal(agrees.status, 0, agrees.stderr);
+  assert.deepEqual(JSON.parse(agrees.stdout).result, { openPr: false });
+  const notObject = wf("run", "echoargs", "--args", "[1]", "--worktree");
+  assert.equal(notObject.status, 2);
+  assert.match(notObject.stderr, /--args must be a JSON object/);
 });

@@ -185,6 +185,8 @@ type Settings = {
   repoHosts: string[];
   /** The repository-relative files and folders that the plan, design and PR-text agents are told to read for context (the glossary, the coding standards, the ADRs). The ones that do not exist are skipped. */
   contextFiles: string[];
+  worktree: boolean;
+  openPr: boolean;
 };
 const SETTINGS: Settings = {
   sliceCaps: { LOW: 1, MED: 3, HIGH: 5 },
@@ -207,6 +209,8 @@ const SETTINGS: Settings = {
   backlogLabel: "ready-for-agent",
   repoHosts: [],
   contextFiles: ["GLOSSARY.md", "CONTEXT.md", "AGENTS.md", "CODING_STANDARDS.md", "CONTRIBUTING.md", "docs/adr"],
+  worktree: false,
+  openPr: true,
 };
 const READ_ONLY = ["read", "grep", "glob", "ls", "semSearch"];
 const REVIEW_TOOLS = ["read", "grep", "glob", "ls"];
@@ -230,6 +234,7 @@ interface Args {
   /** Roda uma vez no worktree novo antes da suíte de base (ex.: `npm ci`). */
   setupCommand?: string;
   openPr?: boolean;
+  worktree?: boolean;
   /** Segundo run de MED/HIGH (com `--resume <runId>` e o mesmo `--cwd`): aprova o plano proposto no primeiro. The run comments the approval on the issue. */
   approveSeams?: boolean;
   /** Seams approved by you, in place of the proposed ones: the plan is made again with them (without `testCommand`, the command the planner chooses waits for your approval). On a resume of a run that proposed seams, the run comments the replacement on the issue. */
@@ -494,6 +499,7 @@ export default defineWorkflow<Args>({
         testCommand: { type: "string" },
         setupCommand: { type: "string" },
         openPr: { type: "boolean" },
+        worktree: { type: "boolean" },
         approveSeams: { type: "boolean" },
         seams: { type: "array", items: { type: "string" } },
         allowExternalAuthor: { type: "boolean" },
@@ -554,7 +560,8 @@ export default defineWorkflow<Args>({
     try {
       progress.data.forge = forge.name; // `wf gc` asks this forge about the run's PR, whatever is detected later
       progress.save();
-      const { issue: number, repo, openPr = false } = ctx.args;
+      const { issue: number, repo } = ctx.args;
+      const openPr = ctx.args.openPr ?? settings.openPr;
       const globs = ctx.args.testGlobs?.length ? ctx.args.testGlobs : DEFAULT_TEST_GLOBS;
       const protectedGlobs = ctx.args.protectedGlobs ?? DEFAULT_PROTECTED_GLOBS;
       // Os tetos de tempo são ajustes, não args: só os arquivos de configuração os trocam (ADR-0001).

@@ -189,7 +189,6 @@ test("the validate reference names what the kit ships: its scripts exist, the ch
   assert.ok(kitPaths.includes("scripts/verify/validate-cursor-ide.sh") && kitPaths.includes("scripts/verify/setup-sandbox-repo.sh"), `found ${kitPaths.join()}`);
   for (const path of kitPaths) assert.ok(existsSync(join(ROOT, path)), `validate.md names ${path}, which the kit does not ship`);
   assert.ok(existsSync(join(ROOT, "packages", "runtime", "workflows", "smoke.ts")), "scenario 3 runs the smoke workflow");
-  // implement-issue opens no PR unless openPr is true, and scenario 4 passes only with one.
   const four = validate.slice(validate.indexOf("\n4. **"), validate.indexOf("\n5. **"));
   assert.match(four, /openPr/, "scenario 4 must ask the chat to open the PR");
 });

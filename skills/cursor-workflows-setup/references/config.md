@@ -106,6 +106,11 @@ Under `workflows.<name>`:
     show implement-issue` prints it. Set it when the repository keeps its glossary elsewhere. It replaces the default whole,
     so copy the printed list and change what differs. Paths are relative to the repository root: an absolute path, a `..`
     segment or a line break is refused when the config loads.
+  - `worktree`: `false` (default) or `true`, the delivery mode. The run's `worktree` argument (`wf start --worktree`)
+    overrides the files. Until the main-tree mode exists, the run works in a worktree with either value.
+  - `openPr`: `true` (default) pushes the branch and opens the PR (the MR on GitLab) when the run delivers, and returns
+    the link as `prUrl`; `false` leaves the branch committed locally, with no push and no PR. The run's `openPr` argument
+    (`wf start --no-pr` sets it to `false`) overrides the files.
   - `gcFailedAfterDays`: `wf gc` removes a failed run's worktree and branches once it failed more days ago than this; a
     cancelled run never counts as failed. A run whose PR was merged or closed goes without waiting, and the origin
     branch stays while its PR is open.
@@ -127,8 +132,12 @@ pointer into `config`) and `violations`.
 
 1. Run `wf list`, then `wf config show <workflow>`. Done when you know the role name under `config.roles` and its
    current value.
-2. Edit `.agents/workflows/config.json` (repo-wide, committed) or `~/.cursor-workflows/config.json` (this machine).
-   Done when the file is valid JSON and uses only keys the schema knows.
+2. Run `wf config set <dotted.path> <value>` to write `~/.cursor-workflows/config.json` (this machine), or add `--repo`
+   for `.agents/workflows/config.json` (repo-wide, committed). For example,
+   `wf config set --repo workflows.implement-issue.settings.openPr false`. A value that parses as JSON is written as JSON (`false`, `3`, `["a"]`, `{"LOW":2}`), any other text as a string,
+   and a `.` inside a name is written `\.` (`roles.implement\.low`). The command validates the whole resulting file and
+   refuses an invalid value or an unknown path with the schema error, leaving the file as it was. Editing the file by
+   hand also works. Done when the command printed the file, or the file is valid JSON and uses only keys the schema knows.
 3. Run `wf config show <workflow>` again. Done when `provenance` shows the layer you edited for the value you changed,
    and `violations` is empty or reported to the user.
 4. A model id must exist in the account's catalog: `wf models` lists them, and `wf doctor` checks every id the config

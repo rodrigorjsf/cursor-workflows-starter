@@ -88,6 +88,8 @@ wf cancel <jobId>          # para o run (SIGTERM ao job em execução; SIGKILL a
 wf gc --dry-run            # mostra os worktrees e branches de runs terminados que o gc removeria
 ```
 
+`wf start` e `wf run` têm dois atalhos de entrega para o `implement-issue`: `--worktree` põe `worktree: true` nos args e `--no-pr` põe `openPr: false`. Um atalho que contradiz a mesma chave dada em `--args` é recusado com exit 2, sem criar job. Os dois valores também são ajustes do workflow (`worktree`, padrão `false`, e `openPr`, padrão `true`, em `workflows.implement-issue.settings`) que o `wf config set <caminho.com.pontos> <valor>` grava no arquivo global, ou no do repositório com `--repo`, depois de validar o arquivo inteiro contra o esquema ([6.2](../reference/config.md)). A ordem é: args, arquivo do repositório, arquivo global, padrão do código; o `wf config show` diz de qual camada veio cada ajuste. Sem nenhum deles o run abre o PR (o MR no GitLab) e devolve o link em `prUrl`.
+
 `start` valida o nome do workflow e o JSON dos args **antes** de destacar o processo e grava o job (com `runId`)
 na hora. A doc do Cursor não dá o timeout de um comando no shell do agente: as release notes só dizem que esse
 timeout existe, sem valor ([DOC](https://cursor.com/docs/release-notes)). Os cerca de 300 s vêm de relatos não
@@ -298,7 +300,7 @@ cenário 1 só vale ali, porque o IDE escolhe o próprio Node e PATH. Ele:
 | 1 | O `wf doctor` está verde no ambiente do IDE | nada: o assistente roda o `wf doctor` no terminal do Cursor | sai com 0 |
 | 2 | O servidor MCP está visível e habilitado | nada: abra a lista de MCP (Customize) | `workflows` ligado, com as cinco tools |
 | 3 | O `smoke` termina | `/run-workflow smoke` | o job termina com `answer: "pong"` |
-| 4 | O `implement-issue` LOW abre um PR no repositório descartável | `/run-workflow implement-issue 1`, pedindo para abrir o PR (`openPr: true`; sem isso o workflow não abre PR) | o job termina e o PR existe |
+| 4 | O `implement-issue` LOW abre um PR no repositório descartável | `/run-workflow implement-issue 1` (o workflow abre o PR por padrão; `openPr: false` o desliga) | o job termina e o PR existe |
 | 5 | O run sobrevive ao reinício do Cursor | `/run-workflow implement-issue 2`; com o job rodando, feche o Cursor por completo e abra de novo | o job termina mesmo com o Cursor reiniciado no meio (um job ainda rodando não é um `pass`: espere); ou falhou com `runId` e o resume termina sem repetir etapas |
 | 6 | O run cancela pelo chat | `/run-workflow implement-issue 3`; com o job rodando, peça ao chat para cancelar | o job termina `cancelled`, com o `runId` para retomar |
 | 7 | O dashboard mostra o run ao vivo | `/run-workflow smoke`; o chat abre o link do dashboard no navegador embutido do Cursor | no navegador embutido: o cartão do run está na coluna Ping do quadro do `smoke` e vai sozinho para Done, sem recarregar; o clique no cartão abre o grafo, com a etapa `ping` que pisca e fica verde; passar o mouse na etapa mostra modelo, tokens, custo e duração; clicar nela abre o log (prompt, o que o agente disse, chamadas de tool) |
