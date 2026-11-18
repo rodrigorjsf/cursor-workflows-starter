@@ -6,7 +6,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileS
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { errorText } from "./error-text.js";
-import { PRIVATE_DIR } from "./state-files.js";
+import { PRIVATE_DIR, PRIVATE_FILE } from "./state-files.js";
 
 /** Per-user directory of the kit (`~/.cursor-workflows`): metrics database, global runs index. `WF_HOME` overrides it (tests, CI). */
 export function userDir(): string {
@@ -18,7 +18,7 @@ export function assertUserDirWritable(): void {
   const probe = join(dir, `.write-probe-${process.pid}`);
   try {
     mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR });
-    writeFileSync(probe, "");
+    writeFileSync(probe, "", { mode: PRIVATE_FILE });
     rmSync(probe);
   } catch (err) {
     throw new Error(
