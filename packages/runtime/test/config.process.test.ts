@@ -11,6 +11,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { WorkflowEvent } from "../src/runtime/events.js";
 import { readEventLog, eventLogPath } from "../src/runtime/run-store.js";
+import { writeGlobalConfig, writeRepoConfig } from "./config-fixtures.js";
+import { forgeState, fx, issue, setup, teardown } from "./implement-issue.fixture.js";
 
 const PACKAGE = join(import.meta.dirname, "..");
 let sandbox: string;
@@ -250,7 +252,7 @@ const clearConfig = () => {
   rmSync(globalConfig(), { force: true });
   rmSync(repoConfig(), { force: true });
 };
-const implementIssue = () => {
+const shownForImplementIssue = () => {
   const r = wf("config", "show", "implement-issue");
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout).workflows["implement-issue"] as { config: { settings: Record<string, unknown> }; provenance: Record<string, unknown> };
@@ -260,7 +262,7 @@ const jobCount = () => (existsSync(join(repo, ".workflows", "jobs")) ? readdirSy
 test("wf config show names the layer each delivery setting came from: the code default, the global file, the repo file over it", () => {
   clearConfig();
   const delivery = () => {
-    const { config, provenance } = implementIssue();
+    const { config, provenance } = shownForImplementIssue();
     return { values: { worktree: config.settings.worktree, openPr: config.settings.openPr }, worktree: provenance["/settings/worktree"], openPr: provenance["/settings/openPr"] };
   };
   assert.deepEqual(delivery(), { values: { worktree: false, openPr: true }, worktree: { layer: "default" }, openPr: { layer: "default" } });
@@ -288,7 +290,7 @@ test("wf config set writes the global file by default, and wf config show then n
   assert.deepEqual(JSON.parse(r.stdout), { file: globalConfig(), scope: "global", path: `${IMPLEMENT_ISSUE_SETTINGS}.openPr`, value: false });
   assert.deepEqual(fileOf(globalConfig()), settingsFile({ openPr: false }));
   assert.equal(existsSync(repoConfig()), false);
-  const { config, provenance } = implementIssue();
+  const { config, provenance } = shownForImplementIssue();
   assert.equal(config.settings.openPr, false);
   assert.deepEqual(provenance["/settings/openPr"], { layer: "global", ref: globalConfig() });
   clearConfig();
@@ -304,7 +306,7 @@ test("wf config set --repo writes the repo file, keeps what the file already hol
   assert.equal(JSON.parse(r.stdout).file, repoConfig());
   assert.deepEqual(fileOf(repoConfig()), { kit: ">=0.4.0 <0.5.0", workflows: { "implement-issue": { settings: { fixRounds: 1, worktree: true } } } });
   assert.equal(readFileSync(globalConfig(), "utf8"), globalBefore);
-  assert.deepEqual(implementIssue().provenance["/settings/worktree"], { layer: "repo", ref: repoConfig() });
+  assert.deepEqual(shownForImplementIssue().provenance["/settings/worktree"], { layer: "repo", ref: repoConfig() });
   clearConfig();
 });
 
@@ -432,3 +434,72 @@ test("a shortcut that agrees with the same key in --args is accepted, and the sh
   assert.equal(notObject.status, 2);
   assert.match(notObject.stderr, /--args must be a JSON object/);
 });
+
+const DELIVERY_CHILD = (modules: Record<"sdk" | "engine" | "workflow" | "fixture", string>) => `
+import { script } from ${JSON.stringify(modules.sdk)};
+import { runWorkflow } from ${JSON.stringify(modules.engine)};
+import implementIssue from ${JSON.stringify(modules.workflow)};
+import { CLEAN_REVIEW, SUB_CODE, SUB_TEST, labelOf, submit, write } from ${JSON.stringify(modules.fixture)};
+
+const handlers = {
+  "test-1": (o) => { write(o, "test/sub.test.js", SUB_TEST); submit(o, { testFile: "test/sub.test.js", testName: "subtract" }); },
+  "code-1": (o) => { write(o, "src/math.js", SUB_CODE); submit(o, { summary: "subtract", filesChanged: ["src/math.js"] }); },
+  "review:standards": (o) => submit(o, CLEAN_REVIEW),
+  "review:spec": (o) => submit(o, CLEAN_REVIEW),
+  "review:security": (o) => submit(o, CLEAN_REVIEW),
+  "pr-text": (o) => submit(o, { summary: "subtract", door: "two-way", blastRadius: "local" }),
+};
+for (let i = 0; i < 50; i++) {
+  script.push((o) => {
+    const handler = handlers[labelOf(o).replace(/:\\d+$/, "")];
+    if (!handler) throw new Error("no answer for the step " + labelOf(o));
+    handler(o);
+    return { status: "finished", result: "ok" };
+  });
+}
+const outcome = await runWorkflow(implementIssue, JSON.parse(process.argv[2]), { cwd: process.argv[3] });
+process.stdout.write(JSON.stringify({ status: outcome.status, error: outcome.error, result: outcome.result }));
+`;
+
+const DELIVERY_LAYERS: Array<{ name: string; global?: boolean; repo?: boolean; arg?: boolean; opens: boolean }> = [
+  { name: "no setting and no arg", opens: true },
+  { name: "the global file says false", global: false, opens: false },
+  { name: "the repo file says true over a global false", global: false, repo: true, opens: true },
+  { name: "the repo file says false over a global true", global: true, repo: false, opens: false },
+  { name: "the arg says false over a repo true", repo: true, arg: false, opens: false },
+  { name: "the arg says true over a global false", global: false, arg: true, opens: true },
+];
+
+for (const layer of DELIVERY_LAYERS) {
+  test(`a run of implement-issue in its own process, ${layer.name}: ${layer.opens ? "a PR is opened" : "no PR is opened"}`, () => {
+    setup();
+    try {
+      issue(["complexity:low"]);
+      const settingsOf = (openPr: boolean) => ({ workflows: { "implement-issue": { settings: { openPr } } } });
+      if (layer.global !== undefined) writeGlobalConfig(settingsOf(layer.global));
+      if (layer.repo !== undefined) writeRepoConfig(fx.repo, settingsOf(layer.repo));
+      const child = join(sandbox, "delivery-child.mts");
+      writeFileSync(
+        child,
+        DELIVERY_CHILD({
+          sdk: join(PACKAGE, "test", "fake-sdk.ts"),
+          engine: join(PACKAGE, "src", "runtime", "engine.ts"),
+          workflow: join(PACKAGE, "workflows", "implement-issue.ts"),
+          fixture: join(PACKAGE, "test", "implement-issue.fixture.ts"),
+        }),
+      );
+      const env: NodeJS.ProcessEnv = { ...process.env, TSX_TSCONFIG_PATH: join(PACKAGE, "tsconfig.test.json") };
+      delete env.NODE_TEST_CONTEXT;
+      const args = { issue: 7, testCommand: "node --test", ...(layer.arg === undefined ? {} : { openPr: layer.arg }) };
+      const r = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), child, JSON.stringify(args), fx.repo], { env, encoding: "utf8", timeout: 240_000 });
+      assert.equal(r.status, 0, r.stderr);
+      const outcome = JSON.parse(r.stdout) as { status: string; error?: string; result: { status: string; prUrl?: string } };
+      assert.equal(outcome.status, "finished", outcome.error);
+      assert.equal(outcome.result.status, "done", JSON.stringify(outcome.result));
+      assert.equal(outcome.result.prUrl !== undefined, layer.opens);
+      assert.equal(forgeState().prs.length, layer.opens ? 1 : 0);
+    } finally {
+      teardown();
+    }
+  });
+}
