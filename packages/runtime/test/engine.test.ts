@@ -329,3 +329,18 @@ test("teto padrão declarado pelo workflow vale sem --max-tokens; null explícit
   const free = await runWorkflow(capped, {}, { cwd, maxTokens: null });
   assert.equal(free.status, "finished", free.error);
 });
+
+test("ctx.warn writes a warning event and the run goes on to finish", async () => {
+  const events: any[] = [];
+  const wf = defineWorkflow({
+    meta: { name: "wn", description: "wn" },
+    async run(ctx) {
+      ctx.warn("could not index the code: codegraph is missing");
+      return "after the warning";
+    },
+  });
+  const r = await runWorkflow(wf, {}, { cwd, onEvent: (e) => events.push(e) });
+  assert.equal(r.status, "finished", r.error);
+  assert.equal(r.result, "after the warning");
+  assert.deepEqual(events.filter((e) => e.type === "warning").map((e) => e.message), ["could not index the code: codegraph is missing"]);
+});

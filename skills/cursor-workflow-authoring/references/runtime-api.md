@@ -53,6 +53,7 @@ export default defineWorkflow<{ target: string }>({
 | `ctx.pipeline(items, ...stages)` | No barrier: each item goes through the stages independently. A stage that fails drops the item (`null`) and skips its later stages. A stage receives `(previousResult, item, index)`. |
 | `ctx.exec(command, args, opts)` | Runs a command (tests, `git`, `gh` or `glab`) and returns `{ ok, exitCode, timedOut, tail, error? }`. Asynchronous, killed at its timeout, logged. See "`exec()` options" below. |
 | `ctx.phase(title)` / `ctx.log(message)` | Progress, shown by `wait_workflow` and on the CLI. |
+| `ctx.warn(message)` | A `warning` event in the run's log, for a failure that must not end the run. Name what was not done and why: `could not <action>: <reason>`. |
 | `ctx.metric(name, value)` | An outcome or difficulty signal of the run, written to the `metrics` table (observability.md). |
 | `ctx.card({ title, subtitle?, links?, badges? })` | What the run's card shows on the dashboard's Board. `links` is `[{ label, url }]` and `badges` is a list of short strings. Call it again to update the card: the Board shows the latest one. A link to a GitHub pull request also shows whether the pull request is open, merged or closed. A run that never calls it still has a card, titled with the run id. |
 | `ctx.args`, `ctx.cwd`, `ctx.runId` | Input, repository and run id (the same on resume). |

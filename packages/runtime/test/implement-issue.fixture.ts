@@ -6,9 +6,9 @@
 process.env.WF_METRICS = "off";
 import { execFileSync } from "node:child_process";
 import "./isolate-home.js";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
 import { calls, script } from "./fake-sdk.js";
 import { runWorkflow } from "../src/runtime/engine.js";
@@ -92,6 +92,23 @@ export function setPrState(branch: string, state: "OPEN" | "MERGED" | "CLOSED" |
     if (!pr) throw new Error(`the fake forge has no PR on ${branch}`);
     pr.state = state;
   });
+}
+
+export const codegraphCalls = (): Array<{ command: string; cwd: string }> =>
+  (existsSync(process.env.FAKE_CODEGRAPH_LOG!) ? readFileSync(process.env.FAKE_CODEGRAPH_LOG!, "utf8") : "")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { command: string; cwd: string });
+
+export function seedCodeIndex(tree: string) {
+  mkdirSync(join(tree, ".codegraph"), { recursive: true });
+  writeFileSync(join(tree, ".codegraph", "codegraph.db"), SQLITE_HEADER);
+}
+
+export function removeCodegraph() {
+  rmSync(join(fx.root, "bin", "codegraph"));
+  const without = process.env.PATH!.split(delimiter).filter((dir) => !existsSync(join(dir, "codegraph")));
+  process.env.PATH = [dirname(process.execPath), ...without].join(delimiter);
 }
 
 /** The progress record of a run of implement-issue: what `wf gc` reads to know the run's branch, worktree and forge. */
@@ -256,6 +273,35 @@ if (route === "issue view" && a[0] === "issue") {
 } else fail("fake glab: unsupported " + a.join(" "), 2);
 `;
 
+const CODEGRAPH_RECORDINGS_PATH = join(import.meta.dirname, "fixtures", "codegraph", "recordings.json");
+const SQLITE_HEADER = "SQLite format 3\u0000";
+
+const FAKE_CODEGRAPH = `#!/usr/bin/env node
+const fs = require("fs");
+const path = require("path");
+const REC = JSON.parse(fs.readFileSync(${JSON.stringify(CODEGRAPH_RECORDINGS_PATH)}, "utf8"));
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.FAKE_CODEGRAPH_LOG, JSON.stringify({ command: args.join(" "), cwd: process.cwd() }) + "\\n");
+const dir = path.join(process.cwd(), ".codegraph");
+const db = path.join(dir, "codegraph.db");
+const HEADER = ${JSON.stringify(SQLITE_HEADER)};
+const hasIndex = fs.existsSync(db) && fs.readFileSync(db).subarray(0, HEADER.length).toString("latin1") === HEADER;
+const named = (verb) => args.length === 1 && args[0] === verb;
+const name = named("init") ? (hasIndex ? "init-existing" : "init-new")
+  : named("sync") ? (hasIndex ? "sync-initialized" : !fs.existsSync(dir) ? "sync-uninitialized" : fs.existsSync(db) ? "sync-corrupt-index" : "sync-gitignore-only")
+  : "unknown-command";
+const recording = REC.recordings[name];
+const fill = (text) => text.split(REC.placeholders.cwd).join(process.cwd()).split("'" + REC.recordings["unknown-command"].args[0] + "'").join("'" + args[0] + "'");
+process.stdout.write(fill(recording.stdout));
+process.stderr.write(fill(recording.stderr));
+if (name === "init-new") {
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [file, text] of Object.entries(recording.creates)) fs.writeFileSync(path.join(dir, file), text);
+  fs.writeFileSync(db, HEADER);
+}
+process.exit(recording.exitCode);
+`;
+
 export function issue(labels: string[], title = "Add subtract(a, b)") {
   writeFileSync(
     fx.forgeStateFile,
@@ -342,8 +388,11 @@ function setupFor(forge: TestForge) {
   chmodSync(join(bin, "gh"), 0o755);
   writeFileSync(join(bin, "glab"), fakeGlab());
   chmodSync(join(bin, "glab"), 0o755);
+  writeFileSync(join(bin, "codegraph"), FAKE_CODEGRAPH);
+  chmodSync(join(bin, "codegraph"), 0o755);
   fx.forgeStateFile = join(root, "forge.json");
   process.env.FAKE_FORGE_STATE = fx.forgeStateFile;
+  process.env.FAKE_CODEGRAPH_LOG = join(root, "codegraph.log");
   fx.savedPath = process.env.PATH;
   process.env.PATH = `${bin}:${fx.savedPath}`;
   fx.handlers = defaults();
