@@ -52,7 +52,7 @@ Top-level keys besides `caps`:
   argument, when it is a URL) is on any other host fails before any step until the host is declared here. A key is the
   host in lower case, with the port when the URL has one (`git.example.com:8443`); without a port it matches any port.
   The two files merge host by host, and the repo file wins on a host both name. No env var or flag sets it.
-- `dashboard.autoStart` (global file only): `false` stops `start_workflow` from starting the dashboard.
+- `dashboard.autoStart` (global file only): `false` stops `start_workflow` and `wf start` from starting the dashboard.
 
 Under `workflows.<name>`:
 

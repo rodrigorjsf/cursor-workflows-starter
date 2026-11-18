@@ -17,7 +17,7 @@ import { z } from "zod";
 import type { LimitOverrides } from "../config/index.js";
 import { cancelLeftCloudAgents, leftAgentsNote } from "./cloud-cancel.js";
 import type { RunStatus } from "./events.js";
-import { type ExecutionState, type Ledger, projectExecution, replayLedger, resumeHint, withRatio } from "./projection.js";
+import { type ExecutionState, type Ledger, costNote, projectExecution, replayLedger, resumeHint, withRatio } from "./projection.js";
 import { killFrozenJob } from "./job-children.js";
 import { commandLineHas, isAlive } from "./pid.js";
 import { eventLogPath, readEventLog, runLockHolder } from "./run-store.js";
@@ -106,6 +106,7 @@ export interface JobState {
   chargedCents: number;
   spentTokens: number;
   usage: Ledger["usage"] & { cacheHitRatio: number | null };
+  costNote?: string;
 }
 
 /** How often a job's process refreshes the heartbeat in its record. */
@@ -194,6 +195,8 @@ function inspect(cwd: string, record: JobRecord): { state: JobState; liveness?: 
     spentTokens: ledger.spentTokens,
     usage: withRatio(ledger.usage),
   };
+  const unknownCost = costNote(events, ledger);
+  if (unknownCost !== undefined) state.costNote = unknownCost;
   if (record.refused !== undefined) {
     state.status = "failed";
     state.error = record.refused;

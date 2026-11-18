@@ -11,7 +11,7 @@ import { closeSync, openSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { LimitOverrides } from "../config/index.js";
 import { type JobRecord, type JobStart, jobLogPath, jobRefusal, writeJob } from "./job-state.js";
-import { newRunId, plainName } from "./state.js";
+import { assertUserDirWritable, newRunId, plainName } from "./state.js";
 import { PRIVATE_FILE } from "./state-files.js";
 
 /** What a new job record may be given; the rest is generated: a new run id, a random job id, this process's pid. */
@@ -63,6 +63,7 @@ export interface SpawnJobOptions {
  * anything is written, when the job is already running or too many jobs run (`jobRefusal`).
  */
 export function spawnJob(o: SpawnJobOptions): { job: JobRecord; log: string } {
+  assertUserDirWritable();
   const refusal = jobRefusal(o.cwd, o.workflow, o.args ?? {}, o.maxRunningJobs);
   if (refusal !== undefined) throw new JobRefusedError(refusal);
   const start: JobStart = {

@@ -27,7 +27,7 @@ O servidor `workflows` é registrado em `.cursor/mcp.json` (Cursor) e em `.mcp.j
 | Tool | Entrada | Saída |
 |---|---|---|
 | `list_workflows` | — | `name`, `description`, `whenToUse`, `phases`, `argsSchema` de cada workflow |
-| `start_workflow` | `{ name, args, resumeRunId?, overrides? }` | `{ jobId, runId }`, mais `dashboardUrl` (o link da página do run no dashboard, [5.3 §5](../operating/03-observabilidade.md#5-dashboard), que o `start_workflow` inicia se nada responde na porta; `dashboardWarning` traz o motivo quando não sobe, e nenhum dos dois aparece com o início automático desligado). O workflow roda em segundo plano, em um processo destacado: reiniciar o servidor ou o Cursor não o interrompe |
+| `start_workflow` | `{ name, args, resumeRunId?, overrides? }` | `{ jobId, runId }`, mais `dashboardUrl` (o link da página do run no dashboard, [5.3 §5](../operating/03-observabilidade.md#5-dashboard), que o `start_workflow` inicia se nada responde na porta; `dashboardWarning` traz o motivo quando não sobe, e nenhum dos dois aparece com o início automático desligado). O workflow roda em segundo plano, em um processo destacado: reiniciar o servidor ou o Cursor não o interrompe. Antes de criar o job, a tool confere que `~/.cursor-workflows/` aceita escrita e recusa o início (`isError`) quando não aceita, citando o sandbox do agente como causa provável |
 | `wait_workflow` | `{ jobId, timeoutSec? }`: `timeoutSec` é um número de segundos (ou um texto numérico, como `"30"`), levado para 1 a 50 (45 sem ele ou com `null`); um valor que não é número (`"30s"`) é um erro | Estado do job, projetado do log de eventos do run: `status`, `phase`, `recent` (até 20 linhas de resumo, uma linha cada, nunca texto de prompt ou de saída de agente; o custo de cada etapa é o maior entre bruto e cobrado), `result` (o que o workflow devolveu), `error`, `spentCents` (custo que o teto usa; acumula entre resumes), `chargedCents` (só o valor cobrado), `spentTokens` |
 | `get_workflow_status` | `{ jobId }` | Estado, sem esperar |
 | `cancel_workflow` | `{ jobId }` | Cancela o job: para os agentes ativos, desfaz a etapa que estava escrevendo e devolve o estado com `status: "cancelled"`. O run continua retomável. Um processo travado (vivo, sem heartbeat; o job já aparece `failed`) é encerrado com `SIGKILL`, sem desfazer a etapa, e os comandos de `ctx.exec` que ele tinha em andamento morrem com ele. Depois desse `SIGKILL`, e num job cujo processo já morreu (uma queda), cancela os cloud agents que o run deixou rodando, a nota os nomeia e o job continua `failed`; um resume depois cria agentes novos no lugar deles, que custam de novo. O agente do chat só chama quando o usuário pede para parar |
@@ -82,11 +82,16 @@ Run Mode e a allowlist de MCP, e um membro não muda isso.
 Fallback quando o MCP não está habilitado, e caminho preferido em CI e em runs longos:
 
 ```bash
-wf start implement-issue --args '{"issue":123}'   # processo destacado; log em .workflows/jobs/<id>.log
+wf start implement-issue --args '{"issue":123}'   # processo destacado; log em .workflows/jobs/<id>.log; imprime dashboardUrl, o link do run no dashboard (que ele inicia), ou dashboardWarning
 wf wait <jobId> --timeout 240
 wf cancel <jobId>          # para o run (SIGTERM ao job em execução; SIGKILL ao travado e aos comandos dele); o run continua retomável
 wf gc --dry-run            # mostra os worktrees e branches de runs terminados que o gc removeria
 ```
+
+O `wf start` confere, antes de criar o job, que `~/.cursor-workflows/` (ou `WF_HOME`) aceita escrita. Se não aceita, sai com
+código 1 e uma mensagem que cita o sandbox do agente como causa provável: nenhum diretório de run foi criado, então rode o
+comando com permissão total. O `wf status` e o `wf wait` de um run cujo custo a API não informou (`spentCents` 0 e um aviso
+`getUsage() failed` no log) trazem `costNote`, "cost unknown" com os tokens gastos: 0 ali não é o custo.
 
 `start` valida o nome do workflow e o JSON dos args **antes** de destacar o processo e grava o job (com `runId`)
 na hora. A doc do Cursor não dá o timeout de um comando no shell do agente: as release notes só dizem que esse

@@ -56,7 +56,7 @@ user's request.
 4. When `status` is `finished`, present the cost and the `result` according to `result.status`. Cost: `spentCents`
    (what the cents cap counts) and `chargedCents` (only what was charged; 0 for usage included in the plan). With a
    cost warning noted, `spentCents` did not count every attempt; `spentCents: 0` with `getUsage() failed` is an
-   **unknown** cost, not zero: say so and report `spentTokens` instead.
+   **unknown** cost, not zero (the state's `costNote` says so): say so and report `spentTokens` instead.
    - `done`: what was done, what was left out (in `implement-issue`, `deferred`: postponed slices; the PR then only
      references the issue) and the branch or PR.
    - A result with `next` (a checkpoint, such as `implement-issue`'s `seams-proposed` on MED/HIGH issues): the
@@ -148,14 +148,14 @@ ended job is handled as the notes below say, and stays `failed`.
 If the `workflows` tools are not available, use the CLI from the terminal. The `argsSchema` from step 1 lives in the
 `meta` of the workflow file (a file in the kit's built-in `workflows/` folder or in the repository's
 `.agents/workflows/`): `wf list` returns only the name and description. The CLI writes the same job state and the
-same messages, so steps 3 to 6 apply equally, with `--resume <runId>` in place of `resumeRunId` (relaunch with
+same messages, and `wf start` returns the same `dashboardUrl` or `dashboardWarning`, so the dashboard bullet of step 2 and steps 3 to 6 apply equally, with `--resume <runId>` in place of `resumeRunId` (relaunch with
 `start`, also when `next` shows `run`). An unknown name fails with an error that starts with `unknown workflow: `
 (the CLI adds ``. Use `wf list`.``; back to step 1), and an unknown job returns an error that starts with
 `job not found` (step 3). Caps set in the `env` of the `workflows` server in `mcp.json` do not reach the shell, but
 the config files (global caps, repo config) do: pass `--max-cents` and `--max-tokens` to tighten this run further.
 
 ```bash
-wf start <name> --args '<json>' --max-cents <N> --max-tokens <N> [--resume <runId>]   # returns {jobId, runId, log}
+wf start <name> --args '<json>' --max-cents <N> --max-tokens <N> [--resume <runId>]   # returns {jobId, runId, log, dashboardUrl}
 wf wait <jobId> --timeout 240   # repeat until status != running
 wf cancel <jobId>               # only when the user asks to stop; a running job ends cancelled, a stuck or ended one stays failed
 ```

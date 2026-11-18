@@ -4,6 +4,20 @@
 
 ### Adicionado
 
+- **Um início que não deixa um run pela metade, dentro ou depois do sandbox do agente** (issue #119, spec #114). Quatro mudanças:
+  - **O `wf start` e o `start_workflow` conferem `~/.cursor-workflows/` antes de criar o job.** Se o diretório do usuário (ou
+    `WF_HOME`) não aceita escrita, o início é recusado (`wf start` sai com código 1; `start_workflow` responde `isError`) com uma
+    mensagem que cita o sandbox do agente como causa provável e manda rodar com permissão total. Nada é criado antes disso: nem o
+    registro do job nem o diretório do run. As gravações do banco de métricas e do índice de runs continuam sem derrubar o run depois.
+  - **Toda execução registra o run no índice global quando ele não está lá.** Um run cuja primeira execução não conseguiu gravar o
+    `runs.jsonl` aparece nele depois de um resume, uma vez só (a chave é o repositório mais o `runId`) e com a hora da primeira
+    execução. O `registerRunIfMissing` do `runs-index` faz a conferência.
+  - **O `wf start` inicia o dashboard e imprime o link da página do run**, como o `start_workflow`: `dashboardUrl`, ou
+    `dashboardWarning` com o motivo. `dashboard.autoStart: false` no config global e `WF_DASH_AUTOSTART=off` o desligam, e aí
+    nenhum dos dois campos aparece. O `dashboardFields` passou para o `dashboard-instance`, que os dois caminhos usam.
+  - **O `wf status`, o `wf wait` e o `get_workflow_status`/`wait_workflow` dizem que o custo é desconhecido.** Com `spentCents` 0 e um
+    aviso `getUsage() failed` no log, o estado traz `costNote`: "cost unknown: N tokens spent (getUsage() failed, so 0 cents is not
+    the cost)". Um run gratuito que informou seu uso, ou um com custo já somado, não traz.
 - **O dashboard aprova ou troca as seams que um run do `implement-issue` propôs** (issue #98). Um run MED ou HIGH que parou em
   `seams-proposed` (ou, com `seams` e sem `testCommand`, em `test-command-proposed`) mostra no Run view o painel **Seams
   proposed** (ou **Test command proposed**): as seams, as fatias e o comando de teste que o run executa depois da aprovação,

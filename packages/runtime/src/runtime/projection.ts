@@ -78,6 +78,18 @@ export function replayLedger(events: Iterable<WorkflowEvent>): Ledger {
   return ledger;
 }
 
+export const USAGE_FAILED_WARNING = "getUsage() failed";
+
+export function costNote(events: Iterable<WorkflowEvent>, ledger: Ledger): string | undefined {
+  if (ledger.spentCents > 0) return undefined;
+  for (const e of events) {
+    if (e.type === "warning" && e.message.startsWith(USAGE_FAILED_WARNING)) {
+      return `cost unknown: ${ledger.spentTokens} tokens spent (${USAGE_FAILED_WARNING}, so 0 cents is not the cost)`;
+    }
+  }
+  return undefined;
+}
+
 /** A cloud step an earlier execution left without an end: its agent may still be running in the cloud. */
 export interface InterruptedCloudStep {
   /** The step's stable id: what a resume matches the step to. */

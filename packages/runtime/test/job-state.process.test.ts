@@ -63,6 +63,7 @@ function assertFinishedState(state: Record<string, unknown>, jobId: string, via:
   assert.equal(state.spentCents, 9, via);
   assert.equal(state.spentTokens, 110, via);
   assert.doesNotMatch(JSON.stringify(state), /PROMPT-MARKER/, `${via}: no prompt text`);
+  assert.equal("costNote" in state, false, `${via}: a cost that was reported is not unknown`);
 }
 
 test("wf start, wait, status and jobs return the state projected from the event log; the record holds identity and how the job was started", () => {
@@ -108,5 +109,22 @@ test("the MCP tools get_workflow_status and wait_workflow return the same projec
     assert.deepEqual(await call("get_workflow_status", { jobId: "nope" }), { error: "job not found" });
   } finally {
     await client.close();
+  }
+});
+
+test("wf status and wf wait on a run whose cost the API could not report print cost unknown with the tokens", () => {
+  env.FAKE_SDK_GET_USAGE_ERROR = "usage is not available for local agents";
+  try {
+    const started = wf("start", "proc") as { jobId: string };
+    const waited = wf("wait", started.jobId, "--timeout", "60") as Record<string, unknown>;
+    const status = wf("status", started.jobId) as Record<string, unknown>;
+    for (const [via, state] of [["wf wait", waited], ["wf status", status]] as const) {
+      assert.equal(state.status, "finished", via);
+      assert.equal(state.spentCents, 0, via);
+      assert.equal(state.spentTokens, 110, via);
+      assert.equal(state.costNote, "cost unknown: 110 tokens spent (getUsage() failed, so 0 cents is not the cost)", via);
+    }
+  } finally {
+    delete env.FAKE_SDK_GET_USAGE_ERROR;
   }
 });

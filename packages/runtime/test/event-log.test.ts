@@ -333,6 +333,32 @@ test("a global runs index that cannot be written warns but never fails the run",
   }
 });
 
+test("a run whose first execution could not write the global runs index is registered by its resume, once, with its first start time", async () => {
+  const previous = process.env.WF_HOME;
+  const blocker = join(cwd, "not-a-directory");
+  mkdirSync(cwd, { recursive: true });
+  writeFileSync(blocker, "x");
+  process.env.WF_HOME = join(blocker, "home");
+  let first;
+  try {
+    first = await runWorkflow(oneStep, {}, { cwd });
+  } finally {
+    process.env.WF_HOME = previous;
+  }
+  assert.equal(readRunsIndex().some((e) => e.runId === first.runId), false, "the first execution could not register the run");
+
+  const resumed = await runWorkflow(oneStep, {}, { cwd, runId: first.runId });
+  assert.equal(resumed.status, "finished", resumed.error);
+  const afterResume = readRunsIndex().filter((e) => e.runId === first.runId);
+  assert.equal(afterResume.length, 1, "the resume registered the run");
+  assert.equal(afterResume[0]!.repo, cwd);
+  assert.equal(afterResume[0]!.workflow, "indexed");
+  assert.equal(afterResume[0]!.startedAt, ofType(logOf(first.runId).events, "run-start")[0]!.ts, "the run's first start, not the resume's");
+
+  await runWorkflow(oneStep, {}, { cwd, runId: first.runId });
+  assert.equal(readRunsIndex().filter((e) => e.runId === first.runId).length, 1, "a later resume adds no second line");
+});
+
 test("resuming a run whose workflow changed records a warning event; resuming it unchanged does not", async () => {
   const v1 = defineWorkflow({
     meta: { name: "evolving", description: "evolving" },

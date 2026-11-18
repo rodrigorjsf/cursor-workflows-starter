@@ -232,15 +232,16 @@ escreve é só o registro do job, em `.workflows/jobs/`, como o `wf start` faz),
 que um run do `implement-issue` propôs (as duas só iniciam um job novo sobre o run) e
 [cancelar um run](#cancelar-um-run-e-copiar-o-comando-de-resume), pelo mesmo caminho do `wf cancel`.
 
-**Como abrir.** O `start_workflow` garante que o dashboard está rodando (inicia um processo destacado se nada responde
-na porta) e devolve `dashboardUrl`, o link da página do run, ao lado do `jobId`; a skill `run-workflow` abre o link no navegador embutido do
-Cursor. Só um dashboard roda por porta, por mais `start_workflow` que cheguem juntos. `npm run dash` o inicia à mão. Se o
+**Como abrir.** O `start_workflow` e o `wf start` garantem que o dashboard está rodando (iniciam um processo destacado se nada responde
+na porta) e devolvem `dashboardUrl`, o link da página do run, ao lado do `jobId`; a skill `run-workflow` abre o link no navegador embutido do
+Cursor. Só um dashboard roda por porta, por mais `start_workflow` ou `wf start` que cheguem juntos. `npm run dash` o inicia à mão. Se o
 dashboard não consegue subir (porta ocupada por outro programa, pacote ausente na instalação), a resposta traz
-`dashboardWarning` com o motivo e o job começa do mesmo jeito.
+`dashboardWarning` com o motivo e o job começa do mesmo jeito. Com o início automático desligado, o `wf start` não imprime nem
+`dashboardUrl` nem `dashboardWarning`, como o `start_workflow`.
 
 Para desligar o início automático, ponha `{"dashboard": {"autoStart": false}}` no arquivo global
 (`~/.cursor-workflows/config.json`; no do repositório não tem efeito) ou exporte `WF_DASH_AUTOSTART=off` no `env` do
-servidor `workflows`. Um dashboard que já está de pé continua sendo informado em `dashboardUrl`. O processo grava o pid
+servidor `workflows` (ou no shell, para o `wf start`). Um dashboard que já está de pé continua sendo informado em `dashboardUrl`. O processo grava o pid
 em `~/.cursor-workflows/dashboard.pid` e a saída em `dashboard.log`; `kill $(jq -r .pid ~/.cursor-workflows/dashboard.pid)`
 o encerra.
 

@@ -239,7 +239,7 @@
         "$comment": { "$ref": "#/definitions/comment" },
         "autoStart": {
           "type": "boolean",
-          "description": "`false` impede o `start_workflow` de iniciar o dashboard quando ele não está rodando (a variável de ambiente `WF_DASH_AUTOSTART=off` faz o mesmo). Um dashboard que já está de pé continua sendo informado na resposta (`dashboardUrl`). Padrão: `true`."
+          "description": "`false` impede o `start_workflow` e o `wf start` de iniciar o dashboard quando ele não está rodando (a variável de ambiente `WF_DASH_AUTOSTART=off` faz o mesmo). Um dashboard que já está de pé continua sendo informado na resposta (`dashboardUrl`). Padrão: `true`."
         }
       }
     },

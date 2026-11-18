@@ -119,7 +119,7 @@ falhas de segurança.
   `.cursor` apontando para fora (CWE-59). O `wf init` resolve cada caminho, e as pastas no meio dele, antes de ler ou
   escrever, e sai com erro, nomeando o arquivo, se o caminho real cai fora do repositório. Um link para outro arquivo do
   repositório (`AGENTS.md` para `CLAUDE.md`) segue valendo.
-- **O `start_workflow` sobe um dashboard local** (um servidor HTTP) quando nada responde na porta dele, a menos que
+- **O `start_workflow` e o `wf start` sobem um dashboard local** (um servidor HTTP) quando nada responde na porta dele, a menos que
   `dashboard.autoStart` seja `false` no config global ou `WF_DASH_AUTOSTART=off` esteja no ambiente. Ele escuta só em
   `127.0.0.1`, recusa um `Host` estranho, abre o banco de métricas só para leitura e aceita cinco `POST`, o de iniciar um
   workflow, o de retomar um run, o de aprovar as seams, o de trocar as seams e o de cancelar um run, todos protegidos por token CSRF. O de iniciar só vale para um repositório em que o
