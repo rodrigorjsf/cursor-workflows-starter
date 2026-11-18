@@ -106,10 +106,12 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type { ModelSelection, SettingSource } from "@cursor/sdk";
+import { findOnPath } from "../src/find-on-path.js";
 import { wasKilledByCancel } from "../src/runtime/job-state.js";
 import { createRedactor } from "../src/runtime/redaction.js";
 import { findSecretInChange, findSecretInText, savedSecrets } from "../src/runtime/secret-guard.js";
 import { NamedLockedError, acquireNamedLock, eventLogPath, readEventLog } from "../src/runtime/run-store.js";
+import { ensureExcluded } from "../src/runtime/state.js";
 import { defineWorkflow, type AgentCallOptions, type WorkflowCard } from "../src/runtime/workflow.js";
 import { buildPrBody, inlineCode, sanitizeModelText, type PrText } from "./implement-issue/pr-body.js";
 import { CommandError, Commands, NETWORK_TIMEOUT_SEC, SNAPSHOT_GRACE_HOURS, WORKFLOW_BRANCH_PREFIX, worktreeOf } from "./implement-issue/commands.js";
@@ -321,6 +323,15 @@ function tierOfLabels(labels: Array<{ name: string }>, labelTiers: Record<string
     if (tier && (!best || TIER_RANK[tier] > TIER_RANK[best])) best = tier;
   }
   return best;
+}
+
+const CODE_INDEX_DIR = ".codegraph";
+
+async function refreshCodeIndex(cmd: Commands, cwd: string, warn: (message: string) => void): Promise<void> {
+  if (!findOnPath("codegraph", process.env.PATH)) return warn("could not index the code: codegraph is not on the PATH, so the step agents work without a code index");
+  if (!ensureExcluded(cwd, `${CODE_INDEX_DIR}/`)) return warn(`could not index the code: could not exclude ${CODE_INDEX_DIR}/ from git in ${cwd}, so the index would show up as changes of the tree`);
+  const failure = await cmd.codegraph(cwd, existsSync(join(cwd, CODE_INDEX_DIR)) ? "sync" : "init");
+  if (failure) warn(`could not index the code: ${failure}; the step agents work without a current code index`);
 }
 
 const branchExists = (cmd: Commands, cwd: string, branch: string) => cmd.gitIs(cwd, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`);
@@ -583,6 +594,7 @@ export default defineWorkflow<Args>({
           };
         }
       }
+      await refreshCodeIndex(cmd, ctx.cwd, (message) => ctx.warn(message));
       const labelTier = tierOfLabels(issue.labels, settings.labelTiers);
       let tier = labelTier;
       if (!tier) {

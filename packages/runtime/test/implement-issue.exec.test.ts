@@ -3,7 +3,7 @@
 // step node; a `gh` failure is an error, never "no PR". Runs `runWorkflow` with the fake SDK and the environment of
 // implement-issue.fixture.ts (fake gh, temp repo, real git and real `node --test`) and reads the replayed event log.
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import type { ContentEvent, ExecEndEvent, ExecStartEvent, WorkflowEvent } from "../src/runtime/events.js";
@@ -13,7 +13,7 @@ import implementIssue from "../workflows/implement-issue.js";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import { runnerConfigChanged } from "../workflows/implement-issue/tdd.js";
 import { writeRepoConfig } from "./config-fixtures.js";
-import { PLAN, SUB_CODE, SUB_TEST, failForge, fx, forgeState, git, issue, names, onOrigin, run, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
+import { PLAN, SUB_CODE, SUB_TEST, branchOf, codegraphCalls, failCodegraph, failForge, fx, forgeState, git, issue, names, onOrigin, removeCodegraph, run, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
 
 beforeEach(setup);
 afterEach(teardown);
@@ -496,4 +496,73 @@ test("a run that proposed seams and is then resumed with seams still posts the t
   assert.equal(comments.length, 3, "the seams, the decision to replace them, and the test command");
   assert.match(comments[1]!, /Seams replaced/);
   assert.ok(comments[2]!.includes("`touch PWNED`") && /Test command proposed/.test(comments[2]!));
+});
+
+const warningsOf = (runId: string) => eventsOf(runId).flatMap((e) => (e.type === "warning" ? [e.message] : []));
+const excludeLines = () => readFileSync(join(fx.repo, ".git", "info", "exclude"), "utf8").split("\n");
+
+test("a run indexes the code before its first agent step: codegraph init where the tree has no .codegraph", async () => {
+  issue(["complexity:low"]);
+  const r = await run({});
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  assert.deepEqual(codegraphCalls(), [{ command: "init", cwd: realpathSync(fx.repo) }]);
+  const events = eventsOf(r.runId);
+  const indexed = events.findIndex((e) => e.type === "exec-start" && e.label === "codegraph init");
+  const firstAgent = events.findIndex((e) => e.type === "step-start");
+  assert.ok(indexed >= 0 && firstAgent > indexed, `the index command node (${indexed}) comes before the first agent step (${firstAgent})`);
+  assert.deepEqual(warningsOf(r.runId), []);
+});
+
+test("a run where .codegraph already exists syncs the index and does not initialize it again", async () => {
+  issue(["complexity:low"]);
+  mkdirSync(join(fx.repo, ".codegraph"));
+  const r = await run({});
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  assert.deepEqual(codegraphCalls(), [{ command: "sync", cwd: realpathSync(fx.repo) }]);
+});
+
+test("the index step keeps .codegraph out of git: excluded once across a resume, absent from the status and from the delivery commit", async () => {
+  issue(["complexity:medium"]);
+  const first = await run({});
+  assert.equal(res(first).status, "seams-proposed", JSON.stringify(res(first)));
+  assert.equal(excludeLines().filter((line) => line === ".codegraph/").length, 1);
+  assert.ok(existsSync(join(fx.repo, ".codegraph", ".gitignore")), "the fake codegraph made the folder the way the real one does");
+
+  const second = await run({ approveSeams: true }, first.runId);
+  assert.equal(res(second).status, "done", JSON.stringify(res(second)));
+  assert.deepEqual(codegraphCalls().map((c) => c.command), ["init", "sync"], "the resume brings the index up to date");
+  assert.equal(excludeLines().filter((line) => line === ".codegraph/").length, 1, "the resume does not add it again");
+  assert.equal(git(fx.repo, "status", "--porcelain").split("\n").filter((line) => line.includes(".codegraph")).length, 0, "git does not list the index folder");
+  const delivered = git(fx.repo, "show", "--name-only", "--format=", branchOf(first.runId)).split("\n").filter(Boolean);
+  assert.ok(delivered.length > 0 && delivered.every((path) => !path.startsWith(".codegraph/")), `the delivery commit holds ${delivered.join(", ")}`);
+});
+
+test("the index step runs under the network timeout of the settings", async () => {
+  issue(["complexity:low"]);
+  writeRepoConfig(fx.repo, { workflows: { "implement-issue": { settings: { networkTimeoutSec: 7 } } } });
+  const r = await run({});
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  assert.equal(execStarts(eventsOf(r.runId)).find((s) => s.label === "codegraph init")?.timeoutMs, 7000);
+});
+
+test("a machine without codegraph gets one warning and the run finishes, with no exclude line written for an index that never was", async () => {
+  issue(["complexity:low"]);
+  removeCodegraph();
+  const r = await run({});
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  const warnings = warningsOf(r.runId);
+  assert.equal(warnings.length, 1, warnings.join(" | "));
+  assert.match(warnings[0]!, /could not index the code: codegraph is not on the PATH/);
+  assert.ok(!excludeLines().includes(".codegraph/"));
+});
+
+test("a codegraph that exits non-zero gets one warning with what it printed and the run finishes", async () => {
+  issue(["complexity:low"]);
+  failCodegraph("database disk image is malformed");
+  const r = await run({});
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  const warnings = warningsOf(r.runId);
+  assert.equal(warnings.length, 1, warnings.join(" | "));
+  assert.match(warnings[0]!, /could not index the code: codegraph init exited with code 1: database disk image is malformed/);
+  assert.equal(codegraphCalls().length, 1, "the step is not retried");
 });

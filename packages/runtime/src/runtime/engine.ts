@@ -1289,6 +1289,9 @@ async function executeRun<A, R>(
     log(message) {
       emit({ type: "log", message });
     },
+    warn(message) {
+      emit({ type: "warning", message });
+    },
     card({ title, subtitle, links, badges }) {
       // Field by field, copied: an object with more than the card's fields, or one the workflow edits afterwards, changes nothing in the log.
       emit({ type: "card", title, subtitle, links: links?.map(({ label, url }) => ({ label, url })), badges: badges && [...badges] });

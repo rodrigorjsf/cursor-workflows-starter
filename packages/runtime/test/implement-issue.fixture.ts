@@ -6,9 +6,9 @@
 process.env.WF_METRICS = "off";
 import { execFileSync } from "node:child_process";
 import "./isolate-home.js";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { test } from "node:test";
 import { calls, script } from "./fake-sdk.js";
 import { runWorkflow } from "../src/runtime/engine.js";
@@ -92,6 +92,22 @@ export function setPrState(branch: string, state: "OPEN" | "MERGED" | "CLOSED" |
     if (!pr) throw new Error(`the fake forge has no PR on ${branch}`);
     pr.state = state;
   });
+}
+
+export const codegraphCalls = (): Array<{ command: string; cwd: string }> =>
+  (existsSync(process.env.FAKE_CODEGRAPH_LOG!) ? readFileSync(process.env.FAKE_CODEGRAPH_LOG!, "utf8") : "")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => ({ command: line.slice(0, line.indexOf(" ")), cwd: line.slice(line.indexOf(" ") + 1) }));
+
+export const failCodegraph = (message: string) => {
+  process.env.FAKE_CODEGRAPH_FAIL = message;
+};
+
+export function removeCodegraph() {
+  rmSync(join(fx.root, "bin", "codegraph"));
+  const without = process.env.PATH!.split(delimiter).filter((dir) => !existsSync(join(dir, "codegraph")));
+  process.env.PATH = [dirname(process.execPath), ...without].join(delimiter);
 }
 
 /** The progress record of a run of implement-issue: what `wf gc` reads to know the run's branch, worktree and forge. */
@@ -256,6 +272,25 @@ if (route === "issue view" && a[0] === "issue") {
 } else fail("fake glab: unsupported " + a.join(" "), 2);
 `;
 
+const FAKE_CODEGRAPH = `#!/usr/bin/env node
+const fs = require("fs");
+const path = require("path");
+const [verb] = process.argv.slice(2);
+fs.appendFileSync(process.env.FAKE_CODEGRAPH_LOG, verb + " " + process.cwd() + "\\n");
+const dir = path.join(process.cwd(), ".codegraph");
+if (process.env.FAKE_CODEGRAPH_FAIL) { process.stderr.write(process.env.FAKE_CODEGRAPH_FAIL); process.exit(1); }
+if (verb === "init") {
+  if (!fs.existsSync(dir)) { fs.mkdirSync(dir); fs.writeFileSync(path.join(dir, ".gitignore"), "*\\n!.gitignore\\n"); fs.writeFileSync(path.join(dir, "codegraph.db"), ""); }
+  process.exit(0);
+}
+if (verb === "sync") {
+  if (!fs.existsSync(dir)) { process.stderr.write("CodeGraph not initialized in " + process.cwd()); process.exit(1); }
+  process.exit(0);
+}
+process.stderr.write("error: unknown command '" + verb + "'");
+process.exit(1);
+`;
+
 export function issue(labels: string[], title = "Add subtract(a, b)") {
   writeFileSync(
     fx.forgeStateFile,
@@ -342,8 +377,12 @@ function setupFor(forge: TestForge) {
   chmodSync(join(bin, "gh"), 0o755);
   writeFileSync(join(bin, "glab"), fakeGlab());
   chmodSync(join(bin, "glab"), 0o755);
+  writeFileSync(join(bin, "codegraph"), FAKE_CODEGRAPH);
+  chmodSync(join(bin, "codegraph"), 0o755);
   fx.forgeStateFile = join(root, "forge.json");
   process.env.FAKE_FORGE_STATE = fx.forgeStateFile;
+  process.env.FAKE_CODEGRAPH_LOG = join(root, "codegraph.log");
+  delete process.env.FAKE_CODEGRAPH_FAIL;
   fx.savedPath = process.env.PATH;
   process.env.PATH = `${bin}:${fx.savedPath}`;
   fx.handlers = defaults();
@@ -354,6 +393,7 @@ function setupFor(forge: TestForge) {
 
 export function teardown() {
   rmSync(join(process.env.WF_HOME!, "config.json"), { force: true }); // a test that declared forges in the global file leaves none behind
+  delete process.env.FAKE_CODEGRAPH_FAIL;
   process.env.PATH = fx.savedPath;
   script.length = 0;
   calls.length = 0;

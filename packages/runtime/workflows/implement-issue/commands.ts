@@ -194,6 +194,12 @@ export class Commands {
     throw new CommandError(cli, args, r, this.timeouts.networkMs);
   }
 
+  async codegraph(cwd: string, command: "init" | "sync"): Promise<string | undefined> {
+    const args = [command];
+    const r = await this.exec("codegraph", args, this.options("codegraph", args, cwd, this.timeouts.networkMs));
+    return r.ok ? undefined : new CommandError("codegraph", args, r, this.timeouts.networkMs).message;
+  }
+
   private options(command: string, args: string[], cwd: string, timeoutMs: number | undefined, labelWords = 1): ExecOptions {
     return { cwd, ...(timeoutMs === undefined ? {} : { timeoutMs }), label: `${command} ${args.slice(0, labelWords).join(" ")}` };
   }

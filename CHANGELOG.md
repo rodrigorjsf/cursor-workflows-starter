@@ -4,6 +4,13 @@
 
 ### Adicionado
 
+- **O `implement-issue` deixa o índice de código em dia antes da primeira etapa de agente** (issue #118, spec #114). Depois da
+  checagem do autor da issue e antes de qualquer agente, o run roda `codegraph init` quando o repositório do run não tem
+  `.codegraph/` e `codegraph sync` quando tem, como um nó de comando do log, sob o teto dos comandos de rede
+  (`networkTimeoutSec`). Antes disso, acrescenta `.codegraph/` ao `.git/info/exclude` uma única vez (um resume não repete a
+  linha), para a entrega nunca levar arquivos do índice para o commit. Sem `codegraph` no `PATH`, ou com um que sai com código
+  diferente de zero, o run grava um evento `warning` e segue sem índice. O contexto dos workflows ganhou `ctx.warn(message)`, que
+  grava esse evento (`warning`), ao lado de `ctx.log`.
 - **O dashboard aprova ou troca as seams que um run do `implement-issue` propôs** (issue #98). Um run MED ou HIGH que parou em
   `seams-proposed` (ou, com `seams` e sem `testCommand`, em `test-command-proposed`) mostra no Run view o painel **Seams
   proposed** (ou **Test command proposed**): as seams, as fatias e o comando de teste que o run executa depois da aprovação,

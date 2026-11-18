@@ -19,19 +19,24 @@ const excludeFiles = new Map<string, string>();
  * ligado ou submódulo o `.git` é um arquivo: é o git que diz onde está o `info/exclude` (`--git-path`).
  */
 export function ensureIgnored(cwd: string): void {
-  if (!existsSync(join(cwd, ".git"))) return;
+  ensureExcluded(cwd, ".workflows/");
+}
+
+export function ensureExcluded(cwd: string, entry: string): boolean {
+  if (!existsSync(join(cwd, ".git"))) return false;
   let exclude = excludeFiles.get(cwd);
   if (!exclude) {
     try {
       exclude = resolve(cwd, execFileSync("git", ["rev-parse", "--git-path", "info/exclude"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }).trim()); // once per repo, and bounded
     } catch {
-      return; // sem git instalado ou .git inválido: nada a proteger
+      return false;
     }
     excludeFiles.set(cwd, exclude); // `stateDir` roda a cada gravação de job: o git só é consultado uma vez por repositório
   }
   mkdirSync(dirname(exclude), { recursive: true });
   const current = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
-  if (!current.split("\n").includes(".workflows/")) appendFileSync(exclude, `${current.endsWith("\n") || !current ? "" : "\n"}.workflows/\n`);
+  if (!current.split("\n").includes(entry)) appendFileSync(exclude, `${current.endsWith("\n") || !current ? "" : "\n"}${entry}\n`);
+  return true;
 }
 
 /** Where the repo's run state lives, whether or not it exists: nothing is created. */
