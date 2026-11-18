@@ -524,7 +524,7 @@ test("a repository that already has an index is synced, and the new worktree, wh
   assert.deepEqual(warningsOf(r.runId), []);
 });
 
-test("a .codegraph folder that holds only its .gitignore (a clone of a repository that tracks it) is synced, found not initialized, and initialized", async () => {
+test("a .codegraph folder that holds only its .gitignore (a clone of a repository that tracks it) holds no index: it is initialized in both trees, never synced", async () => {
   issue(["complexity:low"]);
   mkdirSync(join(fx.repo, ".codegraph"));
   writeFileSync(join(fx.repo, ".codegraph", ".gitignore"), "*\n!.gitignore\n");
@@ -533,7 +533,7 @@ test("a .codegraph folder that holds only its .gitignore (a clone of a repositor
   const r = await run({});
   assert.equal(res(r).status, "done", JSON.stringify(res(r)));
   const worktree = worktreeOf(r.runId);
-  assert.deepEqual(codegraphCalls(), [indexedIn(fx.repo, "sync"), indexedIn(fx.repo, "init"), indexedIn(worktree, "sync"), indexedIn(worktree, "init")]);
+  assert.deepEqual(codegraphCalls(), [indexedIn(fx.repo, "init"), indexedIn(worktree, "init")]);
   assert.ok(existsSync(join(fx.repo, ".codegraph", "codegraph.db")) && existsSync(join(worktree, ".codegraph", "codegraph.db")));
   assert.deepEqual(warningsOf(r.runId), []);
 });

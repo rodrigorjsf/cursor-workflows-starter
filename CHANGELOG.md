@@ -8,8 +8,8 @@
   checagem do autor da issue e antes de qualquer agente, o run roda `codegraph init` quando o repositório do run não tem
   `.codegraph/` e `codegraph sync` quando tem, como um nó de comando do log, sob o teto dos comandos de rede
   (`networkTimeoutSec`). Quando o worktree do run existe (um worktree novo não traz o índice), repete o passo nele. Uma pasta
-  `.codegraph/` que só tem o `.gitignore` (o clone de um repositório que o versiona, como este) recebe `init` quando o `sync` diz
-  que não há índice. Antes de tudo isso, acrescenta `.codegraph/` ao `.git/info/exclude` uma única vez (um resume não repete a
+  `.codegraph/` que só tem o `.gitignore` (o clone de um repositório que o versiona, como este) não tem índice: recebe `init`, não
+  `sync`, que num diretório dentro de outro indexado atualizaria o índice do diretório de fora. Antes de tudo isso, acrescenta `.codegraph/` ao `.git/info/exclude` uma única vez (um resume não repete a
   linha), para a entrega nunca levar arquivos do índice para o commit. Sem `codegraph` no `PATH`, ou com um que sai com código
   diferente de zero, o run grava um único evento `warning` e segue sem índice. O contexto dos workflows ganhou
   `ctx.warn(message)`, que grava esse evento (`warning`), ao lado de `ctx.log`.

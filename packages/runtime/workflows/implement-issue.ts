@@ -331,10 +331,8 @@ async function codeIndexFailure(cmd: Commands, cwd: string): Promise<string | un
   if (!findOnPath("codegraph", process.env.PATH)) return "codegraph is not on the PATH";
   if (!ensureExcluded(cwd, `${CODE_INDEX_DIR}/`)) return `${CODE_INDEX_DIR}/ cannot be excluded from git in ${cwd}, so the index would show up as changes of the tree`;
   const dir = join(cwd, CODE_INDEX_DIR);
-  const present = existsSync(dir);
-  const failure = await cmd.codegraphFailure(cwd, present ? "sync" : "init");
-  if (failure && present && readdirSync(dir).every((entry) => entry === ".gitignore")) return cmd.codegraphFailure(cwd, "init");
-  return failure;
+  const entries = existsSync(dir) ? readdirSync(dir) : undefined;
+  return cmd.codegraphFailure(cwd, entries && entries.join() !== ".gitignore" ? "sync" : "init");
 }
 
 async function refreshCodeIndex(cmd: Commands, cwd: string, warn: (message: string) => void): Promise<boolean> {
