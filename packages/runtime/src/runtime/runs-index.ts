@@ -16,7 +16,6 @@ export interface RunsIndexEntry {
   /** Absolute path of the repo the run executes in (the directory that holds `.workflows/`). */
   repo: string;
   workflow: string;
-  /** When the run first started, ISO 8601 UTC. A resume does not add a line. Readers that need one line per run dedupe by `runId`. */
   startedAt: string;
 }
 
@@ -27,6 +26,11 @@ export function runsIndexPath(): string {
 export function registerRun(entry: Omit<RunsIndexEntry, "v">): void {
   mkdirSync(userDir(), { recursive: true, mode: 0o700 });
   appendJsonl(runsIndexPath(), { v: RUNS_INDEX_VERSION, ...entry } satisfies RunsIndexEntry);
+}
+
+export function registerRunIfMissing(entry: Omit<RunsIndexEntry, "v">): void {
+  if (readRunsIndex().some((known) => known.runId === entry.runId && known.repo === entry.repo)) return;
+  registerRun(entry);
 }
 
 const isEntry = (v: unknown): v is RunsIndexEntry =>

@@ -264,6 +264,7 @@ export class RunStore {
   readonly journal: Journal;
   /** The run-start of the latest earlier execution of this run, or undefined when the run is new. */
   readonly previousStart: RunStartEvent | undefined;
+  readonly firstStartedAt: string | undefined;
   /**
    * What the run has spent so far, replayed from its event log when the store was opened: every execution before this one,
    * failed attempts included. The budget starts from here, so a resume never starts from zero.
@@ -299,6 +300,7 @@ export class RunStore {
       this.tornTail = { events: hasTornTail(this.eventsFile), journal: hasTornTail(join(dir, JOURNAL_FILE)) };
       const { events } = readEventLog(this.eventsFile, { content: false });
       this.previousStart = events.findLast((e): e is RunStartEvent => e.type === "run-start");
+      this.firstStartedAt = events.find((e): e is RunStartEvent => e.type === "run-start")?.ts;
       this.ledger = replayLedger(events);
       this.interruptedCloud = interruptedCloudSteps(events);
     } catch (err) {

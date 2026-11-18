@@ -87,7 +87,7 @@ export const costConfig: {
   listArtifactsError?: string;
   /** Holds the creation of the agents it answers for (it gets the create options) until the promise settles; `undefined` = not held. */
   createGate?: (options: AgentOptions) => Promise<unknown> | undefined;
-} = { raw: 9, charged: 7 };
+} = { raw: 9, charged: 7, getUsageError: process.env.FAKE_SDK_GET_USAGE_ERROR };
 /** A value that satisfies a JSON Schema: the first `enum` member, the `const`, or the plainest value of the type. */
 function sampleOf(schema: any): unknown {
   if (schema?.const !== undefined) return schema.const;

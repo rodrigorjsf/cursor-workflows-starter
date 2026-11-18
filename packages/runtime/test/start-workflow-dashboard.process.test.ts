@@ -2,6 +2,7 @@
 // (`dashboardUrl`) next to the job; the dashboard then lists the run it was just given. The MCP server and the dashboard
 // are real child processes against the fake Cursor SDK, a temporary repo and a temporary home.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -38,19 +39,20 @@ afterEach(async () => {
   rmSync(sandbox, { recursive: true, force: true });
 });
 
+const childEnv = (extra: Record<string, string>): Record<string, string> => ({
+  ...(getDefaultEnvironment() as Record<string, string>),
+  TSX_TSCONFIG_PATH: join(PACKAGE, "tsconfig.test.json"),
+  WF_HOME: home,
+  WF_METRICS: "off",
+  WF_DASH_PORT: String(port),
+  WF_DASH_START_TIMEOUT_MS: "30000",
+  ...extra,
+});
+
 /** Runs `use` against an MCP server started the way Cursor starts it, with `extra` added to its environment. */
 async function withServer<T>(extra: Record<string, string>, use: (call: (name: string, args: Record<string, unknown>) => Promise<any>) => Promise<T>): Promise<T> {
   const client = new Client({ name: "dashboard-test", version: "0.0.0" });
-  const env = {
-    ...(getDefaultEnvironment() as Record<string, string>),
-    TSX_TSCONFIG_PATH: join(PACKAGE, "tsconfig.test.json"),
-    WF_HOME: home,
-    WF_METRICS: "off",
-    WF_CWD: repo,
-    WF_DASH_PORT: String(port),
-    WF_DASH_START_TIMEOUT_MS: "30000", // a start may be slow while the whole suite runs
-    ...extra,
-  };
+  const env = childEnv({ WF_CWD: repo, ...extra });
   const started: string[] = [];
   const call = async (name: string, args: Record<string, unknown>) => {
     const result = JSON.parse(((await client.callTool({ name, arguments: args })).content as Array<{ text: string }>)[0]!.text);
@@ -148,4 +150,62 @@ test("the dashboard setting in a repo config is reported in the violations and h
     assert.deepEqual(started.violations.map((v: { path: string }) => v.path), ["/dashboard"], JSON.stringify(started));
     assert.equal(started.dashboardUrl, `http://127.0.0.1:${port}/runs/${started.runId}`, "a repo file cannot switch the dashboard off");
   });
+});
+
+function wfCli(extra: Record<string, string>, ...args: string[]) {
+  const r = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), join(PACKAGE, "src", "cli.ts"), ...args, "--cwd", repo], { env: childEnv(extra), encoding: "utf8" });
+  return { status: r.status, stderr: r.stderr, out: JSON.parse(r.stdout) as Record<string, any> };
+}
+
+function startQuick(extra: Record<string, string> = {}) {
+  const started = wfCli(extra, "start", "quick");
+  assert.equal(started.status, 0, started.stderr);
+  const done = wfCli(extra, "wait", started.out.jobId, "--timeout", "60");
+  assert.equal(done.out.status, "finished", JSON.stringify(done.out));
+  return started.out;
+}
+
+test("wf start starts the dashboard once and prints the link to the run's page; the dashboard lists the run", async () => {
+  const first = startQuick();
+  const origin = `http://127.0.0.1:${port}`;
+  assert.equal(first.dashboardUrl, `${origin}/runs/${first.runId}`, JSON.stringify(first));
+  const page = await fetch(first.dashboardUrl);
+  assert.equal(page.status, 200, "the link opens the run's page");
+  assert.match(await page.text(), new RegExp(`Run ${first.runId}`));
+
+  const second = startQuick();
+  assert.equal(second.dashboardUrl, `${origin}/runs/${second.runId}`);
+  assert.equal(dashboardListens(home), 1, "the second start found the dashboard running");
+
+  const listed = (await (await fetch(`${origin}/api/runs`)).json()) as { runs: Array<{ runId: string; status: string }> };
+  assert.equal(listed.runs.find((r) => r.runId === first.runId)?.status, "finished");
+});
+
+test("wf start with auto-start off in the environment prints no link and no warning, and starts no dashboard", async () => {
+  const started = startQuick({ WF_DASH_AUTOSTART: "off" });
+  assert.equal("dashboardUrl" in started, false, JSON.stringify(started));
+  assert.equal("dashboardWarning" in started, false);
+  assert.equal(existsSync(join(home, "dashboard.pid")), false);
+  assert.equal(await fetch(`http://127.0.0.1:${port}/api/health`).then(() => true, () => false), false, "nothing listens");
+});
+
+test("wf start with dashboard.autoStart false in the global config prints no link and no warning, and starts no dashboard", async () => {
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, "config.json"), JSON.stringify({ dashboard: { autoStart: false } }));
+  const started = startQuick();
+  assert.equal("dashboardUrl" in started, false, JSON.stringify(started));
+  assert.equal("dashboardWarning" in started, false);
+  assert.equal(existsSync(join(home, "dashboard.pid")), false);
+});
+
+test("a dashboard that cannot start never stops wf start: the reason comes back as dashboardWarning", async () => {
+  const squatter = createHttpServer((_req, res) => res.end("not a dashboard"));
+  await new Promise<void>((ok) => squatter.listen(port, "127.0.0.1", ok));
+  try {
+    const started = startQuick();
+    assert.equal("dashboardUrl" in started, false);
+    assert.match(started.dashboardWarning, /port \d+ is in use by another program/);
+  } finally {
+    squatter.close();
+  }
 });

@@ -44,6 +44,7 @@ import { assertKitCompatible } from "./kit-version.js";
 import { unifiedDiff } from "./unified-diff.js";
 import { upgradeKit } from "./upgrade.js";
 import { assertCursorEndpoints } from "./runtime/cursor-endpoints.js";
+import { dashboardFields, ensureDashboard } from "./runtime/dashboard-instance.js";
 import { type RunStatus, runWorkflow } from "./runtime/engine.js";
 import { insideWorkflow } from "./runtime/inside-workflow.js";
 import { cancelOnSignals, installCrashHandlers, spawnJob, startJob } from "./runtime/jobs.js";
@@ -273,7 +274,8 @@ async function main(): Promise<number> {
       const { config, violations } = loadEffectiveConfig(def, { cwd, flags: flagLimits(), mcpOverrides: overrides }); // an unusable config fails here, with its field path
       // Refused here too (exit 1, nothing written) when too many jobs run or the same job already does: the caps.maxRunningJobs cap, as for `start_workflow`.
       const { job, log } = spawnJob({ cwd, workflow: def.meta.name, args, maxRunningJobs: config.caps.maxRunningJobs, resumeRunId: values.resume, ...flagLimits(), overrides });
-      out({ jobId: job.jobId, runId: job.runId, log, next: `wf wait ${job.jobId}`, ...(violations.length ? { violations } : {}) });
+      const dashboard = await ensureDashboard();
+      out({ jobId: job.jobId, runId: job.runId, log, next: `wf wait ${job.jobId}`, ...dashboardFields(dashboard, job.runId), ...(violations.length ? { violations } : {}) });
       return 0;
     }
     case "status": {

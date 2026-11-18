@@ -115,7 +115,7 @@ Valida os dois arquivos de configuração do kit: o global (`~/.cursor-workflows
 
 | Campo | Tipo | Obrigatório | Descrição |
 | --- | --- | --- | --- |
-| `autoStart` | `boolean` | não | `false` impede o `start_workflow` de iniciar o dashboard quando ele não está rodando (a variável de ambiente `WF_DASH_AUTOSTART=off` faz o mesmo). Um dashboard que já está de pé continua sendo informado na resposta (`dashboardUrl`). Padrão: `true`. |
+| `autoStart` | `boolean` | não | `false` impede o `start_workflow` e o `wf start` de iniciar o dashboard quando ele não está rodando (a variável de ambiente `WF_DASH_AUTOSTART=off` faz o mesmo). Um dashboard que já está de pé continua sendo informado na resposta (`dashboardUrl`). Padrão: `true`. |
 
 ## Preferências de um workflow
 

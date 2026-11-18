@@ -206,6 +206,48 @@ test("recent lines are one-line summaries: no prompt, agent message, tool call o
   assert.equal(readJob(cwd, job.jobId)!.result, "OUTPUT-MARKER final answer", "only what the workflow itself returned is the result");
 });
 
+const twoSteps = defineWorkflow({
+  meta: { name: "two-steps", description: "two steps" },
+  defaults: { model: { id: "m" } },
+  async run(ctx) {
+    await ctx.agent("first", { label: "first" });
+    return ctx.agent("second", { label: "second" });
+  },
+});
+
+test("a job whose cost the API could not report says the cost is unknown, with its tokens, instead of showing 0 as the cost", async () => {
+  costConfig.getUsageError = "usage is not available for local agents";
+  const { job, done } = startJob(twoSteps, {}, { cwd });
+  await done;
+  const view = readJob(cwd, job.jobId)!;
+  assert.equal(view.status, "finished");
+  assert.equal(view.spentCents, 0);
+  assert.equal(view.spentTokens, 220);
+  assert.equal(view.costNote, "cost unknown: 220 tokens spent (getUsage() failed, so 0 cents is not the cost)");
+});
+
+test("a job that read some of its cost before getUsage() failed shows no unknown-cost note: its cents are counted", async () => {
+  script.push(async () => ({ status: "finished", result: "ok" }));
+  script.push(async () => {
+    costConfig.getUsageError = "usage is not available for local agents";
+    return { status: "finished", result: "ok" };
+  });
+  const { job, done } = startJob(twoSteps, {}, { cwd });
+  await done;
+  const view = readJob(cwd, job.jobId)!;
+  assert.equal(view.spentCents, 9);
+  assert.equal("costNote" in view, false);
+});
+
+test("a job that was free but reported its usage shows no unknown-cost note", async () => {
+  Object.assign(costConfig, { raw: 0, charged: 0 });
+  const { job, done } = startJob(twoSteps, {}, { cwd });
+  await done;
+  const view = readJob(cwd, job.jobId)!;
+  assert.equal(view.spentCents, 0);
+  assert.equal("costNote" in view, false);
+});
+
 test("a workflow result that looks like a content event does not hide the run's end from the projection", async () => {
   const wf = defineWorkflow({ meta: { name: "lookalike", description: "lookalike" }, async run() { return { type: "content", note: "mine" }; } });
   const { job, done } = startJob(wf, {}, { cwd });

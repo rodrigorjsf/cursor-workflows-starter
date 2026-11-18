@@ -2,14 +2,29 @@
 
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { PRIVATE_DIR } from "./state-files.js";
+import { errorText } from "./error-text.js";
+import { PRIVATE_DIR, PRIVATE_FILE } from "./state-files.js";
 
 /** Per-user directory of the kit (`~/.cursor-workflows`): metrics database, global runs index. `WF_HOME` overrides it (tests, CI). */
 export function userDir(): string {
   return process.env.WF_HOME ?? join(homedir(), ".cursor-workflows");
+}
+
+export function assertUserDirWritable(): void {
+  const dir = userDir();
+  const probe = join(dir, `.write-probe-${process.pid}`);
+  try {
+    mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR });
+    writeFileSync(probe, "", { mode: PRIVATE_FILE });
+    rmSync(probe);
+  } catch (err) {
+    throw new Error(
+      `cannot write to the user directory ${dir} (${errorText(err)}); no run was created. The command most likely runs in an agent sandbox, which blocks writes outside the repository: start it with full permissions (outside the sandbox), or point WF_HOME at a writable directory.`,
+    );
+  }
 }
 
 const excludeFiles = new Map<string, string>();
