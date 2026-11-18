@@ -317,34 +317,28 @@ test("each run appends an entry (run id, repo path, workflow, start time) to the
   assert.ok(started >= before - 1000 && started <= Date.now(), `start time ${entry!.startedAt}`); // wall-clock-ok: compared with the start time the run wrote to the index
 });
 
-test("a global runs index that cannot be written warns but never fails the run", async () => {
-  const previous = process.env.WF_HOME;
-  const blocker = join(cwd, "not-a-directory");
-  mkdirSync(cwd, { recursive: true });
-  writeFileSync(blocker, "x");
-  process.env.WF_HOME = join(blocker, "home"); // a path below a regular file: creating it fails
-  try {
-    const events: WorkflowEvent[] = [];
-    const r = await runWorkflow(oneStep, {}, { cwd, onEvent: (e) => events.push(e) });
-    assert.equal(r.status, "finished", r.error);
-    assert.ok(ofType(events, "warning").some((w) => /global runs index/.test(w.message)));
-  } finally {
-    process.env.WF_HOME = previous;
-  }
-});
-
-test("a run whose first execution could not write the global runs index is registered by its resume, once, with its first start time", async () => {
+async function withUnwritableHome<T>(use: () => Promise<T>): Promise<T> {
   const previous = process.env.WF_HOME;
   const blocker = join(cwd, "not-a-directory");
   mkdirSync(cwd, { recursive: true });
   writeFileSync(blocker, "x");
   process.env.WF_HOME = join(blocker, "home");
-  let first;
   try {
-    first = await runWorkflow(oneStep, {}, { cwd });
+    return await use();
   } finally {
     process.env.WF_HOME = previous;
   }
+}
+
+test("a global runs index that cannot be written warns but never fails the run", async () => {
+  const events: WorkflowEvent[] = [];
+  const r = await withUnwritableHome(() => runWorkflow(oneStep, {}, { cwd, onEvent: (e) => events.push(e) }));
+  assert.equal(r.status, "finished", r.error);
+  assert.ok(ofType(events, "warning").some((w) => /global runs index/.test(w.message)));
+});
+
+test("a run whose first execution could not write the global runs index is registered by its resume, once, with its first start time", async () => {
+  const first = await withUnwritableHome(() => runWorkflow(oneStep, {}, { cwd }));
   assert.equal(readRunsIndex().some((e) => e.runId === first.runId), false, "the first execution could not register the run");
 
   const resumed = await runWorkflow(oneStep, {}, { cwd, runId: first.runId });

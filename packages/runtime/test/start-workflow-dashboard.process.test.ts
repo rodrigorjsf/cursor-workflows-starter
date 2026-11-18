@@ -39,19 +39,20 @@ afterEach(async () => {
   rmSync(sandbox, { recursive: true, force: true });
 });
 
+const childEnv = (extra: Record<string, string>): Record<string, string> => ({
+  ...(getDefaultEnvironment() as Record<string, string>),
+  TSX_TSCONFIG_PATH: join(PACKAGE, "tsconfig.test.json"),
+  WF_HOME: home,
+  WF_METRICS: "off",
+  WF_DASH_PORT: String(port),
+  WF_DASH_START_TIMEOUT_MS: "30000",
+  ...extra,
+});
+
 /** Runs `use` against an MCP server started the way Cursor starts it, with `extra` added to its environment. */
 async function withServer<T>(extra: Record<string, string>, use: (call: (name: string, args: Record<string, unknown>) => Promise<any>) => Promise<T>): Promise<T> {
   const client = new Client({ name: "dashboard-test", version: "0.0.0" });
-  const env = {
-    ...(getDefaultEnvironment() as Record<string, string>),
-    TSX_TSCONFIG_PATH: join(PACKAGE, "tsconfig.test.json"),
-    WF_HOME: home,
-    WF_METRICS: "off",
-    WF_CWD: repo,
-    WF_DASH_PORT: String(port),
-    WF_DASH_START_TIMEOUT_MS: "30000", // a start may be slow while the whole suite runs
-    ...extra,
-  };
+  const env = childEnv({ WF_CWD: repo, ...extra });
   const started: string[] = [];
   const call = async (name: string, args: Record<string, unknown>) => {
     const result = JSON.parse(((await client.callTool({ name, arguments: args })).content as Array<{ text: string }>)[0]!.text);
@@ -152,16 +153,7 @@ test("the dashboard setting in a repo config is reported in the violations and h
 });
 
 function wfCli(extra: Record<string, string>, ...args: string[]) {
-  const env = {
-    ...(getDefaultEnvironment() as Record<string, string>),
-    TSX_TSCONFIG_PATH: join(PACKAGE, "tsconfig.test.json"),
-    WF_HOME: home,
-    WF_METRICS: "off",
-    WF_DASH_PORT: String(port),
-    WF_DASH_START_TIMEOUT_MS: "30000",
-    ...extra,
-  };
-  const r = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), join(PACKAGE, "src", "cli.ts"), ...args, "--cwd", repo], { env, encoding: "utf8" });
+  const r = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), join(PACKAGE, "src", "cli.ts"), ...args, "--cwd", repo], { env: childEnv(extra), encoding: "utf8" });
   return { status: r.status, stderr: r.stderr, out: JSON.parse(r.stdout) as Record<string, any> };
 }
 
