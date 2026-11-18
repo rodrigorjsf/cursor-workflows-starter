@@ -145,15 +145,18 @@ export function validateConfigData(data: unknown): Array<{ path: Pointer; messag
     });
 }
 
-/** Reads and validates one config file. A missing file is `undefined`; one that does not parse or validate throws `ConfigError`. */
-export function loadConfigFile(path: string): LoadedConfig | undefined {
+export function readConfigJson(path: string): unknown {
   if (!existsSync(path)) return undefined;
-  let data: unknown;
   try {
-    data = JSON.parse(readFileSync(path, "utf8"));
+    return JSON.parse(readFileSync(path, "utf8"));
   } catch (err) {
     throw new ConfigError([{ ref: path, path: "", message: `invalid JSON: ${errorText(err)}` }]);
   }
+}
+
+export function loadConfigFile(path: string): LoadedConfig | undefined {
+  const data = readConfigJson(path);
+  if (data === undefined) return undefined;
   const errors = validateConfigData(data);
   if (errors.length) throw new ConfigError(errors.map((e) => ({ ref: path, ...e })));
   return { path, data: data as ConfigFile };

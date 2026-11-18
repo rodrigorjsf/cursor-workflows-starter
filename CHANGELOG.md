@@ -4,6 +4,17 @@
 
 ### Adicionado
 
+- **O `implement-issue` tem dois ajustes de entrega, `worktree` e `openPr`, e o `wf config set` os grava** (issue #117, spec #114,
+  [ADR-0012](docs/adr/0012-delivery-modes.md)). `workflows.implement-issue.settings.worktree` (padrão `false`) e `.openPr` (padrão
+  `true`) valem nos dois arquivos de configuração, e os argumentos `worktree` e `openPr` do run valem mais: args, arquivo do
+  repositório, arquivo global, padrão do código. O `wf start` e o `wf run` ganharam os atalhos `--worktree` (`worktree: true`) e
+  `--no-pr` (`openPr: false`); um atalho que contradiz a mesma chave em `--args` é recusado com exit 2, sem criar job. O novo
+  `wf config set <caminho.com.pontos> <valor> [--repo]` grava o arquivo global, ou o do repositório com `--repo`: um valor que é
+  JSON entra como JSON, o resto como texto, e um `.` dentro de um nome se escreve `\.`. Ele valida o arquivo inteiro que
+  resultaria (o esquema e os nomes que cada workflow declara), recusa um valor inválido ou um caminho desconhecido com o erro
+  de campo sem tocar no arquivo, e grava de forma atômica. O `wf config show` já dizia a camada de cada ajuste, e agora diz a dos
+  dois novos. Até o modo da árvore principal chegar, o run ainda trabalha num worktree com qualquer valor de `worktree`.
+
 - **O dashboard aprova ou troca as seams que um run do `implement-issue` propôs** (issue #98). Um run MED ou HIGH que parou em
   `seams-proposed` (ou, com `seams` e sem `testCommand`, em `test-command-proposed`) mostra no Run view o painel **Seams
   proposed** (ou **Test command proposed**): as seams, as fatias e o comando de teste que o run executa depois da aprovação,
@@ -252,6 +263,10 @@
   os comentários da issue antes de postar. O texto passa pelo mesmo redator e pela mesma trava de segredos dos outros comentários.
 
 ### Mudado
+
+- **O `implement-issue` abre o PR (o MR no GitLab) por padrão** (issue #117). O padrão de `openPr` passou de `false` para `true`:
+  um run sem o ajuste e sem o argumento empurra a branch, abre o PR e devolve o link em `prUrl` e no cartão. Quem quer só a branch
+  commitada passa `openPr: false` (ou `--no-pr`), ou grava `wf config set workflows.implement-issue.settings.openPr false`.
 
 - **O `npm run typecheck` pega o índice que pode não existir, o import que sobra, a promessa perdida e o `JSON.parse` com cast.** O
   `packages/runtime/tsconfig.json`, que os seis projetos do `tsc` estendem, liga `noUncheckedIndexedAccess`, `noImplicitOverride`,

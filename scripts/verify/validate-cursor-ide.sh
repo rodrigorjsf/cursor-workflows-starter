@@ -376,7 +376,7 @@ scenario_stage 4 "implement-issue LOW opens a PR on the sandbox repo"
 if ! keep_recorded 4; then
   step "In the same chat, type:"
   say "    /run-workflow implement-issue 1, and open the pull request (openPr: true)"
-  note "implement-issue opens no PR unless asked. It takes some minutes and about 340k tokens (measured: 339k)."
+  note "implement-issue opens the PR by default; openPr: true only says so out loud. It takes some minutes and about 340k tokens (measured: 339k)."
   pause "Press Enter when the chat reports the job finished (or failed)."
   open_url "https://github.com/$SANDBOX_REPO/pulls"
   say "What wf reports for the jobs of the sandbox:"

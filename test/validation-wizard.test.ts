@@ -186,7 +186,7 @@ test("it tells the person exactly what to type in the chat for each scenario, an
   for (const typed of ["/run-workflow smoke", "/run-workflow implement-issue 1", "/run-workflow implement-issue 2", "/run-workflow implement-issue 3"]) {
     assert.ok(r.stdout.includes(typed), `the wizard never says to type ${typed}`);
   }
-  assert.match(r.stdout, /openPr: true/, "scenario 4 must ask for the PR: implement-issue opens none by default");
+  assert.match(r.stdout, /openPr: true/, "scenario 4 must ask for the PR out loud");
   assert.match(r.stdout, /list_workflows[\s\S]*cancel_workflow/, "scenario 2 names the five tools");
   assert.ok(m.calls().includes(`open https://github.com/${REPO}/pulls`), "the PR page is opened for the person");
 });
