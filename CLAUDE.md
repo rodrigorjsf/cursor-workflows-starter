@@ -36,6 +36,7 @@ Workflows live in `packages/runtime/workflows/*.ts` (built in) and `.agents/work
 - Before creating or editing a workflow, load the `cursor-workflow-authoring` skill
   (`skills/cursor-workflow-authoring/`).
 - To convert existing skills and subagents, use `/skill-to-workflow`.
+- Prove every dashboard change with `.cursor/skills/verify-dashboard` (`/principle-prove-it-works`): launch the isolated instance, drive a mapped feature, keep the evidence. A render or a unit test is not that proof.
 - After any change run `mise exec -- npm run check` (typecheck plus every test, docs and generated pages included; `mise.toml`
   pins Node 22.23.4). Tests are offline and use `packages/runtime/test/fake-sdk.ts`. It takes minutes: an agent runs
   `mise exec -- npm run check:log` with `run_in_background`, which logs to `.check.log` and prints the totals and `EXIT=`.
