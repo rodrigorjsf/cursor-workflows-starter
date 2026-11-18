@@ -14,3 +14,7 @@ auth.json
 .probe/
 .claude/skills/
 .check.log
+
+# verify-dashboard: prova local e estado da instância (current.json, pid, log do browser)
+.cursor/skills/verify-dashboard/evidence/
+.cursor/skills/verify-dashboard/state/
