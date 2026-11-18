@@ -98,11 +98,12 @@ export const codegraphCalls = (): Array<{ command: string; cwd: string }> =>
   (existsSync(process.env.FAKE_CODEGRAPH_LOG!) ? readFileSync(process.env.FAKE_CODEGRAPH_LOG!, "utf8") : "")
     .split("\n")
     .filter(Boolean)
-    .map((line) => ({ command: line.slice(0, line.indexOf(" ")), cwd: line.slice(line.indexOf(" ") + 1) }));
+    .map((line) => JSON.parse(line) as { command: string; cwd: string });
 
-export const failCodegraph = (message: string) => {
-  process.env.FAKE_CODEGRAPH_FAIL = message;
-};
+export function seedCodeIndex(tree: string) {
+  mkdirSync(join(tree, ".codegraph"), { recursive: true });
+  writeFileSync(join(tree, ".codegraph", "codegraph.db"), SQLITE_HEADER);
+}
 
 export function removeCodegraph() {
   rmSync(join(fx.root, "bin", "codegraph"));
@@ -272,23 +273,33 @@ if (route === "issue view" && a[0] === "issue") {
 } else fail("fake glab: unsupported " + a.join(" "), 2);
 `;
 
+const CODEGRAPH_RECORDINGS_PATH = join(import.meta.dirname, "fixtures", "codegraph", "recordings.json");
+const SQLITE_HEADER = "SQLite format 3\u0000";
+
 const FAKE_CODEGRAPH = `#!/usr/bin/env node
 const fs = require("fs");
 const path = require("path");
-const [verb] = process.argv.slice(2);
-fs.appendFileSync(process.env.FAKE_CODEGRAPH_LOG, verb + " " + process.cwd() + "\\n");
+const REC = JSON.parse(fs.readFileSync(${JSON.stringify(CODEGRAPH_RECORDINGS_PATH)}, "utf8"));
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.FAKE_CODEGRAPH_LOG, JSON.stringify({ command: args.join(" "), cwd: process.cwd() }) + "\\n");
 const dir = path.join(process.cwd(), ".codegraph");
-if (process.env.FAKE_CODEGRAPH_FAIL) { process.stderr.write(process.env.FAKE_CODEGRAPH_FAIL); process.exit(1); }
-if (verb === "init") {
-  if (!fs.existsSync(dir)) { fs.mkdirSync(dir); fs.writeFileSync(path.join(dir, ".gitignore"), "*\\n!.gitignore\\n"); fs.writeFileSync(path.join(dir, "codegraph.db"), ""); }
-  process.exit(0);
+const db = path.join(dir, "codegraph.db");
+const HEADER = ${JSON.stringify(SQLITE_HEADER)};
+const hasIndex = fs.existsSync(db) && fs.readFileSync(db).subarray(0, HEADER.length).toString("latin1") === HEADER;
+const named = (verb) => args.length === 1 && args[0] === verb;
+const name = named("init") ? (hasIndex ? "init-existing" : "init-new")
+  : named("sync") ? (hasIndex ? "sync-initialized" : !fs.existsSync(dir) ? "sync-uninitialized" : fs.existsSync(db) ? "sync-corrupt-index" : "sync-gitignore-only")
+  : "unknown-command";
+const recording = REC.recordings[name];
+const fill = (text) => text.split(REC.placeholders.cwd).join(process.cwd()).split("'" + REC.recordings["unknown-command"].args[0] + "'").join("'" + args[0] + "'");
+process.stdout.write(fill(recording.stdout));
+process.stderr.write(fill(recording.stderr));
+if (name === "init-new") {
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [file, text] of Object.entries(recording.creates)) fs.writeFileSync(path.join(dir, file), text);
+  fs.writeFileSync(db, HEADER);
 }
-if (verb === "sync") {
-  if (!fs.existsSync(dir)) { process.stderr.write("CodeGraph not initialized in " + process.cwd()); process.exit(1); }
-  process.exit(0);
-}
-process.stderr.write("error: unknown command '" + verb + "'");
-process.exit(1);
+process.exit(recording.exitCode);
 `;
 
 export function issue(labels: string[], title = "Add subtract(a, b)") {
@@ -382,7 +393,6 @@ function setupFor(forge: TestForge) {
   fx.forgeStateFile = join(root, "forge.json");
   process.env.FAKE_FORGE_STATE = fx.forgeStateFile;
   process.env.FAKE_CODEGRAPH_LOG = join(root, "codegraph.log");
-  delete process.env.FAKE_CODEGRAPH_FAIL;
   fx.savedPath = process.env.PATH;
   process.env.PATH = `${bin}:${fx.savedPath}`;
   fx.handlers = defaults();
@@ -393,7 +403,6 @@ function setupFor(forge: TestForge) {
 
 export function teardown() {
   rmSync(join(process.env.WF_HOME!, "config.json"), { force: true }); // a test that declared forges in the global file leaves none behind
-  delete process.env.FAKE_CODEGRAPH_FAIL;
   process.env.PATH = fx.savedPath;
   script.length = 0;
   calls.length = 0;

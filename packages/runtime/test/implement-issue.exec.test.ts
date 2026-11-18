@@ -13,7 +13,7 @@ import implementIssue from "../workflows/implement-issue.js";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import { runnerConfigChanged } from "../workflows/implement-issue/tdd.js";
 import { writeRepoConfig } from "./config-fixtures.js";
-import { PLAN, SUB_CODE, SUB_TEST, branchOf, codegraphCalls, failCodegraph, failForge, fx, forgeState, git, issue, names, onOrigin, removeCodegraph, run, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
+import { PLAN, SUB_CODE, SUB_TEST, branchOf, codegraphCalls, failForge, fx, forgeState, git, issue, names, onOrigin, removeCodegraph, run, seedCodeIndex, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
 
 beforeEach(setup);
 afterEach(teardown);
@@ -500,28 +500,45 @@ test("a run that proposed seams and is then resumed with seams still posts the t
 
 const warningsOf = (runId: string) => eventsOf(runId).flatMap((e) => (e.type === "warning" ? [e.message] : []));
 const excludeLines = () => readFileSync(join(fx.repo, ".git", "info", "exclude"), "utf8").split("\n");
+const indexedIn = (tree: string, command: string) => ({ command, cwd: realpathSync(tree) });
 
-test("a run indexes the code before its first agent step: codegraph init where the tree has no .codegraph", async () => {
+test("a run indexes the code before its first agent step: codegraph init in the repository and in the worktree, where neither has .codegraph", async () => {
   issue(["complexity:low"]);
   const r = await run({});
   assert.equal(res(r).status, "done", JSON.stringify(res(r)));
-  assert.deepEqual(codegraphCalls(), [{ command: "init", cwd: realpathSync(fx.repo) }]);
+  assert.deepEqual(codegraphCalls(), [indexedIn(fx.repo, "init"), indexedIn(worktreeOf(r.runId), "init")]);
   const events = eventsOf(r.runId);
-  const indexed = events.findIndex((e) => e.type === "exec-start" && e.label === "codegraph init");
+  const indexed = events.flatMap((e, position) => (e.type === "exec-start" && e.label === "codegraph init" ? [position] : []));
   const firstAgent = events.findIndex((e) => e.type === "step-start");
-  assert.ok(indexed >= 0 && firstAgent > indexed, `the index command node (${indexed}) comes before the first agent step (${firstAgent})`);
+  assert.equal(indexed.length, 2);
+  assert.ok(indexed.every((position) => position < firstAgent), `the index command nodes (${indexed.join(", ")}) come before the first agent step (${firstAgent})`);
   assert.deepEqual(warningsOf(r.runId), []);
 });
 
-test("a run where .codegraph already exists syncs the index and does not initialize it again", async () => {
+test("a repository that already has an index is synced, and the new worktree, which has none, is initialized", async () => {
   issue(["complexity:low"]);
-  mkdirSync(join(fx.repo, ".codegraph"));
+  seedCodeIndex(fx.repo);
   const r = await run({});
   assert.equal(res(r).status, "done", JSON.stringify(res(r)));
-  assert.deepEqual(codegraphCalls(), [{ command: "sync", cwd: realpathSync(fx.repo) }]);
+  assert.deepEqual(codegraphCalls(), [indexedIn(fx.repo, "sync"), indexedIn(worktreeOf(r.runId), "init")]);
+  assert.deepEqual(warningsOf(r.runId), []);
 });
 
-test("the index step keeps .codegraph out of git: excluded once across a resume, absent from the status and from the delivery commit", async () => {
+test("a .codegraph folder that holds only its .gitignore (a clone of a repository that tracks it) is synced, found not initialized, and initialized", async () => {
+  issue(["complexity:low"]);
+  mkdirSync(join(fx.repo, ".codegraph"));
+  writeFileSync(join(fx.repo, ".codegraph", ".gitignore"), "*\n!.gitignore\n");
+  git(fx.repo, "add", "-f", ".codegraph/.gitignore");
+  git(fx.repo, "commit", "-qm", "track the index's gitignore");
+  const r = await run({});
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  const worktree = worktreeOf(r.runId);
+  assert.deepEqual(codegraphCalls(), [indexedIn(fx.repo, "sync"), indexedIn(fx.repo, "init"), indexedIn(worktree, "sync"), indexedIn(worktree, "init")]);
+  assert.ok(existsSync(join(fx.repo, ".codegraph", "codegraph.db")) && existsSync(join(worktree, ".codegraph", "codegraph.db")));
+  assert.deepEqual(warningsOf(r.runId), []);
+});
+
+test("the index step keeps .codegraph out of git: excluded once across a resume, absent from both trees' status and from the delivery commit", async () => {
   issue(["complexity:medium"]);
   const first = await run({});
   assert.equal(res(first).status, "seams-proposed", JSON.stringify(res(first)));
@@ -530,9 +547,11 @@ test("the index step keeps .codegraph out of git: excluded once across a resume,
 
   const second = await run({ approveSeams: true }, first.runId);
   assert.equal(res(second).status, "done", JSON.stringify(res(second)));
-  assert.deepEqual(codegraphCalls().map((c) => c.command), ["init", "sync"], "the resume brings the index up to date");
+  assert.deepEqual(codegraphCalls(), [indexedIn(fx.repo, "init"), indexedIn(fx.repo, "sync"), indexedIn(worktreeOf(first.runId), "init")], "the resume brings the index of the repository up to date");
   assert.equal(excludeLines().filter((line) => line === ".codegraph/").length, 1, "the resume does not add it again");
-  assert.equal(git(fx.repo, "status", "--porcelain").split("\n").filter((line) => line.includes(".codegraph")).length, 0, "git does not list the index folder");
+  for (const tree of [fx.repo, worktreeOf(first.runId)]) {
+    assert.deepEqual(git(tree, "status", "--porcelain").split("\n").filter((line) => line.includes(".codegraph")), [], `git lists no index folder in ${tree}`);
+  }
   const delivered = git(fx.repo, "show", "--name-only", "--format=", branchOf(first.runId)).split("\n").filter(Boolean);
   assert.ok(delivered.length > 0 && delivered.every((path) => !path.startsWith(".codegraph/")), `the delivery commit holds ${delivered.join(", ")}`);
 });
@@ -542,7 +561,8 @@ test("the index step runs under the network timeout of the settings", async () =
   writeRepoConfig(fx.repo, { workflows: { "implement-issue": { settings: { networkTimeoutSec: 7 } } } });
   const r = await run({});
   assert.equal(res(r).status, "done", JSON.stringify(res(r)));
-  assert.equal(execStarts(eventsOf(r.runId)).find((s) => s.label === "codegraph init")?.timeoutMs, 7000);
+  const timeouts = execStarts(eventsOf(r.runId)).filter((s) => s.label === "codegraph init").map((s) => s.timeoutMs);
+  assert.deepEqual(timeouts, [7000, 7000]);
 });
 
 test("a machine without codegraph gets one warning and the run finishes, with no exclude line written for an index that never was", async () => {
@@ -556,13 +576,14 @@ test("a machine without codegraph gets one warning and the run finishes, with no
   assert.ok(!excludeLines().includes(".codegraph/"));
 });
 
-test("a codegraph that exits non-zero gets one warning with what it printed and the run finishes", async () => {
+test("a codegraph that fails on the index it finds gets one warning with what it printed, the worktree is left alone, and the run finishes", async () => {
   issue(["complexity:low"]);
-  failCodegraph("database disk image is malformed");
+  mkdirSync(join(fx.repo, ".codegraph"));
+  writeFileSync(join(fx.repo, ".codegraph", "codegraph.db"), "not a database");
   const r = await run({});
   assert.equal(res(r).status, "done", JSON.stringify(res(r)));
   const warnings = warningsOf(r.runId);
   assert.equal(warnings.length, 1, warnings.join(" | "));
-  assert.match(warnings[0]!, /could not index the code: codegraph init exited with code 1: database disk image is malformed/);
-  assert.equal(codegraphCalls().length, 1, "the step is not retried");
+  assert.match(warnings[0]!, /could not index the code: codegraph sync exited with code 1: ✗ CodeGraph not initialized in /);
+  assert.deepEqual(codegraphCalls(), [indexedIn(fx.repo, "sync")], "the step is not retried and the worktree is not indexed");
 });

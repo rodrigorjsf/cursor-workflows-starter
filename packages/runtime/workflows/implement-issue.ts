@@ -101,7 +101,7 @@
 // review que bloqueia e o alreadySatisfied só têm testes offline.
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -327,11 +327,20 @@ function tierOfLabels(labels: Array<{ name: string }>, labelTiers: Record<string
 
 const CODE_INDEX_DIR = ".codegraph";
 
-async function refreshCodeIndex(cmd: Commands, cwd: string, warn: (message: string) => void): Promise<void> {
-  if (!findOnPath("codegraph", process.env.PATH)) return warn("could not index the code: codegraph is not on the PATH, so the step agents work without a code index");
-  if (!ensureExcluded(cwd, `${CODE_INDEX_DIR}/`)) return warn(`could not index the code: could not exclude ${CODE_INDEX_DIR}/ from git in ${cwd}, so the index would show up as changes of the tree`);
-  const failure = await cmd.codegraph(cwd, existsSync(join(cwd, CODE_INDEX_DIR)) ? "sync" : "init");
+async function codeIndexFailure(cmd: Commands, cwd: string): Promise<string | undefined> {
+  if (!findOnPath("codegraph", process.env.PATH)) return "codegraph is not on the PATH";
+  if (!ensureExcluded(cwd, `${CODE_INDEX_DIR}/`)) return `${CODE_INDEX_DIR}/ cannot be excluded from git in ${cwd}, so the index would show up as changes of the tree`;
+  const dir = join(cwd, CODE_INDEX_DIR);
+  const present = existsSync(dir);
+  const failure = await cmd.codegraphFailure(cwd, present ? "sync" : "init");
+  if (failure && present && readdirSync(dir).every((entry) => entry === ".gitignore")) return cmd.codegraphFailure(cwd, "init");
+  return failure;
+}
+
+async function refreshCodeIndex(cmd: Commands, cwd: string, warn: (message: string) => void): Promise<boolean> {
+  const failure = await codeIndexFailure(cmd, cwd);
   if (failure) warn(`could not index the code: ${failure}; the step agents work without a current code index`);
+  return failure === undefined;
 }
 
 const branchExists = (cmd: Commands, cwd: string, branch: string) => cmd.gitIs(cwd, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`);
@@ -594,7 +603,7 @@ export default defineWorkflow<Args>({
           };
         }
       }
-      await refreshCodeIndex(cmd, ctx.cwd, (message) => ctx.warn(message));
+      const codeIndexWorks = await refreshCodeIndex(cmd, ctx.cwd, (message) => ctx.warn(message));
       const labelTier = tierOfLabels(issue.labels, settings.labelTiers);
       let tier = labelTier;
       if (!tier) {
@@ -838,6 +847,7 @@ export default defineWorkflow<Args>({
         progress.data.baseCommit = (await cmd.gitRead(worktree, "rev-parse", "HEAD")).trim();
         progress.save();
       }
+      if (codeIndexWorks) await refreshCodeIndex(cmd, worktree, (message) => ctx.warn(message));
       // Uma etapa de escrita interrompida (o processo caiu no meio, ou o run foi cancelado nela): volta ao estado de antes dela.
       if (progress.data.inFlight) {
         const { id, before, interrupted, execution: startedIn } = progress.data.inFlight;

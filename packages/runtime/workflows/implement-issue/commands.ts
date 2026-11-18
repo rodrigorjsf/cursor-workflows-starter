@@ -194,7 +194,7 @@ export class Commands {
     throw new CommandError(cli, args, r, this.timeouts.networkMs);
   }
 
-  async codegraph(cwd: string, command: "init" | "sync"): Promise<string | undefined> {
+  async codegraphFailure(cwd: string, command: "init" | "sync"): Promise<string | undefined> {
     const args = [command];
     const r = await this.exec("codegraph", args, this.options("codegraph", args, cwd, this.timeouts.networkMs));
     return r.ok ? undefined : new CommandError("codegraph", args, r, this.timeouts.networkMs).message;
