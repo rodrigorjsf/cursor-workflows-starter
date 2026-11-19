@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildRunGraph, executionsOf } from "../run-view/run-graph.js";
-import { ExecutionPicker, RunCost } from "../run-view/RunView.js";
+import { ExecutionPicker, RunCost, RunView } from "../run-view/RunView.js";
 import { executionNote, headerStatus, offeredActions, runElapsed } from "../run-view/run-status.js";
 import { render, textOf } from "./render.js";
 import { cloudAgent, execEnd, execStart, phase, runStart, sandboxRun, stamp, step, stepEnd, stepStart, type Draft } from "./run-log.js";
@@ -157,4 +157,13 @@ test("the execution picker carries the note of the execution on show, and is not
   const html = render(ExecutionPicker, { count: 2, current: 0, note: "Execution 1 failed: gh issue view (exit 1)", onPick: () => {} });
   assert.match(html, /<p[^>]*role="alert"[^>]*>Execution 1 failed: gh issue view \(exit 1\)<\/p>/);
   assert.equal(render(ExecutionPicker, { count: 1, current: 0, onPick: () => {} }), "");
+});
+
+test("the header has a visible button back to the Runs list, and the breadcrumb's Runs is a link to the same place", () => {
+  const html = render(RunView, { runId: "wf-aaaa0001" });
+  const back = /<a class="btn back" href="\/#\/runs">(.*?)<\/a>/.exec(html);
+  assert.ok(back, "a link styled as a button points at #/runs");
+  assert.equal(textOf(back[1]!), "← Back to Runs");
+  assert.match(html, /<nav class="crumbs" aria-label="Breadcrumb"><a href="\/#\/runs">Runs<\/a>/);
+  assert.ok(html.indexOf(back[0]) < html.indexOf('class="run-stats"'), "the button is in the header, above the run's numbers");
 });

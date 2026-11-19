@@ -350,6 +350,14 @@ para um run em andamento e para um que já terminou):
   **Replay** anda pelos eventos da execução escolhida.
 - **Clicar** num nó (ou Enter nele) abre o [log da etapa](#o-log-de-uma-etapa) ao lado do grafo (abaixo de 800 px de
   largura, por cima dele).
+- **Menu de etapas.** À esquerda do grafo, um menu lista as etapas, e os comandos marcados com `node: true`, agrupados pela
+  fase em que o grafo os desenha, na ordem do run e cada um com o estado (`ok`, `failed`, `running`…). Clicar numa etapa
+  centraliza o grafo nela, no zoom em que o leitor está (ou no legível, se o zoom for menor), e a seleciona: o log dela abre,
+  como num clique no nó. O botão **Steps** recolhe o menu para o grafo ficar com o espaço; abaixo de 800 px de largura o menu
+  começa recolhido e, aberto, cobre o grafo.
+- **Voltar.** O cabeçalho tem o botão **Back to Runs**, que leva à lista (`#/runs`), e o **Runs** do breadcrumb é um link
+  sublinhado. O menu, o botão e o breadcrumb se operam pelo teclado: Tab chega a cada um e Enter (ou espaço, num botão) o
+  aciona.
 - **Replay.** Num run que não está em andamento, **Replay** reconstrói o grafo evento a evento, na ordem do log, com
   velocidade de 1× a 20×, pausa e uma barra para ir a qualquer ponto. O grafo de qualquer trecho do log é o mesmo que o
   run teria naquele instante, e o painel de log aberto mostra o log da etapa como ele estava naquele ponto (o replay anda

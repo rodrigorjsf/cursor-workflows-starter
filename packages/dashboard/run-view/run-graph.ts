@@ -156,6 +156,27 @@ export function shownEvents(events: readonly RunEvent[], execution: Execution, r
   return { execution: events.slice(execution.from, end), run: events.slice(0, end) };
 }
 
+export interface MenuStep {
+  id: string;
+  label: string;
+  state: NodeState;
+}
+
+export interface MenuPhase {
+  index: number;
+  title: string;
+  steps: MenuStep[];
+}
+
+export const stepMenu = (graph: RunGraph): MenuPhase[] =>
+  graph.lanes
+    .map((lane) => ({
+      index: lane.index,
+      title: lane.title,
+      steps: graph.nodes.filter((node) => isWork(node.kind) && node.lane === lane.index).map(({ id, label, state }) => ({ id, label, state })),
+    }))
+    .filter((phase) => phase.steps.length > 0);
+
 const START = "start";
 
 const str =(value: unknown): string | undefined => (typeof value === "string" ? value : undefined);

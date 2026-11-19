@@ -4,7 +4,7 @@
 // `engine-log.test.ts` checks that against a real run).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type GraphNode, KNOWN_EVENT_VERSION, type RunEvent, buildRunGraph, currentExecution, executionsOf, failedWork, joinIdOf, shownEvents } from "../run-view/run-graph.js";
+import { type GraphNode, KNOWN_EVENT_VERSION, type RunEvent, buildRunGraph, currentExecution, executionsOf, failedWork, joinIdOf, shownEvents, stepMenu } from "../run-view/run-graph.js";
 import { type Draft, cloudAgent, execEnd, execStart, groupEnd, groupStart, phase, ref, RUN, runStart, sandboxRun, stamp, step, stepEnd, stepStart, T0 } from "./run-log.js";
 
 const idsOf = (nodes: GraphNode[]) => nodes.map((n) => n.id);
@@ -476,6 +476,64 @@ test("a run with no phases has one unnamed lane", () => {
   const graph = buildRunGraph(stamp([runStart, ...step("s-a", "only")]));
   assert.deepEqual(graph.lanes.map(({ index, title }) => [index, title]), [[0, ""]]);
   assert.equal(laneOf(graph, "s-a"), 0);
+});
+
+test("the step menu lists the steps and the commands drawn as nodes by phase, in run order, with their state; the start, the forks and joins, the listed commands and a phase with no step stay out", () => {
+  const branch = { parentId: "g1", groupId: "g1" };
+  const graph = buildRunGraph(
+    stamp([
+      runStart,
+      phase("Plan"),
+      execStart("x-0", "git fetch"),
+      execEnd("x-0", "git fetch"),
+      ...step("s1", "plan"),
+      phase("Build"),
+      groupStart("g1", "parallel", 2, "s1"),
+      ...step("b1", "implement-ui", branch),
+      stepStart("b2", "implement-api", branch),
+      stepEnd("b2", "implement-api", branch, { ok: false, errorKind: "agent-error" }),
+      groupEnd("g1", false),
+      phase("Ship"),
+      execStart("x-1", "suite:final", { parentId: "g1" }, { node: true }),
+      execEnd("x-1", "suite:final", { parentId: "g1" }),
+      stepStart("s3", "push", { parentId: "x-1" }),
+      phase("Cleanup"),
+      execStart("x-2", "git gc"),
+      execEnd("x-2", "git gc"),
+    ]),
+  );
+
+  assert.deepEqual(stepMenu(graph), [
+    { index: 0, title: "Plan", steps: [{ id: "s1", label: "plan", state: "ok" }] },
+    {
+      index: 1,
+      title: "Build",
+      steps: [
+        { id: "b1", label: "implement-ui", state: "ok" },
+        { id: "b2", label: "implement-api", state: "failed" },
+      ],
+    },
+    {
+      index: 2,
+      title: "Ship",
+      steps: [
+        { id: "x-1", label: "suite:final", state: "ok" },
+        { id: "s3", label: "push", state: "running" },
+      ],
+    },
+  ]);
+});
+
+test("the step menu of the sandbox run lists every step of its graph under the phase it is drawn in", () => {
+  const graph = buildRunGraph(sandboxRun(), { settled: true });
+  const menu = stepMenu(graph);
+
+  assert.deepEqual(menu.map((p) => p.title), ["Implementation", "Review", "Delivery"]);
+  const listed = menu.flatMap((p) => p.steps.map((s) => s.id));
+  const steps = graph.nodes.filter((n) => n.kind === "step").map((n) => n.id);
+  assert.equal(steps.length, 9);
+  assert.deepEqual(listed.filter((id) => steps.includes(id)).sort(), steps.sort());
+  assert.deepEqual(menu[0]!.steps.map((s) => [s.label, s.state]), [["suite:baseline", "ok"], ["test-1", "ok"], ["suite:red:1", "failed"], ["code-1", "ok"], ["suite:green:1", "ok"]]);
 });
 
 test("the run's summary says whether what it spent is final: not once an attempt's cost was reported as not final", () => {
