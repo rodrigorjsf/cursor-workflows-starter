@@ -28,9 +28,17 @@ falhas de segurança.
   (controle), e o host da allowlist respondeu 200. Detalhes em [`docs/research/verificacoes-locais.md`](docs/research/verificacoes-locais.md) §16.
   - **A leitura da chave só é bloqueada com `readBoundary: "workspace"`.** Num run sem essa chave, a mesma etapa leu o
     `~/.cursor/sdk/auth.json` (`cat` saiu com 0). Ligar o sandbox sozinho nega a rede e a escrita fora do repositório, o
-    que corta o caminho "ler a chave e mandá-la embora", mas não impede a leitura. O kit não grava esse arquivo por você: ponha `{ "readBoundary": "workspace" }` no
-    `.cursor/sandbox.json` do repositório, que foi o arquivo medido, e confira com `wf doctor`, que diz se o `readBoundary` está posto.
+    que corta o caminho "ler a chave e mandá-la embora", mas não impede a leitura. O `wf init` grava `"readBoundary": "workspace"` no
+    `.cursor/sandbox.json` do repositório, que foi o arquivo medido, e mantém as outras chaves dele; confira com `wf doctor`, que diz se o `readBoundary` está posto.
     O `~/.cursor/sandbox.json`, que a doc do Cursor diz valer para todos os workspaces, o kit não mediu.
+  - **Um `.env` fora do git não fica ao alcance de uma etapa do `implement-issue`.** Quando o repositório tem um `.env` ou
+    `.env.*` não rastreado ou ignorado, em qualquer pasta, o run não trabalha na pasta do usuário (o modo da árvore principal,
+    o padrão): usa um worktree só dele, e o log diz isso. No worktree do run, o `.cursor/sandbox.json` sempre tem
+    `readBoundary: "workspace"`: o run o põe quando a base não o traz, e a entrega deixa essa mudança de fora. Medido em
+    2026-11-19 (Linux x64, WSL2, `composer-2.5`, sandbox ligado), com um `cat` do `.env` da pasta principal pelo caminho
+    absoluto, de dentro de um worktree em `.workflows/worktrees/`: com o `readBoundary` no worktree, commitado ou escrito
+    sem commit, `Permission denied`; sem ele, o `cat` saiu com 0. Um `cat` de um arquivo do próprio worktree saiu com 0 nos
+    três runs, e o mesmo `cat` fora do sandbox também. Sem o sandbox ligado (`caps.requireSandbox`), nada impede essa leitura.
   - **O padrão mudou:** o `~/.cursor-workflows/config.json` que o instalador grava traz `caps.requireSandbox: true`, que liga o
     sandbox em toda etapa, e a instalação que já tinha esse arquivo não muda. No Linux o SDK exige `bubblewrap` ou um
     kernel com Landlock: nesta máquina o sandbox impôs as regras pelo Landlock (`CURSOR_SANDBOX_LANDLOCK_STATUS=fully_enforced`),

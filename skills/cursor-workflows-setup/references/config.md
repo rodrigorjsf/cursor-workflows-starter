@@ -107,7 +107,8 @@ Under `workflows.<name>`:
     so copy the printed list and change what differs. Paths are relative to the repository root: an absolute path, a `..`
     segment or a line break is refused when the config loads.
   - `worktree`: `false` (default) or `true`, the delivery mode. `false` checks the run's branch out in the user's own
-    folder, which must be clean, with one such run per repository; `true` works in a worktree of the run's own. The run's
+    folder, which must be clean, with one such run per repository; `true` works in a worktree of the run's own. A repo with a `.env` or `.env.*` file outside git
+    (untracked or ignored, in any folder) gets a worktree run even with `false`, and the log says so. The run's
     `worktree` argument (`wf start --worktree`) overrides the files.
   - `openPr`: `true` (default) pushes the branch and opens the PR (the MR on GitLab) when the run delivers, and returns
     the link as `prUrl`; `false` leaves the branch committed locally, with no push and no PR. The run's `openPr` argument
