@@ -150,6 +150,10 @@ export function executionsOf(events: readonly RunEvent[]): Execution[] {
 
 export const currentExecution = (executions: readonly Execution[], picked: number | undefined): number => Math.min(picked ?? executions.length - 1, executions.length - 1);
 
+export const replayLength = (execution: Execution): number => execution.to - execution.from;
+
+export const atReplay = <T>(items: readonly T[], execution: Execution, position: number): T | undefined => (position < 1 ? undefined : items[execution.from + position - 1]);
+
 export function shownEvents(events: readonly RunEvent[], execution: Execution, replayAt: number | null): { execution: RunEvent[]; run: RunEvent[] } {
   if (replayAt === null) return { execution: events.slice(execution.from, execution.to), run: [...events] };
   const end = Math.min(execution.from + replayAt, execution.to);

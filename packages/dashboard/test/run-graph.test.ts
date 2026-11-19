@@ -4,7 +4,7 @@
 // `engine-log.test.ts` checks that against a real run).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type GraphNode, KNOWN_EVENT_VERSION, type RunEvent, buildRunGraph, currentExecution, executionsOf, failedWork, joinIdOf, shownEvents, stepMenu } from "../run-view/run-graph.js";
+import { type GraphNode, KNOWN_EVENT_VERSION, type RunEvent, atReplay, buildRunGraph, currentExecution, executionsOf, failedWork, joinIdOf, replayLength, shownEvents, stepMenu } from "../run-view/run-graph.js";
 import { type Draft, cloudAgent, execEnd, execStart, groupEnd, groupStart, phase, ref, RUN, runStart, sandboxRun, stamp, step, stepEnd, stepStart, T0 } from "./run-log.js";
 
 const idsOf = (nodes: GraphNode[]) => nodes.map((n) => n.id);
@@ -693,6 +693,18 @@ test("a replay of an execution shows that execution up to its position, after th
   assert.deepEqual(part.run, events.slice(0, second!.from + 3), "the run as it stood: the first execution whole, the second so far");
   assert.deepEqual(idsOf(buildRunGraph(part.execution).nodes), ["start", "s-a"], "the second execution so far has its start and its first step only");
   assert.deepEqual(shownEvents(events, first!, 0).execution, []);
+});
+
+test("a replay position names the last event it shows, and its log line, counted from the start of the execution on view", () => {
+  const events = failedThenResumed();
+  const [first, second] = executionsOf(events);
+  const lines = events.map((_, index) => 100 + index);
+
+  assert.equal(replayLength(second!), events.length - second!.from);
+  assert.equal(atReplay(events, second!, 1), events[second!.from], "position 1 of the second execution is its run-start");
+  assert.equal(atReplay(lines, second!, 3), 100 + second!.from + 2);
+  assert.equal(atReplay(lines, first!, 2), 101);
+  assert.equal(atReplay(lines, first!, 0), undefined, "nothing is shown yet");
 });
 
 test("a step names the attempts that ran in the execution on show: the ones of a resume are not in the execution before it, and one served from the journal ran none", () => {

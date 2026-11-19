@@ -10,7 +10,7 @@ import { argsHashOf } from "./resume-command.js";
 import { CommandPanel, PhasePanel, StepLogPanel, closesOnEscape } from "./StepLogPanel.js";
 import { frameOf, jumpTarget, panTarget } from "./framing.js";
 import { formatCents, formatCount, formatDuration } from "../app/format.js";
-import { type MenuPhase, type RunGraph, type RunProgress, buildRunGraph, commandCount, currentExecution, executionsOf, isWork, shownEvents, stepMenu } from "./run-graph.js";
+import { type MenuPhase, type RunGraph, type RunProgress, atReplay, buildRunGraph, commandCount, currentExecution, executionsOf, isWork, replayLength, shownEvents, stepMenu } from "./run-graph.js";
 import { costUnknown, executionNote, headerStatus, offeredActions, runElapsed } from "./run-status.js";
 import { type Box, type RunLayout, laneTitleBox, layoutRunGraph } from "./run-layout.js";
 import { type Connection, useRunEvents } from "./use-run-events.js";
@@ -340,7 +340,7 @@ export function RunView({ runId }: { runId: string }) {
   const executions = useMemo(() => executionsOf(events), [events]);
   const current = currentExecution(executions, picked);
   const execution = executions[current]!;
-  const executionLength = execution.to - execution.from;
+  const executionLength = replayLength(execution);
   const shown = useMemo(() => shownEvents(events, execution, replayAt), [events, execution.from, execution.to, replayAt]);
   const settled = replaying ? replayAt >= executionLength : status !== undefined && status !== "running";
   const executionSettled = settled || current < executions.length - 1;
@@ -395,11 +395,11 @@ export function RunView({ runId }: { runId: string }) {
     }
     const timer = setTimeout(() => {
       let next = replayAt + 1;
-      while (next < executionLength && !VISIBLE.has(String(events[execution.from + next - 1]?.type))) next++;
+      while (next < executionLength && !VISIBLE.has(String(atReplay(events, execution, next)?.type))) next++;
       setReplayAt(Math.min(next, executionLength));
     }, SPEEDS[speed]![1]);
     return () => clearTimeout(timer);
-  }, [playing, replayAt, speed, events, execution.from, executionLength]);
+  }, [playing, replayAt, speed, events, execution, executionLength]);
 
   const togglePlay = () => {
     if (!playing && replayAt !== null && replayAt >= executionLength) setReplayAt(FIRST_FRAME);
@@ -417,7 +417,7 @@ export function RunView({ runId }: { runId: string }) {
   const openCommand = (selected?.commands ?? phase?.commands)?.find((c) => c.id === commandId);
   const menu = useMemo(() => stepMenu(graph), [graph]);
   /** In a replay, the log line it has reached; at its end, and outside a replay, the whole log. */
-  const upTo = replaying && replayAt < executionLength ? (ids[execution.from + replayAt - 1] ?? 0) : undefined;
+  const upTo = replaying && replayAt < executionLength ? (atReplay(ids, execution, replayAt) ?? 0) : undefined;
   const counts = { steps: whole.nodes.filter((n) => n.kind === "step").length, commands: commandCount(whole) };
   const header = headerStatus({ api: { status, error }, run, replaying, settled });
   const offered = offeredActions(status, whole, error);
@@ -519,7 +519,7 @@ export function RunView({ runId }: { runId: string }) {
           {replaying && (
             <>
               <button type="button" className="btn" onClick={togglePlay}>
-                {playing ? "⏸ Pause" : replayAt >= events.length ? "↻ Again" : "▶ Play"}
+                {playing ? "⏸ Pause" : replayAt >= executionLength ? "↻ Again" : "▶ Play"}
               </button>
               <input
                 type="range"
