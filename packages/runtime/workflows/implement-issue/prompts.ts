@@ -75,6 +75,13 @@ export const TEST_INSTRUCTIONS = `Write ONE failing test for the slice below (TD
 Report the test file and name through the submit_result tool. If the behaviour already exists and a test of it passes
 without implementation, answer alreadySatisfied: true and show the evidence (where the code already does it).`;
 
+export const LOW_SLICE_TEST_IDEA =
+  "cover every case the issue lists, each as an assertion of this one test, with the expected values taken from the issue's own examples";
+
+export const extraSliceTestIdea = (quote: string) =>
+  "A reviewer reported this behaviour as missing, so it may already hold: write its test first, and if the test passes without " +
+  `implementation, answer alreadySatisfied as the instructions above say. Issue requirement: "${quote}"`;
+
 /** Etapa green: o mínimo para passar, sem mexer em testes. */
 export const CODE_INSTRUCTIONS = `The test below fails. Write the least code that makes it pass (TDD, green step).
 - Do not change test files: the test is the specification.

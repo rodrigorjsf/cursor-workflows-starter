@@ -224,8 +224,7 @@ test("an extra slice tells the test step that the reviewer may be wrong and the 
   };
   await run({});
   const prompt = fx.prompts.find((p) => p.label === "test-extra-1")!.msg;
-  assert.match(prompt, /Test idea: issue requirement: "devolve a - b"\. A reviewer reported it as missing, so it may already hold/);
-  assert.match(prompt, /answer alreadySatisfied: true/);
+  assert.match(prompt, /Test idea: A reviewer reported this behaviour as missing, so it may already hold: write its test first, .*alreadySatisfied as the instructions above say\. Issue requirement: "devolve a - b"/);
 });
 
 test("review que continua bloqueando depois da rodada de correção encerra com review-blocking", async () => {
