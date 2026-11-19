@@ -8,6 +8,7 @@
 
 // Verificação real: o que settingSources carrega em runs locais e a guarda contra recursão
 // (ver docs/research/verificacoes-locais.md §7). Rode sobre o repositório criado por setup-probe-repo.sh.
+import { DEFAULT_SETTING_SOURCES } from "../../packages/runtime/src/runtime/repo-code.js";
 import { defineWorkflow } from "../../packages/runtime/src/runtime/workflow.js";
 
 const SCHEMA = {
@@ -31,7 +32,7 @@ export default defineWorkflow({
   meta: { name: "verify-context", description: "Verification: AGENTS.md, Cursor and Claude Code hooks, .cursor/mcp.json and the recursion guard." },
   defaults: { model: { id: process.env.WF_VERIFY_MODEL ?? "composer-2.5" }, timeoutMs: 5 * 60_000, retries: 0 },
   async run(ctx) {
-    const project = await ctx.agent(PROMPT, { label: "with-project", tools: ["shell", "mcp"], schema: SCHEMA, settingSources: ["project", "mdm"] });
+    const project = await ctx.agent(PROMPT, { label: "with-project", tools: ["shell", "mcp"], schema: SCHEMA, settingSources: DEFAULT_SETTING_SOURCES });
     const none = await ctx.agent(PROMPT + " ", { label: "no-settings", tools: ["shell", "mcp"], schema: SCHEMA, settingSources: [] });
     return { status: "done", project, none };
   },
