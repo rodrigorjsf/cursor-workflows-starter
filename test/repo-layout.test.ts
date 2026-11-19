@@ -105,8 +105,12 @@ test("the user-facing rules for target repos are a marked template block", () =>
 
 /** Every .md under a folder, relative to the repo root. */
 function markdownFiles(dir: string): string[] {
+  return filesUnder(dir, /\.md$/);
+}
+
+function filesUnder(dir: string, extension: RegExp): string[] {
   return readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((e) =>
-    e.isDirectory() ? markdownFiles(join(dir, e.name)) : e.name.endsWith(".md") ? [join(dir, e.name)] : [],
+    e.isDirectory() ? (e.name === "node_modules" ? [] : filesUnder(join(dir, e.name), extension)) : extension.test(e.name) ? [join(dir, e.name)] : [],
   );
 }
 
@@ -277,12 +281,6 @@ test("reference files two skills share stay identical", () => {
   const shared = ["runtime-api.md", "rules.md", "recipes.md", "cost.md", "observability.md", "testing.md", "target-repos.md"];
   for (const file of shared) assert.equal(read(conversion, file), read(authoring, file), `${file} drifted: copy it from ${authoring} to ${conversion}`);
 });
-
-function filesUnder(dir: string, extension: RegExp): string[] {
-  return readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((e) =>
-    e.isDirectory() ? (e.name === "node_modules" ? [] : filesUnder(join(dir, e.name), extension)) : extension.test(e.name) ? [join(dir, e.name)] : [],
-  );
-}
 
 const SHIPPED_TEXT = [
   ...readdirSync(ROOT).filter((name) => name.endsWith(".md") && name !== "CHANGELOG.md"),
