@@ -52,6 +52,15 @@ const stepButtons = (tree: ReactElement<Props>[]) => tree.filter((e) => e.type =
 const toggleOf = (tree: ReactElement<Props>[]) => tree.find((e) => e.type === "button" && e.props["aria-expanded"] !== undefined);
 const click = (button: ReactElement<Props> | undefined) => (button!.props.onClick as () => void)();
 
+const treeOf = (props: Parameters<typeof StepMenu>[0]): ReactElement<Props>[] => {
+  let tree: ReactElement<Props>[] = [];
+  render(() => {
+    tree = elementsOf(StepMenu(props));
+    return null;
+  }, {});
+  return tree;
+};
+
 const sandboxMenu = () => stepMenu(buildRunGraph(sandboxRun(), { settled: true }));
 const menuProps = (over: Partial<Parameters<typeof StepMenu>[0]> = {}) => ({ phases: sandboxMenu(), open: true, onToggle: () => {}, onPick: () => {}, onOverlay: () => {}, ...over });
 
@@ -62,13 +71,13 @@ test("the side menu lists every step under its phase, with its state, and each i
   for (const title of ["Implementation", "Review", "Delivery"]) assert.ok(text.includes(title), `the phase ${title} is a heading`);
   assert.match(text, /suite:red:1 failed/);
   assert.match(text, /code-1 ok/);
-  assert.equal(stepButtons(elementsOf(StepMenu(menuProps()))).length, phases.reduce((sum, p) => sum + p.steps.length, 0), "one button per step");
+  assert.equal(stepButtons(treeOf(menuProps())).length, phases.reduce((sum, p) => sum + p.steps.length, 0), "one button per step");
 });
 
 test("picking a step in the side menu hands its id over, and the step picked is marked as pressed", () => {
   const picked: string[] = [];
   const phases = sandboxMenu();
-  const buttons = stepButtons(elementsOf(StepMenu(menuProps({ phases, selectedId: phases[0]!.steps[2]!.id, onPick: (id: string) => picked.push(id) }))));
+  const buttons = stepButtons(treeOf(menuProps({ phases, selectedId: phases[0]!.steps[2]!.id, onPick: (id: string) => picked.push(id) })));
   assert.deepEqual(buttons.flatMap((b, i) => (b.props["aria-pressed"] === true ? [i] : [])), [2], "only the selected step is pressed");
 
   click(buttons[1]);
@@ -79,7 +88,7 @@ test("picking a step in the side menu hands its id over, and the step picked is 
 test("the side menu collapses to its button: closed, no step is listed, and the button says so and opens it again", () => {
   const toggled: boolean[] = [];
   const closed = menuProps({ open: false, onToggle: () => toggled.push(false) });
-  const tree = elementsOf(StepMenu(closed));
+  const tree = treeOf(closed);
   const toggle = toggleOf(tree);
 
   assert.ok(toggle, "the menu keeps a button that opens it");
@@ -88,5 +97,5 @@ test("the side menu collapses to its button: closed, no step is listed, and the 
   assert.doesNotMatch(textOf(render(StepMenu, closed)), /suite:red:1/);
   click(toggle);
   assert.equal(toggled.length, 1);
-  assert.equal(toggleOf(elementsOf(StepMenu(menuProps())))!.props["aria-expanded"], true);
+  assert.equal(toggleOf(treeOf(menuProps()))!.props["aria-expanded"], true);
 });
