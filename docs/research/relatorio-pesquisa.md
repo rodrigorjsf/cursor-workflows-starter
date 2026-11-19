@@ -392,9 +392,12 @@ O detalhamento, com checklist, está em
     Nenhuma fonte diz se os subagents embutidos (`explore`, `browser`) entram do mesmo jeito.
   - O kit permite `settingSources` e `tools` por etapa para cortar isso. Medido [TESTE](verificacoes-locais.md):
     com o mesmo prompt e as tools `shell` e `mcp`, 30,4 mil tokens de input com `project` × 25,5 mil com `[]`.
-    `["team","mdm"]` tira o `AGENTS.md`, mas não as skills (58 com ele e com `project`); `team` só sincroniza as skills
-    gerenciadas do time (leitura estática do bundle do `@cursor/sdk@1.3.1`, não medida); só `[]` as corta, e então os
-    hooks do MDM também saem.
+    `["team","mdm"]` tira o `AGENTS.md`, mas não as skills (58 com ele e com `project`); só `[]` as corta, e então
+    os hooks do time e do MDM também saem.
+
+    > **Nota (2026-11-19, [#138](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/138)):** a leitura
+    > estática do bundle do `@cursor/sdk@1.3.1` mostra que `team` só sincroniza as skills gerenciadas do time, sem
+    > caminho de hooks nem de Team Rules; é uma leitura, não uma medição. A linha acima fica como foi medida.
 - **Skills e subagents no IDE custam contexto fixo repetido.** A cada delegação, o subagent paga o contexto fixo
   de novo e roda no modelo herdado. Convertidos em workflow, viram etapas com modelo, tools e contexto mínimos. Por
   isso a `/skill-to-workflow` tem uma etapa **obrigatória** de otimização de custo, com estimativa por caminho.
