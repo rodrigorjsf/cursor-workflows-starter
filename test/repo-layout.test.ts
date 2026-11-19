@@ -7,6 +7,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { builtinModules } from "node:module";
 import { test } from "node:test";
 import ts from "@typescript/typescript6";
+import { tableRows } from "../scripts/lib/markdown.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const read = (...p: string[]) => readFileSync(join(ROOT, ...p), "utf8");
@@ -331,6 +332,52 @@ test("the authoring book and the authoring skill give the settingSources list cl
     for (const [needle, what] of expected) assert.ok(text.includes(needle), `the ${name} lacks ${needle}: it gives ${what}`);
     assert.ok(text.includes(managedSkills[name]), `the ${name} does not say team syncs ${managedSkills[name]}`);
   }
+});
+
+const mappingRow = (rows: string[][], origin: RegExp): string[] => {
+  const row = rows.find(([cell]) => origin.test(cell!));
+  assert.ok(row, `no mapping row for ${origin}`);
+  return row;
+};
+
+test("skill-to-workflow maps an argument-hint flag, a manual-only skill body, a known CLI and a finite questionnaire, each with the condition it holds under", () => {
+  const rows = tableRows(read("skills", "skill-to-workflow", "SKILL.md"));
+  const cases: Array<[RegExp, RegExp[]]> = [
+    [/`argument-hint` flag/, [/enum/, /`argsSchema`/, /exits 2/, /checkpoint/]],
+    [/`disable-model-invocation: true`/, [/step prompt/, /`\/name`/, /`meta\.whenToUse`/]],
+    [/known arguments/, [/`ctx\.exec`/, /never a synchronous call/, /no `shell`/, /keeps `shell`/]],
+    [/finite questionnaire/, [/checkpoint/i, /`args`/, /open dialogue/, /stays a skill/]],
+  ];
+  for (const [origin, expected] of cases) {
+    const [, destination] = mappingRow(rows, origin);
+    for (const pattern of expected) assert.match(destination!, pattern, `the row for ${origin} lacks ${pattern}`);
+  }
+});
+
+test("the authoring skill documents the checkpoint shape under the glossary term, and the conversion skill carries the same recipe", () => {
+  const recipe = (skill: string) => {
+    const text = read("skills", skill, "references", "recipes.md");
+    const start = text.indexOf("## Checkpoint across two runs");
+    assert.notEqual(start, -1, `${skill} has no checkpoint recipe`);
+    return text.slice(start).replace(/\s+/g, " ");
+  };
+  const authoring = recipe("cursor-workflow-authoring");
+  assert.match(authoring, /A \*\*Checkpoint\*\* is a point where the workflow hands control back to the person/);
+  assert.match(authoring, /status of the workflow's own/);
+  assert.match(authoring, /`runId`/);
+  assert.match(authoring, /`next`/);
+  assert.match(authoring, /answers arrive as `args` of a resume that names the run with `resumeRunId`/);
+  assert.match(authoring, /A `resumeRunId` inside `args` does not resume/);
+  assert.equal(recipe("skill-to-workflow"), authoring);
+});
+
+test("the authoring skill opens with the plain-object module for target repositories and defineWorkflow for the kit's own workflows", () => {
+  const skill = read("skills", "cursor-workflow-authoring", "SKILL.md");
+  const description = /^description: (.*)$/m.exec(skill)?.[1] ?? "";
+  assert.doesNotMatch(description, /defineWorkflow/, "the description names defineWorkflow as the shape of a repository workflow");
+  const opening = skill.slice(skill.indexOf("# Write a workflow")).split("\n\n")[1]!.replace(/\s+/g, " ");
+  assert.match(opening, /target repository[^.]*plain object[^.]*`export default \{ meta, defaults, budget, async run\(ctx\) \{ \.\.\. \} \}`/);
+  assert.match(opening, /the kit's own workflows[^.]*`defineWorkflow\(\{\.\.\.\}\)`/);
 });
 
 /** The version of the package at `...p` (the repo root when empty). */

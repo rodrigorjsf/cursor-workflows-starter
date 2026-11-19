@@ -13,6 +13,14 @@
   como um comando, e os argumentos e o resultado são conteúdo, com a mesma redação, corte e retenção. Não entra no journal: o
   resume chama a tool de novo. A skill `skill-to-workflow` mapeia "chamada de tool MCP conhecida, com argumentos conhecidos"
   para `ctx.mcp`, e a referência da API do runtime e o capítulo 4.1 a documentam.
+- **As skills de autoria ensinam a converter flags, skills manuais, CLIs e questionários** (issue #142, spec #137). A
+  `skill-to-workflow` mapeia a flag do `argument-hint` (`--review`) para um enum no `argsSchema` (o CLI não tem flags para os
+  argumentos do workflow: `wf run <nome> --review` sai com 2), o corpo de uma skill com `disable-model-invocation: true` para o
+  prompt da etapa (o SDK não tem `/nome`), uma chamada de CLI conhecida para `ctx.exec` (sem `shell` para o agente) e um
+  questionário finito para um checkpoint; um diálogo aberto continua skill. A `cursor-workflow-authoring` documenta o formato do
+  **Checkpoint** (um status próprio do workflow, `runId` e `next`; as respostas chegam como `args` de um resume com `resumeRunId`,
+  e um `resumeRunId` dentro de `args` não retoma o run) e abre descrevendo o objeto simples dos repositórios alvo, com
+  `defineWorkflow` só para os workflows do próprio kit.
 
 ### Mudado
 

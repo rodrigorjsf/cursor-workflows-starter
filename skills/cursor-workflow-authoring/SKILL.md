@@ -1,13 +1,15 @@
 ---
 name: cursor-workflow-authoring
-description: Use before creating, editing or testing a Cursor SDK workflow (a defineWorkflow module under a kit's workflows/ folder or a repo's .agents/workflows/).
+description: Use before creating, editing or testing a Cursor SDK workflow (a module under a kit's workflows/ folder or a repo's .agents/workflows/).
 ---
 
 # Write a workflow
 
-A workflow is a TypeScript module with `export default defineWorkflow({...})`. It is **deterministic**: code decides
-what runs, when it runs and how many times; the model only executes each step. Code makes every decision it can make
-(label, count, exit code, diff size).
+A workflow is a TypeScript module. In a target repository it is a plain object,
+`export default { meta, defaults, budget, async run(ctx) { ... } }`, under `.agents/workflows/`; the kit's own workflows,
+under `packages/runtime/workflows/`, wrap the same object in `defineWorkflow({...})`. It is **deterministic**: code
+decides what runs, when it runs and how many times; the model only executes each step. Code makes every decision it can
+make (label, count, exit code, diff size).
 
 ## Steps
 
