@@ -92,7 +92,6 @@ export function StepLogPanel({ runId, node, now, live, upTo, openCommandId, onOp
   const feed = useStepLog(runId, node.id, live);
   const log = useMemo(() => buildNodeLog(feed.items, node, upTo), [feed.items, upTo, node]);
 
-  // Over the canvas (a narrow screen), the log takes the focus; when it closes, the node gets it back.
   const { panel, closeButton } = useFocusWhileOpen(() => focusOnClose(document, node.id));
   useEscape(onClose, false);
 
