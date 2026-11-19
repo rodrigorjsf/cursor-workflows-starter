@@ -485,6 +485,15 @@
 
 ### Corrigido
 
+- **Um `.env` fora do git nunca fica ao alcance de uma etapa do `implement-issue`** (spec #114). O modo da árvore principal
+  (`worktree: false`, o padrão) punha as etapas na pasta do usuário, ao lado de um `.env` não commitado. Agora, quando o
+  repositório tem um `.env` ou `.env.*` não rastreado ou ignorado, em qualquer pasta, o run trabalha num worktree só dele, e o log
+  diz isso; um `.env.example` commitado não conta. O worktree do run sempre tem `readBoundary: "workspace"` no
+  `.cursor/sandbox.json`: o run o põe quando a base não o traz (e mantém as outras chaves de um arquivo commitado), e a entrega
+  deixa essa mudança de fora. O `wf init` passou a gravar `"readBoundary": "workspace"` no `.cursor/sandbox.json` do repositório,
+  mantendo as outras chaves, e a dica do `wf doctor` sem esse ajuste aponta para o `wf init`. Uma sonda real, de 2026-11-19, com
+  o sandbox ligado, mostrou o `cat` do `.env` da pasta principal, pelo caminho absoluto e de dentro do worktree, recusado
+  (`Permission denied`) com o `readBoundary` no worktree, e lido sem ele. Veja o [SECURITY.md](SECURITY.md).
 - **O `wf init` não escreve mais fora do repositório por um link simbólico.** Um repositório clonado que commita o `.gitignore`, o
   `.mcp.json` ou o `AGENTS.md` como link para um arquivo da sua home, ou uma pasta como `.cursor` apontando para fora, fazia o
   `wf init` reescrever esse arquivo (CWE-59). Agora ele resolve cada caminho antes de ler ou escrever e sai com erro, nomeando o

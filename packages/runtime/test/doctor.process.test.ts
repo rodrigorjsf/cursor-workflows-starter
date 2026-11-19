@@ -1073,7 +1073,12 @@ test("requireSandbox true with bwrap on the PATH passes the sandbox check and sa
 
 test("with the sandbox required, the check says whether reads are limited to the workspace: a step can read the Cursor key until readBoundary is workspace in a sandbox.json", onLinux, () => {
   const bins = [ghLoggedIn, fakeBin("bwrap", "exit 0")];
-  const open = checkOf(reportOf(doctor(repoCopy(), { home: sandboxedHome(), bins })), "sandbox");
+  const withoutRepoSandboxJson = () => {
+    const repo = repoCopy();
+    rmSync(join(repo, ".cursor", "sandbox.json"));
+    return repo;
+  };
+  const open = checkOf(reportOf(doctor(withoutRepoSandboxJson(), { home: sandboxedHome(), bins })), "sandbox");
   assert.equal(open.status, "pass", open.message);
   assert.match(open.message, /readBoundary.*not "workspace"/);
   assert.match(open.message, /~\/\.cursor\/sdk\/auth\.json/);
@@ -1085,7 +1090,7 @@ test("with the sandbox required, the check says whether reads are limited to the
 
   const userHome = sandboxedHome();
   put(join(userHome, ".cursor", "sandbox.json"), { readBoundary: "workspace" });
-  const inHome = checkOf(reportOf(doctor(repoCopy(), { home: userHome, bins })), "sandbox");
+  const inHome = checkOf(reportOf(doctor(withoutRepoSandboxJson(), { home: userHome, bins })), "sandbox");
   assert.match(inHome.message, /"workspace" in ~\/\.cursor\/sandbox\.json/);
   assert.match(inHome.message, /has not measured/, "the kit measured the repository's file, not the user's");
   assert.doesNotMatch(inHome.message, /reads are limited to the workspace/);

@@ -216,7 +216,7 @@
         },
         "worktree": {
           "type": "boolean",
-          "description": "`implement-issue`: o modo de entrega do run. `false` é o modo da árvore principal: o run põe a branch dele em checkout na pasta do usuário, que precisa estar limpa (uma árvore suja recusa o início), e só um run por repositório trabalha ali. `true` pede um worktree só do run, em `.workflows/worktrees/`, que permite runs em paralelo (ADR-0012). O argumento `worktree` do run (`wf start --worktree`) vale mais que o arquivo do repositório, que vale mais que o global. Padrão: `false`."
+          "description": "`implement-issue`: o modo de entrega do run. `false` é o modo da árvore principal: o run põe a branch dele em checkout na pasta do usuário, que precisa estar limpa (uma árvore suja recusa o início), e só um run por repositório trabalha ali. `true` pede um worktree só do run, em `.workflows/worktrees/`, que permite runs em paralelo (ADR-0012). Com um `.env` ou `.env.*` fora do git (não rastreado ou ignorado, em qualquer pasta), o run trabalha num worktree mesmo com `false`, e o log diz isso: na pasta do usuário, uma etapa poderia ler o arquivo. O argumento `worktree` do run (`wf start --worktree`) vale mais que o arquivo do repositório, que vale mais que o global. Padrão: `false`."
         },
         "openPr": {
           "type": "boolean",

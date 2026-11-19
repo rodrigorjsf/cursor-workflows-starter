@@ -51,6 +51,11 @@ function withStateDirIgnored(existing: string | undefined): string | undefined {
   return `${text}${text === "" || text.endsWith("\n") ? "" : "\n"}.workflows/\n`;
 }
 
+function withWorkspaceReadBoundary(file: string, existing: string | undefined): string | undefined {
+  const sandbox = parseObject(file, existing);
+  return changedJson({ ...sandbox, readBoundary: "workspace" }, sandbox);
+}
+
 const BLOCK_BEGIN = "<!-- cursor-workflows:begin -->";
 const BLOCK_END = "<!-- cursor-workflows:end -->";
 
@@ -252,6 +257,7 @@ export function initRepo({ cwd, skipAgentsMd = false, remove = false }: InitOpti
     : [
         [".cursor/mcp.json", (text, path) => withWorkflowsServer(path, text, { ...kitServer("${userHome}"), env: { WF_CWD: "${workspaceFolder}" } })],
         [".mcp.json", (text, path) => withWorkflowsServer(path, text, kitServer("${HOME}"))],
+        [".cursor/sandbox.json", (text, path) => withWorkspaceReadBoundary(path, text)],
         [".agents/workflows/config.json", (text, path) => withKitFields(path, text, version)],
         [".gitignore", withStateDirIgnored],
         ...(skipAgentsMd ? [] : [agentsMd]),

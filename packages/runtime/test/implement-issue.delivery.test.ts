@@ -488,6 +488,104 @@ forgeTest("the main-tree run's branch starts at the HEAD the user had checked ou
   assert.ok(existsSync(join(fx.repo, "local.txt")));
 });
 
+const logMessages = (runId: string) =>
+  readEventLog(eventLogPath(fx.repo, runId), { content: false })
+    .events.filter((e) => e.type === "log")
+    .map((e) => (e as { message: string }).message);
+
+const ENV_FILES_OUTSIDE_GIT = [
+  {
+    kind: "an ignored .env at the root",
+    file: ".env",
+    make: () => {
+      writeFileSync(join(fx.repo, ".gitignore"), ".env\n");
+      git(fx.repo, "add", ".gitignore");
+      git(fx.repo, "commit", "-qm", "ignore .env");
+      writeFileSync(join(fx.repo, ".env"), "TOKEN=secret\n");
+    },
+  },
+  {
+    kind: "an ignored .env.local in a subdirectory",
+    file: "src/.env.local",
+    make: () => {
+      writeFileSync(join(fx.repo, ".gitignore"), ".env*\n");
+      git(fx.repo, "add", ".gitignore");
+      git(fx.repo, "commit", "-qm", "ignore .env files");
+      writeFileSync(join(fx.repo, "src", ".env.local"), "TOKEN=secret\n");
+    },
+  },
+  { kind: "an untracked .env", file: ".env", make: () => writeFileSync(join(fx.repo, ".env"), "TOKEN=secret\n") },
+];
+
+for (const envFile of ENV_FILES_OUTSIDE_GIT) {
+  forgeTest(`${envFile.kind} turns a main-tree run into a worktree run, which the log says, so no step works beside the file`, async () => {
+    issue(["complexity:low"]);
+    envFile.make();
+    const cwdOfCodeStep: string[] = [];
+    fx.handlers["code-1"] = (o) => {
+      cwdOfCodeStep.push(realpathSync(o.local!.cwd as string));
+      write(o, "src/math.js", SUB_CODE);
+      submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
+    };
+    const r = await mainTreeRun();
+    assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+    assert.equal(res(r).mainTree, undefined, "the run did not work in the repository's own folder");
+    assert.equal(res(r).worktree, worktreeOf(r.runId));
+    assert.deepEqual(cwdOfCodeStep, [realpathSync(worktreeOf(r.runId))], "the step worked in the run's worktree");
+    assert.ok(!existsSync(join(worktreeOf(r.runId), envFile.file)), "and the worktree has no copy of the file");
+    assert.equal(currentBranch(), "main", "the user's folder stays on its branch");
+    assert.ok(
+      logMessages(r.runId).some((message) => message.includes(envFile.file) && /worktree/.test(message)),
+      `the log names the file and the worktree: ${JSON.stringify(logMessages(r.runId))}`,
+    );
+  });
+}
+
+forgeTest("a worktree whose base has no .cursor/sandbox.json gets one with readBoundary workspace for its steps, and the delivery leaves it out", async () => {
+  issue(["complexity:low"]);
+  const seenByCodeStep: unknown[] = [];
+  fx.handlers["code-1"] = (o) => {
+    seenByCodeStep.push(JSON.parse(readFileSync(join(o.local!.cwd as string, ".cursor", "sandbox.json"), "utf8")));
+    write(o, "src/math.js", SUB_CODE);
+    submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
+  };
+  const r = await run({});
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  assert.deepEqual(seenByCodeStep, [{ readBoundary: "workspace" }], "the step's sandbox reads nothing outside the worktree");
+  assert.ok(!git(fx.repo, "ls-tree", "-r", "--name-only", branchOf(r.runId)).includes(".cursor/sandbox.json"), "the file is not in the delivery");
+  assert.equal(git(worktreeOf(r.runId), "status", "--porcelain").trim(), "");
+});
+
+forgeTest("a tracked .cursor/sandbox.json without readBoundary workspace gets it in the worktree, keeps its other keys, and the delivery keeps the committed file", async () => {
+  issue(["complexity:low"]);
+  const committed = `${JSON.stringify({ networkPolicy: { default: "deny", allow: ["registry.npmjs.org"] } }, null, 2)}\n`;
+  mkdirSync(join(fx.repo, ".cursor"), { recursive: true });
+  writeFileSync(join(fx.repo, ".cursor", "sandbox.json"), committed);
+  git(fx.repo, "add", ".cursor/sandbox.json");
+  git(fx.repo, "commit", "-qm", "sandbox network policy");
+  const seenByCodeStep: unknown[] = [];
+  fx.handlers["code-1"] = (o) => {
+    seenByCodeStep.push(JSON.parse(readFileSync(join(o.local!.cwd as string, ".cursor", "sandbox.json"), "utf8")));
+    write(o, "src/math.js", SUB_CODE);
+    submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
+  };
+  const r = await run({});
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  assert.deepEqual(seenByCodeStep, [{ networkPolicy: { default: "deny", allow: ["registry.npmjs.org"] }, readBoundary: "workspace" }]);
+  assert.equal(git(fx.repo, "show", `${branchOf(r.runId)}:.cursor/sandbox.json`), committed, "the delivery does not change the committed file");
+});
+
+forgeTest("a tracked .env.example keeps the main-tree run in the repository's own folder: only a file outside git counts", async () => {
+  issue(["complexity:low"]);
+  writeFileSync(join(fx.repo, ".env.example"), "TOKEN=\n");
+  git(fx.repo, "add", ".env.example");
+  git(fx.repo, "commit", "-qm", "env example");
+  const r = await mainTreeRun();
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  assert.equal(res(r).mainTree, true);
+  assert.equal(currentBranch(), branchOf(r.runId));
+});
+
 const UNCOMMITTED = [
   { kind: "a modified file", file: "src/math.js", make: () => writeFileSync(join(fx.repo, "src", "math.js"), "export const changed = 1;\n") },
   {

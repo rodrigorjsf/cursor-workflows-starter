@@ -466,7 +466,7 @@ function checkSandbox(cwd: string, resolution: Resolution): CheckResult {
       ? 'reads are limited to the workspace (`readBoundary` is "workspace" in .cursor/sandbox.json)'
       : inRepo === undefined && inHome === "workspace"
         ? '`readBoundary` is "workspace" in ~/.cursor/sandbox.json, which Cursor documents for every workspace but the kit has not measured (it measured the repository\'s .cursor/sandbox.json): confirm that a step cannot read ~/.cursor/sdk/auth.json'
-        : '`readBoundary` is not "workspace" in .cursor/sandbox.json or ~/.cursor/sandbox.json, so a step can still read ~/.cursor/sdk/auth.json: set it to "workspace" in the repository\'s .cursor/sandbox.json to block that read';
+        : '`readBoundary` is not "workspace" in .cursor/sandbox.json or ~/.cursor/sandbox.json, so a step can still read ~/.cursor/sdk/auth.json: run `wf init`, which sets it to "workspace" in the repository\'s .cursor/sandbox.json, to block that read';
   return pass("sandbox", `\`caps.requireSandbox\` is true${bwrap ? `, bubblewrap at ${bwrap}` : `, and ${process.platform} needs no bubblewrap`}; ${reads}`);
 }
 

@@ -192,6 +192,20 @@ test("wf init adds a .workflows/ entry to the .gitignore, creating the file when
   assert.equal(read(existing, ".gitignore"), "node_modules/\ndist/\n.workflows/\n");
 });
 
+test("wf init writes .cursor/sandbox.json with readBoundary workspace, so a sandboxed step reads nothing outside the repository", () => {
+  const repo = emptyRepo();
+  assert.equal(init(repo).status, 0);
+  assert.deepEqual(readJson(repo, ".cursor", "sandbox.json"), { readBoundary: "workspace" });
+});
+
+test("wf init sets readBoundary to workspace in an existing .cursor/sandbox.json and keeps its other keys", () => {
+  const repo = emptyRepo();
+  const mine = { readBoundary: "unrestricted", networkPolicy: { default: "deny", allow: ["registry.npmjs.org"] } };
+  put(join(repo, ".cursor", "sandbox.json"), mine);
+  assert.equal(init(repo).status, 0);
+  assert.deepEqual(readJson(repo, ".cursor", "sandbox.json"), { ...mine, readBoundary: "workspace" });
+});
+
 test("wf init leaves a .gitignore alone when it already ignores .workflows in any common spelling", () => {
   for (const entry of [".workflows", ".workflows/", "/.workflows", "/.workflows/"]) {
     const repo = emptyRepo();
@@ -272,7 +286,7 @@ test("wf init writes through an AGENTS.md symlink to CLAUDE.md instead of replac
 });
 
 test("wf init refuses a file that is a symbolic link out of the repository, names it, writes nothing and leaves the target as it was", () => {
-  for (const file of [".gitignore", ".mcp.json", "AGENTS.md", ".cursor/mcp.json", ".agents/workflows/config.json"]) {
+  for (const file of [".gitignore", ".mcp.json", "AGENTS.md", ".cursor/mcp.json", ".cursor/sandbox.json", ".agents/workflows/config.json"]) {
     const repo = emptyRepo();
     const outside = join(sandbox, `outside-${counter}.txt`);
     put(outside, "# the user's own file\n");
@@ -400,7 +414,7 @@ test("running wf init twice changes nothing the second time and prints no diff",
   const first = init(repo);
   assert.equal(first.status, 0, first.stderr);
   const after = snapshot(repo);
-  assert.deepEqual(Object.keys(after).sort(), [".agents/workflows/config.json", ".cursor/mcp.json", ".gitignore", ".mcp.json", "AGENTS.md"]);
+  assert.deepEqual(Object.keys(after).sort(), [".agents/workflows/config.json", ".cursor/mcp.json", ".cursor/sandbox.json", ".gitignore", ".mcp.json", "AGENTS.md"]);
 
   const second = init(repo);
   assert.equal(second.status, 0, second.stderr);
@@ -411,7 +425,7 @@ test("running wf init twice changes nothing the second time and prints no diff",
 test("wf init does not rewrite a file that already says what it would write, whatever its formatting", () => {
   const repo = emptyRepo();
   assert.equal(init(repo).status, 0);
-  const files = [".mcp.json", join(".cursor", "mcp.json"), join(".agents", "workflows", "config.json")];
+  const files = [".mcp.json", join(".cursor", "mcp.json"), join(".cursor", "sandbox.json"), join(".agents", "workflows", "config.json")];
   const compact = files.map((file) => JSON.stringify(readJson(repo, file)));
   files.forEach((file, i) => put(join(repo, file), compact[i]));
   const again = init(repo);
@@ -451,7 +465,7 @@ test("wf init prints the diff of everything it changed, as a unified diff", () =
   const r = init(repo);
   assert.equal(r.status, 0, r.stderr);
 
-  for (const file of [".cursor/mcp.json", ".mcp.json", ".agents/workflows/config.json", "AGENTS.md"]) {
+  for (const file of [".cursor/mcp.json", ".cursor/sandbox.json", ".mcp.json", ".agents/workflows/config.json", "AGENTS.md"]) {
     assert.ok(r.stdout.includes(`--- /dev/null\n+++ b/${file}\n`), `${file} is a new file in the diff`);
   }
   assert.ok(r.stdout.includes('+      "command": "${userHome}/.cursor-workflows/kit/node_modules/.bin/tsx",\n'));

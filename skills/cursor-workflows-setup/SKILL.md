@@ -20,7 +20,8 @@ Pick the task, then run its steps in order. Each step ends on a stated result.
 ## Init a repo
 
 1. Run `wf init`. It writes `.cursor/mcp.json` and `.mcp.json` (the `workflows` server, through `${userHome}` and
-   `${HOME}`, so the files are the same for the whole team), `.agents/workflows/config.json` (schema address and the
+   `${HOME}`, so the files are the same for the whole team), `.cursor/sandbox.json` (`readBoundary: "workspace"`, other
+   keys kept), `.agents/workflows/config.json` (schema address and the
    `kit` version range), the `.workflows/` line in `.gitignore`, and a marked block in `AGENTS.md`. Done when it exits 0.
    - The user can decline the `AGENTS.md` block with `wf init --no-agents-md`, and undo it later with `wf init --remove`.
    - Running it again changes nothing.

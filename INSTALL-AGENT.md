@@ -96,7 +96,8 @@ wf init
 ```
 
 It writes `.cursor/mcp.json` and `.mcp.json` (the `workflows` MCP server, with no absolute paths, so the same file works
-for the whole team), `.agents/workflows/config.json` (editor autocomplete and the kit version range), the `.workflows/`
+for the whole team), `.cursor/sandbox.json` (`readBoundary: "workspace"`, so a sandboxed step reads nothing outside the
+repository; its other keys stay), `.agents/workflows/config.json` (editor autocomplete and the kit version range), the `.workflows/`
 line in `.gitignore`, and a short marked block of safety rules in `AGENTS.md`. Running it again changes nothing.
 
 Done when it exits 0, you have shown the user the diff it printed on stdout, and you have relayed, as printed, any stderr

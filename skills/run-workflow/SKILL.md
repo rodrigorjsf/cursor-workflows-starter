@@ -40,6 +40,8 @@ repo, and `wf config show implement-issue` names the layer each came from.
 
 - **Main tree.** Tell the user, once the job starts: the tree belongs to the workflow until the job ends. A write step
   can revert a file they edit, and the delivery can commit it. The run leaves the tree on its branch, for them to review.
+  A repo with a `.env` or `.env.*` file outside git (untracked or ignored) gets a worktree run instead, so no step works
+  beside that file: the job log says so, and the result has a `worktree` and no `mainTree`. Give the worktree notice then.
 - **Worktree.** The run works in `.workflows/worktrees/<branch>` of the repo (the `/` of the branch `wf/issue-<n>-<id>`
   written as `-`). The folder exists once `phase` is `Implementation`, and the result's `worktree` names it. In Cursor,
   open it in a new window with the `cursor` CLI (`cursor --new-window <worktree>`), so the user follows the run there.
