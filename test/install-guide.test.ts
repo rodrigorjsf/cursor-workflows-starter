@@ -4,8 +4,7 @@
 // are the ones the kit ships.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { markdownFiles, parseMarkdown } from "../scripts/lib/markdown.js";
@@ -253,32 +252,4 @@ test("the setup skill runs the delivery questionnaire after wf init and before t
   const at = (needle: string) => init.indexOf(needle);
   assert.ok(at("Choose the delivery defaults") > at("`wf init`"), "the questionnaire does not come after wf init");
   assert.ok(at("Choose the delivery defaults") < at("Check the setup"), "the questionnaire does not come before the doctor");
-});
-
-test("every wf config set command the guide and the setup skill name is accepted by the CLI and writes the setting it names", () => {
-  const sandbox = mkdtempSync(join(tmpdir(), "wf-install-questionnaire-"));
-  const home = join(sandbox, "home");
-  const repo = join(sandbox, "repo");
-  mkdirSync(home);
-  mkdirSync(repo);
-  try {
-    const commands = new Set(questionnaires.flatMap(([, section]) => [...(section ?? "").matchAll(/wf config set [^`\n]+/g)].map((m) => m[0].trim())));
-    assert.ok(commands.size >= 6, `expected the four global and the two --repo commands, found ${[...commands].join(" | ")}`);
-    for (const command of commands) {
-      const words = command.split(" ").slice(1);
-      const repoScoped = words.includes("--repo");
-      const [, , ...rest] = words.filter((word) => word !== "--repo");
-      const [path, value] = rest;
-      const run = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), join(ROOT, "packages", "runtime", "src", "cli.ts"), ...words, "--cwd", repo], {
-        env: { ...process.env, WF_HOME: home, WF_METRICS: "off", WF_DASH_AUTOSTART: "off" },
-        encoding: "utf8",
-      });
-      assert.equal(run.status, 0, `${command} failed: ${run.stderr}`);
-      const written = JSON.parse(readFileSync(repoScoped ? join(repo, ".agents", "workflows", "config.json") : join(home, "config.json"), "utf8")) as { workflows: { "implement-issue": { settings: Record<string, unknown> } } };
-      const key = path!.split(".").pop()!;
-      assert.equal(written.workflows["implement-issue"].settings[key], JSON.parse(value!), `${command} did not write ${key}`);
-    }
-  } finally {
-    rmSync(sandbox, { recursive: true, force: true });
-  }
 });

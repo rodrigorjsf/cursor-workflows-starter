@@ -296,6 +296,28 @@ test("wf config set writes the global file by default, and wf config show then n
   clearConfig();
 });
 
+const DELIVERY_DOCS = ["INSTALL-AGENT.md", join("skills", "cursor-workflows-setup", "SKILL.md")];
+
+test("every wf config set command the install guide and the setup skill give for the delivery defaults is accepted and writes the setting it names", () => {
+  clearConfig();
+  const commands = new Set(
+    DELIVERY_DOCS.flatMap((doc) => {
+      const section = readFileSync(join(PACKAGE, "..", "..", doc), "utf8").split(/^## /m).find((part) => /^(?:\d+\. )?Choose the delivery defaults/.test(part)) ?? "";
+      return [...section.matchAll(/wf config set [^`\n]+/g)].map((match) => match[0].trim());
+    }),
+  );
+  assert.equal(commands.size, 6, `the four global and the two --repo commands: ${[...commands].join(" | ")}`);
+  for (const command of commands) {
+    const words = command.split(" ").slice(1);
+    const [path, value] = words.filter((word) => word !== "--repo").slice(2);
+    const r = wf(...words);
+    assert.equal(r.status, 0, `${command}: ${r.stderr}`);
+    const written = fileOf(words.includes("--repo") ? repoConfig() : globalConfig());
+    assert.equal(written.workflows["implement-issue"].settings[path!.split(".").pop()!], JSON.parse(value!), command);
+  }
+  clearConfig();
+});
+
 test("wf config set --repo writes the repo file, keeps what the file already holds and leaves the global file alone", () => {
   clearConfig();
   put(globalConfig(), { caps: { maxCents: 100 } });
