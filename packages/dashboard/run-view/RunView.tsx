@@ -63,18 +63,27 @@ function useClock(active: boolean): number {
 
 const wraps = (from: Box, to: Box): boolean => to.x < from.x + from.width;
 
+export interface FlowView {
+  now: number;
+  selectedId?: string;
+  open(id: string): void;
+  focus(id: string): void;
+  phases: PhaseEntries;
+}
+
 export interface PhaseEntries {
   openIndex?: number;
   onOpen(lane: number): void;
 }
 
 /** What React Flow draws for `graph` laid out as `layout`. `open` opens a node's log; `focus` brings a node that took the keyboard focus into view. */
-export function toFlow(graph: RunGraph, layout: RunLayout, now: number, selectedId: string | undefined, open: (id: string) => void, focus: (id: string) => void, phases: PhaseEntries): { nodes: Node[]; edges: Edge[] } {
+export function toFlow(graph: RunGraph, layout: RunLayout, view: FlowView): { nodes: Node[]; edges: Edge[] } {
+  const { now, selectedId, open, focus, phases } = view;
   const lanes: Node<LaneNodeData, "lane">[] = layout.lanes.map((lane) => ({
     id: `lane-${lane.index}`,
     type: "lane",
     position: { x: lane.x, y: lane.y },
-    data: { title: lane.title, commands: graph.lanes[lane.index]?.commands.length ?? 0, open: lane.index === phases.openIndex, onOpen: () => phases.onOpen(lane.index) },
+    data: { title: lane.title, commandCount: graph.lanes[lane.index]?.commands.length ?? 0, open: lane.index === phases.openIndex, onOpen: () => phases.onOpen(lane.index) },
     width: lane.width,
     height: lane.height,
     zIndex: -1,
@@ -103,7 +112,7 @@ export function toFlow(graph: RunGraph, layout: RunLayout, now: number, selected
       className: `edge-${state.get(e.target)}`,
       focusable: false,
     }));
-  return { nodes: [...(lanes.some((l) => l.data.title !== "" || l.data.commands > 0) ? lanes : []), ...work], edges };
+  return { nodes: [...(lanes.some((l) => l.data.title !== "" || l.data.commandCount > 0) ? lanes : []), ...work], edges };
 }
 
 export function RunCost({ run }: { run: RunProgress }) {
@@ -143,7 +152,7 @@ function Canvas({ graph, layout, now, selectedId, onOpen, phases }: { graph: Run
     },
     [layout, store, setCenter],
   );
-  const { nodes, edges } = useMemo(() => toFlow(graph, layout, now, selectedId, onOpen, focus, phases), [graph, layout, now, selectedId, onOpen, focus, phases]);
+  const { nodes, edges } = useMemo(() => toFlow(graph, layout, { now, selectedId, open: onOpen, focus, phases }), [graph, layout, now, selectedId, onOpen, focus, phases]);
   const pane = useStore((s) => ({ width: s.width, height: s.height }), (a, b) => a.width === b.width && a.height === b.height);
   const firstFrame = useRef(frameOf(graph, layout, paneOrWindow(pane), selectedId));
   const settled = graph.nodes.every((n) => n.state !== "running");

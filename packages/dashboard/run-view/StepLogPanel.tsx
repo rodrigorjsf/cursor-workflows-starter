@@ -1,14 +1,14 @@
 // The log of one step, beside the canvas: its prompt, what the agent said, its tool calls with their output, or a command's
 // output. It follows the step while it runs (the view sticks to the bottom until the reader scrolls up) and shows the log as it
 // stood at a replay's position when the run is being replayed. Everything is drawn as text: a log holds what an agent wrote.
-import { type ReactNode, useEffect, useMemo, useRef } from "react";
+import { type ReactNode, type UIEvent, useEffect, useMemo, useRef } from "react";
 import { formatCount } from "../app/format.js";
 import { commandItemSelector, focusOnClose, focusOnOpen, phaseEntrySelector, restoreFocus } from "./log-focus.js";
 import { NodeRows } from "./NodeRows.js";
 import { Glyph } from "./nodes.js";
 import { describeCommand, describeFacts } from "./node-details.js";
-import type { GraphNode } from "./run-graph.js";
-import { type Body, type LogEntry, type OutputBlock, buildStepLog } from "./step-log.js";
+import { type GraphNode, phaseName } from "./run-graph.js";
+import { type Body, type LogEntry, type OutputBlock, type StepLog, buildStepLog } from "./step-log.js";
 import { type StepLogFeed, useStepLog } from "./use-step-log.js";
 
 /** How close to the bottom (in pixels) a reader still counts as following the tail. */
@@ -91,36 +91,13 @@ export interface StepLogPanelProps {
 export function StepLogPanel({ runId, node, now, live, upTo, openCommandId, onOpenCommand, onClose }: StepLogPanelProps) {
   const feed = useStepLog(runId, node.id, live);
   const log = useMemo(() => buildStepLog(feed.items, { upTo }), [feed.items, upTo]);
-  const scroller = useRef<HTMLDivElement>(null);
-  const following = useRef(live); // a step that is still going is followed at its tail; a finished one is read from its start
 
   // Follow the tail: after new content, go to the bottom, unless the reader scrolled up to read.
-  useEffect(() => {
-    const el = scroller.current;
-    if (el && following.current) el.scrollTop = el.scrollHeight;
-  }, [log.count]);
+  const { scroller, onScroll } = useTail(live, log.count);
 
   // Over the canvas (a narrow screen), the log takes the focus; when it closes, the node gets it back.
-  const panel = useRef<HTMLElement>(null);
-  const closeButton = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (panel.current && closeButton.current) focusOnOpen(panel.current, closeButton.current, (el) => getComputedStyle(el));
-    // A passive cleanup runs once the panel is out of the page and the canvas is shown again, so the node can take the focus.
-    return () => focusOnClose(document, node.id);
-    // Once, on purpose: the focus goes into the panel when it opens and back to the node when it closes. RunView keys the panel by
-    // the node's id (`key={selected.id}`), so another node is another mount, and the `node.id` the cleanup closed over is its node's.
-  }, []);
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      const target = event.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) return; // Escape there belongs to the control (the replay slider and speed, the copied command)
-      onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const { panel, closeButton } = useFocusWhileOpen(() => focusOnClose(document, node.id));
+  useEscape(onClose, false);
 
   const rows = describeFacts(node, now);
   let body: ReactNode;
@@ -134,14 +111,7 @@ export function StepLogPanel({ runId, node, now, live, upTo, openCommandId, onOp
   } else if (log.attempts.length === 0) {
     body = <p className="notice">{live ? "Waiting for the step to write something…" : upTo !== undefined && feed.items.length > 0 ? "Nothing of this step is written at this point of the replay." : "This step wrote no content."}</p>;
   } else {
-    body = log.attempts.map((attempt) => (
-      <div key={attempt.attemptId} className="attempt">
-        {log.attempts.length > 1 && <h2>Attempt {attempt.number}</h2>}
-        {attempt.entries.map((entry, i) => (
-          <Entry key={entry.id} entry={entry} reprompt={entry.kind === "prompt" && attempt.entries.slice(0, i).some((e) => e.kind === "prompt")} />
-        ))}
-      </div>
-    ));
+    body = <Attempts log={log} />;
   }
 
   return (
@@ -162,15 +132,47 @@ export function StepLogPanel({ runId, node, now, live, upTo, openCommandId, onOp
         aria-live="off" // a tail of many lines a second is not something to announce
         tabIndex={0}
         aria-label="Step log"
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          following.current = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_SLACK_PX;
-        }}
+        onScroll={onScroll}
       >
         {body}
       </div>
     </aside>
   );
+}
+
+function Attempts({ log }: { log: StepLog }) {
+  return log.attempts.map((attempt) => (
+    <div key={attempt.attemptId} className="attempt">
+      {log.attempts.length > 1 && <h2>Attempt {attempt.number}</h2>}
+      {attempt.entries.map((entry, i) => (
+        <Entry key={entry.id} entry={entry} reprompt={entry.kind === "prompt" && attempt.entries.slice(0, i).some((e) => e.kind === "prompt")} />
+      ))}
+    </div>
+  ));
+}
+
+function useTail(live: boolean, count: number) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const following = useRef(live);
+  useEffect(() => {
+    const el = scroller.current;
+    if (el && following.current) el.scrollTop = el.scrollHeight;
+  }, [count]);
+  const onScroll = (event: UIEvent<HTMLDivElement>) => {
+    const el = event.currentTarget;
+    following.current = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_SLACK_PX;
+  };
+  return { scroller, onScroll };
+}
+
+function useFocusWhileOpen(restore: () => void) {
+  const panel = useRef<HTMLElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (panel.current && closeButton.current) focusOnOpen(panel.current, closeButton.current, (el) => getComputedStyle(el));
+    return restore;
+  }, []);
+  return { panel, closeButton };
 }
 
 export interface CommandListProps {
@@ -230,16 +232,6 @@ function useEscape(onClose: () => void, capture: boolean) {
   }, [onClose, capture]);
 }
 
-function useFocusInto(selectorToRestore: string) {
-  const panel = useRef<HTMLElement>(null);
-  const closeButton = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (panel.current && closeButton.current) focusOnOpen(panel.current, closeButton.current, (el) => getComputedStyle(el));
-    return () => restoreFocus(document, selectorToRestore);
-  }, []);
-  return { panel, closeButton };
-}
-
 export interface PhasePanelProps {
   lane: number;
   title: string;
@@ -250,9 +242,9 @@ export interface PhasePanelProps {
 }
 
 export function PhasePanel({ lane, title, commands, openId, onSelect, onClose }: PhasePanelProps) {
-  const { panel, closeButton } = useFocusInto(phaseEntrySelector(lane));
+  const { panel, closeButton } = useFocusWhileOpen(() => restoreFocus(document, phaseEntrySelector(lane)));
   useEscape(onClose, false);
-  const name = title === "" ? "the run" : title;
+  const name = phaseName(title);
   return (
     <aside className="step-panel phase-panel" ref={panel} aria-label={`Workflow commands of ${name}`}>
       <header>
@@ -280,12 +272,7 @@ export interface CommandDetailsProps {
 
 export function CommandDetails({ command, feed, now, live, upTo }: CommandDetailsProps) {
   const log = useMemo(() => buildStepLog(feed.items, { upTo }), [feed.items, upTo]);
-  const scroller = useRef<HTMLDivElement>(null);
-  const following = useRef(live);
-  useEffect(() => {
-    const el = scroller.current;
-    if (el && following.current) el.scrollTop = el.scrollHeight;
-  }, [log.count]);
+  const { scroller, onScroll } = useTail(live, log.count);
 
   let body: ReactNode;
   if (feed.status === "loading") body = <p className="notice">Reading the command…</p>;
@@ -298,14 +285,7 @@ export function CommandDetails({ command, feed, now, live, upTo }: CommandDetail
   } else if (log.attempts.length === 0) {
     body = <p className="notice">{live ? "Waiting for the command to write something…" : upTo !== undefined && feed.items.length > 0 ? "Nothing of this command is written at this point of the replay." : "This command wrote no output."}</p>;
   } else {
-    body = log.attempts.map((attempt) => (
-      <div key={attempt.attemptId} className="attempt">
-        {log.attempts.length > 1 && <h2>Attempt {attempt.number}</h2>}
-        {attempt.entries.map((entry) => (
-          <Entry key={entry.id} entry={entry} reprompt={false} />
-        ))}
-      </div>
-    ));
+    body = <Attempts log={log} />;
   }
   return (
     <>
@@ -317,10 +297,7 @@ export function CommandDetails({ command, feed, now, live, upTo }: CommandDetail
         aria-live="off"
         tabIndex={0}
         aria-label="Command output"
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          following.current = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_SLACK_PX;
-        }}
+        onScroll={onScroll}
       >
         {body}
       </div>
@@ -339,7 +316,7 @@ export interface CommandPanelProps {
 
 export function CommandPanel({ runId, command, now, live, upTo, onClose }: CommandPanelProps) {
   const feed = useStepLog(runId, command.id, live);
-  const { panel, closeButton } = useFocusInto(commandItemSelector(command.id));
+  const { panel, closeButton } = useFocusWhileOpen(() => restoreFocus(document, commandItemSelector(command.id)));
   useEscape(onClose, true);
   return (
     <section className="command-panel" role="dialog" aria-label={`Command ${command.label}`} ref={panel}>

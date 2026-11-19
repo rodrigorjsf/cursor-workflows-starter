@@ -129,6 +129,8 @@ export interface GraphOptions {
 /** The id of the node a group's branches flow into. The group's own id is its fork. */
 export const joinIdOf = (groupId: string): string => `join:${groupId}`;
 
+export const phaseName = (title: string): string => (title === "" ? "the run" : title);
+
 export const commandCount = (graph: RunGraph): number =>
   graph.nodes.reduce((sum, node) => sum + (node.kind === "command" ? 1 : 0) + node.commands.length, 0) + graph.lanes.reduce((sum, lane) => sum + lane.commands.length, 0);
 

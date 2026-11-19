@@ -3,7 +3,7 @@ import { Handle, type Node, type NodeProps, Position } from "@xyflow/react";
 import { NodeRows } from "./NodeRows.js";
 import { describeNode, runsInCloud } from "./node-details.js";
 import { LANE_TITLE, NODE_SIZE, NODE_TEXT_PX } from "./run-layout.js";
-import type { GraphNode, NodeState } from "./run-graph.js";
+import { type GraphNode, type NodeState, phaseName } from "./run-graph.js";
 
 export interface WorkNodeData extends Record<string, unknown> {
   node: GraphNode;
@@ -16,7 +16,7 @@ export interface WorkNodeData extends Record<string, unknown> {
 }
 export interface LaneNodeData extends Record<string, unknown> {
   title: string;
-  commands: number;
+  commandCount: number;
   open: boolean;
   onOpen?: () => void;
 }
@@ -112,12 +112,12 @@ export function LaneNode({ data }: NodeProps<Node<LaneNodeData, "lane">>) {
   const { top, left, height } = LANE_TITLE;
   return (
     <div className="lane">
-      {(data.title !== "" || data.commands > 0) && (
+      {(data.title !== "" || data.commandCount > 0) && (
         <div className="lane-header" style={{ top, left, right: left, height, lineHeight: `${height}px` }}>
           <span className="lane-title">{data.title}</span>
-          {data.commands > 0 && (
-            <button type="button" className="phase-entry nopan" aria-pressed={data.open} aria-label={`Workflow of ${data.title === "" ? "the run" : data.title}: ${data.commands} commands. Open the list`} onClick={data.onOpen}>
-              workflow · {data.commands}
+          {data.commandCount > 0 && (
+            <button type="button" className="phase-entry nopan" aria-pressed={data.open} aria-label={`Workflow of ${phaseName(data.title)}: ${data.commandCount} commands. Open the list`} onClick={data.onOpen}>
+              workflow · {data.commandCount}
             </button>
           )}
         </div>

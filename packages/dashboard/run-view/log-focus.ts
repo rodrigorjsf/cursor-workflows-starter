@@ -9,12 +9,12 @@ export interface FocusDoc {
   querySelector(selectors: string): { focus(): void } | null;
 }
 
-const quoted = (value: string): string => value.replace(/["\\]/g, "\\$&");
+const escapedForAttribute = (value: string): string => value.replace(/["\\]/g, "\\$&");
 
 /** The element of the node `id` that takes the focus: the step or command drawn inside React Flow's wrapper. */
-const nodeSelector = (id: string): string => `.react-flow__node[data-id="${quoted(id)}"] .work`;
+const nodeSelector = (id: string): string => `.react-flow__node[data-id="${escapedForAttribute(id)}"] .work`;
 
-export const commandItemSelector = (id: string): string => `.command-item[data-command-id="${quoted(id)}"]`;
+export const commandItemSelector = (id: string): string => `.command-item[data-command-id="${escapedForAttribute(id)}"]`;
 export const phaseEntrySelector = (lane: number): string => `.react-flow__node[data-id="lane-${lane}"] .phase-entry`;
 
 /** On open: into the log (its Close button) when the panel is positioned over the canvas, which then hides the focus. */
