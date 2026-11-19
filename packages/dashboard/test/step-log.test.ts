@@ -4,7 +4,7 @@
 // have, so the log of a step that is still running and that of a finished one are built the same way.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type ContentItem, buildStepLog } from "../run-view/step-log.js";
+import { type ContentItem, buildNodeLog, buildStepLog } from "../run-view/step-log.js";
 import { CommandDetails, CommandList, CommandPanel, PhasePanel, StepLogPanel, closesOnEscape } from "../run-view/StepLogPanel.js";
 import { type GraphNode, buildRunGraph } from "../run-view/run-graph.js";
 import { render, textOf } from "./render.js";
@@ -184,9 +184,9 @@ test("a phase's workflow entry is a panel of its own that lists the commands tha
   assert.match(render(PhasePanel, { lane: 0, title: "", commands: [], onSelect: () => {}, onClose: () => {} }), /aria-label="Workflow commands of the run"/);
 });
 
-const callOf = (command: string, args: string[], cwd: string) => item({ kind: "tool-call", attemptId: "x-1#1", tool: "exec", callId: "x-1#1", text: JSON.stringify({ command, args, cwd }) });
-const stdout = (text: string) => item({ kind: "command-output", attemptId: "x-1#1", tool: "exec", callId: "x-1#1", stream: "stdout", text });
-const stderr = (text: string) => item({ kind: "command-output", attemptId: "x-1#1", tool: "exec", callId: "x-1#1", stream: "stderr", text });
+const callOf = (command: string, args: string[], cwd: string, attemptId = "x-1#1") => item({ kind: "tool-call", attemptId, tool: "exec", callId: attemptId, text: JSON.stringify({ command, args, cwd }) });
+const stdout = (text: string, attemptId = "x-1#1") => item({ kind: "command-output", attemptId, tool: "exec", callId: attemptId, stream: "stdout", text });
+const stderr = (text: string, attemptId = "x-1#1") => item({ kind: "command-output", attemptId, tool: "exec", callId: attemptId, stream: "stderr", text });
 const commandOf = (id: string): GraphNode => graphOf([runStart, phase("Delivery"), ...lsFiles(), execStart("x-2", "git rev-parse"), execEnd("x-2", "git rev-parse", {}, { ok: false, exitCode: 1, probe: true })]).lanes[0]!.commands.find((c) => c.id === id)!;
 const detailsOf = (command: GraphNode, items: ContentItem[], status: "loading" | "ready" | "error" = "ready", live = false) => render(CommandDetails, { command, feed: { items, status, ...(status === "error" ? { error: "the dashboard answered 500" } : {}) }, now: 0, live });
 
@@ -200,8 +200,15 @@ test("a command's panel shows its command line, its directory, how it ended, how
   assert.match(html, /<pre>src\/a\.ts\nsrc\/b\.ts\n<\/pre>/, "the output of a read command is there, in one block");
 });
 
+test("a command's panel shows only the attempts of the execution on view, as a step's panel does", () => {
+  const text = textOf(detailsOf(commandOf("x-1"), [stdout("from another execution\n", "x-1#7"), callOf("git", ["ls-files"], "/work/repo"), stdout("src/a.ts\n")]));
+
+  assert.match(text, /src\/a\.ts/);
+  assert.doesNotMatch(text, /from another execution/);
+});
+
 test("a probe's panel says it is a probe, and stderr is told apart from stdout", () => {
-  const html = detailsOf(commandOf("x-2"), [callOf("git", ["rev-parse", "--verify", "main"], "/work/repo"), stderr("fatal: Needed a single revision\n")]);
+  const html = detailsOf(commandOf("x-2"), [callOf("git", ["rev-parse", "--verify", "main"], "/work/repo", "x-2#1"), stderr("fatal: Needed a single revision\n", "x-2#1")]);
 
   assert.match(textOf(html), /State neutral Exit 1 Probe yes, a non-zero exit is an expected answer/);
   assert.match(html, /class="output stderr"/);
@@ -237,9 +244,9 @@ test("Escape closes a panel, unless something already took it or it belongs to a
 test("a log scoped to some attempts keeps only theirs, and numbers them from 1; no attempts named keeps all", () => {
   const items = [prompt("first try", "a1"), said("it failed", "a1"), prompt("second try", "a2"), said("it worked", "a2")];
 
-  const second = buildStepLog(items, { attempts: ["a2"] });
+  const second = buildNodeLog(items, { attemptIds: ["a2"] });
   assert.deepEqual(second.attempts.map((a) => [a.attemptId, a.number]), [["a2", 1]]);
   assert.equal(second.count, 2);
-  assert.deepEqual(buildStepLog(items, { attempts: [] }).attempts.map((a) => a.attemptId), ["a1", "a2"]);
+  assert.deepEqual(buildNodeLog(items, { attemptIds: [] }).attempts.map((a) => a.attemptId), ["a1", "a2"]);
   assert.deepEqual(buildStepLog(items).attempts.map((a) => a.attemptId), ["a1", "a2"]);
 });

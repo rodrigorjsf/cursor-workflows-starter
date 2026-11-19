@@ -8,7 +8,7 @@ import { NodeRows } from "./NodeRows.js";
 import { Glyph } from "./nodes.js";
 import { describeCommand, describeFacts } from "./node-details.js";
 import { type GraphNode, phaseName } from "./run-graph.js";
-import { type Body, type LogEntry, type OutputBlock, type StepLog, buildStepLog } from "./step-log.js";
+import { type Body, type LogEntry, type OutputBlock, type StepLog, buildNodeLog } from "./step-log.js";
 import { type StepLogFeed, useStepLog } from "./use-step-log.js";
 
 /** How close to the bottom (in pixels) a reader still counts as following the tail. */
@@ -90,7 +90,7 @@ export interface StepLogPanelProps {
 
 export function StepLogPanel({ runId, node, now, live, upTo, openCommandId, onOpenCommand, onClose }: StepLogPanelProps) {
   const feed = useStepLog(runId, node.id, live);
-  const log = useMemo(() => buildStepLog(feed.items, { upTo, attempts: node.attemptIds }), [feed.items, upTo, node.attemptIds]);
+  const log = useMemo(() => buildNodeLog(feed.items, node, upTo), [feed.items, upTo, node]);
 
   // Follow the tail: after new content, go to the bottom, unless the reader scrolled up to read.
   const { scroller, onScroll } = useTail(live, log.count);
@@ -271,7 +271,7 @@ export interface CommandDetailsProps {
 }
 
 export function CommandDetails({ command, feed, now, live, upTo }: CommandDetailsProps) {
-  const log = useMemo(() => buildStepLog(feed.items, { upTo }), [feed.items, upTo]);
+  const log = useMemo(() => buildNodeLog(feed.items, command, upTo), [feed.items, upTo, command]);
   const { scroller, onScroll } = useTail(live, log.count);
 
   let body: ReactNode;
