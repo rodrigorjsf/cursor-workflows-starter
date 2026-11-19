@@ -14,6 +14,7 @@ import { eventLogPath, readEventLog, runDirPath } from "../src/runtime/run-store
 import { discoverWorkflows } from "../src/runtime/registry.js";
 import { readRunsIndex } from "../src/runtime/runs-index.js";
 import { defineWorkflow } from "../src/runtime/workflow.js";
+import { blockedUserDir, withUserDir } from "./user-dir.js";
 
 const cwd = join(import.meta.dirname, ".tmp", `event-log-${process.pid}`); // one directory per test process
 afterEach(() => {
@@ -317,17 +318,9 @@ test("each run appends an entry (run id, repo path, workflow, start time) to the
   assert.ok(started >= before - 1000 && started <= Date.now(), `start time ${entry!.startedAt}`); // wall-clock-ok: compared with the start time the run wrote to the index
 });
 
-async function withUnwritableHome<T>(use: () => Promise<T>): Promise<T> {
-  const previous = process.env.WF_HOME;
-  const blocker = join(cwd, "not-a-directory");
+function withUnwritableHome<T>(use: () => Promise<T>): Promise<T> {
   mkdirSync(cwd, { recursive: true });
-  writeFileSync(blocker, "x");
-  process.env.WF_HOME = join(blocker, "home");
-  try {
-    return await use();
-  } finally {
-    process.env.WF_HOME = previous;
-  }
+  return withUserDir(process.env, blockedUserDir(cwd), use);
 }
 
 test("a global runs index that cannot be written warns but never fails the run", async () => {
