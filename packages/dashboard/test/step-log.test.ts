@@ -1,3 +1,7 @@
+// Seam: what a step's panel shows. `buildStepLog(items)` turns the `content` events of one step, as the API gives them, into
+// what the panel draws: per attempt the prompt, then in order what the agent said and the tools it called with their output; for
+// a `ctx.exec` command, the command and its output. Pure: the panel and these tests call the same function on the items they
+// have, so the log of a step that is still running and that of a finished one are built the same way.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type ContentItem, buildNodeLog } from "../run-view/step-log.js";
