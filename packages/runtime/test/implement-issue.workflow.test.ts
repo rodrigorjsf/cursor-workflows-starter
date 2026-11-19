@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { calls } from "./fake-sdk.js";
 import { globToRegExp } from "../workflows/implement-issue/tdd.js";
-import { PLAN, SUB_CODE, SUB_TEST, branchOf, fx, forgeState, git, issue, names, run, setup, submit, teardown, write } from "./implement-issue.fixture.js";
+import { CLEAN_REVIEW, PLAN, SUB_CODE, SUB_TEST, branchOf, changeForgeState, fx, forgeState, git, issue, names, run, setup, submit, teardown, write } from "./implement-issue.fixture.js";
 
 beforeEach(setup);
 afterEach(teardown);
@@ -164,6 +164,68 @@ test("review: requisito faltando vira fatia TDD extra e padrão violado vira ref
   assert.ok(names().includes("refactor-1"));
   assert.ok(names().includes("review:spec:2") && names().includes("review:standards:2"));
   assert.ok(!names().includes("review:security:2"), "só os eixos que bloquearam são revistos");
+});
+
+const ABS_CASES = ["assert.equal(abs(5), 5);", "assert.equal(abs(-5), 5);", "assert.equal(abs(0), 0);"];
+const ABS_CODE = "export function add(a, b) {\n  return a + b;\n}\n\nexport function abs(x) {\n  return x < 0 ? -x : x;\n}\n";
+const absTest = (cases: string[]) =>
+  `import assert from "node:assert/strict";\nimport { test } from "node:test";\nimport { abs } from "../src/math.js";\n\ntest("abs", () => {\n${cases.map((c) => `  ${c}\n`).join("")}});\n`;
+
+test("LOW: an issue that lists three cases costs one slice and one review round when the test step is asked to cover them all", async () => {
+  issue(["complexity:low"], "Add abs(x) to src/math.js");
+  changeForgeState((state) => {
+    state.issue.body = "Add an exported function `abs(x)` to `src/math.js`, and a test for it covering a positive number, a negative number and zero.";
+  });
+  fx.handlers["test-1"] = (o, msg) => {
+    const askedForEveryCase = /Test idea: .*every case the issue lists/.test(msg);
+    write(o, "test/abs.test.js", absTest(askedForEveryCase ? ABS_CASES : [ABS_CASES[1]!]));
+    submit(o, { testFile: "test/abs.test.js", testName: "abs" });
+  };
+  fx.handlers["code-1"] = (o) => {
+    write(o, "src/math.js", ABS_CODE);
+    submit(o, { summary: "abs exported", filesChanged: ["src/math.js"] });
+  };
+  fx.handlers["review:spec"] = (o) => {
+    const tests = readFileSync(join(o.local.cwd, "test", "abs.test.js"), "utf8");
+    const findings = ABS_CASES.filter((c) => !tests.includes(c)).map((c) => ({
+      kind: "missing",
+      quote: "covering a positive number, a negative number and zero",
+      note: `no assertion ${c}`,
+      behavior: c,
+      seam: "abs",
+    }));
+    submit(o, { findings, worst: findings.length ? "missing" : "" });
+  };
+  for (const label of ["test-extra-1", "test-extra-2"]) {
+    fx.handlers[label] = (o) => {
+      write(o, "test/abs.test.js", absTest(ABS_CASES));
+      submit(o, { testFile: "test/abs.test.js", testName: "abs", alreadySatisfied: true, evidence: "abs already returns the absolute value" });
+    };
+  }
+  const r = await run({});
+  assert.equal((r.result as any).status, "done", JSON.stringify(r.result));
+  assert.deepEqual(names().filter((n) => /^(test|code)-/.test(n)), ["test-1", "code-1"]);
+  assert.ok(!names().includes("review:spec:2"), "no second review round when nothing was missing");
+});
+
+test("an extra slice tells the test step that the reviewer may be wrong and the behaviour may already hold", async () => {
+  issue(["complexity:low"]);
+  let specRound = 0;
+  fx.handlers["review:spec"] = (o) =>
+    submit(
+      o,
+      ++specRound === 1
+        ? { findings: [{ kind: "missing", quote: "devolve a - b", note: "falta a diferença", behavior: "subtract devolve a diferença", seam: "math.subtract" }], worst: "missing" }
+        : CLEAN_REVIEW,
+    );
+  fx.handlers["test-extra-1"] = (o) => {
+    write(o, "test/again.test.js", absTest(ABS_CASES).replace("abs", "add").replace("abs(5), 5", "add(2, 3), 5"));
+    submit(o, { testFile: "test/again.test.js", testName: "add", alreadySatisfied: true, evidence: "src/math.js already exports add" });
+  };
+  await run({});
+  const prompt = fx.prompts.find((p) => p.label === "test-extra-1")!.msg;
+  assert.match(prompt, /Test idea: issue requirement: "devolve a - b"\. A reviewer reported it as missing, so it may already hold/);
+  assert.match(prompt, /answer alreadySatisfied: true/);
 });
 
 test("review que continua bloqueando depois da rodada de correção encerra com review-blocking", async () => {
