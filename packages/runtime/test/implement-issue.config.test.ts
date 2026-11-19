@@ -37,7 +37,7 @@ forgeTest("with no config the steps run on the role defaults: models, params and
   assert.deepEqual(modelOf("pr-text"), { id: "composer-2.5" });
   assert.deepEqual(sourcesOf("review:spec:1"), []);
   assert.deepEqual(sourcesOf("pr-text"), []);
-  assert.deepEqual(sourcesOf("code-1"), ["project", "team", "mdm"], "write steps keep the engine default");
+  assert.deepEqual(sourcesOf("code-1"), ["project", "mdm"], "write steps keep the engine default");
 });
 
 forgeTest("the config swaps the model of a role: global file, WF_MODEL_* by role name and by the old alias, params kept or replaced", async () => {

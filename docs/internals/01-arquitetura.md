@@ -36,8 +36,9 @@ são o que o backend local faz numa tentativa.
    `WF_INSIDE_WORKFLOW=1`. O shell das etapas herda a marca (medido em 2026-11-11), e o CLI recusa `run`/`start`
    com ela. Os servidores do `.cursor/mcp.json` **não** herdam, porque o SDK não repassa o ambiente a eles; por
    isso o passo 4 encobre o servidor `workflows`.
-1. **Chave do journal:** `sha256(prompt + {model, schema, cwd, tools, agents, settingSources})` mais o número da
-   ocorrência.
+1. **Chave do journal:** `sha256(prompt + {model, schema, cwd, tools, disallowedTools, agents, settingSources, mcpServers,
+   sandbox})` mais o número da ocorrência. `sandbox` é o efetivo (com `caps.requireSandbox` aplicado). Ser um hash mantém os
+   valores de `env` e `headers` de um `mcpServers` fora do journal.
    - Se a chave já estiver no journal, devolve o resultado salvo sem chamar a API.
    - Com `memo: true` (só etapas de leitura), consulta também `.workflows/memo/`, com chave na etapa e no estado do
      repositório (HEAD + mudanças locais + arquivos novos). Um acerto vale entre runs diferentes.
@@ -68,7 +69,7 @@ são o que o backend local faz numa tentativa.
      Antes disso, medido em 2026-11-11: uma etapa começou abaixo de `--max-tokens 300000` e o run fechou em 344 mil
      ([8.2 §9](../research/verificacoes-locais.md)).
 4. **Agente novo:** `Agent.create` com o modelo da etapa, a allowlist de tools, os subagents e MCP servers
-   inline, o sandbox (se pedido) e `settingSources: ["project","team","mdm"]`.
+   inline, o sandbox (se pedido) e `settingSources: ["project","mdm"]`.
    - Com `schema`, registra a custom tool `submit_result` e garante `"mcp"` na allowlist.
    - Quando a etapa carrega camadas de arquivo (`project`, `user`, `plugins` ou `all`), registra também um MCP
      inline `workflows` (ou `WF_MCP_SERVER_NAME`) sem tools, `packages/runtime/src/runtime/nested-mcp-guard.mjs`. Ele vence o
@@ -170,6 +171,27 @@ poderia estourar o tempo dela e a saída dela ficaria invisível.
 4. **Cancelamento.** O cancelamento do run mata o grupo do comando, fecha o nó como `cancelled`, e a chamada lança
    `RunCancelledError`: o workflow não segue. O run espera o comando parar antes de gravar o `run-end`. Um segundo sinal
    (que sai do processo na hora) mata antes todos os comandos que ainda rodam.
+
+## Chamadas MCP do script (`ctx.mcp`)
+
+`ctx.mcp(servidor, tool, args, { label, phase, timeoutMs })` chama uma tool conhecida de um servidor MCP stdio sem agente
+([ADR-0013](../adr/0013-script-side-mcp-calls.md)). O motor a trata como um comando de `ctx.exec`, e só o transporte muda.
+
+1. **Cliente.** O `mcp-call.ts` sobe o servidor com o `StdioClientTransport` do `@modelcontextprotocol/sdk` (o `command` e os
+   `args` da config inline, no cwd do run, com o ambiente mínimo do SDK mais o `env`), chama a tool e fecha o cliente, que
+   termina o processo do servidor: `stdin` fechado, `SIGTERM` e, dois segundos depois, `SIGKILL`. Um processo que sai sem
+   ter fechado os clientes (um segundo sinal) mata antes os servidores que ainda rodam. A config só vem do código do
+   workflow: nunca do `.cursor/mcp.json`, que contornaria o `caps.allowedSettingSources`.
+2. **Nó do run.** A chamada é um nó com `stepId` (`x-…`, da config, da tool e dos argumentos mais a ocorrência), `parentId` e
+   `groupId`, e abre um `exec-start` e fecha um `exec-end` com `command: "mcp"`. O `outcome` é `exit` quando o servidor
+   respondeu (com `ok: false` se a tool reportou erro ou não existe), `spawn-error` quando o servidor não subiu ou
+   não completou o `initialize`, `timeout` no tempo estourado e `cancelled` no cancelamento; não há `exitCode`. Os argumentos
+   e o resultado são `content` (`tool-call` com `tool: "mcp"`, e `command-output`), sob a mesma redação, o mesmo corte e a
+   mesma retenção, e o resultado passa pelo mesmo corte de 262144 caracteres por chamada.
+3. **Falha é resultado.** Servidor que não sobe, tool desconhecida, erro da tool e tempo estourado voltam como
+   `{ ok: false, error }`, sem lançar. O resultado completo volta ao workflow; o log guarda a parte que cabe nele.
+4. **Cancelamento e resume.** O cancelamento do run fecha o cliente, termina o servidor, fecha o nó como `cancelled` e a
+   chamada lança `RunCancelledError`. A chamada **não** entra no journal: o resume a faz de novo.
 
 ## O `AgentBackend`: quem roda a tentativa
 

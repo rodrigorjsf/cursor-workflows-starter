@@ -344,6 +344,11 @@ export class RunStore {
     this.resultRedactor.learn(env);
   }
 
+  learnSecretValues(values: readonly string[]): void {
+    this.redactor.learnValues(values);
+    this.resultRedactor.learnValues(values);
+  }
+
   appendEvent(event: WorkflowEvent): void {
     appendJsonl(this.eventsFile, event);
     if (event.type === "run-end") this.ended = true;

@@ -14,7 +14,7 @@
   },
   "scripts": {
     "typecheck": "PATH=../../node_modules/typescript/bin:$PATH; tsc --noEmit && tsc --noEmit -p test",
-    "test": "tsx --tsconfig tsconfig.test.json --test --test-timeout=600000 test/*.test.ts"
+    "test": "tsx --tsconfig tsconfig.test.json --test --test-timeout=600000 test/*.test.ts ../../skills/cursor-workflow-authoring/examples/*/*.test.ts"
   },
   "dependencies": {
     "@cursor/sdk": "1.3.1",

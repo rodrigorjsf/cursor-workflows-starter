@@ -1,5 +1,45 @@
 # Changelog
 
+## Não lançado
+
+### Adicionado
+
+- **O workflow chama uma tool conhecida de um servidor MCP sem agente, com `ctx.mcp`** (issue #141, spec #137,
+  [ADR-0013](docs/adr/0013-script-side-mcp-calls.md)). `ctx.mcp(servidor, tool, args, { label, phase, timeoutMs })` sobe um servidor
+  MCP stdio descrito no código do workflow (`command`, `args`, `env`; nunca o `.cursor/mcp.json` do repositório), chama a tool e
+  devolve `{ ok, text, content, structuredContent?, timedOut, error? }`. Tool com erro, tool desconhecida, servidor que não
+  sobe e tempo estourado voltam como resultado com `ok: false`, como no `ctx.exec`; o cancelamento do run fecha o cliente,
+  termina o servidor e lança. A chamada reaproveita os eventos `exec-start` e `exec-end` com `command: "mcp"`, então o run a lista
+  como um comando, e os argumentos e o resultado são conteúdo, com a mesma redação, corte e retenção. Não entra no journal: o
+  resume chama a tool de novo. A skill `skill-to-workflow` mapeia "chamada de tool MCP conhecida, com argumentos conhecidos"
+  para `ctx.mcp`, e a referência da API do runtime e o capítulo 4.1 a documentam.
+- **As skills de autoria ensinam a converter flags, skills manuais, CLIs e questionários** (issue #142, spec #137). A
+  `skill-to-workflow` mapeia a flag do `argument-hint` (`--review`) para um enum no `argsSchema` (o CLI não tem flags para os
+  argumentos do workflow: `wf run <nome> --review` sai com 2), o corpo de uma skill com `disable-model-invocation: true` para o
+  prompt da etapa (o SDK não tem `/nome`), uma chamada de CLI conhecida para `ctx.exec` (sem `shell` para o agente) e um
+  questionário finito para um checkpoint; um diálogo aberto continua skill. A `cursor-workflow-authoring` documenta o formato do
+  **Checkpoint** (um status próprio do workflow, `runId` e `next`; as respostas chegam como `args` de um resume com `resumeRunId`,
+  e um `resumeRunId` dentro de `args` não retoma o run) e abre descrevendo o objeto simples dos repositórios alvo, com
+  `defineWorkflow` só para os workflows do próprio kit.
+- **Um exemplo `explore-db` mostra a conversão de uma skill de exploração de banco de dados** (issue #143, spec #137). Mora na pasta
+  da skill `cursor-workflow-authoring` (`examples/explore-db/`), com um servidor MCP falso (`node:sqlite` em memória, tools
+  `list_tables`, `describe_table` e `query`) e o teste offline que o `npm test` roda; não é um workflow embutido e não aparece em
+  `list_workflows`. O `argsSchema` exige `mode: "review" | "interview"`. O modo `review` coleta o schema com `ctx.mcp`, sem agente,
+  roda um agente por eixo (índices, nomes e normalização) em paralelo e roteia os achados por severidade em código. O modo
+  `interview` propõe um questionário finito, devolve o checkpoint `questions-proposed` com `runId` e `next`, e o resume com
+  `answers` continua com a etapa do questionário vinda do journal. Um resultado com `next` é classificado como pendente, seja qual for o status: o run que espera as
+  respostas fica na coluna **Awaiting approval** do quadro, e não em **Failed**. As receitas e a `skill-to-workflow` apontam o exemplo.
+
+### Mudado
+
+- **O default de `settingSources` do engine deixa de ter `team`: é `["project","mdm"]`** (issue #139, spec #137). Medido em
+  2026-11-19 com `composer-2.5` e uma etapa só de leitura, numa conta sem time, `team` não acrescentou regra, hook nem skill: as
+  mesmas contagens (`ruleCount` 1 e 63 skills), o hook do projeto rodou e a marca do `AGENTS.md` chegou nos dois lados
+  ([8.2 §18](docs/research/verificacoes-locais.md)). `team` só sincroniza as skills gerenciadas do time; quem as quer numa etapa passa
+  `settingSources` com `"team"`. `DEFAULT_SETTING_SOURCES`, os testes que o fixam, os capítulos 2.2, 2.3, 3.1, 4.2, 5.1 e 5.2 e as
+  duas skills de autoria passaram a nomear a lista nova; o 8.1 ganhou uma nota, e os workflows `verify-context` e `verify-sandbox` leem
+  a constante em vez de repetir a lista. O `team` continua aceito em `settingSources` e em `caps.allowedSettingSources`.
+
 ## 0.5.0 (pré-release, 2026-11-19)
 
 ### Adicionado

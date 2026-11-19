@@ -1,6 +1,6 @@
 # 7.13 · ADR-0013: Script-side MCP calls with `ctx.mcp`
 
-**Status:** accepted, not built yet · decided on 2026-11-19 after the context-parity research of 2026-11-17 (`ai-study-library`, `ai/study/paridade-contexto-workflows`)
+**Status:** accepted · decided on 2026-11-19 after the context-parity research of 2026-11-17 (`ai-study-library`, `ai/study/paridade-contexto-workflows`); built by [#141](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/141) of [spec #137](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/137)
 
 ## Context
 

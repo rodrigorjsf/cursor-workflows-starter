@@ -240,6 +240,10 @@ Ainda segundo o pacote [PKG]:
 | Salvar e distribuir | `.claude/workflows/`, `~/.claude/workflows/`, plugin `workflows/` (vira `/<plugin>:<nome>`) | — | `packages/runtime/workflows/` do kit + `.agents/workflows/` do repositório (este vence em nome repetido) |
 | Script isolado (sem fs/rede) | Sim | — | **Não**: roda em Node normal, o que é mais poderoso (git, gh, testes no próprio script) e exige disciplina para o resume |
 
+> **Nota (2026-11-19, [#139](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/139)):** o default de `settingSources` do engine que esta
+> seção e as seções 5.1 e 6 citam (`project`, `team` e `mdm`) deixou de ter `team`: a medição de 2026-11-19 não viu `team` acrescentar
+> regra, hook nem skill ([8.2 §18](verificacoes-locais.md)), e o default virou `["project","mdm"]`. As linhas ficam como foram escritas.
+
 ---
 
 ## 4. Como invocar de dentro do Cursor IDE
@@ -390,6 +394,10 @@ O detalhamento, com checklist, está em
     com o mesmo prompt e as tools `shell` e `mcp`, 30,4 mil tokens de input com `project` × 25,5 mil com `[]`.
     `["team","mdm"]` tira o `AGENTS.md`, mas não as skills (58 com ele e com `project`); só `[]` as corta, e então
     os hooks do time e do MDM também saem.
+
+    > **Nota (2026-11-19, [#138](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/138)):** a leitura
+    > estática do bundle do `@cursor/sdk@1.3.1` mostra que `team` só sincroniza as skills gerenciadas do time, sem
+    > caminho de hooks nem de Team Rules; é uma leitura, não uma medição. A linha acima fica como foi medida.
 - **Skills e subagents no IDE custam contexto fixo repetido.** A cada delegação, o subagent paga o contexto fixo
   de novo e roda no modelo herdado. Convertidos em workflow, viram etapas com modelo, tools e contexto mínimos. Por
   isso a `/skill-to-workflow` tem uma etapa **obrigatória** de otimização de custo, com estimativa por caminho.
@@ -524,8 +532,8 @@ condicional** sobre o Cursor SDK. Esse é o espaço que o starter kit ocupa.
 2. O timeout de uma chamada de tool MCP no Cursor IDE (o kit evita depender disso com start/wait). A doc não dá o
    valor. Os 60 s documentados valem para tools MCP stdio em workers self-hosted e para a conexão (startup) de
    MCP em runs locais do SDK, não para o IDE.
-3. Se o `~/.claude/settings.json` do usuário também é lido nas runs do SDK, e se os hooks de `team` e `mdm`
-   disparam nelas. O teste só cobriu `.claude/settings.json` e `.cursor/hooks.json` do projeto, numa conta pessoal.
+3. Se o `~/.claude/settings.json` do usuário também é lido nas runs do SDK, e se os hooks de `mdm`
+   disparam nelas (a leitura estática do bundle diz que `team` não carrega hooks nem regras do time). O teste só cobriu `.claude/settings.json` e `.cursor/hooks.json` do projeto, numa conta pessoal.
 4. Se uma política de modelo do admin gera substituição silenciosa do lado do servidor nas runs do SDK; a doc não
    documenta isso para o SDK. `RunResult.model` devolve o ID resolvido [TESTE](verificacoes-locais.md), mas não se
    sabe se uma substituição por política apareceria ali. Não dá para testar numa conta pessoal.

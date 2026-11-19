@@ -11,8 +11,8 @@ Return `{ status: "done", ... }` when the run delivered and another explicit sta
 - a run that was cancelled (`cancel_workflow`, `wf cancel`, Ctrl-C) → `cancelled`;
 - a run that threw or hit a cap → `error`;
 - `status` in `done`, `delivered`, `ok`, `success`, `succeeded` → `delivered`;
-- a pending status (`pending`, `seams-proposed`, or one added to `PENDING` in the runtime's `outcome.ts`), returned by
-  a checkpoint that waits for the human, with `runId` and `next` → `pending` (not a failure);
+- a result that carries `next` (a checkpoint that waits for the human, with `runId`), or a built-in pending status
+  (`pending`, `seams-proposed`) → `pending` (not a failure);
 - any other `status` → `failed`;
 - no `status` → `unknown`.
 

@@ -1,24 +1,30 @@
 ---
 name: cursor-workflow-authoring
-description: Use before creating, editing or testing a Cursor SDK workflow (a defineWorkflow module under a kit's workflows/ folder or a repo's .agents/workflows/).
+description: Use before creating, editing or testing a Cursor SDK workflow (a module under a kit's workflows/ folder or a repo's .agents/workflows/).
 ---
 
 # Write a workflow
 
-A workflow is a TypeScript module with `export default defineWorkflow({...})`. It is **deterministic**: code decides
-what runs, when it runs and how many times; the model only executes each step. Code makes every decision it can make
-(label, count, exit code, diff size).
+A workflow is a TypeScript module. In a target repository it is a plain object,
+`export default { meta, defaults, budget, async run(ctx) { ... } }`, under `.agents/workflows/`; the kit's own workflows,
+under `packages/runtime/workflows/`, wrap the same object in `defineWorkflow({...})`. It is **deterministic**: code
+decides what runs, when it runs and how many times; the model only executes each step. Code makes every decision it can
+make (label, count, exit code, diff size).
 
 ## Steps
 
 1. **Shape the steps.** Read [references/runtime-api.md](references/runtime-api.md): the skeleton, the `ctx` calls, the
-   `agent()` and `exec()` options and how the caps behave. Done when each step has a name, a model, `tools`,
+   `agent()`, `exec()` and `mcp()` options and how the caps behave. Done when each step has a name, a model, `tools`,
    `settingSources` and, if the code reads its result, a `schema`, and every command the code runs (tests, `git`, `gh` or
-   `glab`) goes through `ctx.exec`, never a synchronous call (`execFileSync`).
+   `glab`) goes through `ctx.exec`, never a synchronous call (`execFileSync`). When a step must behave like the same
+   request typed in the IDE chat, read "Parity with an IDE chat turn" in the same file: the `settingSources` list that
+   comes closest and the routes account and team rules take.
 2. **Pick the patterns.** For each case in the flow, read its section of [references/recipes.md](references/recipes.md):
    routing by label, review by axes, fix until it passes, fan-out with isolation, adversarial verification, cheap read
    step, escalate by budget, invariants between steps, resume with invariants, checkpoint across two runs. Done when
-   every case has its recipe in the code.
+   every case has its recipe in the code. For a flow that queries an MCP server and branches on a flag, the worked
+   example [examples/explore-db/](examples/explore-db/explore-db.ts) combines `ctx.mcp`, an enum in `argsSchema`,
+   review by axes and a checkpoint, and its test runs offline in `npm test`.
 3. **Apply the rules.** [references/rules.md](references/rules.md) holds the nine rules (prompt as key, schema, code
    verification, model in code, isolated parallel writes, effects in code behind a secrets guard, explicit cuts,
    idempotent effects, composition). Done when each rule holds in the code.

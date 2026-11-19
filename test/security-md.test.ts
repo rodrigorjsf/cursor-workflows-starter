@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
-import { parseMarkdown, sectionOf } from "../scripts/lib/markdown.js";
+import { parseMarkdown, sectionOf, tableRows } from "../scripts/lib/markdown.js";
 import { BROAD_SCOPES, SECURITY_TOKEN_SECTION } from "../packages/runtime/src/github-token-scopes.js";
 
 const SECURITY = readFileSync(join(resolve(import.meta.dirname, ".."), "SECURITY.md"), "utf8");
@@ -60,16 +60,6 @@ test("SECURITY.md says what the runtime hardening does: the job cap, the scrubbe
 
 /** `text` on one line: the prose is hard-wrapped, so a phrase a test looks for may break across lines. */
 const flat = (text: string): string => text.replace(/\s+/g, " ");
-
-/** The rows of the first Markdown table in `section`, as their cells, header and separator left out. */
-function tableRows(section: string): string[][] {
-  return section
-    .split("\n")
-    .filter((line) => line.startsWith("|"))
-    .map((line) => line.slice(1, line.lastIndexOf("|")).split("|").map((cell) => cell.trim()))
-    .filter((cells) => !cells.every((cell) => /^-+$/.test(cell)))
-    .slice(1);
-}
 
 // The user's data goes to more places than the cloud snapshot: SECURITY.md names each recipient in one table, so a reader judging the
 // kit's risk finds them together, with the page that governs each one's retention.

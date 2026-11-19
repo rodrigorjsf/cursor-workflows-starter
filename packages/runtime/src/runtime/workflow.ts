@@ -118,7 +118,6 @@ export interface AgentCallOptions {
    * Cada camada aumenta o contexto fixo de TODA chamada: regras, descrições de skills e de subagents
    * (injetadas na descrição da tool Task) e tools dos MCP servers do projeto. Etapas só de leitura usam []
    * (sem AGENTS.md, regras, hooks, MCP nem skills; o prompt lista os arquivos de contexto que importam).
-   * ["team","mdm"] só quando a etapa precisa dos hooks do time ou MDM: ele ainda carrega as skills (docs/operating/02-custos-e-cache.md §4.3).
    * Regra em docs/operating/02-custos-e-cache.md §6.
    */
   settingSources?: SettingSource[];
@@ -177,6 +176,27 @@ export interface ExecResult {
   /** The last 32768 characters of what the command wrote, stdout and stderr in the order they arrived. Not redacted: the log's copy is. */
   tail: string;
   /** Why the command could not start (a missing program, a bad cwd). Absent when it ran. */
+  error?: string;
+}
+
+export interface McpStdioServer {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
+export interface McpCallOptions {
+  label?: string;
+  phase?: string;
+  timeoutMs?: number;
+}
+
+export interface McpResult {
+  ok: boolean;
+  text: string;
+  content: unknown[];
+  structuredContent?: unknown;
+  timedOut: boolean;
   error?: string;
 }
 
@@ -260,6 +280,7 @@ export interface WorkflowContext<A = unknown> {
    * run kills the command and throws. A resume runs the command again: `exec` is not journaled.
    */
   exec(command: string, args?: string[], opts?: ExecOptions): Promise<ExecResult>;
+  mcp(server: McpStdioServer, tool: string, args?: Record<string, unknown>, opts?: McpCallOptions): Promise<McpResult>;
   phase(title: string): void;
   log(message: string): void;
   warn(message: string): void;

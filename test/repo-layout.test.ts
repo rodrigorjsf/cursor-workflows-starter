@@ -7,6 +7,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { builtinModules } from "node:module";
 import { test } from "node:test";
 import ts from "@typescript/typescript6";
+import { tableRows } from "../scripts/lib/markdown.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const read = (...p: string[]) => readFileSync(join(ROOT, ...p), "utf8");
@@ -105,8 +106,12 @@ test("the user-facing rules for target repos are a marked template block", () =>
 
 /** Every .md under a folder, relative to the repo root. */
 function markdownFiles(dir: string): string[] {
+  return filesUnder(dir, /\.md$/);
+}
+
+function filesUnder(dir: string, extension: RegExp): string[] {
   return readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((e) =>
-    e.isDirectory() ? markdownFiles(join(dir, e.name)) : e.name.endsWith(".md") ? [join(dir, e.name)] : [],
+    e.isDirectory() ? (e.name === "node_modules" ? [] : filesUnder(join(dir, e.name), extension)) : extension.test(e.name) ? [join(dir, e.name)] : [],
   );
 }
 
@@ -276,6 +281,116 @@ test("reference files two skills share stay identical", () => {
   const conversion = join("skills", "skill-to-workflow", "references");
   const shared = ["runtime-api.md", "rules.md", "recipes.md", "cost.md", "observability.md", "testing.md", "target-repos.md"];
   for (const file of shared) assert.equal(read(conversion, file), read(authoring, file), `${file} drifted: copy it from ${authoring} to ${conversion}`);
+});
+
+const SHIPPED_TEXT = [
+  ...readdirSync(ROOT).filter((name) => name.endsWith(".md") && name !== "CHANGELOG.md"),
+  ...filesUnder("docs", /\.md$/),
+  ...filesUnder("skills", /\.md$/),
+  ...filesUnder("templates", /\.md$/),
+  ...filesUnder("scripts", /\.(ts|sh|md)$/),
+  ...filesUnder("packages/runtime/src", /\.(ts|mjs)$/),
+  ...filesUnder("packages/runtime/workflows", /\.ts$/),
+];
+
+const DATED_RESEARCH = [join("docs", "research", "verificacoes-locais.md"), join("docs", "research", "relatorio-pesquisa.md")];
+
+const TEAM_AS_RULES_OR_HOOKS = [
+  /regras(?:\/| e )hooks do time/i,
+  /hooks (?:do|de) time (?:e|ou) (?:do )?MDM/i,
+  /hooks do projeto, do time e MDM/i,
+  /hooks de `team` e `mdm`/i,
+  /carrega `team` e `mdm` por padrão/i,
+  /\bteam,? (?:or|and) MDM hooks\b/i,
+];
+
+test("no doc, skill or source file says the team setting source loads team rules or team hooks", () => {
+  const offenders = SHIPPED_TEXT.filter((file) => !DATED_RESEARCH.includes(file)).flatMap((file) => {
+    const text = read(file).replace(/\s+/g, " ");
+    return TEAM_AS_RULES_OR_HOOKS.flatMap((pattern) => (pattern.test(text) ? [`${file}: ${pattern}`] : []));
+  });
+  assert.deepEqual(offenders, [], "team only drives the managed-skill sync of @cursor/sdk 1.3.1: describe it that way");
+});
+
+const DROPPED_DEFAULT = /\[\s*"project",\s*"team",\s*"mdm"\s*\]/;
+
+test("no doc, skill, script or source file names project, team and mdm as the engine default, which dropped team on 2026-11-19", () => {
+  const offenders = SHIPPED_TEXT.filter((file) => !DATED_RESEARCH.includes(file) && DROPPED_DEFAULT.test(read(file)));
+  assert.deepEqual(offenders, [], 'the engine default is ["project","mdm"]: only the dated research chapters may name the older list');
+});
+
+test("the authoring book and the authoring skill give the settingSources list closest to an IDE turn and the three routes account and team rules take", () => {
+  const book = read("docs", "authoring", "01-escrevendo-workflows.md");
+  const skill = filesUnder("skills/cursor-workflow-authoring", /\.md$/).map((file) => read(file)).join("\n");
+  const expected: Array<[string, string]> = [
+    ['["project","user","plugins","mdm"]', "the list closest to an IDE turn"],
+    ["AGENTS.md", "route one for account and team rules"],
+    ["alwaysApply: true", "route two for account and team rules"],
+    ["disable-model-invocation", "that a manual-only skill body never loads through the catalog"],
+  ];
+  const managedSkills = { book: "skills gerenciadas", skill: "managed skills" };
+  for (const [name, text] of [["book", book], ["skill", skill]] as const) {
+    for (const [needle, what] of expected) assert.ok(text.includes(needle), `the ${name} lacks ${needle}: it gives ${what}`);
+    assert.ok(text.includes(managedSkills[name]), `the ${name} does not say team syncs ${managedSkills[name]}`);
+  }
+});
+
+const mappingRow = (rows: string[][], origin: RegExp): string[] => {
+  const row = rows.find(([cell]) => origin.test(cell!));
+  assert.ok(row, `no mapping row for ${origin}`);
+  return row;
+};
+
+test("skill-to-workflow maps an argument-hint flag, a manual-only skill body, a known CLI and a finite questionnaire, each with the condition it holds under", () => {
+  const rows = tableRows(read("skills", "skill-to-workflow", "SKILL.md"));
+  const cases: Array<[RegExp, RegExp[]]> = [
+    [/`argument-hint` flag/, [/enum/, /`argsSchema`/, /exits 2/, /checkpoint/]],
+    [/`disable-model-invocation: true`/, [/step prompt/, /`\/name`/, /`meta\.whenToUse`/]],
+    [/known arguments/, [/`ctx\.exec`/, /never a synchronous call/, /no `shell`/, /keeps `shell`/]],
+    [/finite questionnaire/, [/checkpoint/i, /`args`/, /open dialogue/, /stays a skill/]],
+  ];
+  for (const [origin, expected] of cases) {
+    const [, destination] = mappingRow(rows, origin);
+    for (const pattern of expected) assert.match(destination!, pattern, `the row for ${origin} lacks ${pattern}`);
+  }
+});
+
+test("the authoring skill documents the checkpoint shape under the glossary term, and the conversion skill carries the same recipe", () => {
+  const recipe = (skill: string) => {
+    const text = read("skills", skill, "references", "recipes.md");
+    const start = text.indexOf("## Checkpoint across two runs");
+    assert.notEqual(start, -1, `${skill} has no checkpoint recipe`);
+    return text.slice(start).replace(/\s+/g, " ");
+  };
+  const authoring = recipe("cursor-workflow-authoring");
+  assert.match(authoring, /A \*\*Checkpoint\*\* is a point where the workflow hands control back to the person/);
+  assert.match(authoring, /status of the workflow's own/);
+  assert.match(authoring, /`runId`/);
+  assert.match(authoring, /`next`/);
+  assert.match(authoring, /answers arrive as `args` of a resume that names the run with `resumeRunId`/);
+  assert.match(authoring, /A `resumeRunId` inside `args` does not resume/);
+  assert.equal(recipe("skill-to-workflow"), authoring);
+});
+
+test("the authoring skill opens with the plain-object module for target repositories and defineWorkflow for the kit's own workflows", () => {
+  const skill = read("skills", "cursor-workflow-authoring", "SKILL.md");
+  const description = /^description: (.*)$/m.exec(skill)?.[1] ?? "";
+  assert.doesNotMatch(description, /defineWorkflow/, "the description names defineWorkflow as the shape of a repository workflow");
+  const opening = skill.slice(skill.indexOf("# Write a workflow")).split("\n\n")[1]!.replace(/\s+/g, " ");
+  assert.match(opening, /target repository[^.]*plain object[^.]*`export default \{ meta, defaults, budget, async run\(ctx\) \{ \.\.\. \} \}`/);
+  assert.match(opening, /the kit's own workflows[^.]*`defineWorkflow\(\{\.\.\.\}\)`/);
+});
+
+test("the explore-db example ships inside the authoring skill, which links it, the recipes and the conversion skill name it, and no built-in workflow carries its name", () => {
+  const folder = join("skills", "cursor-workflow-authoring", "examples", "explore-db");
+  for (const file of ["explore-db.ts", "fake-db-server.mjs", "explore-db.test.ts"]) assert.ok(existsSync(join(ROOT, folder, file)), `${folder}/${file} is missing`);
+  assert.match(read("skills", "cursor-workflow-authoring", "SKILL.md"), /\]\(examples\/explore-db\/explore-db\.ts\)/, "the authoring skill does not link the example");
+  for (const skill of ["cursor-workflow-authoring", "skill-to-workflow"]) {
+    assert.ok(read("skills", skill, "references", "recipes.md").includes("`examples/explore-db/`"), `${skill}'s recipes.md does not name the example`);
+  }
+  assert.ok(read("skills", "skill-to-workflow", "SKILL.md").includes("`examples/explore-db/`"), "the conversion skill does not name the example");
+  const builtIn = readdirSync(join(ROOT, "packages", "runtime", "workflows"));
+  assert.deepEqual(builtIn.filter((entry) => entry.startsWith("explore-db")), [], "the example is no built-in workflow: it must not show in list_workflows");
 });
 
 /** The version of the package at `...p` (the repo root when empty). */

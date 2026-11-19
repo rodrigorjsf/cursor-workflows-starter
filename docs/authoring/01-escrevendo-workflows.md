@@ -108,6 +108,37 @@ escolhe o forge: `github.com` é GitHub (`gh`), `gitlab.com` é GitLab (`glab`) 
 - Uma etapa na nuvem num repositório do GitLab depende do suporte do próprio Cursor ao GitLab; o kit não valida esse
   caminho ([6.2](../reference/config.md)).
 
+### Chamadas MCP do script: `ctx.mcp`
+
+Quando o código já decide a tool e os argumentos (listar as tabelas, descrever um esquema, rodar uma consulta fixa),
+`ctx.mcp(servidor, tool, args, { label, phase, timeoutMs })` chama a tool de um servidor MCP sem agente: não custa um
+turno de modelo e não tem variância ([ADR-0013](../adr/0013-script-side-mcp-calls.md)). Uma tool que o modelo precisa escolher
+continua numa etapa de agente, com `mcpServers` na etapa.
+
+```ts
+const servidor = { command: "node", args: ["db-server.mjs"], env: { DB_PATH: "app.sqlite" } };
+const tabelas = await ctx.mcp(servidor, "list_tables", {}, { label: "tabelas" });
+if (!tabelas.ok) return { status: "failed", reason: tabelas.error };
+```
+
+- O `servidor` é uma config stdio escrita no código do workflow (`command`, `args`, `env`). Nunca se resolve por nome a partir
+  do `.cursor/mcp.json` do repositório: num repositório em que você não confia, esse arquivo decidiria o que o workflow
+  executa. Servidores HTTP ficam de fora até um workflow precisar de um. O servidor sobe no cwd do run, com `HOME`,
+  `LOGNAME`, `PATH`, `SHELL`, `TERM` e `USER` do processo mais o `env`, e roda fora do sandbox do SDK, com a confiança de
+  um comando de `ctx.exec`. Um servidor configurado só no IDE precisa ter a config copiada para o workflow.
+- Devolve `{ ok, text, content, structuredContent?, timedOut, error? }`. Tool com erro, tool desconhecida, servidor que não
+  inicia ou que morre e tempo estourado (`timedOut: true`, 10 minutos por padrão no `timeoutMs`, contando a subida do
+  servidor) são **resultados** com `ok: false`, não exceções, como no `ctx.exec`. Um run cancelado fecha o cliente, termina o
+  processo do servidor e lança `RunCancelledError`.
+- A chamada reaproveita os eventos do `ctx.exec`: um `exec-start` e um `exec-end` com `command: "mcp"` e o servidor e a tool
+  no `label` (o `label` da chamada o substitui; o padrão é `mcp <comando> <primeiro argumento que não é flag> <tool>`, como `mcp node server.mjs echo`), então o run a desenha como desenha um comando e o esquema de eventos não muda
+  ([6.1](../reference/events.md#exec-start)). A tool, os argumentos e o servidor (o comando, os argumentos e só os nomes das
+  variáveis de `env`) são um `content` do tipo `tool-call`, e o resultado é `content` do tipo `command-output`, com a redação, o
+  corte e a retenção do conteúdo de um agente. O valor de uma chave com nome de segredo em `args` (`apiKey`,
+  `db_password`) e o de uma variável com nome de segredo em `env` também são redigidos.
+- **Não** entra no journal: o resume chama a tool de novo, e uma tool com efeitos roda duas vezes. A etapa de agente
+  seguinte, cujo prompt não mudou, ainda volta do journal.
+
 ## Custo
 
 Toda receita abaixo deve passar pelo checklist de custo ([5.2 §6](../operating/02-custos-e-cache.md#6-checklist-de-custo)). As
@@ -118,6 +149,29 @@ práticas que mais pesam:
 - `settingSources` mínimo por etapa;
 - prompt com parte fixa primeiro;
 - modelo certo por etapa.
+
+## Paridade com um turno do chat do IDE
+
+Uma etapa recebe só o que está no disco e entra por `settingSources`. A lista que mais se aproxima de um turno do chat do
+IDE sobre o mesmo checkout é `["project","user","plugins","mdm"]`. Passe-a na chamada `agent()` ou no papel da etapa
+([6.2](../reference/config.md#papéis-globs-de-label-e-variáveis)), e confira que `caps.allowedSettingSources` lista `user` e
+`plugins`. Cada camada soma contexto fixo a toda chamada
+([5.2 §4.3](../operating/02-custos-e-cache.md#43-contexto-fixo-mínimo-por-etapa)): dê a lista só à etapa que precisa da paridade.
+
+- **`project` lê o checkout, não a sessão do IDE.** O que só existe na janela aberta (um arquivo não salvo, uma regra anexada à
+  mão) não chega à etapa.
+- **`team` fica de fora da lista.** Ele só sincroniza as skills gerenciadas do time: não busca Team Rules e não tem caminho de
+  hooks. A leitura estática do bundle do `@cursor/sdk@1.3.1` diz isso, e a medição de 2026-11-19 ([8.2 §18](../research/verificacoes-locais.md))
+  o confirmou numa conta sem time: com `team` na lista, as mesmas regras e skills, o mesmo hook e a mesma marca do `AGENTS.md`. Por isso
+  ele também saiu do default do engine.
+- **As regras da conta e as do time não têm transporte.** As User Rules da conta e as Team Rules do dashboard não têm campo nem
+  busca no SDK. Elas chegam a uma etapa por três caminhos: o `AGENTS.md` do repositório, uma regra `.mdc` em `.cursor/rules/` com
+  `alwaysApply: true` (os dois exigem `project`) ou o prompt da etapa. Que uma regra `alwaysApply` chegue a todo turno sem
+  interface não foi medido.
+- **O corpo de uma skill com `disable-model-invocation: true` nunca vem do catálogo de skills**, e o SDK não tem `/nome` para
+  anexá-lo como o IDE faz. Para a etapa receber essas instruções, ponha o corpo no prompt.
+- **Etapas na nuvem ignoram a lista local.** A VM carrega as camadas que sempre carrega (`project`, `team` e `plugins`)
+  ([6.2 §Etapas na nuvem](../reference/config.md#etapas-na-nuvem)).
 
 ## Receitas
 
@@ -294,9 +348,10 @@ O runtime não pausa para perguntar. Quando o fluxo precisa da aprovação de um
 combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
 
 1. O run 1 vai até o resultado a aprovar, guarda-o no progresso do run e devolve um status pendente (no
-   `implement-issue`, `seams-proposed`) com `runId` e `next`, o comando de retomada. O status entra em `PENDING`
-   ([`packages/runtime/src/runtime/outcome.ts`](../../packages/runtime/src/runtime/outcome.ts)); fora dele, o run contaria como falha no
-   custo por entrega.
+   `implement-issue`, `seams-proposed`) com `runId` e `next`, o comando de retomada. Um resultado com `next` é classificado
+   como pendente, seja qual for o status
+   ([`packages/runtime/src/runtime/outcome.ts`](../../packages/runtime/src/runtime/outcome.ts)); sem ele, o run contaria como falha
+   no custo por entrega.
 2. O código publica o resultado onde o humano decide: no `implement-issue`, um comentário na issue com um marcador
    e o `runId` (uma vez por run), o comando pelo CLI (`--resume <runId>`, com os args entre aspas simples
    escapadas) e o caminho pelo chat (`resumeRunId`). O texto passa pela trava de segredos antes.
@@ -316,6 +371,13 @@ combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
    `seams: [...]` ([5.3 §Decidir as seams](../operating/03-observabilidade.md#decidir-as-seams-de-um-run-do-implement-issue)).
 4. A skill [`run-workflow`](../../skills/run-workflow/SKILL.md) trata qualquer resultado com `next`: mostra o
    resultado, pergunta ao usuário e relança só com a aprovação dele.
+
+Um questionário finito segue o mesmo formato, sem seams a aprovar. O exemplo
+[`explore-db`](../../skills/cursor-workflow-authoring/examples/explore-db/explore-db.ts), no modo `interview`, propõe as perguntas
+numa etapa com schema, devolve `questions-proposed` com `runId`, as perguntas e `next`, e o resume com `answers` busca a etapa do
+questionário no journal e escreve o relatório que as respostas pedem. Ele mora na pasta da skill `cursor-workflow-authoring`, roda
+offline em `npm test` contra um servidor MCP falso (`node:sqlite` em memória) e não é um workflow embutido: não aparece em
+`list_workflows`.
 
 ## Escrevendo bons prompts de etapa
 

@@ -24,6 +24,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { findOnPath } from "../../packages/runtime/src/find-on-path.js";
 import { errorText } from "../../packages/runtime/src/runtime/error-text.js";
+import { DEFAULT_SETTING_SOURCES } from "../../packages/runtime/src/runtime/repo-code.js";
 import { defineWorkflow } from "../../packages/runtime/src/runtime/workflow.js";
 import { readJsonl } from "../../packages/runtime/src/runtime/state-files.js";
 import { EVENTS_FILE, runDirIn } from "../../packages/runtime/src/runtime/run-store.js";
@@ -291,7 +292,7 @@ export default defineWorkflow<{ readBoundary?: ReadBoundary }>({
       ctx.phase("attempts");
       try {
         // All tools and the engine's default settingSources spelled out, as a kit write step has them (implement-issue's test, code and fix steps).
-        await ctx.agent(probePrompt(token, home), { role: "probe", label: STEP_LABEL, settingSources: ["project", "team", "mdm"], sandbox: true, revertOnRetry: true });
+        await ctx.agent(probePrompt(token, home), { role: "probe", label: STEP_LABEL, settingSources: DEFAULT_SETTING_SOURCES, sandbox: true, revertOnRetry: true });
       } catch (err) {
         const message = errorText(err);
         if (/bubblewrap|bwrap/i.test(message)) throw new Error(`verify-sandbox: the SDK could not start its sandbox: ${message}. This is not a sandbox result, so nothing is recorded.`);

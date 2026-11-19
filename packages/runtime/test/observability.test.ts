@@ -189,6 +189,16 @@ test("classe do resultado", () => {
   assert.equal(outcomeClass("failed", "done"), "error");
 });
 
+test("a result that carries the resume command next is a checkpoint, classed as waiting for the person whatever its status", () => {
+  const checkpoint = { status: "questions-proposed", runId: "explore-db-1", next: "npm run wf -- run explore-db --resume explore-db-1" };
+  assert.equal(outcomeClass("finished", checkpoint.status, checkpoint), "pending");
+  assert.equal(outcomeClass("finished", undefined, { next: checkpoint.next }), "pending");
+  assert.equal(outcomeClass("finished", "questions-proposed", { status: "questions-proposed" }), "failed");
+  assert.equal(outcomeClass("finished", "done", { status: "done", next: 3 }), "delivered");
+  assert.equal(outcomeClass("failed", "questions-proposed", checkpoint), "error");
+  assert.equal(outcomeClass("cancelled", "questions-proposed", checkpoint), "cancelled");
+});
+
 test("estimativa usa a tarifa alta quando o prompt médio por passo passa da faixa (Haiku 5.5: 100k)", async () => {
   const db = await openDb(dbPath);
   db.exec(`INSERT INTO runs (exec_id, run_id, workflow, workflow_hash, started_at) VALUES ('e', 'r', 'w', 'h', '2026-11-10T00:00:00Z')`);

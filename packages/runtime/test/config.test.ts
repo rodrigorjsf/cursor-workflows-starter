@@ -215,7 +215,7 @@ test("label globs are the fallback for steps without a role; the glob with the m
     ["label-narrow", "label-wide", "fallback-model", "from-role"],
   );
   assert.deepEqual(calls[2].local.settingSources, [], "the catch-all glob applies to the step no other glob matches");
-  assert.deepEqual(calls[3].local.settingSources, ["project", "team", "mdm"], "a step with a role ignores the label globs");
+  assert.deepEqual(calls[3].local.settingSources, ["project", "mdm"], "a step with a role ignores the label globs");
   const start = runStartOf(logOf(r.runId));
   assert.deepEqual(Object.keys(start.config.labels).sort(), ["*", "design:*", "design:a*"]);
   assert.deepEqual(start.provenance["/labels/design:a*/retries"], { layer: "repo", ref: repoConfigPath(cwd) });
@@ -341,7 +341,7 @@ test("allowedSettingSources: lists intersect, a role asking for 'all' is reduced
   const r = await runWorkflow(wf, {}, { cwd });
   assert.equal(r.status, "finished", r.error);
   assert.deepEqual(calls[0].local.settingSources, ["project"]);
-  assert.deepEqual(calls[1].local.settingSources, ["project", "team", "mdm"], "inside the cap: untouched");
+  assert.deepEqual(calls[1].local.settingSources, ["project", "mdm"], "inside the cap: untouched");
   const start = runStartOf(logOf(r.runId));
   assert.deepEqual(start.config.roles.classify!.settingSources, ["project"]);
   assert.equal(start.violations.length, 1);
@@ -502,6 +502,30 @@ test("requireSandbox in the global caps sandboxes every step, even one whose cod
   const free = await runWorkflow(wf, {}, { cwd });
   assert.equal(free.status, "finished", free.error);
   assert.deepEqual(calls.map((c) => c.local?.sandboxOptions), [undefined, undefined], "without the cap the code decides; a repo file cannot set caps");
+});
+
+test("a resume where the global requireSandbox cap changed runs the step again, though the step's own sandbox did not", async () => {
+  const wf = configWorkflow((ctx) => ctx.agent("p", { role: "classify", label: "c", sandbox: false }));
+  const first = await runWorkflow(wf, {}, { cwd });
+  assert.equal(calls.length, 1);
+
+  writeGlobalConfig({ caps: { requireSandbox: true } });
+  await runWorkflow(wf, {}, { cwd, runId: first.runId });
+
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1].local?.sandboxOptions, { enabled: true });
+});
+
+test("a resume where the step's sandbox changed under a requireSandbox cap that sandboxes it either way does not run the step again", async () => {
+  writeGlobalConfig({ caps: { requireSandbox: true } });
+  let sandbox = false;
+  const wf = configWorkflow((ctx) => ctx.agent("p", { role: "classify", label: "c", sandbox }));
+  const first = await runWorkflow(wf, {}, { cwd });
+
+  sandbox = true;
+  await runWorkflow(wf, {}, { cwd, runId: first.runId });
+
+  assert.equal(calls.length, 1, "the effective sandbox is the same, so the finished step is reused");
 });
 
 test("tighten-only overrides (the chat): a lower limit applies, a looser one is a violation with no effect", async () => {

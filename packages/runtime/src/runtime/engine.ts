@@ -26,17 +26,19 @@ import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedCo
 import { cursorEndpointRefusal } from "./cursor-endpoints.js";
 import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type OutputStream, type NewEvent, type RunStatus, type StepRef, type TurnUsage, type WorkflowEvent } from "./events.js";
 import { recordExecGroup } from "./job-children.js";
+import { MCP_CALL_TIMEOUT_MS, MCP_COMMAND, callMcpTool, serverName } from "./mcp-call.js";
 import { jobsDirIn } from "./job-state.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
 import { type InterruptedCloudStep, USAGE_FAILED_PREFIX, addUsage, emptyUsage, resumeHint, subtractUsage, turnTokens, withRatio } from "./projection.js";
 import { CONTENT_MAX_CHARS, RunLockedError, RunPrunedError, RunStore } from "./run-store.js";
 import { DEFAULT_SETTING_SOURCES, loadsProjectSettings, repoCodeWarning, repoCommandsIn } from "./repo-code.js";
+import { secretValuesOf } from "./redaction.js";
 import { savedSecrets } from "./secret-guard.js";
 import type { RetentionPolicy } from "./retention.js";
 import { registerRunIfMissing } from "./runs-index.js";
 import { INSIDE_WORKFLOW_ENV } from "./inside-workflow.js";
 import { newRunId, stateDir as runtimeStateDir } from "./state.js";
-import type { AgentCallOptions, Budget, ExecOptions, ExecResult, UsageTotals, WorkflowContext, WorkflowDefinition } from "./workflow.js";
+import type { AgentCallOptions, Budget, ExecOptions, ExecResult, McpCallOptions, McpResult, McpStdioServer, UsageTotals, WorkflowContext, WorkflowDefinition } from "./workflow.js";
 import { workflowSourceHash } from "./workflow-source.js";
 import { type Snapshot, revertToSnapshot, takeSnapshot } from "./worktree-snapshot.js";
 
@@ -139,11 +141,6 @@ export interface RunOptions {
   concurrency?: number;
   /** The chat's overrides (`start_workflow`): they can only tighten the resolved limits; a looser one is a violation and has no effect. */
   mcpOverrides?: LimitOverrides;
-  /**
-   * Camadas de configuração carregadas pelos agentes das etapas. Default ["project","team","mdm"]:
-   * AGENTS.md, .cursor/rules, skills (.agents/skills, .cursor/skills, ...), hooks e MCP do projeto,
-   * mais regras/hooks do time e hooks Enterprise (MDM). Remova "project" em repositórios não confiáveis.
-   */
   settingSources?: SettingSource[];
   /** Onde ficam journal e estado. Default <cwd>/.workflows/runs. */
   stateDir?: string;
@@ -753,6 +750,7 @@ async function executeRun<A, R>(
     label: string;
     phase: string | undefined;
     sources: SettingSource[];
+    sandbox: boolean;
     /** Where the step runs: its role's location in the config, once the global `allowedLocations` cap has applied. */
     location: StepLocation;
     /** How a cloud step delivers a structured result: its role's `resultVia` in the config. */
@@ -785,6 +783,7 @@ async function executeRun<A, R>(
     const phase = o.phase ?? currentPhase;
     const sources = allowedSources(caps.allowedSettingSources, o.settingSources ?? settingSources);
     const mKey = modelKey(o.model);
+    const sandbox = caps.requireSandbox === true || Boolean(o.sandbox);
     const fingerprint = {
       model: o.model,
       schema: o.schema,
@@ -793,11 +792,13 @@ async function executeRun<A, R>(
       disallowedTools: o.disallowedTools,
       agents: o.agents,
       settingSources: sources,
+      mcpServers: o.mcpServers,
+      sandbox,
     };
     // Chave calculada de forma síncrona, antes de qualquer await.
     const key = journal.keyFor(prompt, fingerprint);
     const ref: StepRef = { stepId: stepIdOf(key), parentId: flow.last, groupId: flow.groupId };
-    const step: StepContext = { o, role, promptHash, label, phase, sources, location: overrides.location, resultVia: overrides.resultVia, mKey, fingerprint, key, ref, started: false, tokenCap: overrides.maxTokensPerStep, tokens: 0 };
+    const step: StepContext = { o, role, promptHash, label, phase, sources, sandbox, location: overrides.location, resultVia: overrides.resultVia, mKey, fingerprint, key, ref, started: false, tokenCap: overrides.maxTokensPerStep, tokens: 0 };
     return inNode(runStep<T>(prompt, step), flow, ref, () => step.started);
   }
 
@@ -820,7 +821,7 @@ async function executeRun<A, R>(
   }
 
   async function runStep<T>(prompt: string, step: StepContext): Promise<T> {
-    const { o, role, promptHash, label, phase, sources, location, mKey, fingerprint, key, ref } = step;
+    const { o, role, promptHash, label, phase, sources, sandbox, location, mKey, fingerprint, key, ref } = step;
     const emitStart = (attemptId: string, attempt: number, cachedFrom: false | "journal" | "memo") => {
       step.started = true;
       emit({
@@ -912,8 +913,7 @@ async function executeRun<A, R>(
       mcpServers: location === "cloud" ? o.mcpServers : withGuard(nestedGuard(sources), o.mcpServers),
       cwd: stepCwd,
       settingSources: sources,
-      // The global cap wins over the workflow code: a pull request that edits a workflow cannot turn sandboxing off.
-      sandbox: caps.requireSandbox === true || Boolean(o.sandbox),
+      sandbox,
       writes,
       schema: o.schema,
       schemaRetries: o.schemaRetries ?? 2,
@@ -1189,22 +1189,23 @@ async function executeRun<A, R>(
           }
         };
 
+  function refuseCallThatCannotStart(api: "ctx.exec" | "ctx.mcp", timeoutMs: number): void {
+    if (!(timeoutMs > 0) || !Number.isFinite(timeoutMs)) throw new StepFailedError(`${api}: timeoutMs must be a positive number of milliseconds, got ${timeoutMs}`);
+    if (signal?.aborted) {
+      interrupted = true;
+      throw new RunCancelledError(cancelMessage);
+    }
+  }
+
   /** One `ctx.exec` call: a step node of the run. The command runs in its own process, and the call returns what the command did. */
   async function execCall(command: string, args: string[] = [], callOpts: ExecOptions = {}): Promise<ExecResult> {
     const flow = currentFlow();
     const cwd = callOpts.cwd ?? opts.cwd;
     const timeoutMs = callOpts.timeoutMs ?? resolved.config.execTimeoutMs;
-    if (!(timeoutMs > 0) || !Number.isFinite(timeoutMs)) throw new StepFailedError(`ctx.exec: timeoutMs must be a positive number of milliseconds, got ${timeoutMs}`);
-    if (signal?.aborted) {
-      interrupted = true; // a cancelled run starts no command: no node either
-      throw new RunCancelledError(cancelMessage);
-    }
+    refuseCallThatCannotStart("ctx.exec", timeoutMs);
     // The node's id comes from the call's shape and its branch (`flow.prefix`: where it sits in the groups), computed before
     // any await: the numbering does not depend on which parallel branch gets there first.
-    const shape = sha(JSON.stringify([flow.prefix, command, args, cwd]));
-    const occurrence = execOccurrences.get(shape) ?? 0;
-    execOccurrences.set(shape, occurrence + 1);
-    const ref: StepRef = { stepId: `x-${shape.slice(0, 12)}.${occurrence}`, parentId: flow.last, groupId: flow.groupId };
+    const ref = execNodeRef(flow, [command, args, cwd]);
     return inNode(runExec(command, args, cwd, timeoutMs, callOpts, ref), flow, ref, () => true); // runExec opens the node at once
   }
 
@@ -1251,6 +1252,54 @@ async function executeRun<A, R>(
     return result;
   }
 
+  function execNodeRef(flow: Flow, call: unknown[]): StepRef {
+    const shape = sha(JSON.stringify([flow.prefix, ...call]));
+    const occurrence = execOccurrences.get(shape) ?? 0;
+    execOccurrences.set(shape, occurrence + 1);
+    return { stepId: `x-${shape.slice(0, 12)}.${occurrence}`, parentId: flow.last, groupId: flow.groupId };
+  }
+
+  async function mcpCall(server: McpStdioServer, tool: string, args: Record<string, unknown> = {}, callOpts: McpCallOptions = {}): Promise<McpResult> {
+    const flow = currentFlow();
+    const timeoutMs = callOpts.timeoutMs ?? MCP_CALL_TIMEOUT_MS;
+    refuseCallThatCannotStart("ctx.mcp", timeoutMs);
+    const ref = execNodeRef(flow, ["mcp", server.command, server.args ?? [], tool, args]);
+    return inNode(runMcp(server, tool, args, timeoutMs, callOpts, ref), flow, ref, () => true);
+  }
+
+  async function runMcp(server: McpStdioServer, tool: string, args: Record<string, unknown>, timeoutMs: number, callOpts: McpCallOptions, ref: StepRef): Promise<McpResult> {
+    const attemptId = randomUUID();
+    const label = callOpts.label ?? `mcp ${serverName(server)} ${tool}`;
+    const phase = callOpts.phase ?? currentPhase;
+    const startedAt = Date.now();
+    store.learnSecrets(server.env ?? {});
+    store.learnSecretValues(secretValuesOf(args));
+    emit({ type: "exec-start", ...ref, attemptId, label, phase, command: MCP_COMMAND, timeoutMs });
+    const content = attemptContent(ref, attemptId);
+    content.write("tool-call", JSON.stringify({ toolName: tool, arguments: args, server: { command: server.command, args: server.args ?? [], env: Object.keys(server.env ?? {}) } }), { tool: "mcp", callId: attemptId });
+    const { outcome, result } = await callMcpTool({ server, tool, args, cwd: opts.cwd, timeoutMs, signal });
+    const log = outputLog((stream, text) => content.write("command-output", text, { tool: "mcp", callId: attemptId, stream }), { pieceMax: CONTENT_MAX_CHARS, logMax: EXEC_LOG_MAX_CHARS });
+    const output = result.ok ? result.text : (result.error ?? result.text);
+    log.push(result.ok ? "stdout" : "stderr", output);
+    log.end();
+    emit({
+      type: "exec-end",
+      ...ref,
+      attemptId,
+      label,
+      phase,
+      command: MCP_COMMAND,
+      ok: result.ok,
+      outcome,
+      error: result.error,
+      durationMs: Date.now() - startedAt,
+      outputChars: output.length,
+      outputTruncated: log.truncated || undefined,
+    });
+    if (outcome === "cancelled") throw new RunCancelledError(cancelMessage);
+    return result;
+  }
+
   const ctx: WorkflowContext<A> = {
     args,
     runId,
@@ -1260,6 +1309,7 @@ async function executeRun<A, R>(
     forges: structuredClone(resolved.config.forges ?? {}),
     agent: agentCall,
     exec: execCall,
+    mcp: mcpCall,
     parallel: (thunks) =>
       runGroup("parallel", thunks, (thunk) =>
         thunk().catch((err: unknown) => {

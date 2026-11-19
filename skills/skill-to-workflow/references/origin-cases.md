@@ -9,8 +9,8 @@ The origin skill talks to the user in three ways:
 
 | In the origin | In the workflow |
 |---|---|
-| Asks for an input ("what is the fixed point?", "where is the spec?") | `args`, or a value the code derives (base commit, issue via `gh` or `glab`) |
-| Asks for approval of an intermediate result ("confirm the seams with the user") | A **checkpoint** across two runs of the same workflow: recipe "Checkpoint across two runs" in [recipes.md](recipes.md) (in `implement-issue`, `seams-proposed` and `approveSeams`) |
+| Asks for an input ("what is the fixed point?", "where is the spec?"), or takes it from an `argument-hint` flag | `args` (an enum when the flag picks a branch), or a value the code derives (base commit, issue via `gh` or `glab`) |
+| Asks for approval of an intermediate result ("confirm the seams with the user"), or a finite questionnaire (a fixed list of questions, each with known answers) | A **checkpoint** across two runs of the same workflow: recipe "Checkpoint across two runs" in [recipes.md](recipes.md) (in `implement-issue`, `seams-proposed` and `approveSeams`). A questionnaire's result holds the questions, and the answers return as one arg of the resume |
 | Open conversation (interview, brainstorming) | Stays a skill; goes into the report as not converted |
 
 A step that presents options to the user and recommends one ("compare the designs and recommend") becomes a judge

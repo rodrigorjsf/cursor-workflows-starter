@@ -148,7 +148,7 @@ function lastEnd(events: WorkflowEvent[]): { how: "failed" | "cancelled" | "othe
   if (start < 0) return undefined;
   const end = events.slice(start).find((e) => e.type === "run-end");
   if (!end) return { how: "failed", at: Date.parse(events.at(-1)!.ts) };
-  const how = outcomeClass(end.status, end.outcomeStatus);
+  const how = outcomeClass(end.status, end.outcomeStatus, end.result);
   return { how: how === "error" || how === "failed" ? "failed" : how === "cancelled" ? "cancelled" : "other", at: Date.parse(end.ts) };
 }
 

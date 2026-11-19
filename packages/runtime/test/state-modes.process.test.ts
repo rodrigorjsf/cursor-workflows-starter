@@ -7,12 +7,13 @@
 process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
 import "./isolate-home.js";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { after, afterEach, before, test } from "node:test";
 import { calls, script } from "./fake-sdk.js";
+import { repoWithOneCommit } from "./git-fixtures.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import { defineWorkflow } from "../src/runtime/workflow.js";
 import { waitFor } from "./wait-for.js";
@@ -29,11 +30,7 @@ before(() => {
   repo = join(sandbox, "repo");
   mkdirSync(join(repo, ".agents", "workflows"), { recursive: true });
   mkdirSync(join(sandbox, "home"));
-  const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, stdio: "ignore" });
-  git("init", "-q");
-  writeFileSync(join(repo, "a.txt"), "1");
-  git("add", ".");
-  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init");
+  repoWithOneCommit(repo);
   writeFileSync(
     join(repo, ".agents", "workflows", "sits-in-exec.mjs"),
     `export default {\n  meta: { name: "sits-in-exec", description: "a job that sits in a long ctx.exec" },\n  async run(ctx) { await ctx.exec("sleep", ["600"], { timeoutMs: 120000 }); },\n};\n`,
