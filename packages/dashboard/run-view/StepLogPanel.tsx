@@ -87,7 +87,7 @@ export interface StepLogPanelProps {
 
 export function StepLogPanel({ runId, node, now, live, upTo, onClose }: StepLogPanelProps) {
   const feed = useStepLog(runId, node.id, live);
-  const log = useMemo(() => buildStepLog(feed.items, { upTo }), [feed.items, upTo]);
+  const log = useMemo(() => buildStepLog(feed.items, { upTo, attempts: node.attemptIds }), [feed.items, upTo, node.attemptIds]);
   const scroller = useRef<HTMLDivElement>(null);
   const following = useRef(live); // a step that is still going is followed at its tail; a finished one is read from its start
 

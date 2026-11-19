@@ -10,8 +10,8 @@ import { argsHashOf } from "./resume-command.js";
 import { StepLogPanel } from "./StepLogPanel.js";
 import { frameOf, panTarget } from "./framing.js";
 import { formatCents, formatCount, formatDuration } from "../app/format.js";
-import { type RunGraph, type RunProgress, buildRunGraph, commandCount, isWork } from "./run-graph.js";
-import { costUnknown, headerStatus, offeredActions, runElapsed } from "./run-status.js";
+import { type RunGraph, type RunProgress, buildRunGraph, commandCount, currentExecution, executionsOf, isWork, shownEvents } from "./run-graph.js";
+import { costUnknown, executionNote, headerStatus, offeredActions, runElapsed } from "./run-status.js";
 import { type Box, type RunLayout, layoutRunGraph } from "./run-layout.js";
 import { type Connection, useRunEvents } from "./use-run-events.js";
 import { errorText } from "../app/error-text.js";
@@ -108,6 +108,26 @@ export function RunCost({ run }: { run: RunProgress }) {
     </span>
   ) : (
     <>{formatCents(run.costCents)}</>
+  );
+}
+
+export function ExecutionPicker({ count, current, note, onPick }: { count: number; current: number; note?: string; onPick(index: number): void }) {
+  if (count < 2) return null;
+  return (
+    <div className="executions">
+      <select aria-label="Execution shown" value={current} onChange={(event) => onPick(Number(event.target.value))}>
+        {Array.from({ length: count }, (_, index) => (
+          <option key={index} value={index}>
+            Execution {index + 1} / {count}
+          </option>
+        ))}
+      </select>
+      {note !== undefined && (
+        <p className="execution-note" role="status">
+          {note}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -209,48 +229,61 @@ export function RunView({ runId }: { runId: string }) {
   const [replayAt, setReplayAt] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(0);
+  const [picked, setPicked] = useState<number>();
   const replaying = replayAt !== null;
-  const shown = useMemo(() => (replayAt === null ? events : events.slice(0, replayAt)), [events, replayAt]);
-  const settled = replaying ? replayAt >= events.length : status !== undefined && status !== "running";
-  const graph = useMemo(() => buildRunGraph(shown, { settled }), [shown, settled]);
+  const executions = useMemo(() => executionsOf(events), [events]);
+  const current = currentExecution(executions, picked);
+  const execution = executions[current]!;
+  const executionLength = execution.to - execution.from;
+  const shown = useMemo(() => shownEvents(events, execution, replayAt), [events, execution.from, execution.to, replayAt]);
+  const settled = replaying ? replayAt >= executionLength : status !== undefined && status !== "running";
+  const executionSettled = settled || current < executions.length - 1;
+  const graph = useMemo(() => buildRunGraph(shown.execution, { settled: executionSettled }), [shown.execution, executionSettled]);
+  const whole = useMemo(() => (shown.run.length === shown.execution.length ? graph : buildRunGraph(shown.run, { settled })), [graph, shown, settled]);
   const { layout, error: layoutError } = useLayout(graph);
   const clock = useClock(!replaying && !settled);
   const [selectedId, setSelectedId] = useState<string>();
   const open = useCallback((id: string) => setSelectedId(id), []);
   const close = useCallback(() => setSelectedId(undefined), []);
-  const now = replaying ? Date.parse(String(shown.at(-1)?.ts ?? "")) || 0 : clock;
+  const now = replaying ? Date.parse(String(shown.execution.at(-1)?.ts ?? "")) || 0 : clock;
 
   useEffect(() => {
-    document.title = `${graph.run.workflow ?? "run"} · ${runId}`;
-  }, [graph.run.workflow, runId]);
+    document.title = `${whole.run.workflow ?? "run"} · ${runId}`;
+  }, [whole.run.workflow, runId]);
 
   // The replay: step to the next event that changes the picture.
   useEffect(() => {
     if (!playing || replayAt === null) return;
-    if (replayAt >= events.length) {
+    if (replayAt >= executionLength) {
       setPlaying(false);
       return;
     }
     const timer = setTimeout(() => {
       let next = replayAt + 1;
-      while (next < events.length && !VISIBLE.has(String(events[next - 1]?.type))) next++;
-      setReplayAt(Math.min(next, events.length));
+      while (next < executionLength && !VISIBLE.has(String(events[execution.from + next - 1]?.type))) next++;
+      setReplayAt(Math.min(next, executionLength));
     }, SPEEDS[speed]![1]);
     return () => clearTimeout(timer);
-  }, [playing, replayAt, speed, events]);
+  }, [playing, replayAt, speed, events, execution.from, executionLength]);
 
   const togglePlay = () => {
-    if (!playing && replayAt !== null && replayAt >= events.length) setReplayAt(FIRST_FRAME); // again, from the start
+    if (!playing && replayAt !== null && replayAt >= executionLength) setReplayAt(FIRST_FRAME); // again, from the start
     setPlaying(!playing);
   };
+  const pick = (index: number) => {
+    setPicked(index === executions.length - 1 ? undefined : index);
+    setPlaying(false);
+    if (replaying) setReplayAt(FIRST_FRAME);
+  };
 
-  const { run } = graph;
+  const { run } = whole;
   const selected = graph.nodes.find((n) => n.id === selectedId && isWork(n.kind));
   /** In a replay, the log line it has reached; at its end, and outside a replay, the whole log. */
-  const upTo = replaying && replayAt < events.length ? (ids[replayAt - 1] ?? 0) : undefined;
-  const counts = { steps: graph.nodes.filter((n) => n.kind === "step").length, commands: commandCount(graph) };
+  const upTo = replaying && replayAt < executionLength ? (ids[execution.from + replayAt - 1] ?? 0) : undefined;
+  const counts = { steps: whole.nodes.filter((n) => n.kind === "step").length, commands: commandCount(whole) };
   const header = headerStatus({ api: { status, error }, run, replaying, settled });
-  const offered = offeredActions(status, graph, error);
+  const offered = offeredActions(status, whole, error);
+  const note = current < executions.length - 1 ? executionNote(graph, current + 1) : undefined;
   const elapsed = runElapsed(run, settled, now);
 
   if (connection === "not-found") {
@@ -326,6 +359,7 @@ export function RunView({ runId }: { runId: string }) {
           )}
         </dl>
         <div className="toolbar">
+        <ExecutionPicker count={executions.length} current={current} note={note} onPick={pick} />
         <div className="replay">
           {!replaying && status !== undefined && status !== "running" && events.length > 0 && (
             <button
@@ -348,7 +382,7 @@ export function RunView({ runId }: { runId: string }) {
                 type="range"
                 aria-label="replay position"
                 min={FIRST_FRAME}
-                max={events.length}
+                max={executionLength}
                 value={replayAt}
                 onChange={(e) => {
                   setPlaying(false);
@@ -396,7 +430,7 @@ export function RunView({ runId }: { runId: string }) {
               The run could not be drawn: {layoutError}
             </p>
           ) : layout && status !== undefined ? (
-            <ReactFlowProvider>
+            <ReactFlowProvider key={current}>
               <Canvas graph={graph} layout={layout} now={now} selectedId={selected?.id} onOpen={open} />
             </ReactFlowProvider>
           ) : (

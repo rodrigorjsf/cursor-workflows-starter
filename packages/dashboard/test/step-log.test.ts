@@ -125,3 +125,13 @@ test("upTo keeps what the log held at that line: the logs of a replay", () => {
 test("a step with no content has no attempts", () => {
   assert.deepEqual(buildStepLog([]), { attempts: [], count: 0 });
 });
+
+test("a log scoped to some attempts keeps only theirs, and numbers them from 1; no attempts named keeps all", () => {
+  const items = [prompt("first try", "a1"), said("it failed", "a1"), prompt("second try", "a2"), said("it worked", "a2")];
+
+  const second = buildStepLog(items, { attempts: ["a2"] });
+  assert.deepEqual(second.attempts.map((a) => [a.attemptId, a.number]), [["a2", 1]]);
+  assert.equal(second.count, 2);
+  assert.deepEqual(buildStepLog(items, { attempts: [] }).attempts.map((a) => a.attemptId), ["a1", "a2"]);
+  assert.deepEqual(buildStepLog(items).attempts.map((a) => a.attemptId), ["a1", "a2"]);
+});

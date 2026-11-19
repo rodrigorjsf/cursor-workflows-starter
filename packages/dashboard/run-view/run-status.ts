@@ -4,7 +4,7 @@
 // the run. A run whose process died without ending it is `failed` there, with the runtime's error and its resume hint; the
 // events alone would only say that they stopped. The events speak during a replay, which shows the run as it stood.
 import { runsInCloud } from "./node-details.js";
-import type { ProgressStatus, RunGraph, RunProgress } from "./run-graph.js";
+import { type ProgressStatus, type RunGraph, type RunProgress, failedWork } from "./run-graph.js";
 import type { ApiStatus } from "./use-run-events.js";
 
 const EVENTS_TEXT: Record<ProgressStatus, string> = {
@@ -79,3 +79,11 @@ export function runElapsed(run: { startedAt?: string; endedAt?: string }, settle
 }
 
 export const costUnknown = (run: Pick<RunProgress, "costCents" | "costFinal">): boolean => run.costCents === 0 && !run.costFinal;
+
+export function executionNote(graph: RunGraph, number: number): string | undefined {
+  const { status, error } = graph.run;
+  if (status === "finished" || status === "running") return undefined;
+  const failed = failedWork(graph).map((node) => (node.detail.errorKind === undefined ? node.label : `${node.label} (${node.detail.errorKind})`));
+  const cause = failed.length > 0 ? failed.join(", ") : error;
+  return `Execution ${number} ${EVENTS_TEXT[status]}${cause === undefined ? "" : `: ${cause}`}`;
+}

@@ -76,6 +76,7 @@ export interface GraphNode {
   lane: number;
   detail: NodeDetail;
   commands: GraphNode[];
+  attemptIds: string[];
 }
 
 /** A phase, drawn as a band. A step is drawn in the lane of its phase, or in a later one when it continues from a node in a later lane. */
@@ -129,9 +130,30 @@ export const joinIdOf = (groupId: string): string => `join:${groupId}`;
 export const commandCount = (graph: RunGraph): number =>
   graph.nodes.reduce((sum, node) => sum + (node.kind === "command" ? 1 : 0) + node.commands.length, 0) + graph.lanes.reduce((sum, lane) => sum + lane.commands.length, 0);
 
+export const failedWork = (graph: RunGraph): GraphNode[] =>
+  [...graph.nodes, ...graph.nodes.flatMap((node) => node.commands), ...graph.lanes.flatMap((lane) => lane.commands)].filter((node) => isWork(node.kind) && node.state === "failed");
+
+export interface Execution {
+  from: number;
+  to: number;
+}
+
+export function executionsOf(events: readonly RunEvent[]): Execution[] {
+  const cuts = events.flatMap((event, index) => (readable(event) && event.type === "run-start" ? [index] : [])).slice(1);
+  return [0, ...cuts].map((from, n) => ({ from, to: cuts[n] ?? events.length }));
+}
+
+export const currentExecution = (executions: readonly Execution[], picked: number | undefined): number => Math.min(picked ?? executions.length - 1, executions.length - 1);
+
+export function shownEvents(events: readonly RunEvent[], execution: Execution, replayAt: number | null): { execution: RunEvent[]; run: RunEvent[] } {
+  if (replayAt === null) return { execution: events.slice(execution.from, execution.to), run: [...events] };
+  const end = Math.min(execution.from + replayAt, execution.to);
+  return { execution: events.slice(execution.from, end), run: events.slice(0, end) };
+}
+
 const START = "start";
 
-const str = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
+const str =(value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
 
 /** What the builder remembers about a node besides what the graph shows: where it sits in the run's structure. */
 interface Placement {
@@ -199,9 +221,9 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
   const phaseOf = new Map<string, string>();
   const phases: string[] = [];
   const marked = new Set<string>();
-  const add = (node: Omit<GraphNode, "detail" | "lane" | "commands">, placement: Placement | null, phase = currentPhase) => {
+  const add = (node: Omit<GraphNode, "detail" | "lane" | "commands" | "attemptIds">, placement: Placement | null, phase = currentPhase) => {
     if (nodes.has(node.id)) return;
-    nodes.set(node.id, { ...node, lane: 0, detail: emptyDetail(), commands: [] });
+    nodes.set(node.id, { ...node, lane: 0, detail: emptyDetail(), commands: [], attemptIds: [] });
     if (placement) placed.set(node.id, placement);
     if (node.kind === "start") return;
     phaseOf.set(node.id, phase);
@@ -345,6 +367,7 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
     const failed = real.filter((a) => a.ended && !a.ok).at(-1);
     const state: NodeState = !last.ended ? "running" : !last.ok ? (last.errorKind === "cancelled" ? "cancelled" : last.answered ? "neutral" : "failed") : last.cached ? "cached" : "ok";
     node.state = state;
+    node.attemptIds = [...w.attempts].filter(([, a]) => !a.cached).map(([attemptId]) => attemptId);
     node.detail = {
       ...(w.model !== undefined && { model: w.model }),
       ...(w.command !== undefined && { command: w.command }),
