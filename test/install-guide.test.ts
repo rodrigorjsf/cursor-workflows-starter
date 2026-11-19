@@ -64,13 +64,14 @@ for (const file of FETCH_DOCS) {
   });
 }
 
-test("the guide runs install, login check, Privacy Mode confirmation, init, doctor, in that order, and every wf command in it exists", () => {
+test("the guide runs install, login check, Privacy Mode confirmation, init, delivery defaults, doctor, in that order, and every wf command in it exists", () => {
   const sections = GUIDE.split(/^## /m).slice(1);
   const steps = [
     [/^\d+\. Install the kit/, '"$installer" --tag'],
     [/^\d+\. Log in/, "wf whoami"],
     [/^\d+\. Confirm Privacy Mode/, "Privacy Mode"],
     [/^\d+\. Set up the repo/, "wf init"],
+    [/^\d+\. Choose the delivery defaults/, "wf config set"],
     [/^\d+\. Run the doctor/, "wf doctor"],
   ] as const;
   const positions = steps.map(([heading, command]) => {
@@ -214,4 +215,41 @@ test("the installer and wf upgrade say the same four things about a tag, and the
     assert.ok(GUIDE.includes(`\`${quoted}\``), `INSTALL-AGENT.md no longer quotes \`${quoted}\``);
     assert.ok(fragments.some((fragment) => fragment.startsWith(quoted)), `\`${quoted}\` is not the start of a message the code prints`);
   }
+});
+
+const SETUP_SKILL = read("skills", "cursor-workflows-setup", "SKILL.md");
+const SETTINGS = "workflows.implement-issue.settings";
+const questionnaireOf = (markdown: string) => markdown.split(/^## /m).find((section) => /^(?:\d+\. )?Choose the delivery defaults/.test(section));
+const questionnaires = [
+  ["INSTALL-AGENT.md", questionnaireOf(GUIDE)],
+  ["the setup skill", questionnaireOf(SETUP_SKILL)],
+] as const;
+
+for (const [name, section] of questionnaires) {
+  test(`${name} has the delivery questionnaire: both questions through the host's question tool, each answer written with wf config set`, () => {
+    assert.ok(section, `${name} has no section 'Choose the delivery defaults'`);
+    const flat = section.replace(/\s+/g, " ");
+    assert.ok(section.includes("`AskQuestion`") && section.includes("`AskUserQuestion`"), `${name} does not name the question tool of Cursor (AskQuestion) and of Claude Code (AskUserQuestion)`);
+    assert.match(flat, /worktree/i, `${name} never asks whether runs use a worktree`);
+    assert.match(flat, /\bPR\b/, `${name} never asks whether runs open a PR`);
+    for (const key of ["worktree", "openPr"]) {
+      for (const value of ["true", "false"]) assert.ok(section.includes(`wf config set ${SETTINGS}.${key} ${value}`), `${name} never writes ${key} ${value} to the global config`);
+    }
+    assert.match(flat, /Done when/, `${name}: the questionnaire has no stated result`);
+  });
+
+  test(`${name} shows the repo-level override of both defaults with wf config set --repo, and the file it writes`, () => {
+    assert.ok(section, `${name} has no section 'Choose the delivery defaults'`);
+    for (const key of ["worktree", "openPr"]) assert.ok(section.includes(`wf config set --repo ${SETTINGS}.${key} `), `${name} never shows wf config set --repo for ${key}`);
+    assert.ok(section.includes(".agents/workflows/config.json"), `${name} does not say which file --repo writes`);
+    assert.match(section.replace(/\s+/g, " "), /wf config show implement-issue/, `${name} does not point at wf config show for the layer each value came from`);
+  });
+}
+
+test("the setup skill runs the delivery questionnaire after wf init and before the doctor", () => {
+  const init = SETUP_SKILL.split(/^## /m).find((section) => /^Init a repo/.test(section));
+  assert.ok(init, "no section 'Init a repo'");
+  const at = (needle: string) => init.indexOf(needle);
+  assert.ok(at("Choose the delivery defaults") > at("`wf init`"), "the questionnaire does not come after wf init");
+  assert.ok(at("Choose the delivery defaults") < at("Check the setup"), "the questionnaire does not come before the doctor");
 });

@@ -28,12 +28,12 @@ import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type OutputStre
 import { recordExecGroup } from "./job-children.js";
 import { jobsDirIn } from "./job-state.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
-import { type InterruptedCloudStep, addUsage, emptyUsage, resumeHint, subtractUsage, turnTokens, withRatio } from "./projection.js";
+import { type InterruptedCloudStep, USAGE_FAILED_PREFIX, addUsage, emptyUsage, resumeHint, subtractUsage, turnTokens, withRatio } from "./projection.js";
 import { CONTENT_MAX_CHARS, RunLockedError, RunPrunedError, RunStore } from "./run-store.js";
 import { DEFAULT_SETTING_SOURCES, loadsProjectSettings, repoCodeWarning, repoCommandsIn } from "./repo-code.js";
 import { savedSecrets } from "./secret-guard.js";
 import type { RetentionPolicy } from "./retention.js";
-import { registerRun } from "./runs-index.js";
+import { registerRunIfMissing } from "./runs-index.js";
 import { INSIDE_WORKFLOW_ENV } from "./inside-workflow.js";
 import { newRunId, stateDir as runtimeStateDir } from "./state.js";
 import type { AgentCallOptions, Budget, ExecOptions, ExecResult, UsageTotals, WorkflowContext, WorkflowDefinition } from "./workflow.js";
@@ -250,13 +250,10 @@ function announceRun<A>(o: {
       message: `the workflow code changed since this run's previous execution (${store.previousStart.workflowHash} → ${workflowHash}): the resumed run mixes versions`,
     });
   }
-  if (!store.previousStart) {
-    // First execution of this run: register it where tools outside the repo can find it. A resume is the same run.
-    try {
-      registerRun({ runId, repo: resolve(opts.cwd), workflow: def.meta.name, startedAt });
-    } catch (err) {
-      emit({ type: "warning", message: `could not register the run in the global runs index: ${errorText(err)}` });
-    }
+  try {
+    registerRunIfMissing({ runId, repo: resolve(opts.cwd), workflow: def.meta.name, startedAt: store.firstStartedAt ?? startedAt });
+  } catch (err) {
+    emit({ type: "warning", message: `could not register the run in the global runs index: ${errorText(err)}` });
   }
   for (const { runId: prunedRun, error } of pruned.failed) {
     emit({ type: "warning", message: `could not delete the old content and step results of run ${prunedRun}: ${error}` });
@@ -736,7 +733,7 @@ async function executeRun<A, R>(
       const why = "failed" in reading ? reading.failed : "";
       emit({
         type: "warning",
-        message: `getUsage() failed (${why.slice(0, 160)}): tokens counted from the turn-ended events; cost unknown, so the cents cap did not count this attempt. Use --max-tokens.`,
+        message: `${USAGE_FAILED_PREFIX} (${why.slice(0, 160)}): tokens counted from the turn-ended events; cost unknown, so the cents cap did not count this attempt. Use --max-tokens.`,
       });
     } else if (!u.cost) {
       emit({
@@ -1288,6 +1285,9 @@ async function executeRun<A, R>(
     },
     log(message) {
       emit({ type: "log", message });
+    },
+    warn(message) {
+      emit({ type: "warning", message });
     },
     card({ title, subtitle, links, badges }) {
       // Field by field, copied: an object with more than the card's fields, or one the workflow edits afterwards, changes nothing in the log.

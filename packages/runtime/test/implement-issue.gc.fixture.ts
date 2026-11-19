@@ -40,6 +40,19 @@ export async function failedRun() {
   return { runId: r.runId, branch: branchOf(r.runId), worktree: worktreeOf(r.runId) };
 }
 
+export async function mainTreeDelivered() {
+  const r = await run({ openPr: true, worktree: false });
+  const result = r.result as { status: string; branch: string };
+  assert.equal(result.status, "done", JSON.stringify(result));
+  return { runId: r.runId, branch: result.branch };
+}
+
+export async function mainTreeFailed() {
+  const r = await run({ testCommand: "exit 1", worktree: false });
+  assert.equal((r.result as { status: string }).status, "baseline-red", JSON.stringify(r.result));
+  return { runId: r.runId, branch: branchOf(r.runId) };
+}
+
 /** Moves everything the run did `days` days into the past, as if it had happened then. */
 export const age = (runId: string, days: number) => ageRunLog(fx.repo, runId, days);
 

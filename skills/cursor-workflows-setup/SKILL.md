@@ -1,6 +1,6 @@
 ---
 name: cursor-workflows-setup
-description: "Use to set up, check, upgrade, validate or tune the Cursor Workflows kit in a repo: wf init, wf doctor, wf upgrade, the Cursor IDE validation, wf config show and the config files."
+description: "Use to set up, check, upgrade, validate or tune the Cursor Workflows kit in a repo: wf init, the delivery defaults (worktree or main tree, PR or not), wf doctor, wf upgrade, the Cursor IDE validation, wf config set and show, and the config files."
 ---
 
 # Set up the kit
@@ -32,9 +32,49 @@ Pick the task, then run its steps in order. Each step ends on a stated result.
      kit block. Relay the line as printed: it names the import that works from the file to edit (`@AGENTS.md` in a root
      `CLAUDE.md` or `CLAUDE.local.md`, `@../AGENTS.md` in `.claude/CLAUDE.md`, or a new root `CLAUDE.md` holding
      `@AGENTS.md` when the file sits above the repo). The user decides; `wf init` does not write those files.
-3. Run the checks in "Check the setup". Done when `wf doctor` exits 0.
-4. Tell the user to enable the `workflows` server in the IDE (Cursor: the MCP list in Customize; Claude Code: approve it
+3. Follow "Choose the delivery defaults". Done when its last step passes.
+4. Run the checks in "Check the setup". Done when `wf doctor` exits 0.
+5. Tell the user to enable the `workflows` server in the IDE (Cursor: the MCP list in Customize; Claude Code: approve it
    when asked), then restart it. Done when the user has the instruction.
+
+## Choose the delivery defaults
+
+Run it after `wf init`, and again whenever the user wants runs to deliver differently. `implement-issue` has two delivery
+settings, and the user picks the global default of each.
+
+1. Ask the two questions one at a time with the host's question tool (`AskQuestion` in Cursor, `AskUserQuestion` in
+   Claude Code; in a host with neither, ask in the chat) and wait for each answer. The user decides: you write what they
+   said. Done when the user has answered both.
+   - **Where do runs work?** The main tree: the run's branch is checked out in the folder the user has open, so the IDE
+     shows the files change while the run works; the tree must be clean when a run starts, it belongs to the run until
+     the run ends, and one such run goes at a time per repo. This is the code default. Or a worktree: each run works in
+     a folder of its own under `.workflows/worktrees/`, so the user's tree stays untouched and runs go in parallel; the
+     IDE shows nothing of it until the user opens that folder.
+   - **Do runs open a PR?** Yes: the run pushes its branch, opens the PR (the MR on GitLab) and returns the link. This
+     is the code default. Or no: the run leaves the branch committed locally, with no push and no PR, for the user to
+     review first.
+2. Write each answer to the global config, `~/.cursor-workflows/config.json`, even when it matches the code default.
+   Done when both commands of the answers exited 0:
+
+   | Answer | Command |
+   |---|---|
+   | main tree | `wf config set workflows.implement-issue.settings.worktree false` |
+   | worktree | `wf config set workflows.implement-issue.settings.worktree true` |
+   | PR | `wf config set workflows.implement-issue.settings.openPr true` |
+   | no PR | `wf config set workflows.implement-issue.settings.openPr false` |
+
+3. Show the user how one repo differs from those defaults, from that repo's root. Done when the user has seen both
+   commands:
+
+   ```bash
+   wf config set --repo workflows.implement-issue.settings.worktree true
+   wf config set --repo workflows.implement-issue.settings.openPr false
+   ```
+
+   These write `.agents/workflows/config.json`, the file the repo commits, and a repo value beats the global one. A
+   single run beats both: `wf start` takes `--worktree` and `--no-pr`.
+4. Run `wf config show implement-issue`. Done when `provenance` names the layer `global` for `/settings/worktree` and
+   `/settings/openPr`, or `repo` for one that the repo's own file already sets.
 
 ## Check the setup
 

@@ -27,7 +27,7 @@ O servidor `workflows` é registrado em `.cursor/mcp.json` (Cursor) e em `.mcp.j
 | Tool | Entrada | Saída |
 |---|---|---|
 | `list_workflows` | — | `name`, `description`, `whenToUse`, `phases`, `argsSchema` de cada workflow |
-| `start_workflow` | `{ name, args, resumeRunId?, overrides? }` | `{ jobId, runId }`, mais `dashboardUrl` (o link da página do run no dashboard, [5.3 §5](../operating/03-observabilidade.md#5-dashboard), que o `start_workflow` inicia se nada responde na porta; `dashboardWarning` traz o motivo quando não sobe, e nenhum dos dois aparece com o início automático desligado). O workflow roda em segundo plano, em um processo destacado: reiniciar o servidor ou o Cursor não o interrompe |
+| `start_workflow` | `{ name, args, resumeRunId?, overrides? }` | `{ jobId, runId }`, mais `dashboardUrl` (o link da página do run no dashboard, [5.3 §5](../operating/03-observabilidade.md#5-dashboard), que o `start_workflow` inicia se nada responde na porta; `dashboardWarning` traz o motivo quando não sobe, e nenhum dos dois aparece com o início automático desligado). O workflow roda em segundo plano, em um processo destacado: reiniciar o servidor ou o Cursor não o interrompe. Antes de criar o job, a tool confere que `~/.cursor-workflows/` aceita escrita e recusa o início (`isError`) quando não aceita, citando o sandbox do agente como causa provável |
 | `wait_workflow` | `{ jobId, timeoutSec? }`: `timeoutSec` é um número de segundos (ou um texto numérico, como `"30"`), levado para 1 a 50 (45 sem ele ou com `null`); um valor que não é número (`"30s"`) é um erro | Estado do job, projetado do log de eventos do run: `status`, `phase`, `recent` (até 20 linhas de resumo, uma linha cada, nunca texto de prompt ou de saída de agente; o custo de cada etapa é o maior entre bruto e cobrado), `result` (o que o workflow devolveu), `error`, `spentCents` (custo que o teto usa; acumula entre resumes), `chargedCents` (só o valor cobrado), `spentTokens` |
 | `get_workflow_status` | `{ jobId }` | Estado, sem esperar |
 | `cancel_workflow` | `{ jobId }` | Cancela o job: para os agentes ativos, desfaz a etapa que estava escrevendo e devolve o estado com `status: "cancelled"`. O run continua retomável. Um processo travado (vivo, sem heartbeat; o job já aparece `failed`) é encerrado com `SIGKILL`, sem desfazer a etapa, e os comandos de `ctx.exec` que ele tinha em andamento morrem com ele. Depois desse `SIGKILL`, e num job cujo processo já morreu (uma queda), cancela os cloud agents que o run deixou rodando, a nota os nomeia e o job continua `failed`; um resume depois cria agentes novos no lugar deles, que custam de novo. O agente do chat só chama quando o usuário pede para parar |
@@ -82,11 +82,40 @@ Run Mode e a allowlist de MCP, e um membro não muda isso.
 Fallback quando o MCP não está habilitado, e caminho preferido em CI e em runs longos:
 
 ```bash
-wf start implement-issue --args '{"issue":123}'   # processo destacado; log em .workflows/jobs/<id>.log
+wf start implement-issue --args '{"issue":123}'   # processo destacado; log em .workflows/jobs/<id>.log; imprime dashboardUrl, o link do run no dashboard (que ele inicia), ou dashboardWarning
 wf wait <jobId> --timeout 240
 wf cancel <jobId>          # para o run (SIGTERM ao job em execução; SIGKILL ao travado e aos comandos dele); o run continua retomável
 wf gc --dry-run            # mostra os worktrees e branches de runs terminados que o gc removeria
 ```
+
+`wf start` e `wf run` têm dois atalhos de entrega para o `implement-issue`: `--worktree` põe `worktree: true` nos args e `--no-pr` põe `openPr: false`. Um atalho que contradiz a mesma chave dada em `--args` é recusado com exit 2, sem criar job. Os dois valores também são ajustes do workflow (`worktree`, padrão `false`, e `openPr`, padrão `true`, em `workflows.implement-issue.settings`) que o `wf config set <caminho.com.pontos> <valor>` grava no arquivo global, ou no do repositório com `--repo`, depois de validar o arquivo inteiro contra o esquema ([6.2](../reference/config.md)). A ordem é: args, arquivo do repositório, arquivo global, padrão do código; o `wf config show` diz de qual camada veio cada ajuste. Sem nenhum deles o run abre o PR (o MR no GitLab) e devolve o link em `prUrl`.
+
+Sem `--worktree`, o `implement-issue` trabalha na **árvore principal**: ele cria a branch do run (`wf/issue-<n>-<run>`) a partir do HEAD que a
+pasta tem em checkout, commits locais ainda não enviados inclusive, e a põe em checkout nessa pasta, que é a que o IDE tem aberta. Você vê os
+arquivos mudarem enquanto os agentes escrevem, e quando o run termina a pasta continua na branch dele, com o commit da entrega. Enquanto o job
+roda a pasta é do workflow: um arquivo que você salva ali pode ser desfeito por uma etapa que escreve, ou entrar no commit.
+
+- **Uma árvore suja recusa o início** antes de qualquer etapa, com `status: "dirty-tree"`: o `reason` lista os arquivos modificados, no índice
+  ou não rastreados (fora do `.workflows/`) e dá as duas saídas, commitar, guardar ou descartar, ou iniciar com `--worktree`. Nada é criado.
+- **Só um run por repositório trabalha na árvore principal.** Um segundo início, ainda que de outra issue, volta `status: "main-tree-busy"`
+  com o id do run que a tem e a sugestão de `--worktree`. Um início com `--worktree` ao lado dele é permitido: o worktree é uma pasta do run.
+- O resultado do run traz `branch` e `mainTree: true`, e não traz `worktree`.
+- **O resume segue as mesmas regras do início.** Com a pasta em outra branch e limpa, ele põe a branch do run em checkout de novo e
+  segue. Com a pasta em outra branch e suja, ou na branch do run com arquivos que o run não fez (ele compara a pasta com a árvore que
+  deixou ao fim de cada etapa de escrita e ao terminar), ele devolve `status: "dirty-tree"` com a lista, sem mover nada: guarde ou
+  descarte os arquivos e retome de novo. O trabalho do próprio run, ainda não commitado, não conta como sujo. Se o processo do run
+  morreu no meio de uma etapa de escrita, o run não gravou a árvore dessa etapa, e o resume desfaz a etapa em andamento sem separar
+  o que é dela do que é seu.
+- **O cancelar desfaz só a etapa de escrita em andamento**, na pasta do usuário, como num worktree: a branch, os commits e o trabalho
+  das etapas anteriores do run ficam. Um cancelar que chega com o agente da etapa trabalhando desfaz a etapa na hora; um que chega
+  enquanto o código confere o resultado (a suíte) deixa os arquivos da etapa até o resume desfazê-la.
+- **O `wf gc` não tem worktree para remover num run da árvore principal.** Ele nunca toca nos arquivos da pasta e só apaga a branch
+  que o run registrou como sua. A branch que a pasta tem em checkout fica, com o motivo no plano: saia dela e rode o `wf gc` de novo.
+
+O `wf start` confere, antes de criar o job, que `~/.cursor-workflows/` (ou `WF_HOME`) aceita escrita. Se não aceita, sai com
+código 1 e uma mensagem que cita o sandbox do agente como causa provável: nenhum diretório de run foi criado, então rode o
+comando com permissão total. O `wf status` e o `wf wait` de um run cujo custo a API não informou (`spentCents` 0 e um aviso
+`getUsage() failed` no log) trazem `costNote`, "cost unknown" com os tokens gastos: 0 ali não é o custo.
 
 `start` valida o nome do workflow e o JSON dos args **antes** de destacar o processo e grava o job (com `runId`)
 na hora. A doc do Cursor não dá o timeout de um comando no shell do agente: as release notes só dizem que esse
@@ -107,6 +136,15 @@ Não é automático: roda quando você o chama. Detalhes e limites em [5.1](../o
 carrega antes de chamar `start_workflow`, pelo `/run-workflow` ou por um pedido em prosa ("implementa a issue 7").
 A skill ensina a disparar, acompanhar e repassar: tratar checkpoint, custo desconhecido e `secret-blocked`, e não
 mexer nos arquivos enquanto o job roda.
+
+Ela pede que `start_workflow` e `wf start` rodem com **permissão total** (fora do sandbox do agente) e diz ao usuário os quatro
+motivos antes de ele aprovar: rede para `gh`, `glab` e `git push`, que o proxy do sandbox recusa; gravações em
+`~/.cursor-workflows/` (as métricas e o índice de runs); um job destacado que sobrevive ao comando; a porta do dashboard. Ela
+prefere a tool `start_workflow` ao `wf start` quando o servidor `workflows` existe, e o `argument-hint` dela é
+`<workflow> <args> [--worktree] [--no-pr]`. Num workflow que escreve, ela cobre o modo de entrega
+([ADR-0012](../adr/0012-delivery-modes.md)): na árvore principal, avisa que a árvore é do workflow enquanto o job roda; num
+worktree, abre a pasta numa janela nova do Cursor com o CLI `cursor` (no Claude Code e no Codex, dá o caminho); no fim, dá o
+link do PR (o MR no GitLab).
 
 Ela já foi só do usuário (`disable-model-invocation: true`), mas isso não travava nada: o servidor MCP anuncia
 `start_workflow` com o `whenToUse` de cada workflow, e um pedido em prosa chegava à tool sem passar pela skill. A
@@ -298,7 +336,7 @@ cenário 1 só vale ali, porque o IDE escolhe o próprio Node e PATH. Ele:
 | 1 | O `wf doctor` está verde no ambiente do IDE | nada: o assistente roda o `wf doctor` no terminal do Cursor | sai com 0 |
 | 2 | O servidor MCP está visível e habilitado | nada: abra a lista de MCP (Customize) | `workflows` ligado, com as cinco tools |
 | 3 | O `smoke` termina | `/run-workflow smoke` | o job termina com `answer: "pong"` |
-| 4 | O `implement-issue` LOW abre um PR no repositório descartável | `/run-workflow implement-issue 1`, pedindo para abrir o PR (`openPr: true`; sem isso o workflow não abre PR) | o job termina e o PR existe |
+| 4 | O `implement-issue` LOW abre um PR no repositório descartável | `/run-workflow implement-issue 1` (o workflow abre o PR por padrão; `openPr: false` o desliga) | o job termina e o PR existe |
 | 5 | O run sobrevive ao reinício do Cursor | `/run-workflow implement-issue 2`; com o job rodando, feche o Cursor por completo e abra de novo | o job termina mesmo com o Cursor reiniciado no meio (um job ainda rodando não é um `pass`: espere); ou falhou com `runId` e o resume termina sem repetir etapas |
 | 6 | O run cancela pelo chat | `/run-workflow implement-issue 3`; com o job rodando, peça ao chat para cancelar | o job termina `cancelled`, com o `runId` para retomar |
 | 7 | O dashboard mostra o run ao vivo | `/run-workflow smoke`; o chat abre o link do dashboard no navegador embutido do Cursor | no navegador embutido: o cartão do run está na coluna Ping do quadro do `smoke` e vai sozinho para Done, sem recarregar; o clique no cartão abre o grafo, com a etapa `ping` que pisca e fica verde; passar o mouse na etapa mostra modelo, tokens, custo e duração; clicar nela abre o log (prompt, o que o agente disse, chamadas de tool) |

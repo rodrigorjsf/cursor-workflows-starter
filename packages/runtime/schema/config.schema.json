@@ -197,7 +197,7 @@
           "description": "`implement-issue`: label da issue (sem diferenciar maiúsculas) → tier. Quando várias labels casam, vale o tier mais alto, qualquer que seja a ordem. Sem nenhuma label que case, um classificador barato decide. Troca o mapa padrão inteiro (`complexity:low` e `good first issue` são LOW, `complexity:medium` é MED, `complexity:high` e `security` são HIGH)."
         },
         "maxStepCrashes": { "type": "integer", "minimum": 0, "description": "`implement-issue`: quantas vezes uma mesma etapa de escrita pode derrubar o processo (um resume que a encontra em andamento) e ser retomada. Na vez seguinte o run encerra com `step-crash-loop`, em vez de repetir a etapa. Um cancelamento no meio da etapa não conta. Padrão: 2." },
-        "gcFailedAfterDays": { "type": "integer", "minimum": 0, "description": "`implement-issue`: o `wf gc` remove o worktree e as branches (local e do origin) de um run que falhou há mais dias que isto. Falhou quer dizer terminou com erro ou com um status de falha (`tests-failed`, `baseline-red`…), ou o processo caiu sem terminar; um run cancelado não conta. A branch do origin só sai se o PR não está aberto e o commit nela é de um push do próprio run. Um run cujo PR foi mergeado ou fechado sai antes, sem esperar. Padrão: 14." },
+        "gcFailedAfterDays": { "type": "integer", "minimum": 0, "description": "`implement-issue`: o `wf gc` remove o worktree (um run da árvore principal não tem) e as branches (local, que a pasta não tenha em checkout, e do origin) de um run que falhou há mais dias que isto. Falhou quer dizer terminou com erro ou com um status de falha (`tests-failed`, `baseline-red`…), ou o processo caiu sem terminar; um run cancelado não conta. A branch do origin só sai se o PR não está aberto e o commit nela é de um push do próprio run. Um run cujo PR foi mergeado ou fechado sai antes, sem esperar. Padrão: 14." },
         "gcSnapshotGraceHours": { "type": "number", "minimum": 0, "description": "`implement-issue`: o `wf gc` varre as branches de snapshot (`wf/cloud-snapshot/<run>/<id>`, que as etapas na nuvem empurram para o `cloud.remote`) que a etapa não apagou: o processo caiu, foi morto, ou o remote recusou apagar. A branch sai quando o run que a fez é deste repositório, nenhum processo o executa e o último evento dele tem mais horas que isto; enquanto isso ela fica, com o motivo no plano. A espera existe porque o cloud agent que o processo morto iniciou pode ainda estar partindo da branch, e ninguém mediu na API real quanto ele demora a lê-la. Um run cortado no meio da etapa dona da branch (o resume pode reanexar ao agente, a não ser que o run dele tenha sido cancelado, e o trabalho de uma etapa que escreve está nela) a mantém por `gcFailedAfterDays` dias, e a de um run cancelado (que o gc também mantém, porque ele pode ser retomado) sem limite. Padrão: 24." },
         "testTimeoutSec": { "type": "number", "exclusiveMinimum": 0, "description": "`implement-issue`: tempo máximo, em segundos, de cada rodada de testes (e do `setupCommand`). Passado esse tempo o comando é morto: uma rodada de testes encerra o run com `tests-timeout`, e o `setupCommand` com `setup-failed`, como qualquer falha dele. Padrão: 600." },
         "networkTimeoutSec": { "type": "number", "exclusiveMinimum": 0, "description": "`implement-issue` e `wf gc`: tempo máximo, em segundos, de cada comando de rede (`git push`, `git ls-remote` e todo `gh` ou `glab`): uma credencial pedida ou uma conexão parada falha a etapa em vez de travar o run. O git local usa o `execTimeoutMs` do workflow. Padrão: 120." },
@@ -213,6 +213,14 @@
           "items": { "type": "string", "pattern": "^(?![/\\\\]|[A-Za-z]:)(?!(.*[/\\\\])?\\.\\.([/\\\\]|$)).+$" },
           "uniqueItems": true,
           "description": "`implement-issue`: os arquivos e pastas do repositório que os agentes de plano, de design e de texto do PR leem como contexto (o glossário, as regras de código, os ADRs). Cada item é um caminho relativo à raiz do repositório, de um arquivo ou de uma pasta; um que não existe é pulado. Sem caminho absoluto, sem segmento `..` e sem quebra de linha: o caminho é juntado à raiz, e o run não sai dela. Um repositório cujo glossário mora em outro lugar o declara aqui, por exemplo `[\"docs/vision/03-conceitos.md\", \"AGENTS.md\", \"CODING_STANDARDS.md\", \"CONTRIBUTING.md\", \"docs/adr\"]`. O ajuste vale inteiro, sem combinar com o padrão: copie o padrão e troque o que muda. Padrão: `[\"GLOSSARY.md\", \"CONTEXT.md\", \"AGENTS.md\", \"CODING_STANDARDS.md\", \"CONTRIBUTING.md\", \"docs/adr\"]`."
+        },
+        "worktree": {
+          "type": "boolean",
+          "description": "`implement-issue`: o modo de entrega do run. `false` é o modo da árvore principal: o run põe a branch dele em checkout na pasta do usuário, que precisa estar limpa (uma árvore suja recusa o início), e só um run por repositório trabalha ali. `true` pede um worktree só do run, em `.workflows/worktrees/`, que permite runs em paralelo (ADR-0012). O argumento `worktree` do run (`wf start --worktree`) vale mais que o arquivo do repositório, que vale mais que o global. Padrão: `false`."
+        },
+        "openPr": {
+          "type": "boolean",
+          "description": "`implement-issue`: abre, ao entregar, o pull request (o merge request no GitLab) e devolve o link em `prUrl`. `false` entrega só a branch commitada, sem push e sem PR. O argumento `openPr` do run (`wf start --no-pr` o põe em `false`) vale mais que o arquivo do repositório, que vale mais que o global. Padrão: `true`."
         }
       }
     },
@@ -239,7 +247,7 @@
         "$comment": { "$ref": "#/definitions/comment" },
         "autoStart": {
           "type": "boolean",
-          "description": "`false` impede o `start_workflow` de iniciar o dashboard quando ele não está rodando (a variável de ambiente `WF_DASH_AUTOSTART=off` faz o mesmo). Um dashboard que já está de pé continua sendo informado na resposta (`dashboardUrl`). Padrão: `true`."
+          "description": "`false` impede o `start_workflow` e o `wf start` de iniciar o dashboard quando ele não está rodando (a variável de ambiente `WF_DASH_AUTOSTART=off` faz o mesmo). Um dashboard que já está de pé continua sendo informado na resposta (`dashboardUrl`). Padrão: `true`."
         }
       }
     },

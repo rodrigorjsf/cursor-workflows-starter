@@ -43,8 +43,8 @@ accepts tighter `overrides` per run).
    in the config swaps it.
 4. **`implement-issue` opens a pull request on a sandbox repo.** The user creates a private GitHub repo with one issue
    labelled `complexity:low`; the kit ships a script that does it, `~/.cursor-workflows/kit/scripts/verify/setup-sandbox-repo.sh
-   <owner/new-repo>`. In the chat, with that repo open: `/run-workflow implement-issue 1` with `openPr: true` (the workflow opens no PR
-   unless asked). Pass: the job ends `finished` and the PR exists on GitHub.
+   <owner/new-repo>`. In the chat, with that repo open: `/run-workflow implement-issue 1` (the workflow opens the PR by default;
+   `openPr: false` turns it off). Pass: the job ends `finished` and the PR exists on GitHub.
 5. **A run survives restarting Cursor.** Start a run (scenario 4's issue, or any run that takes minutes), then the user
    quits and reopens Cursor. Pass: `wf jobs` still lists the job, and it finishes, or `get_workflow_status` reports
    `failed` with a `runId` and a resume (`start_workflow` with `resumeRunId`) completes it without repeating finished

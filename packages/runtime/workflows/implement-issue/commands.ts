@@ -1,7 +1,7 @@
 // Every command implement-issue runs (the tests of the TDD loop, `git`, the forge's CLI) goes through `ctx.exec`: it never blocks
 // the process (status and cancel stay responsive), it is killed at its timeout, and the run's event log shows it as a step node.
 // The forge's CLI is named in forge.ts alone: this file knows only that such a CLI is a network command (`forgeRead`).
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NETWORK_GIT_ENV } from "../../src/runtime/git-transport.js";
@@ -105,6 +105,24 @@ export class Commands {
     return this.succeedRead("git", args, cwd, this.timeouts.localMs);
   }
 
+  async currentBranch(cwd: string): Promise<string> {
+    return (await this.gitRead(cwd, "branch", "--show-current")).trim();
+  }
+
+  async peekTree(cwd: string): Promise<string> {
+    const dir = mkdtempSync(join(tmpdir(), "wf-index-"));
+    try {
+      const index = join(dir, "index");
+      const own = (await this.gitRead(cwd, "rev-parse", "--path-format=absolute", "--git-path", "index")).trim();
+      if (existsSync(own)) copyFileSync(own, index);
+      const env = { GIT_INDEX_FILE: index };
+      await this.succeed("git", ["add", "-A"], cwd, this.timeouts.localMs, env);
+      return (await this.succeedRead("git", ["write-tree"], cwd, this.timeouts.localMs, undefined, env)).trim();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
   /** `git` whose exit code is the answer (`diff --quiet`, `rev-parse --verify --quiet`): 0 is yes, 1 is no, anything else is an error. */
   async gitIs(cwd: string, ...args: string[]): Promise<boolean> {
     const r = await this.exec("git", args, this.options("git", args, cwd, this.timeouts.localMs));
@@ -192,6 +210,12 @@ export class Commands {
     if (r.ok) return r.stdout;
     if (r.exitCode === 1 && nothing.test(r.tail)) return undefined;
     throw new CommandError(cli, args, r, this.timeouts.networkMs);
+  }
+
+  async codegraphFailure(cwd: string, command: "init" | "sync"): Promise<string | undefined> {
+    const args = [command];
+    const r = await this.exec("codegraph", args, this.options("codegraph", args, cwd, this.timeouts.networkMs));
+    return r.ok ? undefined : new CommandError("codegraph", args, r, this.timeouts.networkMs).message;
   }
 
   private options(command: string, args: string[], cwd: string, timeoutMs: number | undefined, labelWords = 1): ExecOptions {

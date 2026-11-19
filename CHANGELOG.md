@@ -4,6 +4,84 @@
 
 ### Adicionado
 
+- **O `implement-issue` tem dois ajustes de entrega, `worktree` e `openPr`, e o `wf config set` os grava** (issue #117, spec #114,
+  [ADR-0012](docs/adr/0012-delivery-modes.md)). `workflows.implement-issue.settings.worktree` (padrão `false`) e `.openPr` (padrão
+  `true`) valem nos dois arquivos de configuração, e os argumentos `worktree` e `openPr` do run valem mais: args, arquivo do
+  repositório, arquivo global, padrão do código. O `wf start` e o `wf run` ganharam os atalhos `--worktree` (`worktree: true`) e
+  `--no-pr` (`openPr: false`); um atalho que contradiz a mesma chave em `--args` é recusado com exit 2, sem criar job. O novo
+  `wf config set <caminho.com.pontos> <valor> [--repo]` grava o arquivo global, ou o do repositório com `--repo`: um valor que é
+  JSON entra como JSON, o resto como texto, e um `.` dentro de um nome se escreve `\.`. Ele valida o arquivo inteiro que
+  resultaria (o esquema e os nomes que cada workflow declara), recusa um valor inválido ou um caminho desconhecido com o erro
+  de campo sem tocar no arquivo, e grava de forma atômica. O `wf config show` já dizia a camada de cada ajuste, e agora diz a dos
+  dois novos.
+- **O guia de instalação e a skill `cursor-workflows-setup` perguntam os padrões de entrega** (issue #124, spec #114,
+  [ADR-0012](docs/adr/0012-delivery-modes.md)). Depois do `wf init`, o `INSTALL-AGENT.md` ganhou o passo 6 ("Choose the delivery
+  defaults"), que renumera o doctor para 7 e a entrega final para 8, e a skill ganhou a seção de mesmo nome, no passo 3 de "Init a
+  repo". O agente pergunta, com a ferramenta de perguntas do host (`AskQuestion` no Cursor, `AskUserQuestion` no Claude Code),
+  se os runs trabalham num worktree e se abrem um PR por padrão, grava cada resposta no config global com
+  `wf config set workflows.implement-issue.settings.worktree` e `.openPr`, e mostra os comandos `wf config set --repo` que
+  mudam cada padrão num repositório. O bootstrapper do npm ([ADR-0011](docs/adr/0011-npm-bootstrapper.md)) não tem agente e
+  fica com os padrões do código. O `test/install-guide.test.ts` prende o passo e roda no CLI de verdade cada `wf config set` que o
+  guia e a skill citam; o guia continua preso à tag da versão do pacote.
+- **O `implement-issue` deixa o índice de código em dia antes da primeira etapa de agente** (issue #118, spec #114). Depois da
+  checagem do autor da issue e antes de qualquer agente, o run roda `codegraph init` quando o repositório do run não tem
+  `.codegraph/` e `codegraph sync` quando tem, como um nó de comando do log, sob o teto dos comandos de rede
+  (`networkTimeoutSec`). Quando o worktree do run existe (um worktree novo não traz o índice), repete o passo nele. Uma pasta
+  `.codegraph/` que só tem o `.gitignore` (o clone de um repositório que o versiona, como este) não tem índice: recebe `init`, não
+  `sync`, que num diretório dentro de outro indexado atualizaria o índice do diretório de fora. Antes de tudo isso, acrescenta `.codegraph/` ao `.git/info/exclude` uma única vez (um resume não repete a
+  linha), para a entrega nunca levar arquivos do índice para o commit. Sem `codegraph` no `PATH`, ou com um que sai com código
+  diferente de zero, o run grava um único evento `warning` e segue sem índice. O contexto dos workflows ganhou
+  `ctx.warn(message)`, que grava esse evento (`warning`), ao lado de `ctx.log`.
+- **Um início que não deixa um run pela metade, dentro ou depois do sandbox do agente** (issue #119, spec #114). Quatro mudanças:
+  - **O `wf start` e o `start_workflow` conferem `~/.cursor-workflows/` antes de criar o job.** Se o diretório do usuário (ou
+    `WF_HOME`) não aceita escrita, o início é recusado (`wf start` sai com código 1; `start_workflow` responde `isError`) com uma
+    mensagem que cita o sandbox do agente como causa provável e manda rodar com permissão total. Nada é criado antes disso: nem o
+    registro do job nem o diretório do run. As gravações do banco de métricas e do índice de runs continuam sem derrubar o run depois.
+  - **Toda execução registra o run no índice global quando ele não está lá.** Um run cuja primeira execução não conseguiu gravar o
+    `runs.jsonl` aparece nele depois de um resume, uma vez só (a chave é o repositório mais o `runId`) e com a hora da primeira
+    execução. O `registerRunIfMissing` do `runs-index` faz a conferência.
+  - **O `wf start` inicia o dashboard e imprime o link da página do run**, como o `start_workflow`: `dashboardUrl`, ou
+    `dashboardWarning` com o motivo. `dashboard.autoStart: false` no config global e `WF_DASH_AUTOSTART=off` o desligam, e aí
+    nenhum dos dois campos aparece. O `dashboardFields` passou para o `dashboard-instance`, que os dois caminhos usam.
+  - **O `wf status`, o `wf wait` e o `get_workflow_status`/`wait_workflow` dizem que o custo é desconhecido.** Com `spentCents` 0 e um
+    aviso `getUsage() failed` no log, o estado traz `costNote`: "cost unknown: N tokens spent (getUsage() failed, so 0 cents is not
+    the cost)". Um run gratuito que informou seu uso, ou um com custo já somado, não traz.
+- **A skill `run-workflow` pede permissão total com os motivos, prefere o MCP e cobre o modo de entrega no chat** (issue #127, spec #114,
+  [ADR-0012](docs/adr/0012-delivery-modes.md)). A skill manda rodar `start_workflow` e `wf start` com permissão total (fora do sandbox
+  do agente) e manda dizer ao usuário os quatro motivos antes de ele aprovar: rede para `gh`, `glab` e `git push`, que o proxy do
+  sandbox recusa; gravações em `~/.cursor-workflows/` (as métricas e o índice de runs); um job destacado que sobrevive ao comando; a
+  porta do dashboard. Um início recusado com `cannot write to the user directory` rodou dentro do sandbox e não criou run: a skill
+  manda pedir a permissão e iniciar de novo. Ela prefere a tool `start_workflow` ao `wf start` quando o servidor `workflows`
+  existe, e, com o dashboard parado, aponta só os comandos suportados (o próximo início o sobe; com o início automático desligado,
+  `wf config set dashboard.autoStart true`), nunca o código do kit. O `argument-hint` passou a ser
+  `<workflow> <args> [--worktree] [--no-pr]`, e a seção nova "Delivery" diz o que o agente faz em cada modo: avisa que a árvore é do
+  workflow enquanto o job roda (árvore principal), abre a pasta do worktree numa janela nova do Cursor com o CLI `cursor` (onde o
+  hospedeiro não abre janela, dá o caminho) e entrega o link do PR ou MR (`prUrl`). Os resultados `dirty-tree` e `main-tree-busy`
+  são repassados com o `reason` e os `files`. O `test/repo-layout.test.ts` prende cada um desses pontos.
+- **O `implement-issue` trabalha por padrão na árvore principal: a branch do run fica em checkout na pasta do usuário** (issue #123,
+  spec #114, [ADR-0012](docs/adr/0012-delivery-modes.md)). Com `worktree` falso (o padrão), o run cria a branch dele
+  (`wf/issue-<n>-<run>`) a partir do HEAD que a pasta tem em checkout, commits locais ainda não enviados inclusive, e a põe em
+  checkout nessa pasta: o IDE mostra os arquivos mudando enquanto os agentes escrevem. A entrega commita só o que o run mudou e abre o
+  PR (o MR no GitLab) dali, e no fim a pasta continua na branch do run.
+  - **Uma árvore suja recusa o início, antes de qualquer etapa.** Um arquivo modificado, no índice ou não rastreado, fora do
+    `.workflows/`, devolve `status: "dirty-tree"` com `files` (as linhas do `git status --porcelain`) e um `reason` que lista até
+    vinte deles e dá as duas saídas: commitar, guardar ou descartar, ou iniciar com `--worktree`. Nada é criado: nem branch, nem
+    worktree, nem passo de agente. Uma pasta `.codegraph/` não conta quando o `codegraph` está no `PATH` (o run a exclui do git antes de
+    olhar a árvore); sem o `codegraph`, ela é um arquivo sujo, porque nada a impediria de entrar no commit.
+  - **Só um run por repositório trabalha na árvore principal.** O segundo início, ainda que numa outra issue, devolve
+    `status: "main-tree-busy"` com `activeRunId` e um `reason` que manda usar `--worktree`; um início com `--worktree` ao lado dele é
+    permitido. O lock é `main-tree`, em `.workflows/locks/`, e vale até o run terminar.
+  - **O resultado traz `branch` e `mainTree: true`, sem `worktree`.** `--worktree` (ou `worktree: true`) mantém o comportamento
+    anterior.
+  - **O resume, o cancelar e o `wf gc` seguem as mesmas regras** (issue #126). Um resume cuja pasta saiu da branch do run, e está
+    limpa, põe a branch em checkout de novo e segue; se está suja, devolve `status: "dirty-tree"` com os arquivos, sem mover nada. Com
+    a pasta na branch do run, o resume recusa só o que o run não fez: o run grava a árvore que deixou ao fim de cada etapa de escrita,
+    ao desfazer uma etapa cancelada e ao terminar uma execução, e o resume compara a pasta com ela, de modo que o trabalho do próprio
+    run, ainda não commitado, não é "sujo". Um processo que morre no meio de uma etapa de escrita não gravou a árvore daquela etapa, e o
+    resume dele desfaz a etapa em andamento sem separar o que é do run do que é seu. O cancelar
+    de um job que roda desfaz só a etapa de escrita em andamento na pasta do usuário e deixa a branch, os commits e o trabalho anterior
+    do run. O `wf gc` de um run da árvore principal não tem worktree para remover, nunca toca nos arquivos da pasta e só apaga a
+    branch que o run registrou como sua (`wf/…`): a branch em checkout na pasta fica, com o motivo no plano, até o usuário sair dela.
 - **O dashboard aprova ou troca as seams que um run do `implement-issue` propôs** (issue #98). Um run MED ou HIGH que parou em
   `seams-proposed` (ou, com `seams` e sem `testCommand`, em `test-command-proposed`) mostra no Run view o painel **Seams
   proposed** (ou **Test command proposed**): as seams, as fatias e o comando de teste que o run executa depois da aprovação,
@@ -252,6 +330,20 @@
   os comentários da issue antes de postar. O texto passa pelo mesmo redator e pela mesma trava de segredos dos outros comentários.
 
 ### Mudado
+
+- **No `implement-issue`, a fatia única do LOW cobre todos os casos que a issue lista, e uma fatia extra avisa que o review pode ter
+  errado** (issue #120, spec #114). O run `implement-issue-4e859968` (uma issue LOW que pedia `abs(x)` com um número positivo, um
+  negativo e zero) gastou 694.676 tokens: a fatia do LOW pedia "um exemplo da issue", o teste cobriu só o caso negativo, o review
+  de spec apontou os outros dois como faltando, cada um virou uma fatia extra (as duas já estavam satisfeitas) e houve uma segunda
+  rodada de review, 421.658 tokens (60,7%) de trabalho que uma primeira fatia completa dispensava. O teto `sliceCaps.LOW` não teve
+  parte nisso: o plano do LOW é uma fatia montada em código, e o teto nunca cortou nada. Agora a etapa red do LOW recebe a
+  instrução de cobrir cada caso que a issue lista, cada um como uma asserção do mesmo teste. E a fatia extra que um achado do review
+  abre diz à etapa red que o review a apontou como faltando, que ela pode já existir, e manda escrever o teste primeiro e, se ele
+  passar sem implementação, responder `alreadySatisfied` como as instruções já pedem, sem a segunda tentativa que o run mediu
+  (117.400 tokens). Nenhum ajuste nem argumento mudou.
+- **O `implement-issue` abre o PR (o MR no GitLab) por padrão** (issue #117). O padrão de `openPr` passou de `false` para `true`:
+  um run sem o ajuste e sem o argumento empurra a branch, abre o PR e devolve o link em `prUrl` e no cartão. Quem quer só a branch
+  commitada passa `openPr: false` (ou `--no-pr`), ou grava `wf config set workflows.implement-issue.settings.openPr false`.
 
 - **O `npm run typecheck` pega o índice que pode não existir, o import que sobra, a promessa perdida e o `JSON.parse` com cast.** O
   `packages/runtime/tsconfig.json`, que os seis projetos do `tsc` estendem, liga `noUncheckedIndexedAccess`, `noImplicitOverride`,

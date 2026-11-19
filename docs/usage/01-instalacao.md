@@ -35,7 +35,9 @@ usa recebe depois os próprios arquivos, do `wf init` ([2.3](03-invocacao-no-cur
 Aponte qualquer agente de código para o guia, fixado numa tag:
 `https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/INSTALL-AGENT.md`. Ele checa a máquina,
 instala o kit, confere o login, pede que você confirme que o Privacy Mode está ligado (veja [§4](#4-login-e-modelos)), roda o
-`wf init` no repositório atual e termina no `wf doctor`. O guia é público, está
+`wf init` no repositório atual, pergunta se os runs trabalham num worktree e se abrem um PR por padrão (grava as respostas no
+arquivo global com `wf config set`, e mostra o `wf config set --repo` que muda cada padrão num repositório) e termina no
+`wf doctor`. O guia é público, está
 em inglês (texto escrito para agentes) e não depende de nenhum outro documento. A tag que ele traz é sempre a versão do
 pacote: o `npm test` reprova se os dois divergirem, então uma versão nova só sai com o guia apontando para ela.
 
@@ -215,10 +217,11 @@ O que conferir:
    Isso não é hipótese: num Premium, em 2026-11-11, toda chamada ao `getUsage()` deu `feature_unavailable`
    ([8.2 §5](../research/verificacoes-locais.md)). Com isso, `spentCents` fica em 0 e o
    `--max-cents` não dispara. Veja [2.2 §3](02-configuracao-inicial.md#3-teto-de-custo).
-4. Em `/caminho/do/repo-de-teste/.workflows/worktrees/` existe um worktree `wf-issue-1-<run>`, na branch `wf/issue-1-<run>`, com o commit.
+4. A pasta `/caminho/do/repo-de-teste` está na branch `wf/issue-1-<run>`, com o commit: a árvore principal é o padrão, e ela precisa estar
+   limpa para o run começar. Com `--worktree`, o commit está num worktree `wf-issue-1-<run>` em `/caminho/do/repo-de-teste/.workflows/worktrees/`.
 5. Rodando de novo com `--resume <runId>`, as etapas de agente concluídas aparecem como "(cache)", e o commit
    não é repetido. As etapas que escrevem (`test-N`, `code-N`, `fix-N-R`, `refactor-1`) nunca vêm do cache: o que
-   elas fizeram está no worktree, e o progresso do run (`tdd-progress.json`) guarda as fatias prontas, que o resume
+   elas fizeram está na árvore do run, e o progresso do run (`tdd-progress.json`) guarda as fatias prontas, que o resume
    não refaz.
 
 Se algo divergir, anote em um issue do seu fork. Os pontos marcados "a validar" em

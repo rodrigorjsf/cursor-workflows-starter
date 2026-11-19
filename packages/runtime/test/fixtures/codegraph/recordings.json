@@ -1,0 +1,69 @@
+{
+  "recordedWith": {
+    "codegraph": "1.6.2"
+  },
+  "placeholders": {
+    "cwd": "<cwd>"
+  },
+  "recordings": {
+    "sync-uninitialized": {
+      "args": [
+        "sync"
+      ],
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "✗ CodeGraph not initialized in <cwd>\n"
+    },
+    "init-new": {
+      "args": [
+        "init"
+      ],
+      "exitCode": 0,
+      "stdout": "┌  Initializing CodeGraph\n│\n◆  Initialized in <cwd>\n│\nScanning files...\nParsing code...\nResolving refs...\nLinking dynamic dispatch...\n│\n◆  Indexed 1 files\n│\n●  2 nodes, 1 edges in 12.7s\n│\n└  Done\n\n",
+      "stderr": "",
+      "creates": {
+        ".gitignore": "# CodeGraph data files — local to each machine, not for committing.\n# Ignore everything in .codegraph/ except this file itself, so transient\n# files (the database, daemon.pid, sockets, logs) never show up in git.\n*\n!.gitignore\n"
+      }
+    },
+    "init-existing": {
+      "args": [
+        "init"
+      ],
+      "exitCode": 0,
+      "stdout": "┌  Initializing CodeGraph\n│\n▲  Already initialized in <cwd>\n│\n●  Use \"codegraph index\" to re-index or \"codegraph sync\" to update\n│\n└  \n\n",
+      "stderr": ""
+    },
+    "sync-initialized": {
+      "args": [
+        "sync"
+      ],
+      "exitCode": 0,
+      "stdout": "┌  Syncing CodeGraph\n│\nScanning files...\n│\n●  Already up to date\n│\n└  Done\n\n",
+      "stderr": ""
+    },
+    "unknown-command": {
+      "args": [
+        "bogus"
+      ],
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "error: unknown command 'bogus'\n"
+    },
+    "sync-gitignore-only": {
+      "args": [
+        "sync"
+      ],
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "✗ CodeGraph not initialized in <cwd>\n"
+    },
+    "sync-corrupt-index": {
+      "args": [
+        "sync"
+      ],
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "✗ CodeGraph not initialized in <cwd>\n"
+    }
+  }
+}

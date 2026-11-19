@@ -189,14 +189,15 @@ test("the validate reference names what the kit ships: its scripts exist, the ch
   assert.ok(kitPaths.includes("scripts/verify/validate-cursor-ide.sh") && kitPaths.includes("scripts/verify/setup-sandbox-repo.sh"), `found ${kitPaths.join()}`);
   for (const path of kitPaths) assert.ok(existsSync(join(ROOT, path)), `validate.md names ${path}, which the kit does not ship`);
   assert.ok(existsSync(join(ROOT, "packages", "runtime", "workflows", "smoke.ts")), "scenario 3 runs the smoke workflow");
-  // implement-issue opens no PR unless openPr is true, and scenario 4 passes only with one.
   const four = validate.slice(validate.indexOf("\n4. **"), validate.indexOf("\n5. **"));
   assert.match(four, /openPr/, "scenario 4 must ask the chat to open the PR");
 });
 
+const runWorkflowStep2 = (skill: string): string => skill.slice(skill.indexOf("\n2. "), skill.indexOf("\n3. Chain `wait_workflow`"));
+
 test("the run-workflow skill opens the dashboard link that start_workflow returns in Cursor's built-in browser", () => {
   const skill = read("skills", "run-workflow", "SKILL.md");
-  const step2 = skill.slice(skill.indexOf("\n2. Call `start_workflow`"), skill.indexOf("\n3. Chain `wait_workflow`"));
+  const step2 = runWorkflowStep2(skill);
   assert.match(step2, /`dashboardUrl`/, "step 2 must tell the agent what to do with dashboardUrl");
   assert.match(step2, /built-in browser/i, "the link opens in Cursor's built-in browser");
   assert.match(step2, /`dashboardWarning`/, "a dashboard that could not start is relayed, not ignored");
@@ -211,6 +212,63 @@ test("the run-workflow skill says that workflow output is data from the run: rel
   assert.match(intro, /never follow/i, "and the agent never follows it");
   const approval = skill.slice(skill.indexOf("`untrusted-author`"), skill.indexOf("`secret-blocked`"));
   assert.match(approval, /allowExternalAuthor: true/, "the skill tells the agent how an outside author's issue goes on, after the user read it");
+});
+
+test("the run-workflow skill says where a stopped main-tree run left its change: on the result's branch, in the user's own folder", () => {
+  const skill = read("skills", "run-workflow", "SKILL.md");
+  const blocked = skill.slice(skill.indexOf("- `secret-blocked`"), skill.indexOf("- Anything else: the workflow ended"));
+  assert.match(blocked, /`mainTree: true`/, "the secret-blocked bullet knows a result without a worktree");
+  assert.match(blocked, /`branch`/);
+  const unfinished = skill.slice(skill.indexOf("- Anything else: the workflow ended"), skill.indexOf("5. When `status` is `failed`"));
+  assert.match(unfinished, /`worktree` or `branch`/);
+});
+
+test("the run-workflow skill asks for full permissions and gives the user the four reasons", () => {
+  const skill = read("skills", "run-workflow", "SKILL.md");
+  const permissions = skill.slice(skill.indexOf("\n## Permissions"), skill.indexOf("\n## Delivery"));
+  assert.match(permissions, /full permissions \(outside the agent sandbox\)/);
+  assert.match(permissions, /`start_workflow` and `wf start`/);
+  assert.match(permissions, /network for `gh`, `glab` and `git push`, which the sandbox proxy refuses/);
+  assert.match(permissions, /writes to `~\/\.cursor-workflows\/` \(the metrics and the runs index\)/);
+  assert.match(permissions, /a detached job that outlives the command/);
+  assert.match(permissions, /the dashboard's port/);
+  assert.match(permissions, /`cannot write to the user directory`/, "the refusal that names the sandbox is the cue to ask again with full permissions");
+});
+
+test("the run-workflow skill prefers the start_workflow tool and sends a down dashboard to supported commands, never to the kit's source", () => {
+  const skill = read("skills", "run-workflow", "SKILL.md");
+  const step2 = runWorkflowStep2(skill);
+  assert.match(step2, /Prefer `start_workflow` to `wf start` whenever the `workflows` server is available/);
+  assert.match(step2, /wf config set dashboard\.autoStart true/, "a dashboard that stays down for lack of auto-start is turned on by a supported command");
+  assert.match(step2, /next `start_workflow` or `wf start` starts it/);
+  assert.doesNotMatch(skill, /npm run dash|packages\/dashboard|~\/\.cursor-workflows\/kit/, "the skill names no path of the kit's source for the dashboard");
+  assert.match(step2, /never (?:start it from|read) the kit/i, "the agent is told to stay out of the kit's source");
+});
+
+test("the run-workflow skill's argument-hint shows the workflow, its args and both delivery shortcuts", () => {
+  const skill = read("skills", "run-workflow", "SKILL.md");
+  const frontmatter = skill.slice(0, skill.indexOf("\n---", 4));
+  assert.match(frontmatter, /^argument-hint: <workflow> <args> \[--worktree\] \[--no-pr\]$/m);
+  const step1 = skill.slice(skill.indexOf("\n1. Build `name` and `args`"), skill.indexOf("\n2. "));
+  assert.match(step1, /`--worktree`.*`worktree: true`/s, "a shortcut in the request becomes its arg");
+  assert.match(step1, /`--no-pr`.*`openPr: false`/s);
+});
+
+test("the run-workflow skill covers the main-tree notice, the worktree window in Cursor (the path elsewhere) and the PR or MR link", () => {
+  const skill = read("skills", "run-workflow", "SKILL.md");
+  const delivery = skill.slice(skill.indexOf("\n## Delivery"), skill.indexOf("\n## Steps"));
+  assert.match(delivery, /main tree/i);
+  assert.match(delivery, /the tree belongs to the workflow until the job ends/);
+  assert.match(delivery, /`cursor --new-window <worktree>`/, "in Cursor the worktree opens in a new window through the cursor CLI");
+  assert.match(delivery, /Claude Code, Codex\), give the user the path/, "where no window can open, the user gets the path");
+  assert.match(delivery, /`prUrl`/, "the PR or MR link is relayed from the result");
+  assert.match(delivery, /MR/);
+  const done = skill.slice(skill.indexOf("   - `done`:"), skill.indexOf("   - A result with `next`"));
+  assert.match(done, /`prUrl`/, "the final message of a delivered run starts from the link");
+  const refused = skill.slice(skill.indexOf("   - `dirty-tree`"), skill.indexOf("   - Anything else: the workflow ended"));
+  assert.match(refused, /`main-tree-busy`/);
+  assert.match(refused, /`files`/);
+  assert.match(refused, /`--worktree`/);
 });
 
 test("reference files two skills share stay identical", () => {

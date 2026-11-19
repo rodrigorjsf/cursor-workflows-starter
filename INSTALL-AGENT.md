@@ -105,7 +105,49 @@ line that starts with `wf init: Claude Code reads`. That line means a Claude Cod
 `wf init` does not write Claude Code's memory files. It never runs git: the user reviews the diff and commits. The user can decline the `AGENTS.md` block with `wf init --no-agents-md` and undo it later with
 `wf init --remove`.
 
-## 6. Run the doctor
+## 6. Choose the delivery defaults
+
+`implement-issue` delivers its work in two ways that the user picks between, and each pick has a default for every repo
+on this machine. Ask the two questions below one at a time with the host's question tool (`AskQuestion` in Cursor,
+`AskUserQuestion` in Claude Code; in a host with neither, ask in the chat) and wait for each answer. The user decides:
+you write what they said.
+
+1. **Where do runs work?**
+   - The main tree: the run's branch is checked out in the folder the user has open, so the IDE shows the files change
+     while the run works. The tree must be clean when a run starts, it belongs to the run until the run ends, and one
+     such run goes at a time per repo. This is the code default.
+   - A worktree: each run works in a folder of its own under `.workflows/worktrees/`, so the user's tree stays untouched
+     and runs go in parallel. The IDE shows nothing of it until the user opens that folder.
+2. **Do runs open a PR?**
+   - Yes: the run pushes its branch, opens the PR (the MR on GitLab) and returns the link. This is the code default.
+   - No: the run leaves the branch committed locally, with no push and no PR, for the user to review first.
+
+Write both answers to the global config, `~/.cursor-workflows/config.json`, with the command of each answer, even when it
+matches the code default:
+
+| Answer | Command |
+|---|---|
+| main tree | `wf config set workflows.implement-issue.settings.worktree false` |
+| worktree | `wf config set workflows.implement-issue.settings.worktree true` |
+| PR | `wf config set workflows.implement-issue.settings.openPr true` |
+| no PR | `wf config set workflows.implement-issue.settings.openPr false` |
+
+Then show the user how one repo differs from those defaults. From that repo's root:
+
+```bash
+wf config set --repo workflows.implement-issue.settings.worktree true
+wf config set --repo workflows.implement-issue.settings.openPr false
+```
+
+These write `.agents/workflows/config.json`, the file the repo commits, and a repo value beats the global one. A single
+run beats both: `wf start` takes `--worktree` and `--no-pr`. `wf config show implement-issue` names the layer each
+value came from.
+
+Done when both answers are in the global config (`wf config show implement-issue` prints `"layer": "global"` for
+`/settings/worktree` and `/settings/openPr` under `provenance`, or `"layer": "repo"` for one that the repo's own file
+already sets) and the user has seen the two `--repo` commands.
+
+## 7. Run the doctor
 
 ```bash
 wf doctor --json
@@ -124,7 +166,7 @@ that names the key. Declaring the host is the user's call.
 Run the doctor from a terminal the IDE opened when you can: `node` and `mcp-server` follow the environment the IDE
 starts.
 
-## 7. Hand over
+## 8. Hand over
 
 Tell the user:
 

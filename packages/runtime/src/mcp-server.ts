@@ -51,7 +51,7 @@ import { z } from "zod";
 import { type LimitOverrides, limitOverridesSchema, loadEffectiveConfig, parseLimitOverrides } from "./config/index.js";
 import { assertKitCompatible, readKitPackage } from "./kit-version.js";
 import { argsError } from "./runtime/args-schema.js";
-import { type DashboardStatus, ensureDashboard, runPageUrl } from "./runtime/dashboard-instance.js";
+import { dashboardFields, ensureDashboard } from "./runtime/dashboard-instance.js";
 import { insideWorkflow } from "./runtime/inside-workflow.js";
 import { installCrashHandlers, spawnJob } from "./runtime/jobs.js";
 import { cancelJob, readJob, waitJob, waitSeconds } from "./runtime/job-state.js";
@@ -74,10 +74,6 @@ const { workflows, broken } = nested
 const { version } = readKitPackage();
 // `tools: {}` makes the SDK answer tools/list from the start: with no tool registered (inside a step) it lists none.
 const server = new McpServer({ name: "cursor-workflows", version }, { capabilities: { tools: {} } });
-
-/** What `start_workflow` says about the dashboard: the link to the run's page (the Board is one menu away), or why there is none. Nothing when auto-start is off. */
-const dashboardFields = (d: DashboardStatus, runId: string) =>
-  d.status === "running" ? { dashboardUrl: runPageUrl(d.url, runId) } : d.status === "unavailable" ? { dashboardWarning: d.reason } : {};
 
 const text = (v: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(v, null, 2) }] });
 const fail = (v: unknown) => ({ ...text(v), isError: true });
@@ -111,8 +107,9 @@ if (nested) {
         "Starts a workflow by name. The workflow runs to the end on its own (steps, models and reviews are " +
         "defined in code). Returns a jobId; then call wait_workflow until status != running. When the local " +
         "dashboard is running it also returns dashboardUrl, where the user can watch the run. It is refused (isError, nothing started) when " +
-        "the repository already runs as many jobs as caps.maxRunningJobs allows (3 by default), or already runs this workflow with the same args: " +
-        "wait for that job instead of starting another. Available: " +
+        "the repository already runs as many jobs as caps.maxRunningJobs allows (3 by default), already runs this workflow with the same args: " +
+        "wait for that job instead of starting another, or the user directory ~/.cursor-workflows cannot be written (an agent sandbox is the likely cause: " +
+        "the server must run with full permissions). Available: " +
         [...workflows.values()].map((w) => `${w.meta.name} (${w.meta.whenToUse ?? w.meta.description})`).join("; "),
       inputSchema: z.strictObject({
         // The handler answers a name it does not know with `unknown workflow`; the list is for the model.

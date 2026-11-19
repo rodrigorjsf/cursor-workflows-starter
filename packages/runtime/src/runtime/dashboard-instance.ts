@@ -41,6 +41,9 @@ export const dashboardUrl = (port: number): string => `http://${DASHBOARD_HOST}:
 /** The Run view of run `runId` on the dashboard at `baseUrl`: the page `/runs/<runId>` (the dashboard's `app/format.ts` writes the same link as `runHref`). */
 export const runPageUrl = (baseUrl: string, runId: string): string => `${baseUrl}/runs/${encodeURIComponent(runId)}`;
 
+export const dashboardFields = (d: DashboardStatus, runId: string) =>
+  d.status === "running" ? { dashboardUrl: runPageUrl(d.url, runId) } : d.status === "unavailable" ? { dashboardWarning: d.reason } : {};
+
 export const dashboardPidPath = (): string => join(userDir(), "dashboard.pid");
 /** Where the dashboard keeps the bundle of its web app, one folder per content hash (see packages/dashboard/src/web-bundle.ts). */
 export const dashboardCacheDir = (): string => join(userDir(), "dashboard-cache");

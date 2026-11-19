@@ -260,6 +260,7 @@ export interface WorkflowContext<A = unknown> {
   exec(command: string, args?: string[], opts?: ExecOptions): Promise<ExecResult>;
   phase(title: string): void;
   log(message: string): void;
+  warn(message: string): void;
   /**
    * Sets what the run's card shows in the dashboard's Board (see `WorkflowCard`). The Board keeps the latest card of each
    * run: call it again when something the card shows changes (a pull request opened, a tier decided). A run that never

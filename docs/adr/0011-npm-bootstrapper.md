@@ -35,6 +35,9 @@ keeps living in the cloned tag.**
   outside the package, with its path and its reason: the clone, the `wf` shim, the global skill links, the default config,
   and the files `wf init` edits. It asks once, `[y/N]`, and N is the default. Without a TTY it refuses unless `--yes` is
   given, and the refusal prints the same plan. `install.sh` and `wf upgrade` are unchanged.
+- **`init` asks no delivery question.** The install guide asks the user for the delivery defaults of
+  [ADR-0012](0012-delivery-modes.md) with the host's question tool. The bootstrapper has no agent to ask, so it writes none
+  of them, the code defaults stand, and its plan says so.
 - **Release from CI.** Pushing a `v*` tag runs a workflow that runs the full check, compares the package version with the
   tag, creates the immutable GitHub release, and only then runs `npm publish --provenance` with npm trusted publishing
   (OIDC, no stored token). The release must exist before the package, because the installer refuses a tag that has no

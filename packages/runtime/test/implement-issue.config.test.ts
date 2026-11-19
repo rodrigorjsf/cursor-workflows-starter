@@ -3,14 +3,15 @@
 // extra slices, fix rounds, red/green attempts, diff size, label-to-tier map, crash limit) are settings of the workflow
 // that the same files tune. The environment (fake SDK, fake gh, temp repo) is in implement-issue.fixture.ts.
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { calls } from "./fake-sdk.js";
 import { CONFIG_SCHEMA_PATH, validateConfigData } from "../src/config/file.js";
+import type { WorkflowEvent } from "../src/runtime/events.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import implementIssue from "../workflows/implement-issue.js";
-import { ALL_CODE, ALL_TEST, CLEAN_REVIEW, PLAN, SUB_CODE, forgeState, forgeTest, fx, git, issue, names, run, submit, write } from "./implement-issue.fixture.js";
+import { ALL_CODE, ALL_TEST, CLEAN_REVIEW, PLAN, SUB_CODE, branchOf, forgeState, forgeTest, fx, git, issue, names, originBranches, run, submit, worktreeOf, write } from "./implement-issue.fixture.js";
 import { globalConfigPath, runStartOf, withEnv, writeGlobalConfig, writeRepoConfig } from "./config-fixtures.js";
 
 afterEach(() => rmSync(globalConfigPath(), { force: true }));
@@ -68,7 +69,7 @@ const settings = (value: Record<string, unknown>) => writeRepoConfig(fx.repo, { 
 const slice = (n: number) => ({ behavior: `comportamento ${n}`, seam: "math.subtract", testIdea: `ideia ${n}` });
 const WRONG_CODE = SUB_CODE.replace("a - b", "a + b");
 
-test("implement-issue declares its fourteen settings with the code defaults; each is in the config schema, and the defaults pass it", () => {
+test("implement-issue declares its sixteen settings with the code defaults; each is in the config schema, and the defaults pass it", () => {
   assert.deepEqual(implementIssue.meta.settings, {
     sliceCaps: { LOW: 1, MED: 3, HIGH: 5 },
     extraSlices: 2,
@@ -84,6 +85,8 @@ test("implement-issue declares its fourteen settings with the code defaults; eac
     backlogLabel: "ready-for-agent",
     repoHosts: [],
     contextFiles: ["GLOSSARY.md", "CONTEXT.md", "AGENTS.md", "CODING_STANDARDS.md", "CONTRIBUTING.md", "docs/adr"],
+    worktree: false,
+    openPr: true,
   });
   assert.deepEqual(validateConfigData({ workflows: { "implement-issue": { settings: implementIssue.meta.settings } } }), []);
   const schema = JSON.parse(readFileSync(CONFIG_SCHEMA_PATH, "utf8")) as { definitions: { workflowSettings: { properties: Record<string, unknown> } } };
@@ -126,6 +129,8 @@ forgeTest("a setting that is out of range, misspelled or of the wrong shape fail
   await fails({ contextFiles: ["docs/glossary.md", "../x"] }, /\/workflows\/implement-issue\/settings\/contextFiles\/1/);
   await fails({ contextFiles: [""] }, /\/workflows\/implement-issue\/settings\/contextFiles\/0/);
   await fails({ contextFiles: ["docs/glossary.md", "docs/glossary.md"] }, /\/workflows\/implement-issue\/settings\/contextFiles/);
+  await fails({ openPr: "yes" }, /\/workflows\/implement-issue\/settings\/openPr/);
+  await fails({ worktree: 1 }, /\/workflows\/implement-issue\/settings\/worktree/);
   await fails({ fixRound: 1 }, /\/workflows\/implement-issue\/settings\/fixRound: unknown setting \(workflow implement-issue declares: sliceCaps, extraSlices, fixRounds/);
   assert.equal(calls.length, 0);
 });
@@ -330,4 +335,88 @@ forgeTest("maxDiffChars cuts the diff the reviewers and the PR text get", async 
   assert.match(prompt, /\(diff truncated: read the files for the rest\)/);
   const shown = prompt.slice(prompt.lastIndexOf("```diff\n") + 8, prompt.lastIndexOf("\n```"));
   assert.equal(shown.length, 60);
+});
+
+const cardsOf = (runId: string) => readEventLog(eventLogPath(fx.repo, runId)).events.filter((e: WorkflowEvent): e is Extract<WorkflowEvent, { type: "card" }> => e.type === "card");
+
+forgeTest("a run with no setting and no arg opens the PR (the MR on GitLab), and the link is in the result and on the card", async (forge) => {
+  issue(["complexity:low"]);
+  const r = await run({ openPr: undefined });
+  assert.equal(r.status, "finished", r.error);
+  const [opened] = forgeState().prs;
+  assert.ok(opened, "the forge was asked to open it");
+  assert.equal(res(r).prUrl, opened.url);
+  assert.deepEqual(cardsOf(r.runId).at(-1)!.links, [{ label: forge === "gitlab" ? "MR !1" : "PR #1", url: opened.url }]);
+  assert.deepEqual(originBranches(), [branchOf(r.runId)], "the branch was pushed for it");
+});
+
+const LAYERS: Array<{ name: string; global?: boolean; repo?: boolean; arg?: boolean; opens: boolean }> = [
+  { name: "the global file says false", global: false, opens: false },
+  { name: "the global file says true", global: true, opens: true },
+  { name: "the repo file says true over a global false", global: false, repo: true, opens: true },
+  { name: "the repo file says false over a global true", global: true, repo: false, opens: false },
+  { name: "the arg says true over a global false", global: false, arg: true, opens: true },
+  { name: "the arg says false over a global true", global: true, arg: false, opens: false },
+  { name: "the arg says true over a repo false", repo: false, arg: true, opens: true },
+  { name: "the arg says false over a repo true", repo: true, arg: false, opens: false },
+  { name: "the arg says false over a repo true over a global true", global: true, repo: true, arg: false, opens: false },
+];
+
+for (const layer of LAYERS) {
+  forgeTest(`openPr, ${layer.name}: ${layer.opens ? "a PR is opened" : "no PR is opened"}`, async () => {
+    issue(["complexity:low"]);
+    if (layer.global !== undefined) writeGlobalConfig({ workflows: { "implement-issue": { settings: { openPr: layer.global } } } });
+    if (layer.repo !== undefined) settings({ openPr: layer.repo });
+    const r = await run({ openPr: layer.arg });
+    assert.equal(r.status, "finished", r.error);
+    assert.equal(res(r).prUrl !== undefined, layer.opens);
+    assert.equal(forgeState().prs.length, layer.opens ? 1 : 0);
+  });
+}
+
+forgeTest("with openPr false the run delivers the branch, committed in its worktree, and opens no PR", async () => {
+  issue(["complexity:low"]);
+  settings({ openPr: false });
+  const r = await run({ openPr: undefined });
+  assert.equal(r.status, "finished", r.error);
+  assert.equal(res(r).status, "done");
+  assert.equal(res(r).prUrl, undefined);
+  assert.equal(res(r).branch, branchOf(r.runId));
+  assert.equal(git(fx.repo, "rev-list", "--count", `main..${branchOf(r.runId)}`).trim(), "1", "the delivery commit is on the branch");
+  assert.deepEqual(forgeState().prs, []);
+  assert.deepEqual(originBranches(), [], "nothing was pushed");
+});
+
+const WORKTREE_LAYERS: Array<{ name: string; global?: boolean; repo?: boolean; arg?: boolean; inWorktree: boolean }> = [
+  { name: "no setting and no arg", inWorktree: false },
+  { name: "the global file says true", global: true, inWorktree: true },
+  { name: "the repo file says false over a global true", global: true, repo: false, inWorktree: false },
+  { name: "the repo file says true over a global false", global: false, repo: true, inWorktree: true },
+  { name: "the arg says true over a repo false", repo: false, arg: true, inWorktree: true },
+  { name: "the arg says false over a repo true over a global true", global: true, repo: true, arg: false, inWorktree: false },
+];
+
+for (const layer of WORKTREE_LAYERS) {
+  forgeTest(`worktree, ${layer.name}: the run works ${layer.inWorktree ? "in a worktree of its own" : "in the user's tree"}`, async () => {
+    issue(["complexity:low"]);
+    if (layer.global !== undefined) writeGlobalConfig({ workflows: { "implement-issue": { settings: { worktree: layer.global } } } });
+    if (layer.repo !== undefined) {
+      settings({ worktree: layer.repo });
+      git(fx.repo, "add", "-A");
+      git(fx.repo, "commit", "-qm", "the repo's delivery setting");
+    }
+    const r = await run({ worktree: layer.arg });
+    assert.equal(r.status, "finished", r.error);
+    assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+    assert.equal(res(r).worktree, layer.inWorktree ? worktreeOf(r.runId) : undefined);
+    assert.equal(existsSync(worktreeOf(r.runId)), layer.inWorktree);
+    assert.equal(git(fx.repo, "branch", "--show-current").trim(), layer.inWorktree ? "main" : branchOf(r.runId));
+  });
+}
+
+forgeTest("the worktree arg must be a boolean", async () => {
+  issue(["complexity:low"]);
+  const r = await run({ worktree: "yes" });
+  assert.equal(r.status, "failed");
+  assert.match(r.error!, /worktree/);
 });

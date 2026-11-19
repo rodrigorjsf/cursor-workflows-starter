@@ -52,7 +52,7 @@ Top-level keys besides `caps`:
   argument, when it is a URL) is on any other host fails before any step until the host is declared here. A key is the
   host in lower case, with the port when the URL has one (`git.example.com:8443`); without a port it matches any port.
   The two files merge host by host, and the repo file wins on a host both name. No env var or flag sets it.
-- `dashboard.autoStart` (global file only): `false` stops `start_workflow` from starting the dashboard.
+- `dashboard.autoStart` (global file only): `false` stops `start_workflow` and `wf start` from starting the dashboard.
 
 Under `workflows.<name>`:
 
@@ -106,8 +106,14 @@ Under `workflows.<name>`:
     show implement-issue` prints it. Set it when the repository keeps its glossary elsewhere. It replaces the default whole,
     so copy the printed list and change what differs. Paths are relative to the repository root: an absolute path, a `..`
     segment or a line break is refused when the config loads.
-  - `gcFailedAfterDays`: `wf gc` removes a failed run's worktree and branches once it failed more days ago than this; a
-    cancelled run never counts as failed. A run whose PR was merged or closed goes without waiting, and the origin
+  - `worktree`: `false` (default) or `true`, the delivery mode. `false` checks the run's branch out in the user's own
+    folder, which must be clean, with one such run per repository; `true` works in a worktree of the run's own. The run's
+    `worktree` argument (`wf start --worktree`) overrides the files.
+  - `openPr`: `true` (default) pushes the branch and opens the PR (the MR on GitLab) when the run delivers, and returns
+    the link as `prUrl`; `false` leaves the branch committed locally, with no push and no PR. The run's `openPr` argument
+    (`wf start --no-pr` sets it to `false`) overrides the files.
+  - `gcFailedAfterDays`: `wf gc` removes a failed run's worktree (a main-tree run has none) and branches once it failed
+    more days ago than this; the branch checked out in the user's folder stays. A cancelled run never counts as failed. A run whose PR was merged or closed goes without waiting, and the origin
     branch stays while its PR is open.
   - `gcSnapshotGraceHours`: `wf gc` removes a cloud snapshot branch the step left behind once its run (of this repo)
     has no process and its last event is older than this many hours. The branch of a run cut off inside the step that
@@ -127,8 +133,12 @@ pointer into `config`) and `violations`.
 
 1. Run `wf list`, then `wf config show <workflow>`. Done when you know the role name under `config.roles` and its
    current value.
-2. Edit `.agents/workflows/config.json` (repo-wide, committed) or `~/.cursor-workflows/config.json` (this machine).
-   Done when the file is valid JSON and uses only keys the schema knows.
+2. Run `wf config set <dotted.path> <value>` to write `~/.cursor-workflows/config.json` (this machine), or add `--repo`
+   for `.agents/workflows/config.json` (repo-wide, committed). For example,
+   `wf config set --repo workflows.implement-issue.settings.openPr false`. A value that parses as JSON is written as JSON (`false`, `3`, `["a"]`, `{"LOW":2}`), any other text as a string,
+   and a `.` inside a name is written `\.` (`roles.implement\.low`). The command validates the whole resulting file and
+   refuses an invalid value or an unknown path with the schema error, leaving the file as it was. Editing the file by
+   hand also works. Done when the command printed the file, or the file is valid JSON and uses only keys the schema knows.
 3. Run `wf config show <workflow>` again. Done when `provenance` shows the layer you edited for the value you changed,
    and `violations` is empty or reported to the user.
 4. A model id must exist in the account's catalog: `wf models` lists them, and `wf doctor` checks every id the config

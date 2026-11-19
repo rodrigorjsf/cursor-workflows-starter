@@ -2,36 +2,48 @@
 
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { PRIVATE_DIR } from "./state-files.js";
+import { errorText } from "./error-text.js";
+import { PRIVATE_DIR, PRIVATE_FILE } from "./state-files.js";
 
 /** Per-user directory of the kit (`~/.cursor-workflows`): metrics database, global runs index. `WF_HOME` overrides it (tests, CI). */
 export function userDir(): string {
   return process.env.WF_HOME ?? join(homedir(), ".cursor-workflows");
 }
 
+export function assertUserDirWritable(): void {
+  const dir = userDir();
+  const probe = join(dir, `.write-probe-${process.pid}`);
+  try {
+    mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR });
+    writeFileSync(probe, "", { mode: PRIVATE_FILE });
+    rmSync(probe);
+  } catch (err) {
+    throw new Error(
+      `cannot write to the user directory ${dir} (${errorText(err)}); no run was created. The command most likely runs in an agent sandbox, which blocks writes outside the repository: start it with full permissions (outside the sandbox), or point WF_HOME at a writable directory.`,
+    );
+  }
+}
+
 const excludeFiles = new Map<string, string>();
 
-/**
- * Garante `.workflows/` fora do git no repositório alvo (via info/exclude, sem tocar no .gitignore). Em um worktree
- * ligado ou submódulo o `.git` é um arquivo: é o git que diz onde está o `info/exclude` (`--git-path`).
- */
-export function ensureIgnored(cwd: string): void {
-  if (!existsSync(join(cwd, ".git"))) return;
+export function ensureExcluded(cwd: string, entry: string): boolean {
+  if (!existsSync(join(cwd, ".git"))) return false;
   let exclude = excludeFiles.get(cwd);
   if (!exclude) {
     try {
       exclude = resolve(cwd, execFileSync("git", ["rev-parse", "--git-path", "info/exclude"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000 }).trim()); // once per repo, and bounded
     } catch {
-      return; // sem git instalado ou .git inválido: nada a proteger
+      return false;
     }
     excludeFiles.set(cwd, exclude); // `stateDir` roda a cada gravação de job: o git só é consultado uma vez por repositório
   }
   mkdirSync(dirname(exclude), { recursive: true });
   const current = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
-  if (!current.split("\n").includes(".workflows/")) appendFileSync(exclude, `${current.endsWith("\n") || !current ? "" : "\n"}.workflows/\n`);
+  if (!current.split("\n").includes(entry)) appendFileSync(exclude, `${current.endsWith("\n") || !current ? "" : "\n"}${entry}\n`);
+  return true;
 }
 
 /** Where the repo's run state lives, whether or not it exists: nothing is created. */
@@ -39,7 +51,7 @@ export const stateRootIn = (cwd: string): string => join(cwd, ".workflows");
 
 /** A folder of the repo's run state (`.workflows/<parts>`), made when it is not there, for its user alone (`PRIVATE_DIR`): it holds the private source of the repo. */
 export function stateDir(cwd: string, ...parts: string[]): string {
-  ensureIgnored(cwd);
+  ensureExcluded(cwd, ".workflows/");
   const dir = join(stateRootIn(cwd), ...parts);
   mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR });
   return dir;

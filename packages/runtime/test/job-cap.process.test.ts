@@ -5,13 +5,14 @@
 // never started a second time.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, before, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
+import { blockedUserDir, withUserDir } from "./isolate-home.js";
 
 const PACKAGE = join(import.meta.dirname, "..");
 let sandbox: string;
@@ -166,4 +167,46 @@ test("the jobs of another repository do not count", () => {
   } finally {
     spawnSync(process.execPath, [...tsx("cli.ts"), "cancel", JSON.parse(r.stdout).jobId, "--timeout", "20", "--cwd", other], { env });
   }
+});
+
+const SANDBOX_REFUSAL = /cannot write to the user directory .*agent sandbox/;
+
+
+test("wf start with a user directory that cannot be created exits 1 and names the agent sandbox, before any run directory exists", async () => {
+  const refused = await withUserDir(env, blockedUserDir(sandbox), () => start({ n: 1 }));
+  assert.equal(refused.status, 1, refused.stderr);
+  assert.equal(refused.out.jobId, undefined);
+  assert.match(refused.stderr, SANDBOX_REFUSAL);
+  assert.equal(existsSync(join(repo, ".workflows")), false, "no run directory, no job record");
+});
+
+test("wf start with a read-only user directory exits 1 and names the agent sandbox, before any run directory exists", { skip: process.getuid?.() === 0 }, async () => {
+  const readOnly = join(sandbox, "read-only-home");
+  mkdirSync(readOnly);
+  chmodSync(readOnly, 0o500);
+  try {
+    const refused = await withUserDir(env, readOnly, () => start({ n: 1 }));
+    assert.equal(refused.status, 1, refused.stderr);
+    assert.match(refused.stderr, SANDBOX_REFUSAL);
+    assert.equal(existsSync(join(repo, ".workflows")), false);
+  } finally {
+    chmodSync(readOnly, 0o700);
+  }
+});
+
+test("start_workflow with an unwritable user directory answers isError that names the agent sandbox, and creates no job record", async () => {
+  await withUserDir(env, blockedUserDir(sandbox), () =>
+    withServer(async (call) => {
+      const refused = await call("start_workflow", { name: "hold", args: { n: 1 } });
+      assert.equal(refused.isError, true, JSON.stringify(refused.body));
+      assert.match(refused.body.error, SANDBOX_REFUSAL);
+    }),
+  );
+  assert.equal(existsSync(join(repo, ".workflows")), false);
+});
+
+test("a writable user directory is left with no probe file behind after a start", () => {
+  const started = start({ n: 1 });
+  assert.equal(started.status, 0, started.stderr);
+  assert.deepEqual(readdirSync(join(sandbox, "home")).filter((f) => f.startsWith(".write-probe")), []);
 });

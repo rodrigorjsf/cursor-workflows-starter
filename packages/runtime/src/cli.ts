@@ -37,13 +37,14 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { Cursor } from "@cursor/sdk";
-import { globalConfigPath, loadEffectiveConfig, parseLimitOverrides, repoConfigPath } from "./config/index.js";
+import { globalConfigPath, loadEffectiveConfig, parseLimitOverrides, repoConfigPath, setConfigValue } from "./config/index.js";
 import { formatReport, runDoctor } from "./doctor.js";
 import { initRepo } from "./init.js";
 import { assertKitCompatible } from "./kit-version.js";
 import { unifiedDiff } from "./unified-diff.js";
 import { upgradeKit } from "./upgrade.js";
 import { assertCursorEndpoints } from "./runtime/cursor-endpoints.js";
+import { dashboardFields, ensureDashboard } from "./runtime/dashboard-instance.js";
 import { type RunStatus, runWorkflow } from "./runtime/engine.js";
 import { insideWorkflow } from "./runtime/inside-workflow.js";
 import { cancelOnSignals, installCrashHandlers, spawnJob, startJob } from "./runtime/jobs.js";
@@ -81,6 +82,9 @@ const FLAGS = {
   json: { type: "boolean", default: false },
   "dry-run": { type: "boolean", default: false },
   "allow-mutable-tag": { type: "boolean", default: false },
+  worktree: { type: "boolean", default: false },
+  "no-pr": { type: "boolean", default: false },
+  repo: { type: "boolean", default: false },
 } as const;
 
 /** The command line, parsed. An unknown flag or a flag with no value is a usage error, not a stack trace. */
@@ -125,6 +129,21 @@ const flagLimits = () => {
     return n;
   };
   return { maxCents: number("max-cents"), maxTokens: number("max-tokens") };
+};
+const DELIVERY_SHORTCUTS = [
+  { flag: "worktree", key: "worktree", value: true },
+  { flag: "no-pr", key: "openPr", value: false },
+] as const;
+const withDeliveryShortcuts = (args: unknown): unknown => {
+  const given = DELIVERY_SHORTCUTS.filter(({ flag }) => values[flag]);
+  if (given.length === 0) return args;
+  if (typeof args !== "object" || args === null || Array.isArray(args)) throw new UsageError(`--args must be a JSON object when ${given.map(({ flag }) => `--${flag}`).join(" and ")} is used`);
+  const folded: Record<string, unknown> = { ...args };
+  for (const { flag, key, value } of given) {
+    if (key in folded && folded[key] !== value) throw new UsageError(`--${flag} sets "${key}" to ${value}, and --args sets it to ${JSON.stringify(folded[key])}: drop one of them`);
+    folded[key] = value;
+  }
+  return folded;
 };
 /** The JSON value of a flag (`--args`, `--overrides`); text that is not JSON is a usage error that names the flag. */
 const jsonFlag = (flag: string, raw: string): unknown => {
@@ -212,7 +231,13 @@ async function main(): Promise<number> {
       return 0;
     }
     case "config": {
-      if (name !== "show") throw new UsageError("usage: wf config show [workflow] [--max-tokens N] [--max-cents N]");
+      if (name === "set") {
+        const [, , dottedPath, rawValue] = positionals;
+        if (dottedPath === undefined || rawValue === undefined || positionals.length > 4) throw new UsageError("usage: wf config set <dotted.path> <value> [--repo]");
+        out(setConfigValue({ cwd, scope: values.repo ? "repo" : "global", path: dottedPath, value: rawValue, workflows: (await loadWorkflows(cwd)).values() }));
+        return 0;
+      }
+      if (name !== "show") throw new UsageError("usage: wf config show [workflow] [--max-tokens N] [--max-cents N] | wf config set <dotted.path> <value> [--repo]");
       const known = await loadWorkflows(cwd);
       const wanted = positionals[2];
       if (wanted !== undefined && !known.has(wanted)) throw new Error(`unknown workflow: ${wanted}. Use \`wf list\`.`);
@@ -226,7 +251,7 @@ async function main(): Promise<number> {
     }
     case "run": {
       const def = await resolveWorkflow();
-      const args = jsonFlag("args", values.args!);
+      const args = withDeliveryShortcuts(jsonFlag("args", values.args!));
       const opts = { ...runOpts(), signal: cancelOnSignals() }; // SIGINT and SIGTERM cancel the run, the same as `wf cancel`
       if (values.job) {
         // Child mode of `wf start` and `start_workflow`: the parent already created the job.
@@ -244,12 +269,13 @@ async function main(): Promise<number> {
     case "start": {
       // Valida no pai, antes do spawn, para o erro aparecer aqui e não sumir num processo destacado.
       const def = await resolveWorkflow();
-      const args = jsonFlag("args", values.args!);
+      const args = withDeliveryShortcuts(jsonFlag("args", values.args!));
       const overrides = overridesFlag();
       const { config, violations } = loadEffectiveConfig(def, { cwd, flags: flagLimits(), mcpOverrides: overrides }); // an unusable config fails here, with its field path
       // Refused here too (exit 1, nothing written) when too many jobs run or the same job already does: the caps.maxRunningJobs cap, as for `start_workflow`.
       const { job, log } = spawnJob({ cwd, workflow: def.meta.name, args, maxRunningJobs: config.caps.maxRunningJobs, resumeRunId: values.resume, ...flagLimits(), overrides });
-      out({ jobId: job.jobId, runId: job.runId, log, next: `wf wait ${job.jobId}`, ...(violations.length ? { violations } : {}) });
+      const dashboard = await ensureDashboard();
+      out({ jobId: job.jobId, runId: job.runId, log, next: `wf wait ${job.jobId}`, ...dashboardFields(dashboard, job.runId), ...(violations.length ? { violations } : {}) });
       return 0;
     }
     case "status": {

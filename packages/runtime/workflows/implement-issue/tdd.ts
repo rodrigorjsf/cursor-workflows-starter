@@ -228,6 +228,8 @@ export interface Progress {
   /** A branch e o worktree que ESTE run criou: o worktree só é reaproveitado pelo run que o registrou (nunca por outro). */
   branch?: string;
   worktree?: string;
+  mainTree?: boolean;
+  handedBack?: string;
   /** Commit do worktree antes de qualquer mudança: base do diff do review e do commit final. */
   baseCommit?: string;
   baselineGreen?: boolean;
@@ -271,6 +273,8 @@ export interface Progress {
 const PROGRESS: z.ZodType<Progress> = z.looseObject({
   branch: z.string().optional(),
   worktree: z.string().optional(),
+  mainTree: z.boolean().optional(),
+  handedBack: z.string().optional(),
   baseCommit: z.string().optional(),
   baselineGreen: z.boolean().optional(),
   proposedPlan: z.unknown().optional(),
