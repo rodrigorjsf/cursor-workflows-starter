@@ -21,6 +21,14 @@
   **Checkpoint** (um status próprio do workflow, `runId` e `next`; as respostas chegam como `args` de um resume com `resumeRunId`,
   e um `resumeRunId` dentro de `args` não retoma o run) e abre descrevendo o objeto simples dos repositórios alvo, com
   `defineWorkflow` só para os workflows do próprio kit.
+- **Um exemplo `explore-db` mostra a conversão de uma skill de exploração de banco de dados** (issue #143, spec #137). Mora na pasta
+  da skill `cursor-workflow-authoring` (`examples/explore-db/`), com um servidor MCP falso (`node:sqlite` em memória, tools
+  `list_tables`, `describe_table` e `query`) e o teste offline que o `npm test` roda; não é um workflow embutido e não aparece em
+  `list_workflows`. O `argsSchema` exige `mode: "review" | "interview"`. O modo `review` coleta o schema com `ctx.mcp`, sem agente,
+  roda um agente por eixo (índices, nomes e normalização) em paralelo e roteia os achados por severidade em código. O modo
+  `interview` propõe um questionário finito, devolve o checkpoint `questions-proposed` com `runId` e `next`, e o resume com
+  `answers` continua com a etapa do questionário vinda do journal. `questions-proposed` entra em `PENDING`: o run que espera as
+  respostas fica na coluna **Awaiting approval** do quadro, e não em **Failed**. As receitas e a `skill-to-workflow` apontam o exemplo.
 
 ### Mudado
 

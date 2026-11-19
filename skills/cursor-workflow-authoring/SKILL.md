@@ -22,7 +22,9 @@ make (label, count, exit code, diff size).
 2. **Pick the patterns.** For each case in the flow, read its section of [references/recipes.md](references/recipes.md):
    routing by label, review by axes, fix until it passes, fan-out with isolation, adversarial verification, cheap read
    step, escalate by budget, invariants between steps, resume with invariants, checkpoint across two runs. Done when
-   every case has its recipe in the code.
+   every case has its recipe in the code. For a flow that queries an MCP server and branches on a flag, the worked
+   example [examples/explore-db/](examples/explore-db/explore-db.ts) combines `ctx.mcp`, an enum in `argsSchema`,
+   review by axes and a checkpoint, and its test runs offline in `npm test`.
 3. **Apply the rules.** [references/rules.md](references/rules.md) holds the nine rules (prompt as key, schema, code
    verification, model in code, isolated parallel writes, effects in code behind a secrets guard, explicit cuts,
    idempotent effects, composition). Done when each rule holds in the code.

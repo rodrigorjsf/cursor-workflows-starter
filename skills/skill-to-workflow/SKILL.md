@@ -16,7 +16,10 @@ in a `packages/runtime/workflows/<name>/` folder when the module grows; `package
 the credits table (section `Créditos`) of the kit's book chapter `vision/02-a-ideia-e-as-referencias.md` when the origin
 is third-party; and a conversion report in the chat. If the flow comes from another repository (kit installed elsewhere),
 step 5 ends by copying the workflow to `.agents/workflows/` there. The kit's built-in `implement-issue` workflow is a
-finished conversion of four skills (`tdd`, `codebase-design`, `code-review` and `pr`).
+finished conversion of four skills (`tdd`, `codebase-design`, `code-review` and `pr`). For a skill that queries an MCP
+server and branches on `--review` and `--interview`, the `explore-db` example (`examples/explore-db/` in the
+`cursor-workflow-authoring` skill) is a finished conversion too: an enum in `argsSchema`, `ctx.mcp` for the known calls,
+review by axes and a checkpoint.
 
 The references next to this file carry everything the steps apply: [runtime-api.md](references/runtime-api.md) (the
 runtime API), [rules.md](references/rules.md), [recipes.md](references/recipes.md),

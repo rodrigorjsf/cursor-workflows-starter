@@ -380,6 +380,18 @@ test("the authoring skill opens with the plain-object module for target reposito
   assert.match(opening, /the kit's own workflows[^.]*`defineWorkflow\(\{\.\.\.\}\)`/);
 });
 
+test("the explore-db example ships inside the authoring skill, which links it, the recipes and the conversion skill name it, and no built-in workflow carries its name", () => {
+  const folder = join("skills", "cursor-workflow-authoring", "examples", "explore-db");
+  for (const file of ["explore-db.ts", "fake-db-server.mjs", "explore-db.test.ts"]) assert.ok(existsSync(join(ROOT, folder, file)), `${folder}/${file} is missing`);
+  assert.match(read("skills", "cursor-workflow-authoring", "SKILL.md"), /\]\(examples\/explore-db\/explore-db\.ts\)/, "the authoring skill does not link the example");
+  for (const skill of ["cursor-workflow-authoring", "skill-to-workflow"]) {
+    assert.ok(read("skills", skill, "references", "recipes.md").includes("`examples/explore-db/`"), `${skill}'s recipes.md does not name the example`);
+  }
+  assert.ok(read("skills", "skill-to-workflow", "SKILL.md").includes("`examples/explore-db/`"), "the conversion skill does not name the example");
+  const builtIn = readdirSync(join(ROOT, "packages", "runtime", "workflows"));
+  assert.deepEqual(builtIn.filter((entry) => entry.startsWith("explore-db")), [], "the example is no built-in workflow: it must not show in list_workflows");
+});
+
 /** The version of the package at `...p` (the repo root when empty). */
 const version = (...p: string[]): string => JSON.parse(read(...p, "package.json")).version;
 

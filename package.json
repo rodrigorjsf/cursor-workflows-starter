@@ -16,7 +16,7 @@
     "mcp": "tsx packages/runtime/src/mcp-server.ts",
     "check": "npm run typecheck && npm test",
     "check:log": "npm run check > .check.log 2>&1; e=$?; grep -E '^# (tests|pass|fail) |^not ok' .check.log; echo EXIT=$e; exit $e",
-    "typecheck": "PATH=node_modules/typescript/bin:$PATH; tsc --noEmit && tsc --noEmit -p packages/dashboard/app && tsc --noEmit -p packages/dashboard/run-view && tsc --noEmit -p test && tsc --noEmit -p packages/runtime/test && tsc --noEmit -p packages/dashboard/test",
+    "typecheck": "PATH=node_modules/typescript/bin:$PATH; tsc --noEmit && tsc --noEmit -p packages/dashboard/app && tsc --noEmit -p packages/dashboard/run-view && tsc --noEmit -p test && tsc --noEmit -p packages/runtime/test && tsc --noEmit -p packages/dashboard/test && tsc --noEmit -p skills/cursor-workflow-authoring/examples/explore-db",
     "models": "tsx packages/runtime/src/cli.ts models",
     "test": "npm run test --workspaces --if-present; w=$?; tsx --test --test-timeout=120000 test/*.test.ts; r=$?; exit $((w || r))",
     "test:repo": "tsx --test --test-timeout=120000 test/*.test.ts",

@@ -371,6 +371,13 @@ combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
 4. A skill [`run-workflow`](../../skills/run-workflow/SKILL.md) trata qualquer resultado com `next`: mostra o
    resultado, pergunta ao usuário e relança só com a aprovação dele.
 
+Um questionário finito segue o mesmo formato, sem seams a aprovar. O exemplo
+[`explore-db`](../../skills/cursor-workflow-authoring/examples/explore-db/explore-db.ts), no modo `interview`, propõe as perguntas
+numa etapa com schema, devolve `questions-proposed` com `runId`, as perguntas e `next`, e o resume com `answers` busca a etapa do
+questionário no journal e escreve o relatório que as respostas pedem. Ele mora na pasta da skill `cursor-workflow-authoring`, roda
+offline em `npm test` contra um servidor MCP falso (`node:sqlite` em memória) e não é um workflow embutido: não aparece em
+`list_workflows`.
+
 ## Escrevendo bons prompts de etapa
 
 - **Autocontidos:** a etapa não vê o histórico do chat nem as etapas anteriores. Passe no prompt tudo o que ela

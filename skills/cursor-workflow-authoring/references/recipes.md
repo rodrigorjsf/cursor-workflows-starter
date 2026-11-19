@@ -42,6 +42,10 @@ const b = blockingOf(byAxis); // e.g. missing/wrong → extra TDD slice; hard/bl
 
 The round goes in the prompt (journal key, rule 1). After the fix, re-review only the axes that blocked.
 
+The `review` mode of the `explore-db` example (`examples/explore-db/` in the `cursor-workflow-authoring` skill) runs this
+recipe over a database schema that `ctx.mcp` collected with no agent: one step per axis, each with the finding
+categories of its own, and the findings routed by severity in code.
+
 ## Fix until it passes (with a cap)
 
 ```ts
@@ -186,7 +190,9 @@ The answers arrive as `args` of a resume that names the run with `resumeRunId`: 
 `additionalProperties: false` refuses it as `invalid args`, and one without that guard starts a new run with no journal.
 List the answer args in `argsSchema` (`approveSeams`, `answers`), so a wrong answer is refused before the run starts. A
 finite questionnaire is a checkpoint whose result holds the questions, each with the answers it accepts, and the answers
-return as one arg of the resume.
+return as one arg of the resume. The `interview` mode of the `explore-db` example (`examples/explore-db/` in the
+`cursor-workflow-authoring` skill) is one: its first run returns `questions-proposed` with the questions and `next`, and the
+resume with `answers` takes the questionnaire step from the journal.
 
 The flow of a checkpoint that approves a stored result:
 
