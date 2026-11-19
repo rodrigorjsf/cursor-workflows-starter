@@ -387,13 +387,32 @@ forgeTest("with openPr false the run delivers the branch, committed in its workt
   assert.deepEqual(originBranches(), [], "nothing was pushed");
 });
 
-forgeTest("the worktree arg is accepted, and until the main-tree mode exists the run still works in its worktree", async () => {
-  issue(["complexity:low"]);
-  const r = await run({ worktree: true });
-  assert.equal(r.status, "finished", r.error);
-  assert.equal(res(r).worktree, worktreeOf(r.runId));
-  assert.ok(existsSync(res(r).worktree));
-});
+const WORKTREE_LAYERS: Array<{ name: string; global?: boolean; repo?: boolean; arg?: boolean; inWorktree: boolean }> = [
+  { name: "no setting and no arg", inWorktree: false },
+  { name: "the global file says true", global: true, inWorktree: true },
+  { name: "the repo file says false over a global true", global: true, repo: false, inWorktree: false },
+  { name: "the repo file says true over a global false", global: false, repo: true, inWorktree: true },
+  { name: "the arg says true over a repo false", repo: false, arg: true, inWorktree: true },
+  { name: "the arg says false over a repo true over a global true", global: true, repo: true, arg: false, inWorktree: false },
+];
+
+for (const layer of WORKTREE_LAYERS) {
+  forgeTest(`worktree, ${layer.name}: the run works ${layer.inWorktree ? "in a worktree of its own" : "in the user's tree"}`, async () => {
+    issue(["complexity:low"]);
+    if (layer.global !== undefined) writeGlobalConfig({ workflows: { "implement-issue": { settings: { worktree: layer.global } } } });
+    if (layer.repo !== undefined) {
+      settings({ worktree: layer.repo });
+      git(fx.repo, "add", "-A");
+      git(fx.repo, "commit", "-qm", "the repo's delivery setting");
+    }
+    const r = await run({ worktree: layer.arg });
+    assert.equal(r.status, "finished", r.error);
+    assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+    assert.equal(res(r).worktree, layer.inWorktree ? worktreeOf(r.runId) : undefined);
+    assert.equal(existsSync(worktreeOf(r.runId)), layer.inWorktree);
+    assert.equal(git(fx.repo, "branch", "--show-current").trim(), layer.inWorktree ? "main" : branchOf(r.runId));
+  });
+}
 
 forgeTest("the worktree arg must be a boolean", async () => {
   issue(["complexity:low"]);

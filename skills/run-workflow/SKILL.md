@@ -77,10 +77,11 @@ user's request.
      user to read the issue themselves: do not summarize or quote it for them. If they trust it, relaunch with the args
      of the `next` command as they are (it adds `allowExternalAuthor: true`) and `resumeRunId` equal to `result.runId`.
    - `secret-blocked`: relay the `reason` (the rule that fired, without the secret) and leave the inspection of the
-     `worktree` (when present: the block at a seams comment brings none) to the user, so the secret stays out of
-     the chat.
+     change to the user, so the secret stays out of the chat. The change is in the result's `worktree`; a result with
+     `mainTree: true` has no `worktree`, and its change is on its `branch`, in the user's own folder. The block at a seams
+     comment brings none of them.
    - Anything else: the workflow ended **without delivering**. Relay the status and whatever the result brings
-     (`output`, `findings`, `worktree`).
+     (`output`, `findings`, `worktree` or `branch`).
 5. When `status` is `failed`, relay the `error` and follow its beginning:
    - `invalid args`: fix the args from the `argsSchema` (step 1) and start a new run, without `resumeRunId`.
    - `The account's plan does not give access` or `Cursor usage limit reached`: a resume would fail the same way; the

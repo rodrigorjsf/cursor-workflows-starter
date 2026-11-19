@@ -140,7 +140,7 @@ forgeTest("a cancel in the middle of a write step is not a crash: any number of 
   let runId: string | undefined;
   for (let n = 1; n <= 4; n++) {
     const controller = new AbortController();
-    const cancelled = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test" } as any, {
+    const cancelled = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test", worktree: true } as any, {
       cwd: fx.repo,
       runId,
       signal: controller.signal,
@@ -174,7 +174,7 @@ async function cancelAtEveryCommandAfter(label: string, runId: string) {
     let agentAnswered = false;
     let seen = 0;
     let at: string | undefined;
-    const r = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test" } as any, {
+    const r = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test", worktree: true } as any, {
       cwd: fx.repo,
       runId,
       signal: controller.signal,
@@ -252,7 +252,7 @@ forgeTest("a resume cancelled while it undoes a step that crashed the process st
   const first = await run({});
   crashInGreen(first.runId);
   const controller = new AbortController();
-  const cancelled = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test" } as any, {
+  const cancelled = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test", worktree: true } as any, {
     cwd: fx.repo,
     runId: first.runId,
     signal: controller.signal,
@@ -313,7 +313,7 @@ forgeTest("a step begun after a cancelled execution belongs to the execution tha
   };
   for (execution = 1; execution <= 2; execution++) {
     const controller = new AbortController();
-    const r = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test" } as any, {
+    const r = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test", worktree: true } as any, {
       cwd: fx.repo,
       runId,
       signal: controller.signal,
@@ -356,7 +356,7 @@ forgeTest("a cancel while a fix step runs does not use up the fix round: the res
   // More cancels than the default fixRounds (2): none of them may count as a round.
   for (let n = 1; n <= 3; n++) {
     const controller = new AbortController();
-    const r = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test" } as any, {
+    const r = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test", worktree: true } as any, {
       cwd: fx.repo,
       runId,
       signal: controller.signal,
@@ -381,7 +381,7 @@ forgeTest("a fix step that ran to its end counts, even when the run is cancelled
   fx.handlers["fix-1-2"] = rightFix;
   const runId = "implement-issue-fixsuitecancel";
   const controller = new AbortController();
-  const cancelled = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test" } as any, {
+  const cancelled = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test", worktree: true } as any, {
     cwd: fx.repo,
     runId,
     signal: controller.signal,
@@ -401,7 +401,7 @@ forgeTest("a right fix that ran to its end stays when the run is cancelled durin
   fx.handlers["fix-1-1"] = rightFix;
   const runId = "implement-issue-fixsuitecancel-right";
   const controller = new AbortController();
-  const cancelled = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test" } as any, {
+  const cancelled = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test", worktree: true } as any, {
     cwd: fx.repo,
     runId,
     signal: controller.signal,

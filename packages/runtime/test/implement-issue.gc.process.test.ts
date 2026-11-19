@@ -316,7 +316,7 @@ test("a cancelled run is not a failed one: however long ago it stopped, gc keeps
     setTimeout(() => controller.abort(), 100);
     return { hang: true };
   };
-  const cancelled = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test" } as never, { cwd: fx.repo, signal: controller.signal });
+  const cancelled = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test", worktree: true } as never, { cwd: fx.repo, signal: controller.signal });
   assert.equal(cancelled.status, "cancelled");
   age(cancelled.runId, 90);
 

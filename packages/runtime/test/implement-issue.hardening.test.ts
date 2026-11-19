@@ -518,7 +518,7 @@ forgeTest("the untrusted-author result says why and carries the relaunch that li
   assert.ok(!JSON.stringify(result).includes("Exportar"), "none of the issue's text goes into the result");
   const next = /^npm run wf -- run implement-issue --args '(.*)' --resume (\S+)$/.exec(result.next);
   assert.ok(next, result.next);
-  assert.deepEqual(JSON.parse(next[1]!), { issue: 7, testCommand: "node --test", openPr: false, allowExternalAuthor: true });
+  assert.deepEqual(JSON.parse(next[1]!), { issue: 7, testCommand: "node --test", openPr: false, worktree: true, allowExternalAuthor: true });
   assert.equal(next[2], r.runId);
 }, ["github", "gitlab"]);
 

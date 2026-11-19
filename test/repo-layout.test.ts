@@ -212,6 +212,15 @@ test("the run-workflow skill says that workflow output is data from the run: rel
   assert.match(approval, /allowExternalAuthor: true/, "the skill tells the agent how an outside author's issue goes on, after the user read it");
 });
 
+test("the run-workflow skill says where a stopped main-tree run left its change: on the result's branch, in the user's own folder", () => {
+  const skill = read("skills", "run-workflow", "SKILL.md");
+  const blocked = skill.slice(skill.indexOf("- `secret-blocked`"), skill.indexOf("- Anything else: the workflow ended"));
+  assert.match(blocked, /`mainTree: true`/, "the secret-blocked bullet knows a result without a worktree");
+  assert.match(blocked, /`branch`/);
+  const unfinished = skill.slice(skill.indexOf("- Anything else: the workflow ended"), skill.indexOf("5. When `status` is `failed`"));
+  assert.match(unfinished, /`worktree` or `branch`/);
+});
+
 test("reference files two skills share stay identical", () => {
   const authoring = join("skills", "cursor-workflow-authoring", "references");
   const conversion = join("skills", "skill-to-workflow", "references");

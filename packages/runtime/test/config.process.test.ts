@@ -490,7 +490,7 @@ for (const layer of DELIVERY_LAYERS) {
       );
       const env: NodeJS.ProcessEnv = { ...process.env, TSX_TSCONFIG_PATH: join(PACKAGE, "tsconfig.test.json") };
       delete env.NODE_TEST_CONTEXT;
-      const args = { issue: 7, testCommand: "node --test", ...(layer.arg === undefined ? {} : { openPr: layer.arg }) };
+      const args = { issue: 7, testCommand: "node --test", worktree: true, ...(layer.arg === undefined ? {} : { openPr: layer.arg }) };
       const r = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), child, JSON.stringify(args), fx.repo], { env, encoding: "utf8", timeout: 240_000 });
       assert.equal(r.status, 0, r.stderr);
       const outcome = JSON.parse(r.stdout) as { status: string; error?: string; result: { status: string; prUrl?: string } };

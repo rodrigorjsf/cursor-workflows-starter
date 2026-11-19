@@ -215,10 +215,11 @@ O que conferir:
    Isso não é hipótese: num Premium, em 2026-11-11, toda chamada ao `getUsage()` deu `feature_unavailable`
    ([8.2 §5](../research/verificacoes-locais.md)). Com isso, `spentCents` fica em 0 e o
    `--max-cents` não dispara. Veja [2.2 §3](02-configuracao-inicial.md#3-teto-de-custo).
-4. Em `/caminho/do/repo-de-teste/.workflows/worktrees/` existe um worktree `wf-issue-1-<run>`, na branch `wf/issue-1-<run>`, com o commit.
+4. A pasta `/caminho/do/repo-de-teste` está na branch `wf/issue-1-<run>`, com o commit: a árvore principal é o padrão, e ela precisa estar
+   limpa para o run começar. Com `--worktree`, o commit está num worktree `wf-issue-1-<run>` em `/caminho/do/repo-de-teste/.workflows/worktrees/`.
 5. Rodando de novo com `--resume <runId>`, as etapas de agente concluídas aparecem como "(cache)", e o commit
    não é repetido. As etapas que escrevem (`test-N`, `code-N`, `fix-N-R`, `refactor-1`) nunca vêm do cache: o que
-   elas fizeram está no worktree, e o progresso do run (`tdd-progress.json`) guarda as fatias prontas, que o resume
+   elas fizeram está na árvore do run, e o progresso do run (`tdd-progress.json`) guarda as fatias prontas, que o resume
    não refaz.
 
 Se algo divergir, anote em um issue do seu fork. Os pontos marcados "a validar" em
