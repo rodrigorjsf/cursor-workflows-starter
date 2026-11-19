@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import "../../../../packages/runtime/test/isolate-home.js";
+import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -229,6 +230,30 @@ const copyOfWorkflow = async (serverSource?: string) => {
   if (serverSource) writeFileSync(join(folder, "fake-db-server.mjs"), serverSource);
   return (await import(pathToFileURL(join(folder, "explore-db.mts")).href)).default;
 };
+
+test("copied with its fake server into a repo's .agents/workflows, the example is listed and the server stays off the stdio of the process that lists it", () => {
+  const workflows = join(cwd, ".agents", "workflows");
+  mkdirSync(workflows, { recursive: true });
+  symlinkSync(join(import.meta.dirname, "..", "..", "..", "..", "node_modules"), join(cwd, "node_modules"));
+  for (const file of ["explore-db.ts", "fake-db-server.mjs"]) copyFileSync(join(import.meta.dirname, file), join(workflows, file));
+  const registry = pathToFileURL(join(import.meta.dirname, "..", "..", "..", "..", "packages", "runtime", "src", "runtime", "registry.ts")).href;
+  const lister = `const { discoverWorkflows } = await import(${JSON.stringify(registry)});
+    const { workflows, broken } = await discoverWorkflows(${JSON.stringify(cwd)});
+    process.stdout.write(JSON.stringify({ names: [...workflows.keys()], broken }) + "\\n");`;
+  const initialize = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "lister", version: "1" } } };
+
+  const listed = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), "--input-type=module", "-e", lister], {
+    input: JSON.stringify(initialize) + "\n",
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+
+  const lines = listed.stdout.trim().split("\n");
+  assert.equal(lines.length, 1, listed.stdout);
+  const { names, broken } = JSON.parse(lines[0]!);
+  assert.ok(names.includes("explore-db"));
+  assert.deepEqual(broken, []);
+});
 
 const serverAnswering = (answers: Record<string, unknown>) => `
   import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
