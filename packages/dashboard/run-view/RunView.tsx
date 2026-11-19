@@ -9,9 +9,9 @@ import { SeamsPanel } from "./SeamsPanel.js";
 import { argsHashOf } from "./resume-command.js";
 import { StepLogPanel } from "./StepLogPanel.js";
 import { frameOf, panTarget } from "./framing.js";
-import { formatCount, formatDuration } from "../app/format.js";
-import { type RunGraph, buildRunGraph, isWork } from "./run-graph.js";
-import { headerCost, headerStatus, offeredActions, runElapsed } from "./run-status.js";
+import { formatCents, formatCount, formatDuration } from "../app/format.js";
+import { type RunGraph, type RunProgress, buildRunGraph, isWork } from "./run-graph.js";
+import { costUnknown, headerStatus, offeredActions, runElapsed } from "./run-status.js";
 import { type RunLayout, layoutRunGraph } from "./run-layout.js";
 import { type Connection, useRunEvents } from "./use-run-events.js";
 import { errorText } from "../app/error-text.js";
@@ -89,6 +89,16 @@ export function toFlow(graph: RunGraph, layout: RunLayout, now: number, selected
     .filter((e) => layout.nodes[e.source] && layout.nodes[e.target])
     .map((e) => ({ id: e.id, source: e.source, target: e.target, animated: state.get(e.target) === "running", className: `edge-${state.get(e.target)}`, focusable: false })); // an edge has no action: not a Tab stop
   return { nodes: [...(layout.lanes.some((l) => l.title !== "") ? lanes : []), ...work], edges };
+}
+
+export function RunCost({ run }: { run: RunProgress }) {
+  return costUnknown(run) ? (
+    <span className="none" title="Cursor did not report the cost of these steps: 0¢ is not what the run cost">
+      unknown
+    </span>
+  ) : (
+    <>{formatCents(run.costCents)}</>
+  );
 }
 
 /** The height the page's header takes, to guess the size of the canvas before it is measured. */
@@ -282,7 +292,9 @@ export function RunView({ runId }: { runId: string }) {
           </div>
           <div>
             <dt>Cost</dt>
-            <dd>{headerCost(run)}</dd>
+            <dd>
+              <RunCost run={run} />
+            </dd>
           </div>
           <div>
             <dt>Tokens</dt>

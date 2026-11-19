@@ -4,7 +4,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildRunGraph } from "../run-view/run-graph.js";
-import { headerCost, headerStatus, offeredActions, runElapsed } from "../run-view/run-status.js";
+import { RunCost } from "../run-view/RunView.js";
+import { headerStatus, offeredActions, runElapsed } from "../run-view/run-status.js";
+import { render, textOf } from "./render.js";
 import { cloudAgent, phase, runStart, stamp, step, stepEnd, stepStart, type Draft } from "./run-log.js";
 
 const DEAD_ERROR = 'the process executing the run ended without finishing it; relaunch with resumeRunId="wf-aaaa0001"';
@@ -81,28 +83,36 @@ test("the header's duration follows the Runs table's rule: to the run-end, to no
 const costed = (stepId: string, extra: Record<string, unknown>): Draft[] => [stepStart(stepId, stepId), stepEnd(stepId, stepId, {}, { usage: { totalTokens: 1000 }, ...extra })];
 const unreported = { costFinal: false, rawCents: 0, chargedCents: 0 };
 const finalCost = { costFinal: true, rawCents: 9, chargedCents: 7 };
-const headerOf = (drafts: Draft[]) => graphOf(drafts).run;
+const costOf = (drafts: Draft[]) => textOf(render(RunCost, { run: graphOf(drafts).run }));
 
 test("a run whose attempts all reported their cost as not final, with 0 charged, reads as unknown and still has its tokens", () => {
-  const run = headerOf([runStart, ...costed("s-a", unreported), ...costed("s-b", unreported)]);
-  assert.equal(headerCost(run), "unknown");
-  assert.equal(run.tokens, 2000);
+  const drafts = [runStart, ...costed("s-a", unreported), ...costed("s-b", unreported)];
+  assert.equal(costOf(drafts), "unknown");
+  assert.equal(graphOf(drafts).run.tokens, 2000);
+});
+
+test("an unknown cost is marked like every other missing value, and says why", () => {
+  const html = render(RunCost, { run: graphOf([runStart, ...costed("s-a", unreported)]).run });
+  assert.match(html, /class="none"/);
+  assert.match(html, /title="Cursor did not report the cost/);
 });
 
 test("a run with a final cost shows that cost", () => {
-  assert.equal(headerCost(headerOf([runStart, ...costed("s-a", finalCost), ...costed("s-b", finalCost)])), "18¢");
+  const html = render(RunCost, { run: graphOf([runStart, ...costed("s-a", finalCost), ...costed("s-b", finalCost)]).run });
+  assert.equal(textOf(html), "18¢");
+  assert.doesNotMatch(html, /class="none"/);
 });
 
 test("a final cost of 0 is 0, not unknown", () => {
-  assert.equal(headerCost(headerOf([runStart, ...costed("s-a", { costFinal: true, rawCents: 0, chargedCents: 0 })])), "0¢");
-  assert.equal(headerCost(headerOf([runStart, stepStart("s-a", "plan")])), "0¢", "nothing has been charged or reported yet");
+  assert.equal(costOf([runStart, ...costed("s-a", { costFinal: true, rawCents: 0, chargedCents: 0 })]), "0¢");
+  assert.equal(costOf([runStart, stepStart("s-a", "plan")]), "0¢", "nothing has been charged or reported yet");
 });
 
 test("one attempt that did not report its cost leaves the run's 0 unknown; once something was charged, the run shows what it was charged", () => {
-  assert.equal(headerCost(headerOf([runStart, ...costed("s-a", { costFinal: true, rawCents: 0, chargedCents: 0 }), ...costed("s-b", unreported)])), "unknown");
-  assert.equal(headerCost(headerOf([runStart, ...costed("s-a", finalCost), ...costed("s-b", unreported)])), "9¢");
+  assert.equal(costOf([runStart, ...costed("s-a", { costFinal: true, rawCents: 0, chargedCents: 0 }), ...costed("s-b", unreported)]), "unknown");
+  assert.equal(costOf([runStart, ...costed("s-a", finalCost), ...costed("s-b", unreported)]), "9¢");
 });
 
 test("a log from before events said whether the cost was final reads as final", () => {
-  assert.equal(headerCost(headerOf([runStart, ...costed("s-a", { rawCents: 0, chargedCents: 0 })])), "0¢");
+  assert.equal(costOf([runStart, ...costed("s-a", { rawCents: 0, chargedCents: 0 })]), "0¢");
 });
