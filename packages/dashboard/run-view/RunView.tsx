@@ -7,7 +7,7 @@ import { JunctionNode, LaneNode, type LaneNodeData, StartNode, WorkNode, type Wo
 import { RunActions } from "./RunActions.js";
 import { SeamsPanel } from "./SeamsPanel.js";
 import { argsHashOf } from "./resume-command.js";
-import { StepLogPanel } from "./StepLogPanel.js";
+import { CommandPanel, PhasePanel, StepLogPanel } from "./StepLogPanel.js";
 import { frameOf, panTarget } from "./framing.js";
 import { formatCents, formatCount, formatDuration } from "../app/format.js";
 import { type RunGraph, type RunProgress, buildRunGraph, commandCount, isWork } from "./run-graph.js";
@@ -63,13 +63,27 @@ function useClock(active: boolean): number {
 
 const wraps = (from: Box, to: Box): boolean => to.x < from.x + from.width;
 
+export interface FlowView {
+  now: number;
+  selectedId?: string;
+  open(id: string): void;
+  focus(id: string): void;
+  phases: PhaseEntries;
+}
+
+export interface PhaseEntries {
+  openIndex?: number;
+  onOpen(lane: number): void;
+}
+
 /** What React Flow draws for `graph` laid out as `layout`. `open` opens a node's log; `focus` brings a node that took the keyboard focus into view. */
-export function toFlow(graph: RunGraph, layout: RunLayout, now: number, selectedId: string | undefined, open: (id: string) => void, focus: (id: string) => void): { nodes: Node[]; edges: Edge[] } {
+export function toFlow(graph: RunGraph, layout: RunLayout, view: FlowView): { nodes: Node[]; edges: Edge[] } {
+  const { now, selectedId, open, focus, phases } = view;
   const lanes: Node<LaneNodeData, "lane">[] = layout.lanes.map((lane) => ({
     id: `lane-${lane.index}`,
     type: "lane",
     position: { x: lane.x, y: lane.y },
-    data: { title: lane.title },
+    data: { title: lane.title, commandCount: graph.lanes[lane.index]?.commands.length ?? 0, open: lane.index === phases.openIndex, onOpen: () => phases.onOpen(lane.index) },
     width: lane.width,
     height: lane.height,
     zIndex: -1,
@@ -98,7 +112,7 @@ export function toFlow(graph: RunGraph, layout: RunLayout, now: number, selected
       className: `edge-${state.get(e.target)}`,
       focusable: false,
     }));
-  return { nodes: [...(layout.lanes.some((l) => l.title !== "") ? lanes : []), ...work], edges };
+  return { nodes: [...(lanes.some((l) => l.data.title !== "" || l.data.commandCount > 0) ? lanes : []), ...work], edges };
 }
 
 export function RunCost({ run }: { run: RunProgress }) {
@@ -123,7 +137,7 @@ const paneOrWindow = (pane: { width: number; height: number }) => (pane.width > 
  * (or what is framed) changes. A node that takes the keyboard focus off the canvas is panned into view, at the same zoom;
  * that counts as the user moving the view, so the run stays where the reader tabbed to (Fit View hands it back).
  */
-function Canvas({ graph, layout, now, selectedId, onOpen }: { graph: RunGraph; layout: RunLayout; now: number; selectedId?: string; onOpen(id: string): void }) {
+function Canvas({ graph, layout, now, selectedId, onOpen, phases }: { graph: RunGraph; layout: RunLayout; now: number; selectedId?: string; onOpen(id: string): void; phases: PhaseEntries }) {
   const { fitView, setCenter } = useReactFlow();
   const store = useStoreApi();
   const userMoved = useRef(false);
@@ -138,7 +152,7 @@ function Canvas({ graph, layout, now, selectedId, onOpen }: { graph: RunGraph; l
     },
     [layout, store, setCenter],
   );
-  const { nodes, edges } = useMemo(() => toFlow(graph, layout, now, selectedId, onOpen, focus), [graph, layout, now, selectedId, onOpen, focus]);
+  const { nodes, edges } = useMemo(() => toFlow(graph, layout, { now, selectedId, open: onOpen, focus, phases }), [graph, layout, now, selectedId, onOpen, focus, phases]);
   const pane = useStore((s) => ({ width: s.width, height: s.height }), (a, b) => a.width === b.width && a.height === b.height);
   const firstFrame = useRef(frameOf(graph, layout, paneOrWindow(pane), selectedId));
   const settled = graph.nodes.every((n) => n.state !== "running");
@@ -216,8 +230,28 @@ export function RunView({ runId }: { runId: string }) {
   const { layout, error: layoutError } = useLayout(graph);
   const clock = useClock(!replaying && !settled);
   const [selectedId, setSelectedId] = useState<string>();
-  const open = useCallback((id: string) => setSelectedId(id), []);
-  const close = useCallback(() => setSelectedId(undefined), []);
+  const [phaseIndex, setPhaseIndex] = useState<number>();
+  const [commandId, setCommandId] = useState<string>();
+  const open = useCallback((id: string) => {
+    setSelectedId(id);
+    setPhaseIndex(undefined);
+    setCommandId(undefined);
+  }, []);
+  const close = useCallback(() => {
+    setSelectedId(undefined);
+    setCommandId(undefined);
+  }, []);
+  const openPhase = useCallback((lane: number) => {
+    setPhaseIndex(lane);
+    setSelectedId(undefined);
+    setCommandId(undefined);
+  }, []);
+  const closePhase = useCallback(() => {
+    setPhaseIndex(undefined);
+    setCommandId(undefined);
+  }, []);
+  const phases = useMemo<PhaseEntries>(() => ({ openIndex: phaseIndex, onOpen: openPhase }), [phaseIndex, openPhase]);
+  const closeCommand = useCallback(() => setCommandId(undefined), []);
   const now = replaying ? Date.parse(String(shown.at(-1)?.ts ?? "")) || 0 : clock;
 
   useEffect(() => {
@@ -246,6 +280,8 @@ export function RunView({ runId }: { runId: string }) {
 
   const { run } = graph;
   const selected = graph.nodes.find((n) => n.id === selectedId && isWork(n.kind));
+  const phase = phaseIndex === undefined || selected ? undefined : graph.lanes[phaseIndex];
+  const openCommand = (selected?.commands ?? phase?.commands)?.find((c) => c.id === commandId);
   /** In a replay, the log line it has reached; at its end, and outside a replay, the whole log. */
   const upTo = replaying && replayAt < events.length ? (ids[replayAt - 1] ?? 0) : undefined;
   const counts = { steps: graph.nodes.filter((n) => n.kind === "step").length, commands: commandCount(graph) };
@@ -397,13 +433,15 @@ export function RunView({ runId }: { runId: string }) {
             </p>
           ) : layout && status !== undefined ? (
             <ReactFlowProvider>
-              <Canvas graph={graph} layout={layout} now={now} selectedId={selected?.id} onOpen={open} />
+              <Canvas graph={graph} layout={layout} now={now} selectedId={selected?.id} onOpen={open} phases={phases} />
             </ReactFlowProvider>
           ) : (
             <p className="notice">{connection === "waiting" ? "Waiting for the run to start…" : "Drawing the run…"}</p>
           )}
         </div>
-        {selected && <StepLogPanel key={selected.id} runId={runId} node={selected} now={now} live={!replaying && selected.state === "running"} upTo={upTo} onClose={close} />}
+        {selected && <StepLogPanel key={selected.id} runId={runId} node={selected} now={now} live={!replaying && selected.state === "running"} upTo={upTo} openCommandId={openCommand?.id} onOpenCommand={setCommandId} onClose={close} />}
+        {phase && <PhasePanel key={phaseIndex} lane={phase.index} title={phase.title} commands={phase.commands} openId={openCommand?.id} onSelect={setCommandId} onClose={closePhase} />}
+        {openCommand && <CommandPanel key={openCommand.id} runId={runId} command={openCommand} now={now} live={!replaying && openCommand.state === "running"} upTo={upTo} onClose={closeCommand} />}
       </div>
     </main>
   );

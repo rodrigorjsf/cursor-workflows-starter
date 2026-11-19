@@ -65,6 +65,9 @@ export interface NodeDetail {
   error?: string;
   /** Where the result came from when it was not computed now. */
   cached?: "journal" | "memo";
+  exitCode?: number;
+  signal?: string;
+  probe?: boolean;
 }
 
 export interface GraphNode {
@@ -126,6 +129,8 @@ export interface GraphOptions {
 /** The id of the node a group's branches flow into. The group's own id is its fork. */
 export const joinIdOf = (groupId: string): string => `join:${groupId}`;
 
+export const phaseName = (title: string): string => (title === "" ? "the run" : title);
+
 export const commandCount = (graph: RunGraph): number =>
   graph.nodes.reduce((sum, node) => sum + (node.kind === "command" ? 1 : 0) + node.commands.length, 0) + graph.lanes.reduce((sum, lane) => sum + lane.commands.length, 0);
 
@@ -163,6 +168,9 @@ interface Attempt {
   durationMs: number;
   errorKind?: string;
   error?: string;
+  exitCode?: number;
+  signal?: string;
+  probe: boolean;
 }
 
 /** What is known about a step or command across its attempts. */
@@ -218,7 +226,7 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
     const attemptId = str(event.attemptId);
     const key = attemptId ?? `${stepId}#${found.attempts.size + 1}`;
     let attempt = attemptId === undefined && !starting ? [...found.attempts.values()].at(-1) : found.attempts.get(key);
-    if (!attempt && starting) found.attempts.set(key, (attempt = { ended: false, ok: false, cached: false, answered: false, turnTokens: 0, costCents: 0, costFinal: true, durationMs: 0 }));
+    if (!attempt && starting) found.attempts.set(key, (attempt = { ended: false, ok: false, cached: false, answered: false, probe: false, turnTokens: 0, costCents: 0, costFinal: true, durationMs: 0 }));
     return attempt && { work: found, attempt };
   };
   const begin = (event: RunEvent, kind: "step" | "command") => {
@@ -330,6 +338,9 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
         at.attempt.durationMs = num(event.durationMs) ?? 0;
         at.attempt.errorKind = execErrorKind(event);
         at.attempt.answered = event.probe === true && event.outcome === "exit" && (num(event.exitCode) ?? 0) !== 0;
+        at.attempt.probe = event.probe === true;
+        at.attempt.exitCode = num(event.exitCode);
+        at.attempt.signal = str(event.signal);
         at.attempt.error = str(event.error);
         break;
       }
@@ -359,6 +370,9 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
       ...(failed?.errorKind !== undefined && { errorKind: failed.errorKind }),
       ...(failed?.error !== undefined && { error: failed.error }),
       ...(last.cached && { cached: last.cached }),
+      ...(last.exitCode !== undefined && { exitCode: last.exitCode }),
+      ...(last.signal !== undefined && { signal: last.signal }),
+      ...(last.probe && { probe: true }),
     };
   }
   for (const [id, group] of groups) {
