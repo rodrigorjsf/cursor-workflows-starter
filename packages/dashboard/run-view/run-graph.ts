@@ -132,11 +132,11 @@ export const joinIdOf = (groupId: string): string => `join:${groupId}`;
 
 export const phaseName = (title: string): string => (title === "" ? "the run" : title);
 
-export const commandCount = (graph: RunGraph): number =>
-  graph.nodes.reduce((sum, node) => sum + (node.kind === "command" ? 1 : 0) + node.commands.length, 0) + graph.lanes.reduce((sum, lane) => sum + lane.commands.length, 0);
+export const allWork = (graph: RunGraph): GraphNode[] => [...graph.nodes, ...graph.nodes.flatMap((node) => node.commands), ...graph.lanes.flatMap((lane) => lane.commands)];
 
-export const failedWork = (graph: RunGraph): GraphNode[] =>
-  [...graph.nodes, ...graph.nodes.flatMap((node) => node.commands), ...graph.lanes.flatMap((lane) => lane.commands)].filter((node) => isWork(node.kind) && node.state === "failed");
+export const commandCount = (graph: RunGraph): number => allWork(graph).filter((node) => node.kind === "command").length;
+
+export const failedWork = (graph: RunGraph): GraphNode[] => allWork(graph).filter((node) => isWork(node.kind) && node.state === "failed");
 
 export interface Execution {
   from: number;
