@@ -150,11 +150,11 @@ test("the execution picker is a labelled list of every execution, 'Execution 1 /
   assert.match(html, /<select[^>]*aria-label="Execution shown"/);
   assert.deepEqual([...html.matchAll(/<option[^>]*>([^<]*)<\/option>/g)].map((m) => m[1]), ["Execution 1 / 2", "Execution 2 / 2"]);
   assert.match(html, /<option value="1" selected="">Execution 2 \/ 2/);
-  assert.doesNotMatch(html, /role="status"/, "nothing to say about it");
+  assert.doesNotMatch(html, /role=/, "nothing to say about it");
 });
 
 test("the execution picker carries the note of the execution on show, and is not there for a run with one execution", () => {
   const html = render(ExecutionPicker, { count: 2, current: 0, note: "Execution 1 failed: gh issue view (exit 1)", onPick: () => {} });
-  assert.match(html, /<p[^>]*role="status"[^>]*>Execution 1 failed: gh issue view \(exit 1\)<\/p>/);
+  assert.match(html, /<p[^>]*role="alert"[^>]*>Execution 1 failed: gh issue view \(exit 1\)<\/p>/);
   assert.equal(render(ExecutionPicker, { count: 1, current: 0, onPick: () => {} }), "");
 });

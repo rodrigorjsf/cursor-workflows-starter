@@ -123,7 +123,7 @@ export function ExecutionPicker({ count, current, note, onPick }: { count: numbe
         ))}
       </select>
       {note !== undefined && (
-        <p className="execution-note" role="status">
+        <p className="execution-note" role="alert">
           {note}
         </p>
       )}
@@ -267,7 +267,7 @@ export function RunView({ runId }: { runId: string }) {
   }, [playing, replayAt, speed, events, execution.from, executionLength]);
 
   const togglePlay = () => {
-    if (!playing && replayAt !== null && replayAt >= executionLength) setReplayAt(FIRST_FRAME); // again, from the start
+    if (!playing && replayAt !== null && replayAt >= executionLength) setReplayAt(FIRST_FRAME);
     setPlaying(!playing);
   };
   const pick = (index: number) => {

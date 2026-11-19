@@ -80,10 +80,10 @@ export function runElapsed(run: { startedAt?: string; endedAt?: string }, settle
 
 export const costUnknown = (run: Pick<RunProgress, "costCents" | "costFinal">): boolean => run.costCents === 0 && !run.costFinal;
 
-export function executionNote(graph: RunGraph, number: number): string | undefined {
+export function executionNote(graph: RunGraph, executionNumber: number): string | undefined {
   const { status, error } = graph.run;
   if (status === "finished" || status === "running") return undefined;
   const failed = failedWork(graph).map((node) => (node.detail.errorKind === undefined ? node.label : `${node.label} (${node.detail.errorKind})`));
   const cause = failed.length > 0 ? failed.join(", ") : error;
-  return `Execution ${number} ${EVENTS_TEXT[status]}${cause === undefined ? "" : `: ${cause}`}`;
+  return `Execution ${executionNumber} ${EVENTS_TEXT[status]}${cause === undefined ? "" : `: ${cause}`}`;
 }
