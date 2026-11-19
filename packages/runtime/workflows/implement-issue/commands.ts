@@ -105,6 +105,18 @@ export class Commands {
     return this.succeedRead("git", args, cwd, this.timeouts.localMs);
   }
 
+  async currentBranch(cwd: string): Promise<string> {
+    return (await this.gitRead(cwd, "branch", "--show-current")).trim();
+  }
+
+  async gitWithEnv(cwd: string, env: Record<string, string | undefined>, ...args: string[]): Promise<void> {
+    await this.succeed("git", args, cwd, this.timeouts.localMs, env);
+  }
+
+  async gitReadWithEnv(cwd: string, env: Record<string, string | undefined>, ...args: string[]): Promise<string> {
+    return this.succeedRead("git", args, cwd, this.timeouts.localMs, undefined, env);
+  }
+
   /** `git` whose exit code is the answer (`diff --quiet`, `rev-parse --verify --quiet`): 0 is yes, 1 is no, anything else is an error. */
   async gitIs(cwd: string, ...args: string[]): Promise<boolean> {
     const r = await this.exec("git", args, this.options("git", args, cwd, this.timeouts.localMs));

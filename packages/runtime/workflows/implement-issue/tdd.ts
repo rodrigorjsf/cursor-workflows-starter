@@ -2,7 +2,8 @@
 // arquivos uma etapa tocou, a suíte de testes e o progresso por fatia (para o resume não refazer nem reconferir o
 // que já passou, e para desfazer o que uma etapa interrompida deixou pela metade).
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { errorText } from "../../src/runtime/error-text.js";
@@ -73,6 +74,20 @@ export async function snapshotTree(cmd: Commands, cwd: string): Promise<string> 
   if (flagged.length) await cmd.git(cwd, "update-index", "--no-skip-worktree", "--no-assume-unchanged", "--", ...flagged);
   await cmd.git(cwd, "add", "-A");
   return (await cmd.gitRead(cwd, "write-tree")).trim();
+}
+
+export async function peekTree(cmd: Commands, cwd: string): Promise<string> {
+  const dir = mkdtempSync(join(tmpdir(), "wf-index-"));
+  try {
+    const index = join(dir, "index");
+    const own = (await cmd.gitRead(cwd, "rev-parse", "--path-format=absolute", "--git-path", "index")).trim();
+    if (existsSync(own)) copyFileSync(own, index);
+    const env = { GIT_INDEX_FILE: index };
+    await cmd.gitWithEnv(cwd, env, "add", "-A");
+    return (await cmd.gitReadWithEnv(cwd, env, "write-tree")).trim();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 export interface Change { path: string; status: string }
@@ -229,6 +244,7 @@ export interface Progress {
   branch?: string;
   worktree?: string;
   mainTree?: boolean;
+  handedBack?: string;
   /** Commit do worktree antes de qualquer mudança: base do diff do review e do commit final. */
   baseCommit?: string;
   baselineGreen?: boolean;
@@ -273,6 +289,7 @@ const PROGRESS: z.ZodType<Progress> = z.looseObject({
   branch: z.string().optional(),
   worktree: z.string().optional(),
   mainTree: z.boolean().optional(),
+  handedBack: z.string().optional(),
   baseCommit: z.string().optional(),
   baselineGreen: z.boolean().optional(),
   proposedPlan: z.unknown().optional(),

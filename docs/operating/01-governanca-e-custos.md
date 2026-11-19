@@ -119,7 +119,8 @@ contexto que as etapas carregam (`settingSources`):
 - **O worktree e as branches de um run ficam até o `wf gc`.** Cada run do `implement-issue` deixa o seu worktree
   (`.workflows/worktrees/`), a branch local e, se empurrou, a branch no origin. `wf gc` remove os de um run cujo PR foi
   mergeado ou fechado e os de um run que falhou há mais de `gcFailedAfterDays` dias (padrão 14, em
-  `workflows.implement-issue.settings`); `wf gc --dry-run` só mostra o plano. Ele nunca toca num run que um processo
+  `workflows.implement-issue.settings`); `wf gc --dry-run` só mostra o plano. Um run da árvore principal não tem worktree: o gc
+  nunca toca na pasta do usuário e só apaga a branch que o run registrou como sua, e deixa a que a pasta tem em checkout. Ele nunca toca num run que um processo
   está executando, numa branch fora de `wf/` nem num commit do origin que o run não empurrou, e não apaga o PR de ninguém:
   a branch do origin de um run que falhou, com o PR ainda aberto, fica. Uma branch `wf/` do origin que nenhum run deste
   repositório possui (feita em outro clone) só sai se o PR dela foi mergeado ou fechado. O log e o journal do run em

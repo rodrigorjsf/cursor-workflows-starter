@@ -100,6 +100,17 @@ roda a pasta é do workflow: um arquivo que você salva ali pode ser desfeito po
 - **Só um run por repositório trabalha na árvore principal.** Um segundo início, ainda que de outra issue, volta `status: "main-tree-busy"`
   com o id do run que a tem e a sugestão de `--worktree`. Um início com `--worktree` ao lado dele é permitido: o worktree é uma pasta do run.
 - O resultado do run traz `branch` e `mainTree: true`, e não traz `worktree`.
+- **O resume segue as mesmas regras do início.** Com a pasta em outra branch e limpa, ele põe a branch do run em checkout de novo e
+  segue. Com a pasta em outra branch e suja, ou na branch do run com arquivos que o run não fez (ele compara a pasta com a árvore que
+  deixou ao fim de cada etapa de escrita e ao terminar), ele devolve `status: "dirty-tree"` com a lista, sem mover nada: guarde ou
+  descarte os arquivos e retome de novo. O trabalho do próprio run, ainda não commitado, não conta como sujo. Se o processo do run
+  morreu no meio de uma etapa de escrita, o run não gravou a árvore dessa etapa, e o resume desfaz a etapa em andamento sem separar
+  o que é dela do que é seu.
+- **O cancelar desfaz só a etapa de escrita em andamento**, na pasta do usuário, como num worktree: a branch, os commits e o trabalho
+  das etapas anteriores do run ficam. Um cancelar que chega com o agente da etapa trabalhando desfaz a etapa na hora; um que chega
+  enquanto o código confere o resultado (a suíte) deixa os arquivos da etapa até o resume desfazê-la.
+- **O `wf gc` não tem worktree para remover num run da árvore principal.** Ele nunca toca nos arquivos da pasta e só apaga a branch
+  que o run registrou como sua. A branch que a pasta tem em checkout fica, com o motivo no plano: saia dela e rode o `wf gc` de novo.
 
 O `wf start` confere, antes de criar o job, que `~/.cursor-workflows/` (ou `WF_HOME`) aceita escrita. Se não aceita, sai com
 código 1 e uma mensagem que cita o sandbox do agente como causa provável: nenhum diretório de run foi criado, então rode o

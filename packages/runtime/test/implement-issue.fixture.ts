@@ -40,6 +40,7 @@ export const fx = {
 const ORIGIN_URLS: Record<TestForge, string> = { github: "https://github.com/owner/repo.git", gitlab: "https://gitlab.com/owner/repo.git" };
 
 export const git = (cwd: string, ...a: string[]) => execFileSync("git", a, { cwd, encoding: "utf8" });
+export const currentBranch = () => git(fx.repo, "branch", "--show-current").trim();
 export const labelOf = (o: any) => String(o.name).replace(/^implement-issue:/, "");
 export const names = () => calls.map(labelOf);
 export const submit = (o: any, v: unknown) => o.local.customTools.submit_result.execute(v, {});

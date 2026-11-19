@@ -132,6 +132,7 @@ import {
   isTestFile,
   looksLikeNoTests,
   matchesAny,
+  peekTree,
   restorePaths,
   revertTo,
   runTests,
@@ -426,21 +427,59 @@ function excludeCodeIndex(cwd: string): void {
   if (findOnPath("codegraph", process.env.PATH)) ensureExcluded(cwd, `${CODE_INDEX_DIR}/`);
 }
 
-function dirtyTreeReason(files: string[]): string {
-  const listed = files.slice(0, MAX_LISTED_FILES);
-  const unlisted = files.length - listed.length;
-  return [
-    "this tree has uncommitted changes, and the run works in it: a write step would revert them, or the delivery would commit them into the PR. The files:",
-    ...listed,
-    ...(unlisted > 0 ? [`and ${unlisted} more`] : []),
-    `To go on, commit, stash or discard them and start again, or ${WORKTREE_WAY_OUT}`,
-  ].join("\n");
+interface DirtyTree {
+  status: "dirty-tree";
+  files: string[];
+  reason: string;
 }
 
-async function dirtyTreeRefusal(cmd: Commands, cwd: string): Promise<{ status: "dirty-tree"; files: string[]; reason: string } | undefined> {
+function dirtyTreeReason(files: string[], what: string, wayOut: string): string {
+  const listed = files.slice(0, MAX_LISTED_FILES);
+  const unlisted = files.length - listed.length;
+  return [what, ...listed, ...(unlisted > 0 ? [`and ${unlisted} more`] : []), wayOut].join("\n");
+}
+
+const startDirtyTreeReason = (files: string[]) =>
+  dirtyTreeReason(
+    files,
+    "this tree has uncommitted changes, and the run works in it: a write step would revert them, or the delivery would commit them into the PR. The files:",
+    `To go on, commit, stash or discard them and start again, or ${WORKTREE_WAY_OUT}`,
+  );
+
+async function dirtyTreeRefusal(cmd: Commands, cwd: string, reasonOf = startDirtyTreeReason): Promise<DirtyTree | undefined> {
   excludeCodeIndex(cwd);
   const files = (await cmd.gitRead(cwd, "status", "--porcelain", "--untracked-files=all")).split("\n").filter(Boolean);
-  return files.length ? { status: "dirty-tree", files, reason: dirtyTreeReason(files) } : undefined;
+  return files.length ? { status: "dirty-tree", files, reason: reasonOf(files) } : undefined;
+}
+
+async function handedBackRefusal(cmd: Commands, cwd: string, handedBack: string): Promise<DirtyTree | undefined> {
+  excludeCodeIndex(cwd);
+  const now = await peekTree(cmd, cwd);
+  if (now === handedBack) return undefined;
+  const files = (await changesBetween(cmd, cwd, handedBack, now)).map((change) => `${change.status.padStart(2)} ${change.path}`);
+  const reason = dirtyTreeReason(
+    files,
+    "this tree has changes the run did not make since it handed the tree back, and a write step would revert them, or the delivery would commit them into the PR. The files:",
+    "To go on, stash or discard them (a commit on the run's branch goes into its PR) and resume the run again",
+  );
+  return { status: "dirty-tree", files, reason };
+}
+
+async function resumeRefusal(cmd: Commands, progress: ProgressStore, cwd: string, log: (message: string) => void): Promise<DirtyTree | undefined> {
+  const branch = progress.data.branch!;
+  const checkedOut = await cmd.currentBranch(cwd);
+  if (checkedOut === branch) return progress.data.handedBack === undefined ? undefined : handedBackRefusal(cmd, cwd, progress.data.handedBack);
+  const refusal = await dirtyTreeRefusal(cmd, cwd, (files) =>
+    dirtyTreeReason(
+      files,
+      `this tree is on ${checkedOut || "a detached HEAD"} and has uncommitted changes, and resuming this run checks ${branch} out. If they are the run's own work, go back with git switch ${branch} and resume from there. The files:`,
+      "Otherwise commit, stash or discard them and resume the run again",
+    ),
+  );
+  if (refusal) return refusal;
+  await cmd.git(cwd, "switch", branch);
+  log(`branch ${branch} is checked out again in ${cwd}, where the tree was on ${checkedOut || "a detached HEAD"}`);
+  return undefined;
 }
 
 const runBranchIsThere = async (cmd: Commands, progress: ProgressStore, cwd: string) =>
@@ -465,13 +504,8 @@ function claimMainTree(cwd: string, runId: string, issue: number) {
 
 async function enterMainTree(cmd: Commands, progress: ProgressStore, cwd: string, branch: string, log: (message: string) => void) {
   if (await runBranchIsThere(cmd, progress, cwd)) {
-    const checkedOut = (await cmd.gitRead(cwd, "branch", "--show-current")).trim();
-    if (checkedOut === branch) return undefined;
-    return {
-      status: "branch-switched",
-      branch,
-      reason: `this run works on ${branch}, and this tree is on ${checkedOut || "a detached HEAD"}: switch back to ${branch} (git switch ${branch}) and resume the run, or start a new run`,
-    };
+    if ((await cmd.currentBranch(cwd)) !== branch) await cmd.git(cwd, "switch", branch);
+    return undefined;
   }
   const refusal = await dirtyTreeRefusal(cmd, cwd);
   if (refusal) return refusal;
@@ -631,6 +665,17 @@ export default defineWorkflow<Args>({
     // o jeito (status, erro, cancelamento).
     let releaseIssue: () => void;
     let releaseMainTree: (() => void) | undefined;
+    let handsTreeBack = false;
+    const recordHandedBack = async () => {
+      try {
+        progress.data.handedBack = await peekTree(cmd, ctx.cwd);
+      } catch (err) {
+        if (!(err instanceof CommandError) || err.result.exitCode === null) throw err;
+        ctx.warn(`the tree this run leaves could not be recorded, so a resume cannot tell your changes from the run's: ${err.message}`);
+        progress.data.handedBack = undefined;
+      }
+      progress.save();
+    };
     try {
       releaseIssue = acquireNamedLock(ctx.cwd, await issueLockName(forge, ctx.cwd, ctx.args.issue, ctx.args.repo, (m) => ctx.log(m)), ctx.runId);
     } catch (err) {
@@ -653,8 +698,13 @@ export default defineWorkflow<Args>({
         const claim = claimMainTree(ctx.cwd, ctx.runId, ctx.args.issue);
         if ("refusal" in claim) return claim.refusal;
         releaseMainTree = claim.release;
-        const refusal = (await runBranchIsThere(cmd, progress, ctx.cwd)) ? undefined : await dirtyTreeRefusal(cmd, ctx.cwd);
+        const refusal = (await runBranchIsThere(cmd, progress, ctx.cwd))
+          ? await resumeRefusal(cmd, progress, ctx.cwd, (message) => ctx.log(message))
+          : await dirtyTreeRefusal(cmd, ctx.cwd);
         if (refusal) return { issue: ctx.args.issue, ...refusal };
+        handsTreeBack = true;
+        progress.data.handedBack = await peekTree(cmd, ctx.cwd);
+        progress.save();
       }
       const { issue: number, repo } = ctx.args;
       const openPr = ctx.args.openPr ?? settings.openPr;
@@ -997,6 +1047,7 @@ export default defineWorkflow<Args>({
         progress.data.writeSeq = seq;
         execution ??= executionsOf(ctx.cwd, ctx.runId).length; // esta execução: a última do log, que o engine abriu antes do run
         progress.data.inFlight = { id, before, execution };
+        progress.data.handedBack = undefined;
         progress.save();
         try {
           // revertOnRetry: o worktree é só desta etapa, e uma nova tentativa não pode herdar o que a que falhou deixou.
@@ -1005,16 +1056,23 @@ export default defineWorkflow<Args>({
         } catch (err) {
           try {
             await revertTo(cmd, worktree, before);
-            settle();
+            await settle();
           } catch {
             // O desfazer falhou (o run foi cancelado, ou o git travou): o erro da etapa é o que sobe, e o registro "em andamento" fica,
             // para o resume voltar ao snapshot de antes dela. O catch do run o marca `interrupted`: o processo não caiu.
           }
+          if (mainTree) {
+            progress.data.handedBack = before;
+            progress.save();
+          }
           throw err;
         }
       };
-      const settle = () => {
+      const settle = async () => {
         progress.data.inFlight = undefined;
+        progress.save();
+        if (!mainTree) return;
+        progress.data.handedBack = await peekTree(cmd, worktree);
         progress.save();
       };
       /** O que uma etapa de código (green, correção, refactor) não pode mudar. Vazio = nenhuma violação. */
@@ -1066,7 +1124,7 @@ export default defineWorkflow<Args>({
             const deleted = changes.filter((c) => c.status === "D" && isTest(c.path)).map((c) => c.path);
             if (deleted.length || await runnerConfigChanged(cmd, worktree, before, after)) {
               await revertTo(cmd, worktree, before);
-              settle();
+              await settle();
               problem =
                 `The change was undone: ${deleted.length ? `you deleted tests (${deleted.join(", ")})` : "you changed the runner configuration"}. ` +
                 "Write or update tests, without deleting any.";
@@ -1077,18 +1135,18 @@ export default defineWorkflow<Args>({
             const res = await suite(`red:${sfx}`);
             if (res.kind === "timeout" || res.kind === "killed") {
               await revertTo(cmd, worktree, before);
-              settle();
+              await settle();
               return `tests-${res.kind}`;
             }
             if (res.ok) {
               if (t.alreadySatisfied) {
-                settle(); // o comportamento já existia: o teste fica como regressão, sem etapa de código
+                await settle();
                 Object.assign(rec, { testFile: t.testFile, testName: t.testName, alreadySatisfied: t.evidence ?? "confirmed by the test step", green: res.output, done: true });
                 progress.upsert(rec);
                 return undefined;
               }
               await revertTo(cmd, worktree, before);
-              settle();
+              await settle();
               problem =
                 "The test passed without implementation. If the behaviour already exists, answer alreadySatisfied: true with the evidence; " +
                 "otherwise, write a test that fails because the slice's behaviour is missing.";
@@ -1096,7 +1154,7 @@ export default defineWorkflow<Args>({
               if (attempt === settings.redGreenAttempts) return "test-not-red";
               continue;
             }
-            settle();
+            await settle();
             if (!res.output.includes(t.testName) && !res.output.includes(basename(t.testFile))) {
               redUnattributed++;
               ctx.log(`slice ${sfx}: the red output does not name ${t.testName}; check that the failure comes from the new test`);
@@ -1123,11 +1181,11 @@ export default defineWorkflow<Args>({
             if (problem) {
               lastProblem = problem;
               await revertTo(cmd, worktree, before);
-              settle();
+              await settle();
               if (attempt === settings.redGreenAttempts) return "tdd-violation";
               continue;
             }
-            settle();
+            await settle();
             rec.greenDone = true;
             progress.upsert(rec);
           }
@@ -1149,7 +1207,7 @@ export default defineWorkflow<Args>({
           lastProblem = await codeViolation(before, await snapshotTree(cmd, worktree), rec);
           if (lastProblem) {
             await revertTo(cmd, worktree, before);
-            settle();
+            await settle();
             return "tdd-violation";
           }
           // settle e rodada contada numa só gravação: nenhuma queda entre as duas desfaz uma correção já contada.
@@ -1255,18 +1313,18 @@ export default defineWorkflow<Args>({
           const refactorProblem = await codeViolation(before, await snapshotTree(cmd, worktree));
           if (refactorProblem) {
             await revertTo(cmd, worktree, before);
-            settle();
+            await settle();
             return { ...base, status: "tdd-violation", step: "refactor-1", reason: refactorProblem, ...where };
           }
           const after = await suite("refactor");
           if (!after.ok) {
             await revertTo(cmd, worktree, before); // volta ao último verde
-            settle();
+            await settle();
             // Como em toda suíte: passar do teto ou morrer por um sinal não é uma suíte vermelha.
             const status = after.kind === "timeout" || after.kind === "killed" ? `tests-${after.kind}` : "tests-failed-after-review";
             return { ...base, status, ...where, output: after.output };
           }
-          settle();
+          await settle();
           progress.data.refactorDone = true;
           progress.data.refactorSummary = fix.summary;
           progress.save();
@@ -1355,8 +1413,12 @@ export default defineWorkflow<Args>({
       }
       throw err;
     } finally {
-      releaseMainTree?.();
-      releaseIssue();
+      try {
+        if (handsTreeBack) await recordHandedBack();
+      } finally {
+        releaseMainTree?.();
+        releaseIssue();
+      }
     }
   },
 });
