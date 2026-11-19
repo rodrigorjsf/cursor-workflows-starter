@@ -348,9 +348,10 @@ O runtime não pausa para perguntar. Quando o fluxo precisa da aprovação de um
 combinar as seams antes dos testes), o mesmo workflow roda duas vezes:
 
 1. O run 1 vai até o resultado a aprovar, guarda-o no progresso do run e devolve um status pendente (no
-   `implement-issue`, `seams-proposed`) com `runId` e `next`, o comando de retomada. O status entra em `PENDING`
-   ([`packages/runtime/src/runtime/outcome.ts`](../../packages/runtime/src/runtime/outcome.ts)); fora dele, o run contaria como falha no
-   custo por entrega.
+   `implement-issue`, `seams-proposed`) com `runId` e `next`, o comando de retomada. Um resultado com `next` é classificado
+   como pendente, seja qual for o status
+   ([`packages/runtime/src/runtime/outcome.ts`](../../packages/runtime/src/runtime/outcome.ts)); sem ele, o run contaria como falha
+   no custo por entrega.
 2. O código publica o resultado onde o humano decide: no `implement-issue`, um comentário na issue com um marcador
    e o `runId` (uma vez por run), o comando pelo CLI (`--resume <runId>`, com os args entre aspas simples
    escapadas) e o caminho pelo chat (`resumeRunId`). O texto passa pela trava de segredos antes.

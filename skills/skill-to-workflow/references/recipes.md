@@ -179,9 +179,9 @@ the same run, and the steps already finished come back from the journal.
 
 The returned object has three parts:
 
-- **A status of the workflow's own** (`seams-proposed`), never `done`. The metrics recorder classes `pending` and the names
-  in `PENDING` (`outcome.ts`) as waiting for the person; any other name counts as a failure in cost per delivery, so add
-  the name there (observability.md).
+- **A status of the workflow's own** (`seams-proposed`), never `done`. The metrics recorder classes a result that carries
+  `next` as waiting for the person, whatever its status, so the checkpoint never counts as a failure in cost per delivery
+  (observability.md).
 - **`runId`**: `ctx.runId`. The resume names the run by it.
 - **`next`**: the resume command, a string, with the args it needs after `--args` and `--resume <runId>` at the end.
 

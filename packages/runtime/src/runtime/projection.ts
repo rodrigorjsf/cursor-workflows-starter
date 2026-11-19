@@ -229,7 +229,7 @@ function projectFrom(events: readonly WorkflowEvent[], start: number): Execution
     if (e.type === "run-end") {
       state.status = e.status;
       state.finishedAt = e.ts;
-      state.outcome = outcomeClass(e.status, e.outcomeStatus);
+      state.outcome = outcomeClass(e.status, e.outcomeStatus, e.result);
       state.result = e.result;
       state.error = e.error;
     }

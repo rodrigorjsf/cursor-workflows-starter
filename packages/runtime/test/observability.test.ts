@@ -186,8 +186,17 @@ test("classe do resultado", () => {
   assert.equal(outcomeClass("finished", "seams-proposed"), "pending"); // aguarda aprovação, não é falha
   assert.equal(outcomeClass("finished", "test-command-proposed"), "pending"); // the planner's test command waits for approval, it is no failure
   assert.equal(outcomeClass("finished", "untrusted-author"), "pending"); // an outside author's issue waits for the user to read it, it is no failure
-  assert.equal(outcomeClass("finished", "questions-proposed"), "pending");
   assert.equal(outcomeClass("failed", "done"), "error");
+});
+
+test("a result that carries the resume command next is a checkpoint, classed as waiting for the person whatever its status", () => {
+  const checkpoint = { status: "questions-proposed", runId: "explore-db-1", next: "npm run wf -- run explore-db --resume explore-db-1" };
+  assert.equal(outcomeClass("finished", checkpoint.status, checkpoint), "pending");
+  assert.equal(outcomeClass("finished", undefined, { next: checkpoint.next }), "pending");
+  assert.equal(outcomeClass("finished", "questions-proposed", { status: "questions-proposed" }), "failed");
+  assert.equal(outcomeClass("finished", "done", { status: "done", next: 3 }), "delivered");
+  assert.equal(outcomeClass("failed", "questions-proposed", checkpoint), "error");
+  assert.equal(outcomeClass("cancelled", "questions-proposed", checkpoint), "cancelled");
 });
 
 test("estimativa usa a tarifa alta quando o prompt médio por passo passa da faixa (Haiku 5.5: 100k)", async () => {

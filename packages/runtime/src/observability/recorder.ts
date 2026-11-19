@@ -99,7 +99,7 @@ export async function createRecorder(path?: string): Promise<Recorder> {
           );
           break;
         case "run-end":
-          write(db, () => endRun.run(now(), e.status, e.outcomeStatus ?? null, outcomeClass(e.status, e.outcomeStatus), e.error ?? null, execId));
+          write(db, () => endRun.run(now(), e.status, e.outcomeStatus ?? null, outcomeClass(e.status, e.outcomeStatus, e.result), e.error ?? null, execId));
           break;
       }
     },

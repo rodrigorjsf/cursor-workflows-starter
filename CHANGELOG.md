@@ -27,7 +27,7 @@
   `list_workflows`. O `argsSchema` exige `mode: "review" | "interview"`. O modo `review` coleta o schema com `ctx.mcp`, sem agente,
   roda um agente por eixo (índices, nomes e normalização) em paralelo e roteia os achados por severidade em código. O modo
   `interview` propõe um questionário finito, devolve o checkpoint `questions-proposed` com `runId` e `next`, e o resume com
-  `answers` continua com a etapa do questionário vinda do journal. `questions-proposed` entra em `PENDING`: o run que espera as
+  `answers` continua com a etapa do questionário vinda do journal. Um resultado com `next` é classificado como pendente, seja qual for o status: o run que espera as
   respostas fica na coluna **Awaiting approval** do quadro, e não em **Failed**. As receitas e a `skill-to-workflow` apontam o exemplo.
 
 ### Mudado
