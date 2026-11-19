@@ -18,6 +18,7 @@ const handlers: Record<string, (o: any) => unknown> = {
     write(o, "test/sub.test.js", HANG);
     if (mainTree) return { hang: true };
     submit(o, { testFile: "test/sub.test.js", testName: "subtract" });
+    return undefined;
   },
 };
 for (let i = 0; i < 50; i++)
