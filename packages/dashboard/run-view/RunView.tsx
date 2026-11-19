@@ -2,12 +2,12 @@
 // run. The data comes from `useRunEvents`, the graph from `buildRunGraph` and the positions from `layoutRunGraph`; this file
 // puts them on a React Flow canvas.
 import { Background, Controls, type Edge, type Node, ReactFlow, ReactFlowProvider, useReactFlow, useStore, useStoreApi } from "@xyflow/react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Glyph, JunctionNode, LaneNode, type LaneNodeData, StartNode, WorkNode, type WorkNodeData } from "./nodes.js";
 import { RunActions } from "./RunActions.js";
 import { SeamsPanel } from "./SeamsPanel.js";
 import { argsHashOf } from "./resume-command.js";
-import { CommandPanel, PhasePanel, StepLogPanel } from "./StepLogPanel.js";
+import { CommandPanel, PhasePanel, StepLogPanel, closesOnEscape } from "./StepLogPanel.js";
 import { frameOf, jumpTarget, panTarget } from "./framing.js";
 import { formatCents, formatCount, formatDuration } from "../app/format.js";
 import { type MenuPhase, type RunGraph, type RunProgress, buildRunGraph, commandCount, currentExecution, executionsOf, isWork, shownEvents, stepMenu } from "./run-graph.js";
@@ -275,12 +275,32 @@ function Canvas({ graph, layout, now, selectedId, onOpen, phases, jump }: { grap
 
 export function StepMenu({ phases, open, selectedId, onToggle, onPick, onOverlay }: { phases: MenuPhase[]; open: boolean; selectedId?: string; onToggle(): void; onPick(id: string): void; onOverlay(): void }) {
   const aside = useRef<HTMLElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const overlays = () => aside.current !== null && getComputedStyle(aside.current).position === "absolute";
   useLayoutEffect(() => {
-    if (aside.current && getComputedStyle(aside.current).position === "absolute") onOverlay();
+    if (overlays()) onOverlay();
   }, []);
+  useEffect(() => {
+    if (!open) return;
+    const onResize = () => {
+      if (overlays()) onOverlay();
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [open, onOverlay]);
+  const pick = (id: string) => {
+    onPick(id);
+    if (overlays()) onOverlay();
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (!open || !closesOnEscape(event) || !overlays()) return;
+    event.preventDefault();
+    onOverlay();
+    toggle.current?.focus();
+  };
   return (
-    <aside ref={aside} className={open ? "step-menu" : "step-menu collapsed"} aria-label="Steps">
-      <button type="button" className="btn menu-toggle" aria-expanded={open} aria-controls={open ? "step-menu-body" : undefined} onClick={onToggle}>
+    <aside ref={aside} className={open ? "step-menu" : "step-menu collapsed"} aria-label="Steps" onKeyDown={onKeyDown}>
+      <button type="button" ref={toggle} className="btn menu-toggle" aria-expanded={open} aria-controls={open ? "step-menu-body" : undefined} onClick={onToggle}>
         <span aria-hidden="true">{open ? "◂" : "▸"}</span> Steps
       </button>
       {open && (
@@ -291,7 +311,7 @@ export function StepMenu({ phases, open, selectedId, onToggle, onPick, onOverlay
               <ul>
                 {phase.steps.map((step) => (
                   <li key={step.id}>
-                    <button type="button" className={`menu-step state-${step.state}`} aria-pressed={step.id === selectedId} onClick={() => onPick(step.id)}>
+                    <button type="button" className={`menu-step state-${step.state}`} aria-pressed={step.id === selectedId} onClick={() => pick(step.id)}>
                       <Glyph state={step.state} />
                       <span className="label">{step.label}</span>
                       <span className="state">{step.state}</span>

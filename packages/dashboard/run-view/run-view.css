@@ -217,6 +217,8 @@ code { font-size: var(--text-xs); }
   .run-banner { padding: var(--space-2) var(--space-4); }
   .step-menu:not(.collapsed) { position: absolute; inset: 0 auto 0 0; z-index: 15; width: 85%; box-shadow: var(--shadow-md); }
   .workspace:has(.step-panel) .step-menu { visibility: hidden; }
+  .workspace:has(.step-menu:not(.collapsed)) .canvas { visibility: hidden; }
+  .workspace:has(.step-menu:not(.collapsed)) .canvas .react-flow__node { visibility: hidden !important; }
   .seams-panel { padding: var(--space-2) var(--space-4) var(--space-3); }
   /* the log covers the canvas, which keeps its size and its frame behind it; × or Escape goes back to the graph */
   .step-panel { position: absolute; inset: 0; z-index: 20; border-left: none; }
