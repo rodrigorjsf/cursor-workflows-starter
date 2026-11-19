@@ -677,7 +677,7 @@ export default defineWorkflow<Args>({
       if (tier === "LOW") {
         plan = {
           seams: [{ name: "affected public interface", interface: "chosen by the test step", why: "LOW: one slice, no planner" }],
-          slices: [{ behavior: issue.title, seam: "the public interface closest to the requested behaviour", testIdea: "use an example from the issue as the expected value" }],
+          slices: [{ behavior: issue.title, seam: "the public interface closest to the requested behaviour", testIdea: P.LOW_SLICE_TEST_IDEA }],
           testCommand: ctx.args.testCommand ?? DEFAULT_TEST_COMMAND,
         };
       } else if (ctx.args.approveSeams && !ctx.args.seams?.length && !progress.data.proposedPlan) {
@@ -1154,7 +1154,7 @@ export default defineWorkflow<Args>({
           const seam = f.seam ?? "the closest public interface";
           const key = sliceKey("x", behavior, seam);
           const start = await sliceStart();
-          const failed = await runSlice(key, `extra-${i + 1}`, { behavior, seam, testIdea: `issue requirement: "${f.quote}"` });
+          const failed = await runSlice(key, `extra-${i + 1}`, { behavior, seam, testIdea: P.extraSliceTestIdea(f.quote) });
           if (failed) {
             if (failed !== "tdd-violation" && failed !== "test-not-red") await revertTo(cmd, worktree, start);
             return { ...base, status: failed, slice: `extra-${i + 1}`, reason: lastProblem || undefined, worktree };

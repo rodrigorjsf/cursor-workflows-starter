@@ -286,6 +286,16 @@
 
 ### Mudado
 
+- **No `implement-issue`, a fatia única do LOW cobre todos os casos que a issue lista, e uma fatia extra avisa que o review pode ter
+  errado** (issue #120, spec #114). O run `implement-issue-4e859968` (uma issue LOW que pedia `abs(x)` com um número positivo, um
+  negativo e zero) gastou 694.676 tokens: a fatia do LOW pedia "um exemplo da issue", o teste cobriu só o caso negativo, o review
+  de spec apontou os outros dois como faltando, cada um virou uma fatia extra (as duas já estavam satisfeitas) e houve uma segunda
+  rodada de review, 421.658 tokens (60,7%) de trabalho que uma primeira fatia completa dispensava. O teto `sliceCaps.LOW` não teve
+  parte nisso: o plano do LOW é uma fatia montada em código, e o teto nunca cortou nada. Agora a etapa red do LOW recebe a
+  instrução de cobrir cada caso que a issue lista, cada um como uma asserção do mesmo teste. E a fatia extra que um achado do review
+  abre diz à etapa red que o review a apontou como faltando, que ela pode já existir, e manda escrever o teste primeiro e, se ele
+  passar sem implementação, responder `alreadySatisfied` como as instruções já pedem, sem a segunda tentativa que o run mediu
+  (117.400 tokens). Nenhum ajuste nem argumento mudou.
 - **O `implement-issue` abre o PR (o MR no GitLab) por padrão** (issue #117). O padrão de `openPr` passou de `false` para `true`:
   um run sem o ajuste e sem o argumento empurra a branch, abre o PR e devolve o link em `prUrl` e no cartão. Quem quer só a branch
   commitada passa `openPr: false` (ou `--no-pr`), ou grava `wf config set workflows.implement-issue.settings.openPr false`.
