@@ -101,17 +101,35 @@ test("every command the graph leaves out is listed under the step it follows or 
   assert.equal(new Set(listed).size, listed.length, "each is listed once");
 });
 
-test("a command is listed under the nearest step it continues from, and a command that follows no step goes to its phase, in run order", () => {
+test("in the sandbox run every command ran between steps, so each is listed under its phase, in run order", () => {
   const graph = buildRunGraph(sandboxRun(), { settled: true });
-  const labels = (commands: GraphNode[]) => commands.map((c) => c.label);
+  const labels = (title: string) => graph.lanes.find((l) => l.title === title)!.commands.map((c) => c.label);
 
-  assert.deepEqual(labels(nodeOf(graph, TEST_1).commands), [
-    "git ls-files", "git add", "git write-tree", "git diff", "git ls-tree", "git checkout", "git ls-files", "git add", "git write-tree", "git show", "git show",
-    "git ls-files", "git add", "git write-tree",
-  ]);
-  assert.deepEqual(labels(graph.lanes.find((l) => l.title === "Triage")!.commands), ["git config", "gh issue view"]);
-  assert.deepEqual(labels(graph.lanes.find((l) => l.title === "Delivery")!.commands), ["git rev-parse", "git add", "git diff", "git diff", "git diff", "git commit", "git rev-parse"]);
-  assert.deepEqual(graph.nodes.filter((n) => n.kind === "fork" || n.kind === "join" || n.kind === "start").flatMap((n) => n.commands), [], "only a step holds commands");
+  assert.deepEqual(graph.lanes.map((l) => [l.title, l.commands.length]), [["Triage", 2], ["Implementation", 33], ["Review", 39], ["Delivery", 7]]);
+  assert.deepEqual(labels("Triage"), ["git config", "gh issue view"]);
+  assert.deepEqual(labels("Delivery"), ["git rev-parse", "git add", "git diff", "git diff", "git diff", "git commit", "git rev-parse"]);
+  assert.deepEqual(graph.nodes.flatMap((n) => n.commands), []);
+});
+
+test("a command that ran while a step was going is listed under that step, through the commands between them; one that came after is listed under its phase", () => {
+  const graph = buildRunGraph(
+    stamp([
+      runStart,
+      phase("Build"),
+      stepStart("s-a", "code"),
+      execStart("x-during", "git status", { parentId: "s-a" }),
+      execEnd("x-during", "git status"),
+      execStart("x-nested", "git log", { parentId: "x-during" }),
+      execEnd("x-nested", "git log"),
+      stepEnd("s-a", "code"),
+      execStart("x-after", "git add", { parentId: "s-a" }),
+      execEnd("x-after", "git add"),
+    ]),
+  );
+
+  assert.deepEqual(idsOf(graph.nodes), ["start", "s-a"]);
+  assert.deepEqual(idsOf(nodeOf(graph, "s-a").commands), ["x-during", "x-nested"]);
+  assert.deepEqual(idsOf(graph.lanes[0]!.commands), ["x-after"]);
 });
 
 test("the phases of the sandbox run are its lanes, a phase of commands only included, and the commands before any phase join the first one", () => {

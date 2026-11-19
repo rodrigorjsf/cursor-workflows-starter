@@ -18,7 +18,7 @@ export interface LaneNodeData extends Record<string, unknown> {
   title: string;
 }
 
-const GLYPH: Record<NodeState, string> = { running: "●", ok: "✓", failed: "✗", cancelled: "⊘", cached: "↺", interrupted: "‖" };
+const GLYPH: Record<NodeState, string> = { running: "●", ok: "✓", failed: "✗", cancelled: "⊘", cached: "↺", interrupted: "‖", neutral: "○" };
 
 /** The state as a word a screen reader says; the glyph alone is decoration. */
 function Glyph({ state }: { state: NodeState }) {
@@ -34,6 +34,8 @@ function Handles() {
     <>
       <Handle type="target" position={Position.Left} isConnectable={false} />
       <Handle type="source" position={Position.Right} isConnectable={false} />
+      <Handle id="above" type="target" position={Position.Top} isConnectable={false} />
+      <Handle id="below" type="source" position={Position.Bottom} isConnectable={false} />
     </>
   );
 }

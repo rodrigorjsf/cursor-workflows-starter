@@ -126,6 +126,9 @@ export interface GraphOptions {
 /** The id of the node a group's branches flow into. The group's own id is its fork. */
 export const joinIdOf = (groupId: string): string => `join:${groupId}`;
 
+export const commandCount = (graph: RunGraph): number =>
+  graph.nodes.reduce((sum, node) => sum + (node.kind === "command" ? 1 : 0) + node.commands.length, 0) + graph.lanes.reduce((sum, lane) => sum + lane.commands.length, 0);
+
 const START = "start";
 
 const PROBE_ANSWER_EXIT = 1;
@@ -148,6 +151,7 @@ interface GroupInfo {
 /** One attempt of a step or command, folded from its start, its turns and its end. */
 interface Attempt {
   startedAt?: string;
+  endedAt?: string;
   ended: boolean;
   ok: boolean;
   cached: false | "journal" | "memo";
@@ -308,6 +312,7 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
         const { attempt } = at;
         const usage = event.usage as Record<string, unknown> | undefined;
         attempt.ended = true;
+        attempt.endedAt = str(event.ts);
         attempt.ok = event.ok === true;
         attempt.cached = cachedOf(event.cached);
         attempt.tokens = num(usage?.totalTokens) ?? (usage ? (num(usage.inputTokens) ?? 0) + (num(usage.outputTokens) ?? 0) : undefined);
@@ -379,21 +384,25 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
     }
     return at;
   };
-  const stepBefore = (id: string): string | undefined => {
+  const startedAt = (id: string): number => Date.parse([...(work.get(id)?.attempts.values() ?? [])][0]?.startedAt ?? "");
+  const runningAt = (stepId: string, time: number): boolean =>
+    [...work.get(stepId)!.attempts.values()].some((a) => Date.parse(a.startedAt ?? "") <= time && time <= (a.endedAt === undefined ? Infinity : Date.parse(a.endedAt)));
+  const stepEnclosing = (id: string): string | undefined => {
+    const time = startedAt(id);
     const seen = new Set<string>();
     let at = placed.get(id)?.parentId ?? null;
     while (at !== null && !seen.has(at)) {
       seen.add(at);
       const kind = nodes.get(at)?.kind;
-      if (kind === "step") return at;
-      if (kind !== "command") return undefined;
+      if (kind === "step" && runningAt(at, time)) return at;
+      if (kind !== "step" && kind !== "command") return undefined;
       at = placed.get(at)?.parentId ?? null;
     }
     return undefined;
   };
   const phaseItems: GraphNode[] = [];
   for (const id of removed) {
-    const owner = stepBefore(id);
+    const owner = stepEnclosing(id);
     (owner === undefined ? phaseItems : nodes.get(owner)!.commands).push(nodes.get(id)!);
   }
   for (const id of removed) nodes.delete(id);

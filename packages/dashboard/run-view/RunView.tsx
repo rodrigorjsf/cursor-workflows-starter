@@ -10,9 +10,9 @@ import { argsHashOf } from "./resume-command.js";
 import { StepLogPanel } from "./StepLogPanel.js";
 import { frameOf, panTarget } from "./framing.js";
 import { formatCents, formatCount, formatDuration } from "../app/format.js";
-import { type RunGraph, type RunProgress, buildRunGraph, isWork } from "./run-graph.js";
+import { type RunGraph, type RunProgress, buildRunGraph, commandCount, isWork } from "./run-graph.js";
 import { costUnknown, headerStatus, offeredActions, runElapsed } from "./run-status.js";
-import { type RunLayout, layoutRunGraph } from "./run-layout.js";
+import { type Box, type RunLayout, layoutRunGraph } from "./run-layout.js";
 import { type Connection, useRunEvents } from "./use-run-events.js";
 import { errorText } from "../app/error-text.js";
 
@@ -61,15 +61,17 @@ function useClock(active: boolean): number {
   return now;
 }
 
+const wraps = (from: Box, to: Box): boolean => to.x < from.x + from.width;
+
 /** What React Flow draws for `graph` laid out as `layout`. `open` opens a node's log; `focus` brings a node that took the keyboard focus into view. */
 export function toFlow(graph: RunGraph, layout: RunLayout, now: number, selectedId: string | undefined, open: (id: string) => void, focus: (id: string) => void): { nodes: Node[]; edges: Edge[] } {
   const lanes: Node<LaneNodeData, "lane">[] = layout.lanes.map((lane) => ({
     id: `lane-${lane.index}`,
     type: "lane",
-    position: { x: lane.x, y: 0 },
+    position: { x: lane.x, y: lane.y },
     data: { title: lane.title },
     width: lane.width,
-    height: layout.height,
+    height: lane.height,
     zIndex: -1,
     draggable: false,
     selectable: false,
@@ -87,7 +89,15 @@ export function toFlow(graph: RunGraph, layout: RunLayout, now: number, selected
   const state = new Map(graph.nodes.map((n) => [n.id, n.state]));
   const edges: Edge[] = graph.edges
     .filter((e) => layout.nodes[e.source] && layout.nodes[e.target])
-    .map((e) => ({ id: e.id, source: e.source, target: e.target, animated: state.get(e.target) === "running", className: `edge-${state.get(e.target)}`, focusable: false })); // an edge has no action: not a Tab stop
+    .map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      ...(wraps(layout.nodes[e.source]!, layout.nodes[e.target]!) && { sourceHandle: "below", targetHandle: "above" }),
+      animated: state.get(e.target) === "running",
+      className: `edge-${state.get(e.target)}`,
+      focusable: false,
+    }));
   return { nodes: [...(layout.lanes.some((l) => l.title !== "") ? lanes : []), ...work], edges };
 }
 
@@ -238,7 +248,7 @@ export function RunView({ runId }: { runId: string }) {
   const selected = graph.nodes.find((n) => n.id === selectedId && isWork(n.kind));
   /** In a replay, the log line it has reached; at its end, and outside a replay, the whole log. */
   const upTo = replaying && replayAt < events.length ? (ids[replayAt - 1] ?? 0) : undefined;
-  const counts = { steps: graph.nodes.filter((n) => n.kind === "step").length, commands: graph.nodes.filter((n) => n.kind === "command").length };
+  const counts = { steps: graph.nodes.filter((n) => n.kind === "step").length, commands: commandCount(graph) };
   const header = headerStatus({ api: { status, error }, run, replaying, settled });
   const offered = offeredActions(status, graph, error);
   const elapsed = runElapsed(run, settled, now);

@@ -60,10 +60,10 @@ const workflow = defineWorkflow<unknown, string>({
         await ctx.agent("left 2", { label: "left-2" });
       },
       async () => {
-        await ctx.exec(...NODE, { label: "right-cmd" });
+        await ctx.exec(...NODE, { label: "right-cmd", node: true });
       },
       async () => {
-        await ctx.pipeline(["x", "y"], (item) => ctx.exec(...NODE, { label: `stage-1:${item}` }), (_prev, item) => ctx.exec(...NODE, { label: `stage-2:${item}` }));
+        await ctx.pipeline(["x", "y"], (item) => ctx.exec(...NODE, { label: `stage-1:${item}`, node: true }), (_prev, item) => ctx.exec(...NODE, { label: `stage-2:${item}`, node: true }));
       },
     ]);
     await ctx.agent("merge", { label: "merge" });
@@ -76,7 +76,7 @@ function eventsOf(repo: string, runId: string): RunEvent[] {
 }
 const byLabel = (nodes: GraphNode[], label: string) => nodes.find((n) => n.label === label)!;
 
-test("the graph of a real run: every step and command is a node, the groups fork and join, and what follows a group continues from its join", async () => {
+test("the graph of a real run: every step and every command marked as a node is a node, the groups fork and join, and what follows a group continues from its join", async () => {
   const repo = box.repo("repo");
   const result = await runWorkflow(workflow, {}, { cwd: repo });
   assert.equal(result.status, "finished", result.error);
@@ -105,6 +105,32 @@ test("the graph of a real run: every step and command is a node, the groups fork
   assert.ok(arrow(joinIdOf(outer!), id("merge")), "the step after the group continues from its join");
   assert.deepEqual(graph.lanes.map((l) => l.title), ["Plan", "Build"]);
   assert.equal(byLabel(graph.nodes, "merge").lane, 1);
+});
+
+const withCommands = defineWorkflow<unknown, string>({
+  meta: { name: "with-commands", description: "with commands", phases: [{ title: "Prep" }] },
+  defaults: { model: { id: "m" } },
+  async run(ctx) {
+    ctx.phase("Prep");
+    await ctx.exec(...NODE, { label: "setup" });
+    await ctx.agent("go", { label: "go" });
+    await ctx.exec(...NODE, { label: "suite", node: true });
+    await ctx.exec(process.execPath, ["-e", "process.exit(1)"], { label: "check", probe: true });
+    await ctx.exec(process.execPath, ["-e", "process.exit(2)"], { label: "lint" });
+    return "ok";
+  },
+});
+
+test("the graph of a real run draws the step and the command marked as a node; the other commands are listed under the phase, a probe's exit 1 neutral and another failure red", async () => {
+  const repo = box.repo("repo");
+  const result = await runWorkflow(withCommands, {}, { cwd: repo });
+  assert.equal(result.status, "finished", result.error);
+
+  const graph = buildRunGraph(eventsOf(repo, result.runId));
+  assert.deepEqual(graph.nodes.map((n) => [n.kind, n.label]), [["start", "with-commands"], ["step", "go"], ["command", "suite"]]);
+  assert.deepEqual(graph.lanes.map((l) => [l.title, l.commands.map((c) => [c.label, c.state, c.detail.errorKind])]), [
+    ["Prep", [["setup", "ok", undefined], ["check", "neutral", "exit 1"], ["lint", "failed", "exit 2"]]],
+  ]);
 });
 
 test("the hash the engine writes for empty args is the one the resume command recognises, and any other args are not mistaken for it", async () => {

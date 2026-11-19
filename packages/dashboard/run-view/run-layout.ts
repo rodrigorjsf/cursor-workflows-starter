@@ -1,7 +1,7 @@
 // Where each node of a run graph goes. elkjs lays the graph out left to right (layers by dependency), with one partition per
 // lane so that the phases come out as consecutive bands. The same module runs in the browser and, for the tests, in Node.
 import ELK from "elkjs/lib/elk.bundled.js";
-import type { GraphLane, NodeKind, RunGraph } from "./run-graph.js";
+import type { NodeKind, RunGraph } from "./run-graph.js";
 
 export interface Box {
   x: number;
@@ -10,12 +10,13 @@ export interface Box {
   height: number;
 }
 
-/** A lane as a vertical band: it spans the whole height of the layout. */
 export interface LaneBand {
   index: number;
   title: string;
   x: number;
+  y: number;
   width: number;
+  height: number;
 }
 
 export interface RunLayout {
@@ -37,8 +38,9 @@ export const NODE_SIZE: Record<NodeKind, { width: number; height: number }> = {
 /** The text sizes of a step or command node, in pixels at zoom 1: its label, and the line under it (the model or the command). The components set them. */
 export const NODE_TEXT_PX = { label: 14, sub: 12 } as const;
 
-/** Space around the nodes of the first and last lane, inside the band. */
 const LANE_PADDING = 24;
+const ROW_GAP = 32;
+export const LAYOUT_MAX_WIDTH = 1400;
 
 /** Where a lane's title sits inside its band: `LaneNode` places the title with these, and the title is cut to the box. */
 export const LANE_TITLE = { top: 10, left: 12, height: 18 } as const;
@@ -47,49 +49,83 @@ export const LANE_TITLE = { top: 10, left: 12, height: 18 } as const;
 const LANE_HEADER = LANE_TITLE.top + LANE_TITLE.height + 12;
 
 /** The box a lane's title takes, in the coordinates of the layout. */
-export const laneTitleBox = (lane: LaneBand): Box => ({ x: lane.x + LANE_TITLE.left, y: LANE_TITLE.top, width: Math.max(0, lane.width - 2 * LANE_TITLE.left), height: LANE_TITLE.height });
+export const laneTitleBox = (lane: LaneBand): Box => ({ x: lane.x + LANE_TITLE.left, y: lane.y + LANE_TITLE.top, width: Math.max(0, lane.width - 2 * LANE_TITLE.left), height: LANE_TITLE.height });
 
 const elk = new ELK();
 
-export async function layoutRunGraph(graph: RunGraph): Promise<RunLayout> {
-  if (graph.nodes.length === 0) return { nodes: {}, lanes: [], width: 0, height: 0 };
+interface Layer {
+  boxes: Array<Box & { id: string }>;
+  left: number;
+  right: number;
+}
+
+async function layersOf(graph: RunGraph, laneIndex: number): Promise<Layer[]> {
+  const members = graph.nodes.filter((node) => node.lane === laneIndex);
+  if (members.length === 0) return [];
+  const ids = new Set(members.map((node) => node.id));
   const laid = await elk.layout({
-    id: "run",
+    id: `lane-${laneIndex}`,
     layoutOptions: {
       "elk.algorithm": "layered",
       "elk.direction": "RIGHT",
-      "elk.partitioning.activate": "true",
+      "elk.layered.layering.strategy": "LONGEST_PATH_SOURCE",
       "elk.spacing.nodeNode": "28",
       "elk.layered.spacing.nodeNodeBetweenLayers": "56",
-      // The order the nodes and edges arrived in decides ties, so that what is already drawn stays where it is as the run grows.
       "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
       "elk.layered.crossingMinimization.forceNodeModelOrder": "true",
     },
-    children: graph.nodes.map((node) => ({ id: node.id, ...NODE_SIZE[node.kind], layoutOptions: { "elk.partitioning.partition": String(node.lane) } })),
-    edges: graph.edges.map((edge) => ({ id: edge.id, sources: [edge.source], targets: [edge.target] })),
+    children: members.map((node) => ({ id: node.id, ...NODE_SIZE[node.kind] })),
+    edges: graph.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)).map((edge) => ({ id: edge.id, sources: [edge.source], targets: [edge.target] })),
   });
-
-  const nodes: Record<string, Box> = {};
-  const top = Math.min(...(laid.children ?? []).map((child) => child.y ?? 0));
-  // Every node moves down below the title strip: the topmost lands just under it.
-  for (const child of laid.children ?? []) nodes[child.id] = { x: child.x ?? 0, y: (child.y ?? 0) - top + LANE_HEADER, width: child.width ?? 0, height: child.height ?? 0 };
-  const right = Math.max(...Object.values(nodes).map((b) => b.x + b.width));
-  const bottom = Math.max(...Object.values(nodes).map((b) => b.y + b.height));
-  const left = Math.min(...Object.values(nodes).map((b) => b.x));
-  return { nodes, lanes: bandsOf(graph, nodes, left - LANE_PADDING, right + LANE_PADDING), width: right + LANE_PADDING, height: bottom + LANE_PADDING };
+  const boxes = (laid.children ?? []).map((child) => ({ id: child.id, x: child.x ?? 0, y: child.y ?? 0, width: child.width ?? 0, height: child.height ?? 0 })).sort((a, b) => a.x - b.x);
+  const layers: Layer[] = [];
+  for (const box of boxes) {
+    const layer = layers.at(-1);
+    if (layer && box.x < layer.right) {
+      layer.boxes.push(box);
+      layer.right = Math.max(layer.right, box.x + box.width);
+    } else layers.push({ boxes: [box], left: box.x, right: box.x + box.width });
+  }
+  return layers;
 }
 
-/** The bands: each lane spans its nodes, and the gap between two lanes is split down the middle, so the bands tile. */
-function bandsOf(graph: RunGraph, nodes: Record<string, Box>, from: number, to: number): LaneBand[] {
-  const spans = graph.lanes
-    .map((lane: GraphLane) => {
-      const boxes = graph.nodes.filter((n) => n.lane === lane.index).map((n) => nodes[n.id]!);
-      return boxes.length === 0 ? undefined : { lane, min: Math.min(...boxes.map((b) => b.x)), max: Math.max(...boxes.map((b) => b.x + b.width)) };
-    })
-    .filter((span) => span !== undefined);
-  return spans.map((span, i) => {
-    const x = i === 0 ? from : (spans[i - 1]!.max + span.min) / 2;
-    const end = i === spans.length - 1 ? to : (span.max + spans[i + 1]!.min) / 2;
-    return { index: span.lane.index, title: span.lane.title, x, width: end - x };
-  });
+function rowsOf(layers: Layer[], cap: number): Layer[][] {
+  const rows: Layer[][] = [];
+  for (const layer of layers) {
+    const row = rows.at(-1);
+    if (row && layer.right - row[0]!.left <= cap) row.push(layer);
+    else rows.push([layer]);
+  }
+  return rows;
+}
+
+function balancedRows(layers: Layer[], cap: number): Layer[][] {
+  const count = rowsOf(layers, cap).length;
+  let tight = cap;
+  while (tight > 0 && rowsOf(layers, tight - 8).length === count) tight -= 8;
+  return rowsOf(layers, tight);
+}
+
+export async function layoutRunGraph(graph: RunGraph): Promise<RunLayout> {
+  if (graph.nodes.length === 0) return { nodes: {}, lanes: [], width: 0, height: 0 };
+  const cap = LAYOUT_MAX_WIDTH - 2 * LANE_PADDING;
+  const perLane = await Promise.all(graph.lanes.map(async (lane) => balancedRows(await layersOf(graph, lane.index), cap)));
+  const rowWidth = (row: Layer[]) => row.at(-1)!.right - row[0]!.left;
+  const width = Math.max(...perLane.flatMap((rows) => rows.map(rowWidth)), 0) + 2 * LANE_PADDING;
+  const nodes: Record<string, Box> = {};
+  const lanes: LaneBand[] = [];
+  let top = 0;
+  for (const [i, rows] of perLane.entries()) {
+    let rowTop = top + LANE_HEADER;
+    for (const row of rows) {
+      const boxes = row.flatMap((layer) => layer.boxes);
+      const first = Math.min(...boxes.map((b) => b.y));
+      for (const box of boxes) nodes[box.id] = { x: box.x - row[0]!.left + LANE_PADDING, y: box.y - first + rowTop, width: box.width, height: box.height };
+      rowTop += Math.max(...boxes.map((b) => b.y + b.height)) - first + ROW_GAP;
+    }
+    const height = rows.length === 0 ? LANE_HEADER + LANE_PADDING : rowTop - ROW_GAP + LANE_PADDING - top;
+    lanes.push({ index: graph.lanes[i]!.index, title: graph.lanes[i]!.title, x: 0, y: top, width, height });
+    top += height;
+  }
+  return { nodes, lanes, width, height: top };
 }

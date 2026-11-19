@@ -136,7 +136,7 @@ function shipFeature(mode: Mode): WorkflowDefinition<unknown, string> {
       ]);
       const tests = await ctx.exec(
         ...node(mode === "failed" ? "console.log('running 42 specs');console.error('FAIL packages/api/audit.test.ts\\n  expected 50 rows, got 0');process.exit(1)" : "console.log('42 passed')"),
-        { label: "npm test" },
+        { label: "npm test", node: true },
       );
       if (!tests.ok) throw new Error(`tests failed: 1 of 42 specs failed (exit ${tests.exitCode})`);
       ctx.phase("Review");
