@@ -41,8 +41,8 @@ another repository, note where it is installed and which harness loads it. This 
 
 The fields come from these sources:
 
-- **Skill**: the numbered steps, the conditions ("if X, do Y"), the scripts called and `disable-model-invocation`
-  (whether the skill was explicit or relied on the model to trigger).
+- **Skill**: the numbered steps, the conditions ("if X, do Y"), the scripts called, `argument-hint` (the flags the
+  steps branch on) and `disable-model-invocation` (whether the skill was explicit or relied on the model to trigger).
 - **Subagent**: `name`, `description`, `model` and the body as the prompt, plus each harness's fields (section
   "Origin subagent" of [origin-cases.md](references/origin-cases.md)).
 
@@ -83,10 +83,13 @@ The recipes cited are in [recipes.md](references/recipes.md).
 | Subagent called by delegation | `ctx.agent(subagentBody + task, { model, tools })`; the delegation condition becomes code (step 2) |
 | Several independent subagents, or sub-agents the skill itself fires in parallel | `ctx.parallel` (barrier) or `ctx.pipeline` (per item); the code checks the minimum number of results, and the skill's aggregation becomes code or a judge step |
 | Another skill cited by the skill ("call skill X") | Section "Another skill cited and reference files" of [origin-cases.md](references/origin-cases.md) |
-| Script called by the skill (lint, tests, build) | `ctx.exec` in the workflow (never a synchronous call); the result decides the next step |
+| A CLI the skill calls with known arguments (lint, tests, build, `psql`, `kubectl`) | `ctx.exec` in the workflow (never a synchronous call): no agent turn, and the result decides the next step. The agent step that reads the output gets no `shell`. A command the model composes from what it reads keeps `shell` on its agent step |
 | Known MCP tool call with known arguments (the skill fixes both the tool and its arguments) | `ctx.mcp(server, tool, args)`: the script makes the call with no agent turn, and the result decides the next step. The server's stdio config (`command`, `args`, `env`) is copied into the workflow's code, because a server set up only in the IDE is not read from `.cursor/mcp.json`. A tool the model must choose stays in an agent step, with `mcpServers` on the step |
+| An `argument-hint` flag that picks a branch of the flow (`--review`, `--interview`) | An enum in `argsSchema` (a boolean for a flag independent of the others), and the code branches on `ctx.args`: Ajv refuses a bad value before the run starts. The CLI has no flags for a workflow's own arguments (`wf run <name> --review` exits 2): the value travels in `--args '{"mode":"review"}'`. A choice the person can make only after seeing an intermediate result is no arg: it is a checkpoint |
+| The body of a skill with `disable-model-invocation: true` that a step must follow (the converted skill itself, or one it cites) | The step prompt: the body, or the passage the step uses, in an instructions constant. The skill catalog never loads a manual-only body into a step, and the SDK has no `/name` to attach it. The lines that only tell the person when to type `/name` go to `meta.whenToUse` |
 | Imperative process rule | Recipe "Invariants between steps" |
 | Human approval of an intermediate result | Recipe "Checkpoint across two runs" |
+| A finite questionnaire: the questions, and the answers each accepts, are known before the run stops | A checkpoint: the first run returns the questions in a status of its own, and the answers come back as `args` of a resume (recipe "Checkpoint across two runs"). An open dialogue, where each question depends on the last answer, stays a skill and goes into the report as not converted |
 | Loop with no cap | `for (let round = 1; round <= N && !ok; round++)` |
 | Review/critique | Recipe "Review by axes": one step per axis, a schema with the skill's own finding categories, routing in code |
 | End-of-turn hook that reopens the loop (Cursor: `stop`/`subagentStop` with `followup_message`; Claude Code: `Stop`/`SubagentStop` with `decision: "block"` and `reason`, or exit 2) | An explicit loop in the workflow, with a cap; the hook is no longer needed |

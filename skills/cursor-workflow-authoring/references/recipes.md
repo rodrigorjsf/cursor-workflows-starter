@@ -169,11 +169,28 @@ half-made edits. So:
 
 ## Checkpoint across two runs
 
-The runtime does not pause to ask. When the flow needs a human's approval in the middle, the same workflow runs twice:
+A **Checkpoint** is a point where the workflow hands control back to the person. The `run` returns an object and ends
+`finished`: the runtime never pauses, and no `paused` status exists. The person's answers start a second execution of
+the same run, and the steps already finished come back from the journal.
 
-1. Run 1 goes up to the result to approve, stores it in the run's progress and returns a pending status (for example
-   `seams-proposed`) with `runId` and `next`, the resume command. Add the status to `PENDING` in the metrics recorder;
-   outside it the run counts as a failure in cost per delivery (observability.md).
+The returned object has three parts:
+
+- **A status of the workflow's own** (`seams-proposed`), never `done`. The metrics recorder classes `pending` and the names
+  in `PENDING` (`outcome.ts`) as waiting for the person; any other name counts as a failure in cost per delivery, so add
+  the name there (observability.md).
+- **`runId`**: `ctx.runId`. The resume names the run by it.
+- **`next`**: the resume command, a string, with the args it needs after `--args` and `--resume <runId>` at the end.
+
+The answers arrive as `args` of a resume that names the run with `resumeRunId`: a parameter of `start_workflow` next to
+`args`, or `--resume <runId>` on the CLI. A `resumeRunId` inside `args` does not resume: a workflow whose `argsSchema` has
+`additionalProperties: false` refuses it as `invalid args`, and one without that guard starts a new run with no journal.
+List the answer args in `argsSchema` (`approveSeams`, `answers`), so a wrong answer is refused before the run starts. A
+finite questionnaire is a checkpoint whose result holds the questions, each with the answers it accepts, and the answers
+return as one arg of the resume.
+
+The flow of a checkpoint that approves a stored result:
+
+1. Run 1 goes up to the result to approve, stores it in the run's progress and returns the checkpoint.
 2. The code publishes the result where the human decides: for example a comment on the issue with a marker and the
    `runId` (once per run), the CLI command (`--resume <runId>`, args in escaped single quotes) and the chat path
    (`resumeRunId`). The text passes the secrets guard first.
