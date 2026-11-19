@@ -101,11 +101,6 @@ function addOutput(blocks: OutputBlock[], block: OutputBlock): void {
   blocks.push(block);
 }
 
-/** The log of a step from its content items. `upTo` keeps the items up to that log line (a replay shows the log as it stood). */
-export function buildStepLog(items: readonly ContentItem[], options: { upTo?: number } = {}): StepLog {
-  return buildLog(items, options.upTo, undefined);
-}
-
 export function buildNodeLog(items: readonly ContentItem[], node: { readonly attemptIds: readonly string[] }, upTo?: number): StepLog {
   return buildLog(items, upTo, node.attemptIds.length > 0 ? new Set(node.attemptIds) : undefined);
 }

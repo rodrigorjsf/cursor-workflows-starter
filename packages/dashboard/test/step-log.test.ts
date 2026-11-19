@@ -1,10 +1,6 @@
-// Seam: what a step's panel shows. `buildStepLog(items)` turns the `content` events of one step, as the API gives them, into
-// what the panel draws: per attempt the prompt, then in order what the agent said and the tools it called with their output; for
-// a `ctx.exec` command, the command and its output. Pure: the panel and these tests call the same function on the items they
-// have, so the log of a step that is still running and that of a finished one are built the same way.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type ContentItem, buildNodeLog, buildStepLog } from "../run-view/step-log.js";
+import { type ContentItem, buildNodeLog } from "../run-view/step-log.js";
 import { CommandDetails, CommandList, CommandPanel, PhasePanel, StepLogPanel, closesOnEscape } from "../run-view/StepLogPanel.js";
 import { type GraphNode, buildRunGraph } from "../run-view/run-graph.js";
 import { render, textOf } from "./render.js";
@@ -22,7 +18,7 @@ const call = (tool: string, args: unknown, callId: string, attemptId = "a1") => 
 const output = (tool: string, text: string, callId: string, attemptId = "a1", stream?: "stdout" | "stderr") => item({ kind: "command-output", attemptId, tool, callId, text, ...(stream ? { stream } : {}) });
 
 test("an agent step reads in the order it happened: prompt, what the agent said, each tool call with its output under it", () => {
-  const log = buildStepLog([
+  const log = buildNodeLog([
     prompt("Plan the change."),
     said("I will read the file first."),
     call("read", { path: "src/a.ts" }, "c1"),
@@ -30,7 +26,7 @@ test("an agent step reads in the order it happened: prompt, what the agent said,
     call("shell", { command: "npm test" }, "c2"),
     said("Tests pass."),
     output("shell", "ok 12 tests", "c2"),
-  ]);
+  ], { attemptIds: [] });
   assert.equal(log.attempts.length, 1);
   const entries = log.attempts[0]!.entries;
   assert.deepEqual(
@@ -46,13 +42,13 @@ test("an agent step reads in the order it happened: prompt, what the agent said,
 });
 
 test("a command of ctx.exec is its command line with the output that came from it, stdout and stderr apart and in order", () => {
-  const log = buildStepLog([
+  const log = buildNodeLog([
     call("exec", { command: "git", args: ["commit", "-m", "fix: a thing"], cwd: "/work/repo" }, "x1", "x1"),
     output("exec", "one\n", "x1", "x1", "stdout"),
     output("exec", "two\n", "x1", "x1", "stdout"),
     output("exec", "warning: x\n", "x1", "x1", "stderr"),
     output("exec", "three\n", "x1", "x1", "stdout"),
-  ]);
+  ], { attemptIds: [] });
   const [command] = log.attempts[0]!.entries;
   assert.ok(command, "the call is there");
   assert.equal(command.kind, "tool");
@@ -67,7 +63,7 @@ test("a command of ctx.exec is its command line with the output that came from i
 });
 
 test("a call to an MCP tool is titled by the tool it reaches, not by the generic name the SDK gives every one of them", () => {
-  const log = buildStepLog([call("mcp", { providerIdentifier: "custom-user-tools", toolName: "submit_result", args: { answer: "pong" } }, "c1")]);
+  const log = buildNodeLog([call("mcp", { providerIdentifier: "custom-user-tools", toolName: "submit_result", args: { answer: "pong" } }, "c1")], { attemptIds: [] });
   const [tool] = log.attempts[0]!.entries;
   assert.ok(tool, "the call is there");
   assert.equal(tool.kind === "tool" && tool.title, "mcp: submit_result");
@@ -75,7 +71,7 @@ test("a call to an MCP tool is titled by the tool it reaches, not by the generic
 });
 
 test("each attempt of a step is its own section, in the order the attempts began", () => {
-  const log = buildStepLog([prompt("first try", "a1"), said("hmm", "a1"), prompt("second try", "a2"), said("better", "a2"), prompt("re-prompt: fix the schema", "a2")]);
+  const log = buildNodeLog([prompt("first try", "a1"), said("hmm", "a1"), prompt("second try", "a2"), said("better", "a2"), prompt("re-prompt: fix the schema", "a2")], { attemptIds: [] });
   assert.deepEqual(
     log.attempts.map((a) => [a.attemptId, a.number, a.entries.map((e) => e.kind)]),
     [["a1", 1, ["prompt", "message"]], ["a2", 2, ["prompt", "message", "prompt"]]],
@@ -87,22 +83,22 @@ test("items arrive in any order within a batch: the log is by id", () => {
   const b = prompt("first", "a1");
   b.id = 1;
   a.id = 2;
-  const log = buildStepLog([a, b]);
+  const log = buildNodeLog([a, b], { attemptIds: [] });
   assert.deepEqual(log.attempts[0]!.entries.map((e) => e.kind), ["prompt", "message"]);
 });
 
 test("output with no call before it (a tail that started late) is shown as output, and joins the call when it comes", () => {
-  const alone = buildStepLog([output("shell", "late line", "c9")]);
+  const alone = buildNodeLog([output("shell", "late line", "c9")], { attemptIds: [] });
   assert.deepEqual(alone.attempts[0]!.entries.map((e) => e.kind), ["output"]);
-  const joined = buildStepLog([output("shell", "late line", "c9"), call("shell", { command: "ls" }, "c9")]);
+  const joined = buildNodeLog([output("shell", "late line", "c9"), call("shell", { command: "ls" }, "c9")], { attemptIds: [] });
   assert.deepEqual(joined.attempts[0]!.entries.map((e) => e.kind), ["tool"], "a call that arrives after its output still owns it");
 });
 
 test("text that retention removed, and text that was cut, say so instead of looking empty", () => {
-  const log = buildStepLog([
+  const log = buildNodeLog([
     item({ kind: "prompt", attemptId: "a1", chars: 5120 }), // retention: the event stays, the text goes
     item({ kind: "agent-message", attemptId: "a1", text: "begin", chars: 99_000, truncated: true }),
-  ]);
+  ], { attemptIds: [] });
   const [kept, cut] = log.attempts[0]!.entries;
   assert.ok(kept && cut, "both entries are there");
   assert.equal(kept.kind === "prompt" && kept.text, undefined);
@@ -112,7 +108,7 @@ test("text that retention removed, and text that was cut, say so instead of look
 });
 
 test("a tool call whose arguments are not JSON keeps them as written; an unknown kind is left out", () => {
-  const log = buildStepLog([item({ kind: "tool-call", attemptId: "a1", tool: "shell", callId: "c1", text: "not { json" }), item({ kind: "reasoning", attemptId: "a1", text: "from a newer kit" }), said("done")]);
+  const log = buildNodeLog([item({ kind: "tool-call", attemptId: "a1", tool: "shell", callId: "c1", text: "not { json" }), item({ kind: "reasoning", attemptId: "a1", text: "from a newer kit" }), said("done")], { attemptIds: [] });
   const [tool, message] = log.attempts[0]!.entries;
   assert.ok(tool && message, "both entries are there");
   assert.equal(tool.kind === "tool" && tool.args, "not { json");
@@ -122,12 +118,12 @@ test("a tool call whose arguments are not JSON keeps them as written; an unknown
 
 test("upTo keeps what the log held at that line: the logs of a replay", () => {
   const items = [prompt("p"), said("one"), said("two")];
-  assert.deepEqual(buildStepLog(items, { upTo: items[1]!.id }).attempts[0]!.entries.map((e) => e.kind), ["prompt", "message"]);
-  assert.deepEqual(buildStepLog(items, { upTo: 0 }).attempts, []);
+  assert.deepEqual(buildNodeLog(items, { attemptIds: [] }, items[1]!.id).attempts[0]!.entries.map((e) => e.kind), ["prompt", "message"]);
+  assert.deepEqual(buildNodeLog(items, { attemptIds: [] }, 0).attempts, []);
 });
 
 test("a step with no content has no attempts", () => {
-  assert.deepEqual(buildStepLog([]), { attempts: [], count: 0 });
+  assert.deepEqual(buildNodeLog([], { attemptIds: [] }), { attempts: [], count: 0 });
 });
 
 const graphOf = (drafts: Draft[], settled = true) => buildRunGraph(stamp(drafts), { settled });
@@ -248,5 +244,4 @@ test("a log scoped to some attempts keeps only theirs, and numbers them from 1; 
   assert.deepEqual(second.attempts.map((a) => [a.attemptId, a.number]), [["a2", 1]]);
   assert.equal(second.count, 2);
   assert.deepEqual(buildNodeLog(items, { attemptIds: [] }).attempts.map((a) => a.attemptId), ["a1", "a2"]);
-  assert.deepEqual(buildStepLog(items).attempts.map((a) => a.attemptId), ["a1", "a2"]);
 });

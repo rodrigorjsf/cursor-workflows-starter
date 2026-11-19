@@ -22,7 +22,7 @@ import { describeNode } from "../run-view/node-details.js";
 import { EMPTY_ARGS_HASH, argsHashOf } from "../run-view/resume-command.js";
 import { costUnknown } from "../run-view/run-status.js";
 import { type GraphNode, KNOWN_EVENT_VERSION, type RunEvent, buildRunGraph, joinIdOf } from "../run-view/run-graph.js";
-import { type ContentItem, buildStepLog } from "../run-view/step-log.js";
+import { type ContentItem, buildNodeLog } from "../run-view/step-log.js";
 import { type DashboardServer, startDashboard } from "../src/server.js";
 import { http, type Sandbox, logPath, sandbox } from "./support.js";
 
@@ -257,7 +257,7 @@ test("the step log of a cloud step shows what the cloud agent said, read through
   dash = await startDashboard({ port: 0 });
   const reply = await http(dash.url, `/api/runs/${encodeURIComponent(result.runId)}/steps/${encodeURIComponent(cloud.id)}/content`);
   assert.equal(reply.status, 200);
-  const log = buildStepLog((reply.json as { content: ContentItem[] }).content);
+  const log = buildNodeLog((reply.json as { content: ContentItem[] }).content, { attemptIds: [] });
 
   assert.equal(log.attempts.length, 1);
   const entries = log.attempts[0]!.entries;
