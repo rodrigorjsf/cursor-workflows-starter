@@ -427,7 +427,11 @@ function excludeCodeIndex(cwd: string): void {
   if (findOnPath("codegraph", process.env.PATH)) ensureExcluded(cwd, `${CODE_INDEX_DIR}/`);
 }
 
-type DirtyTree = { status: "dirty-tree"; files: string[]; reason: string };
+interface DirtyTree {
+  status: "dirty-tree";
+  files: string[];
+  reason: string;
+}
 
 function dirtyTreeReason(files: string[], what: string, wayOut: string): string {
   const listed = files.slice(0, MAX_LISTED_FILES);
