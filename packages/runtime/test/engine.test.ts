@@ -3,7 +3,7 @@ process.env.WF_METRICS = "off"; // estes testes não gravam no banco do usuário
 import assert from "node:assert/strict";
 import "./isolate-home.js";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { calls, costConfig, script, stats } from "./fake-sdk.js";
@@ -249,14 +249,7 @@ test("settingSources por etapa sobrescreve o default do run", async () => {
 });
 
 test("memo: reaproveita entre runs no mesmo estado do repo e invalida quando o repo muda", async () => {
-  const { execFileSync } = await import("node:child_process");
-  const { mkdirSync, writeFileSync } = await import("node:fs");
-  mkdirSync(cwd, { recursive: true });
-  const git = (...a: string[]) => execFileSync("git", a, { cwd, stdio: "ignore" });
-  git("init", "-q");
-  writeFileSync(join(cwd, "a.txt"), "1");
-  git("add", ".");
-  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init");
+  repoWithOneCommit();
   const wf = defineWorkflow({ meta: { name: "m", description: "m" }, defaults: { model: { id: "m" } }, run: (ctx) => ctx.agent("plan", { tools: ["read", "grep"], memo: true }) });
 
   await runWorkflow(wf, {}, { cwd }); // runId novo a cada chamada
@@ -273,15 +266,9 @@ test("memo: reaproveita entre runs no mesmo estado do repo e invalida quando o r
 });
 
 test("memo still serves a step when the local changes diff past 1 MiB", async () => {
-  const { execFileSync } = await import("node:child_process");
-  const { mkdirSync, writeFileSync } = await import("node:fs");
-  mkdirSync(cwd, { recursive: true });
-  const git = (...a: string[]) => execFileSync("git", a, { cwd, stdio: "ignore" });
-  git("init", "-q");
-  writeFileSync(join(cwd, "big.txt"), "1");
-  git("add", ".");
-  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init");
-  writeFileSync(join(cwd, "big.txt"), "line of local change\n".repeat(120_000)); // ~2.5 MB diff, past Node's 1 MiB default buffer
+  repoWithOneCommit();
+  const localChangePastOneMebibyte = "line of local change\n".repeat(120_000);
+  writeFileSync(join(cwd, "a.txt"), localChangePastOneMebibyte);
   const wf = defineWorkflow({ meta: { name: "mb", description: "mb" }, defaults: { model: { id: "m" } }, run: (ctx) => ctx.agent("plan", { tools: ["read"], memo: true }) });
 
   await runWorkflow(wf, {}, { cwd });
@@ -290,14 +277,7 @@ test("memo still serves a step when the local changes diff past 1 MiB", async ()
 });
 
 test("the git the engine runs itself (the memo's repo state, the run's repo identity) never blocks the process", async () => {
-  const { execFileSync } = await import("node:child_process");
-  const { chmodSync, mkdirSync, writeFileSync } = await import("node:fs");
-  mkdirSync(cwd, { recursive: true });
-  const git = (...a: string[]) => execFileSync("git", a, { cwd, stdio: "ignore" });
-  git("init", "-q");
-  writeFileSync(join(cwd, "a.txt"), "1");
-  git("add", ".");
-  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init");
+  repoWithOneCommit();
   // A slow git (a large repo, a slow disk): `diff` and `remote` take a second each.
   const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
   const bin = join(cwd, "..", `slow-git-${process.pid}`);
