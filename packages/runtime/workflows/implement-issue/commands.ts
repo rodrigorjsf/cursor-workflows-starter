@@ -4,6 +4,7 @@
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { TAIL_MAX_CHARS } from "../../src/runtime/command-runner.js";
 import { NETWORK_GIT_ENV } from "../../src/runtime/git-transport.js";
 import type { ExecOptions, ExecResult } from "../../src/runtime/workflow.js";
 
@@ -82,8 +83,6 @@ function assertOwned(branch: string, action: string, verb: string): void {
 const MAX_STDOUT_BYTES = 64 * 1024 * 1024;
 
 const READ_SCRIPT = 'set -o pipefail; "$@" 2> >(tee "$WF_STDERR" >&2) | tee "$WF_STDOUT"';
-
-const READ_TAIL_MAX_CHARS = 32_768;
 
 interface ReadOptions {
   labelWords?: number;
@@ -258,7 +257,7 @@ export class Commands {
         env: { ...env, WF_STDOUT: file, WF_STDERR: errors },
       });
       if (existsSync(file) && statSync(file).size > MAX_STDOUT_BYTES) throw new Error(`${command} ${args[0] ?? ""}: the output is larger than ${MAX_STDOUT_BYTES / 1024 / 1024} MiB`);
-      const tail = existsSync(errors) ? readFileSync(errors, "utf8").slice(-READ_TAIL_MAX_CHARS) : result.tail;
+      const tail = existsSync(errors) ? readFileSync(errors, "utf8").slice(-TAIL_MAX_CHARS) : result.tail;
       return { ...result, tail, stdout: existsSync(file) ? readFileSync(file, "utf8") : "" };
     } finally {
       rmSync(dir, { recursive: true, force: true });
