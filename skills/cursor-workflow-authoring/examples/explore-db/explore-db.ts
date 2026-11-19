@@ -126,17 +126,35 @@ const schemaBlockOf = (schema: TableSchema[]) => `## Schema\n${JSON.stringify(sc
 
 const quotedIdentifier = (name: string) => `"${name.replaceAll('"', '""')}"`;
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isStringArray = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string");
+
+const isTableDescription = (value: unknown): value is Omit<TableSchema, "rows"> =>
+  isRecord(value) && typeof value.table === "string" && Array.isArray(value.columns) && Array.isArray(value.indexes) && Array.isArray(value.foreignKeys);
+
+const rowCountOf = (queryAnswer: unknown): number | undefined => {
+  const firstRow = isRecord(queryAnswer) && Array.isArray(queryAnswer.rows) ? queryAnswer.rows[0] : undefined;
+  return isRecord(firstRow) && typeof firstRow.rows === "number" ? firstRow.rows : undefined;
+};
+
+const unexpectedAnswer = (label: string) => new Error(`${label}: unexpected answer`);
+
 async function collectSchema(ctx: WorkflowContext<Args>): Promise<TableSchema[]> {
-  const call = async (tool: string, args: Record<string, unknown>, label: string) => {
+  const call = async (tool: string, args: Record<string, unknown>, label: string): Promise<unknown> => {
     const result = await ctx.mcp(DATABASE_SERVER, tool, args, { label, phase: "Collect" });
     if (!result.ok) throw new Error(`${label}: ${result.error}`);
     return JSON.parse(result.text);
   };
+  const tables = await call("list_tables", {}, "list tables");
+  if (!isStringArray(tables)) throw unexpectedAnswer("list tables");
   const schema: TableSchema[] = [];
-  for (const table of (await call("list_tables", {}, "list tables")) as string[]) {
+  for (const table of tables) {
     const description = await call("describe_table", { table }, `describe ${table}`);
-    const counted = await call("query", { sql: `SELECT COUNT(*) AS rows FROM ${quotedIdentifier(table)}` }, `count ${table}`);
-    schema.push({ ...description, rows: counted.rows[0].rows });
+    if (!isTableDescription(description)) throw unexpectedAnswer(`describe ${table}`);
+    const rows = rowCountOf(await call("query", { sql: `SELECT COUNT(*) AS rows FROM ${quotedIdentifier(table)}` }, `count ${table}`));
+    if (rows === undefined) throw unexpectedAnswer(`count ${table}`);
+    schema.push({ ...description, rows });
   }
   return schema;
 }
@@ -183,13 +201,13 @@ function checkpointOf(ctx: WorkflowContext<Args>, questions: Question[]) {
 }
 
 function answerProblems(questions: Question[], answers: Record<string, string>): string[] {
-  const unanswered = (question: Question) => {
+  const problemsOfAnswer = (question: Question) => {
     const answer = answers[question.id];
     if (answer === undefined) return [`${question.id}: no answer`];
     return question.options.includes(answer) ? [] : [`${question.id}: "${answer}" is not one of ${question.options.join(", ")}`];
   };
-  const unknown = Object.keys(answers).filter((id) => !questions.some((question) => question.id === id));
-  return [...questions.flatMap(unanswered), ...unknown.map((id) => `${id}: no such question`)];
+  const unknownIds = Object.keys(answers).filter((id) => !questions.some((question) => question.id === id));
+  return [...questions.flatMap(problemsOfAnswer), ...unknownIds.map((id) => `${id}: no such question`)];
 }
 
 async function interview(ctx: WorkflowContext<Args>, schema: TableSchema[]) {
