@@ -92,28 +92,11 @@ export function StepLogPanel({ runId, node, now, live, upTo, openCommandId, onOp
   const feed = useStepLog(runId, node.id, live);
   const log = useMemo(() => buildNodeLog(feed.items, node, upTo), [feed.items, upTo, node]);
 
-  // Follow the tail: after new content, go to the bottom, unless the reader scrolled up to read.
-  const { scroller, onScroll } = useTail(live, log.count);
-
   // Over the canvas (a narrow screen), the log takes the focus; when it closes, the node gets it back.
   const { panel, closeButton } = useFocusWhileOpen(() => focusOnClose(document, node.id));
   useEscape(onClose, false);
 
   const rows = describeFacts(node, now);
-  let body: ReactNode;
-  if (feed.status === "loading") body = <p className="notice">Reading the step…</p>;
-  else if (feed.status === "error") {
-    body = (
-      <p className="notice" role="alert">
-        The log of this step could not be read: {feed.error}
-      </p>
-    );
-  } else if (log.attempts.length === 0) {
-    body = <p className="notice">{live ? "Waiting for the step to write something…" : upTo !== undefined && feed.items.length > 0 ? "Nothing of this step is written at this point of the replay." : "This step wrote no content."}</p>;
-  } else {
-    body = <Attempts log={log} />;
-  }
-
   return (
     <aside className="step-panel" ref={panel} aria-label={`Log of ${node.label}`}>
       <header>
@@ -125,18 +108,48 @@ export function StepLogPanel({ runId, node, now, live, upTo, openCommandId, onOp
       </header>
       <NodeRows rows={rows} className="facts" />
       <CommandList commands={node.commands} openId={openCommandId} onSelect={onOpenCommand} />
-      <div
-        className="log"
-        ref={scroller}
-        role="log"
-        aria-live="off" // a tail of many lines a second is not something to announce
-        tabIndex={0}
-        aria-label="Step log"
-        onScroll={onScroll}
-      >
-        {body}
-      </div>
+      <LogBody feed={feed} log={log} live={live} upTo={upTo} words={STEP_WORDS} />
     </aside>
+  );
+}
+
+interface LogWords {
+  noun: string;
+  unreadable: string;
+  silent: string;
+  label: string;
+}
+
+const STEP_WORDS: LogWords = { noun: "step", unreadable: "The log of this step", silent: "This step wrote no content.", label: "Step log" };
+const COMMAND_WORDS: LogWords = { noun: "command", unreadable: "The output of this command", silent: "This command wrote no output.", label: "Command output" };
+
+function LogBody({ feed, log, live, upTo, words }: { feed: StepLogFeed; log: StepLog; live: boolean; upTo?: number; words: LogWords }) {
+  const { scroller, onScroll } = useTail(live, log.count);
+  let body: ReactNode;
+  if (feed.status === "loading") body = <p className="notice">Reading the {words.noun}…</p>;
+  else if (feed.status === "error") {
+    body = (
+      <p className="notice" role="alert">
+        {words.unreadable} could not be read: {feed.error}
+      </p>
+    );
+  } else if (log.attempts.length === 0) {
+    body = <p className="notice">{live ? `Waiting for the ${words.noun} to write something…` : upTo !== undefined && feed.items.length > 0 ? `Nothing of this ${words.noun} is written at this point of the replay.` : words.silent}</p>;
+  } else {
+    body = <Attempts log={log} />;
+  }
+  return (
+    <div
+      className="log"
+      ref={scroller}
+      role="log"
+      aria-live="off"
+      tabIndex={0}
+      aria-label={words.label}
+      onScroll={onScroll}
+    >
+      {body}
+    </div>
   );
 }
 
@@ -272,35 +285,10 @@ export interface CommandDetailsProps {
 
 export function CommandDetails({ command, feed, now, live, upTo }: CommandDetailsProps) {
   const log = useMemo(() => buildNodeLog(feed.items, command, upTo), [feed.items, upTo, command]);
-  const { scroller, onScroll } = useTail(live, log.count);
-
-  let body: ReactNode;
-  if (feed.status === "loading") body = <p className="notice">Reading the command…</p>;
-  else if (feed.status === "error") {
-    body = (
-      <p className="notice" role="alert">
-        The output of this command could not be read: {feed.error}
-      </p>
-    );
-  } else if (log.attempts.length === 0) {
-    body = <p className="notice">{live ? "Waiting for the command to write something…" : upTo !== undefined && feed.items.length > 0 ? "Nothing of this command is written at this point of the replay." : "This command wrote no output."}</p>;
-  } else {
-    body = <Attempts log={log} />;
-  }
   return (
     <>
       <NodeRows rows={describeCommand(command, now)} className="facts" />
-      <div
-        className="log"
-        ref={scroller}
-        role="log"
-        aria-live="off"
-        tabIndex={0}
-        aria-label="Command output"
-        onScroll={onScroll}
-      >
-        {body}
-      </div>
+      <LogBody feed={feed} log={log} live={live} upTo={upTo} words={COMMAND_WORDS} />
     </>
   );
 }
