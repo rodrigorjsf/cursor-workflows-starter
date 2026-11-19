@@ -85,6 +85,12 @@ const READ_SCRIPT = 'set -o pipefail; "$@" 2> >(tee "$WF_STDERR" >&2) | tee "$WF
 
 const READ_TAIL_MAX_CHARS = 32_768;
 
+interface ReadOptions {
+  labelWords?: number;
+  env?: Record<string, string | undefined>;
+  probe?: boolean;
+}
+
 /** The words of a forge CLI call that name its node in the run's log: `<cli> issue view`, not just `<cli> issue`. */
 const FORGE_LABEL_WORDS = 2;
 
@@ -121,7 +127,7 @@ export class Commands {
       if (existsSync(own)) copyFileSync(own, index);
       const env = { GIT_INDEX_FILE: index };
       await this.succeed("git", ["add", "-A"], cwd, this.timeouts.localMs, env);
-      return (await this.succeedRead("git", ["write-tree"], cwd, this.timeouts.localMs, undefined, env)).trim();
+      return (await this.succeedRead("git", ["write-tree"], cwd, this.timeouts.localMs, { env })).trim();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -142,7 +148,7 @@ export class Commands {
 
   /** The commit `branch` points at on the origin, or undefined when the origin has no such branch. A network command. */
   async remoteBranchHead(cwd: string, branch: string): Promise<string | undefined> {
-    const out = await this.succeedRead("git", ["ls-remote", "--heads", "origin", `refs/heads/${branch}`], cwd, this.timeouts.networkMs, undefined, NETWORK_GIT_ENV);
+    const out = await this.succeedRead("git", ["ls-remote", "--heads", "origin", `refs/heads/${branch}`], cwd, this.timeouts.networkMs, { env: NETWORK_GIT_ENV });
     return out.trim().split(/\s+/)[0] || undefined;
   }
 
@@ -172,7 +178,7 @@ export class Commands {
    */
   async remoteOwnedHeads(cwd: string, remote = ORIGIN, prefix = WORKFLOW_BRANCH_PREFIX): Promise<Map<string, string>> {
     if (!(await this.gitIs(cwd, "config", "--get", `remote.${remote}.url`))) return new Map();
-    const out = await this.succeedRead("git", ["ls-remote", "--heads", remote, `refs/heads/${prefix}*`], cwd, this.timeouts.networkMs, undefined, NETWORK_GIT_ENV);
+    const out = await this.succeedRead("git", ["ls-remote", "--heads", remote, `refs/heads/${prefix}*`], cwd, this.timeouts.networkMs, { env: NETWORK_GIT_ENV });
     const heads = new Map<string, string>();
     for (const line of out.split("\n")) {
       const [sha, ref] = line.trim().split(/\s+/);
@@ -192,12 +198,12 @@ export class Commands {
 
   /** The forge's CLI (`cli`) in `cwd`, which has to succeed; returns all of its stdout. A network command. */
   async forgeRead(cli: string, cwd: string, ...args: string[]): Promise<string> {
-    return this.succeedRead(cli, args, cwd, this.timeouts.networkMs, FORGE_LABEL_WORDS);
+    return this.succeedRead(cli, args, cwd, this.timeouts.networkMs, { labelWords: FORGE_LABEL_WORDS });
   }
 
   /** `forgeRead` with variables added to the CLI's environment (`undefined` removes one): a host the CLI takes from there. */
   async forgeReadWith(cli: string, cwd: string, env: Record<string, string | undefined>, ...args: string[]): Promise<string> {
-    return this.succeedRead(cli, args, cwd, this.timeouts.networkMs, FORGE_LABEL_WORDS, env);
+    return this.succeedRead(cli, args, cwd, this.timeouts.networkMs, { labelWords: FORGE_LABEL_WORDS, env });
   }
 
   /**
@@ -231,15 +237,15 @@ export class Commands {
     if (!r.ok) throw new CommandError(command, args, r, timeoutMs);
   }
 
-  private async succeedRead(command: string, args: string[], cwd: string, timeoutMs: number | undefined, labelWords?: number, env?: Record<string, string | undefined>): Promise<string> {
-    const r = await this.read(command, args, cwd, timeoutMs, { labelWords, env });
+  private async succeedRead(command: string, args: string[], cwd: string, timeoutMs: number | undefined, options: ReadOptions = {}): Promise<string> {
+    const r = await this.read(command, args, cwd, timeoutMs, options);
     if (!r.ok) throw new CommandError(command, args, r, timeoutMs);
     return r.stdout;
   }
 
   /** Runs the command with its stdout going to a file, and returns the result with the whole stdout. */
-  private async read(command: string, args: string[], cwd: string, timeoutMs: number | undefined, extra: { labelWords?: number; env?: Record<string, string | undefined>; probe?: boolean } = {}): Promise<ExecResult & { stdout: string }> {
-    const { labelWords, env = {}, probe } = extra;
+  private async read(command: string, args: string[], cwd: string, timeoutMs: number | undefined, options: ReadOptions = {}): Promise<ExecResult & { stdout: string }> {
+    const { labelWords, env = {}, probe } = options;
     const dir = mkdtempSync(join(tmpdir(), "wf-stdout-"));
     const file = join(dir, "stdout");
     const errors = join(dir, "stderr");
