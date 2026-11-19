@@ -33,7 +33,7 @@ Consequences:
 | Fire lock | Approval of `start_workflow` by the Run Mode (outside the allowlist) | The permission prompt of `mcp__workflows__start_workflow` (outside `permissions.allow`); a `PreToolUse` hook with `matcher: "mcp__workflows__start_workflow"` can audit or block it |
 | Native workflow | **None**; the kit fills the gap | The `Workflow` tool, `/deep-research`, `.claude/workflows/` |
 | How context reaches step agents | `settingSources: ["project","team","mdm"]` loads `AGENTS.md`, `.cursor/rules`, skills, hooks and the project MCP; `AGENTS.md` arrives only with `"project"` and is opt-in | The step agents are Cursor's even when Claude Code fires the workflow; whether local SDK runs read `CLAUDE.md` is undocumented, so keep the rules in `AGENTS.md` |
-| Hooks that reach steps | Project, team and MDM hooks (through `settingSources`). With `"project"`, `.cursor/hooks.json` hooks ran, and a `PreToolUse` hook in the project's `.claude/settings.json` that exits 2 blocked the command; with `[]` none ran | Same hooks run in the steps; warn the user that their `PreToolUse` hooks apply there |
+| Hooks that reach steps | Project and MDM hooks (through `settingSources`); `team` only syncs managed skills and brings no team hooks (a static read of the SDK bundle). With `"project"`, `.cursor/hooks.json` hooks ran, and a `PreToolUse` hook in the project's `.claude/settings.json` that exits 2 blocked the command; with `[]` none ran | Same hooks run in the steps; warn the user that their `PreToolUse` hooks apply there |
 | Who pays | The Cursor key used by the runtime | The same: Claude Code's model only pays for the firing and the polling |
 
 To use Claude Code's own runtime instead of this kit, write the flow as a Claude Code workflow

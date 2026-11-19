@@ -194,7 +194,7 @@ O engine cria os agentes com `settingSources: ["project", "team", "mdm"]`, o que
 - `AGENTS.md` e `.cursor/rules/**` do repositório;
 - skills do projeto (`.agents/skills/` e `.cursor/skills/` como nativas; `.claude/skills/`, `.codex/skills/` como
   compatibilidade), hooks e `.cursor/mcp.json` do projeto;
-- regras e hooks do time e hooks Enterprise (MDM).
+- a sincronização das skills gerenciadas do time (`team`) e os hooks Enterprise (MDM).
 
 Medido em 2026-11-11 em runs locais ([8.2 §7](../research/verificacoes-locais.md)):
 
@@ -208,9 +208,14 @@ Com o mesmo prompt e as tools `shell` e `mcp`, a etapa leu 30,4 mil tokens de in
 `[]`. A página do SDK só cita MCP e subagents ao falar de `settingSources`; que o resto também é opt-in vem do
 pacote e foi confirmado pelo teste. A origem das 58 skills não foi isolada.
 
+`team` só dirige a sincronização das skills gerenciadas do time: não carrega regras nem hooks do time. Isso é uma leitura
+estática do bundle do `@cursor/sdk@1.3.1`, não uma medição; a linha "Contexto fixo por camada" de
+[8.2 §7](../research/verificacoes-locais.md) (58 skills e nenhuma marca do `AGENTS.md` com `["team","mdm"]`) é coerente com
+ela. As regras da conta (User Rules) e as do dashboard do time (Team Rules) não têm campo nem busca no SDK; o caminho
+delas até a etapa está em [4.1 §Paridade com um turno do chat do IDE](../authoring/01-escrevendo-workflows.md#paridade-com-um-turno-do-chat-do-ide).
+
 Para isolar os agentes das regras do repositório (por exemplo, num repositório não confiável), passe
-`settingSources` sem `"project"` em `RunOptions`. Só `[]` corta também as skills, e aí saem os hooks do time e do
-MDM.
+`settingSources` sem `"project"` em `RunOptions`. Só `[]` corta também as skills, e aí saem também os hooks do MDM.
 
 > **Sandbox (`sandbox: true`):** liga o `local.sandboxOptions.enabled` do SDK. Medido em 2026-11-14, no Linux x64 (WSL2), com
 > `@cursor/sdk@1.3.1` e `composer-2.5` ([8.2 §16](../research/verificacoes-locais.md)): a rede de saída é negada, salvo os hosts

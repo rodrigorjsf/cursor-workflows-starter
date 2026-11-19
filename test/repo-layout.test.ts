@@ -105,8 +105,12 @@ test("the user-facing rules for target repos are a marked template block", () =>
 
 /** Every .md under a folder, relative to the repo root. */
 function markdownFiles(dir: string): string[] {
+  return filesUnder(dir, /\.md$/);
+}
+
+function filesUnder(dir: string, extension: RegExp): string[] {
   return readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((e) =>
-    e.isDirectory() ? markdownFiles(join(dir, e.name)) : e.name.endsWith(".md") ? [join(dir, e.name)] : [],
+    e.isDirectory() ? (e.name === "node_modules" ? [] : filesUnder(join(dir, e.name), extension)) : extension.test(e.name) ? [join(dir, e.name)] : [],
   );
 }
 
@@ -276,6 +280,49 @@ test("reference files two skills share stay identical", () => {
   const conversion = join("skills", "skill-to-workflow", "references");
   const shared = ["runtime-api.md", "rules.md", "recipes.md", "cost.md", "observability.md", "testing.md", "target-repos.md"];
   for (const file of shared) assert.equal(read(conversion, file), read(authoring, file), `${file} drifted: copy it from ${authoring} to ${conversion}`);
+});
+
+const SHIPPED_TEXT = [
+  ...readdirSync(ROOT).filter((name) => name.endsWith(".md") && name !== "CHANGELOG.md"),
+  ...filesUnder("docs", /\.md$/),
+  ...filesUnder("skills", /\.md$/),
+  ...filesUnder("templates", /\.md$/),
+  ...filesUnder("scripts", /\.(ts|sh|md)$/),
+  ...filesUnder("packages/runtime/src", /\.(ts|mjs)$/),
+  ...filesUnder("packages/runtime/workflows", /\.ts$/),
+];
+
+const TEAM_AS_RULES_OR_HOOKS = [
+  /regras(?:\/| e )hooks do time/i,
+  /hooks (?:do|de) time (?:e|ou) (?:do )?MDM/i,
+  /hooks do projeto, do time e MDM/i,
+  /hooks de `team` e `mdm`/i,
+  /carrega `team` e `mdm` por padrão/i,
+  /\bteam,? (?:or|and) MDM hooks\b/i,
+];
+
+test("no doc, skill or source file says the team setting source loads team rules or team hooks", () => {
+  const offenders = SHIPPED_TEXT.flatMap((file) => {
+    const text = read(file).replace(/\s+/g, " ");
+    return TEAM_AS_RULES_OR_HOOKS.flatMap((pattern) => (pattern.test(text) ? [`${file}: ${pattern}`] : []));
+  });
+  assert.deepEqual(offenders, [], "team only drives the managed-skill sync of @cursor/sdk 1.3.1: describe it that way");
+});
+
+test("the authoring book and the authoring skill give the settingSources list closest to an IDE turn and the three routes account and team rules take", () => {
+  const book = read("docs", "authoring", "01-escrevendo-workflows.md");
+  const skill = filesUnder("skills/cursor-workflow-authoring", /\.md$/).map((file) => read(file)).join("\n");
+  const expected: Array<[string, string]> = [
+    ['["project","user","plugins","mdm"]', "the list closest to an IDE turn"],
+    ["AGENTS.md", "route one for account and team rules"],
+    ["alwaysApply: true", "route two for account and team rules"],
+    ["disable-model-invocation", "that a manual-only skill body never loads through the catalog"],
+  ];
+  const managedSkills = { book: "skills gerenciadas", skill: "managed skills" };
+  for (const [name, text] of [["book", book], ["skill", skill]] as const) {
+    for (const [needle, what] of expected) assert.ok(text.includes(needle), `the ${name} lacks ${needle}: it gives ${what}`);
+    assert.ok(text.includes(managedSkills[name]), `the ${name} does not say team syncs ${managedSkills[name]}`);
+  }
 });
 
 /** The version of the package at `...p` (the repo root when empty). */

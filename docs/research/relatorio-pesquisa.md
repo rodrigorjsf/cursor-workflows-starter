@@ -388,8 +388,9 @@ O detalhamento, com checklist, está em
     Nenhuma fonte diz se os subagents embutidos (`explore`, `browser`) entram do mesmo jeito.
   - O kit permite `settingSources` e `tools` por etapa para cortar isso. Medido [TESTE](verificacoes-locais.md):
     com o mesmo prompt e as tools `shell` e `mcp`, 30,4 mil tokens de input com `project` × 25,5 mil com `[]`.
-    `["team","mdm"]` tira o `AGENTS.md`, mas não as skills (58 com ele e com `project`); só `[]` as corta, e então
-    os hooks do time e do MDM também saem.
+    `["team","mdm"]` tira o `AGENTS.md`, mas não as skills (58 com ele e com `project`); `team` só sincroniza as skills
+    gerenciadas do time (leitura estática do bundle do `@cursor/sdk@1.3.1`, não medida); só `[]` as corta, e então os
+    hooks do MDM também saem.
 - **Skills e subagents no IDE custam contexto fixo repetido.** A cada delegação, o subagent paga o contexto fixo
   de novo e roda no modelo herdado. Convertidos em workflow, viram etapas com modelo, tools e contexto mínimos. Por
   isso a `/skill-to-workflow` tem uma etapa **obrigatória** de otimização de custo, com estimativa por caminho.
@@ -524,8 +525,8 @@ condicional** sobre o Cursor SDK. Esse é o espaço que o starter kit ocupa.
 2. O timeout de uma chamada de tool MCP no Cursor IDE (o kit evita depender disso com start/wait). A doc não dá o
    valor. Os 60 s documentados valem para tools MCP stdio em workers self-hosted e para a conexão (startup) de
    MCP em runs locais do SDK, não para o IDE.
-3. Se o `~/.claude/settings.json` do usuário também é lido nas runs do SDK, e se os hooks de `team` e `mdm`
-   disparam nelas. O teste só cobriu `.claude/settings.json` e `.cursor/hooks.json` do projeto, numa conta pessoal.
+3. Se o `~/.claude/settings.json` do usuário também é lido nas runs do SDK, e se os hooks de `mdm`
+   disparam nelas (a leitura estática do bundle diz que `team` não carrega hooks nem regras do time). O teste só cobriu `.claude/settings.json` e `.cursor/hooks.json` do projeto, numa conta pessoal.
 4. Se uma política de modelo do admin gera substituição silenciosa do lado do servidor nas runs do SDK; a doc não
    documenta isso para o SDK. `RunResult.model` devolve o ID resolvido [TESTE](verificacoes-locais.md), mas não se
    sabe se uma substituição por política apareceria ali. Não dá para testar numa conta pessoal.
