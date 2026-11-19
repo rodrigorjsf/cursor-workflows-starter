@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import { calls, costConfig, script, stats } from "../../../../packages/runtime/test/fake-sdk.js";
 import { runWorkflow } from "../../../../packages/runtime/src/runtime/engine.js";
 import type { ExecStartEvent, StepStartEvent, WorkflowEvent } from "../../../../packages/runtime/src/runtime/events.js";
+import { projectLatestExecution } from "../../../../packages/runtime/src/runtime/projection.js";
 import { eventLogPath, readEventLog } from "../../../../packages/runtime/src/runtime/run-store.js";
 import exploreDb from "./explore-db.js";
 
@@ -168,6 +169,13 @@ test("interview proposes a finite questionnaire and returns a checkpoint with th
   });
   assert.deepEqual(calls.map(labelOf), ["questionnaire"], "no review agent ran, and the schema collection made no agent call");
   assert.ok(mcpCalls(eventsOf(run.runId)).length > 0, "the schema was collected through ctx.mcp");
+});
+
+test("a run that stops at the checkpoint is classed as waiting for the person, not as a failure", async () => {
+  scriptInterview();
+  const run = await runWorkflow(exploreDb, interviewArgs(), { cwd, metricsDb: false });
+
+  assert.equal(projectLatestExecution(eventsOf(run.runId))?.outcome, "pending");
 });
 
 test("a resume with the answers continues the run: the questionnaire comes back from the journal and the report is shaped by the answers", async () => {
