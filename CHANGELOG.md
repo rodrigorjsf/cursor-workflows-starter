@@ -46,6 +46,18 @@
   - **O `wf status`, o `wf wait` e o `get_workflow_status`/`wait_workflow` dizem que o custo é desconhecido.** Com `spentCents` 0 e um
     aviso `getUsage() failed` no log, o estado traz `costNote`: "cost unknown: N tokens spent (getUsage() failed, so 0 cents is not
     the cost)". Um run gratuito que informou seu uso, ou um com custo já somado, não traz.
+- **A skill `run-workflow` pede permissão total com os motivos, prefere o MCP e cobre o modo de entrega no chat** (issue #127, spec #114,
+  [ADR-0012](docs/adr/0012-delivery-modes.md)). A skill manda rodar `start_workflow` e `wf start` com permissão total (fora do sandbox
+  do agente) e manda dizer ao usuário os quatro motivos antes de ele aprovar: rede para `gh`, `glab` e `git push`, que o proxy do
+  sandbox recusa; gravações em `~/.cursor-workflows/` (as métricas e o índice de runs); um job destacado que sobrevive ao comando; a
+  porta do dashboard. Um início recusado com `cannot write to the user directory` rodou dentro do sandbox e não criou run: a skill
+  manda pedir a permissão e iniciar de novo. Ela prefere a tool `start_workflow` ao `wf start` quando o servidor `workflows`
+  existe, e, com o dashboard parado, aponta só os comandos suportados (o próximo início o sobe; com o início automático desligado,
+  `wf config set dashboard.autoStart true`), nunca o código do kit. O `argument-hint` passou a ser
+  `<workflow> <args> [--worktree] [--no-pr]`, e a seção nova "Delivery" diz o que o agente faz em cada modo: avisa que a árvore é do
+  workflow enquanto o job roda (árvore principal), abre a pasta do worktree numa janela nova do Cursor com o CLI `cursor` (onde o
+  hospedeiro não abre janela, dá o caminho) e entrega o link do PR ou MR (`prUrl`). Os resultados `dirty-tree`, `main-tree-busy` e
+  `branch-switched` são repassados com o `reason` e os `files`. O `test/repo-layout.test.ts` prende cada um desses pontos.
 - **O `implement-issue` trabalha por padrão na árvore principal: a branch do run fica em checkout na pasta do usuário** (issue #123,
   spec #114, [ADR-0012](docs/adr/0012-delivery-modes.md)). Com `worktree` falso (o padrão), o run cria a branch dele
   (`wf/issue-<n>-<run>`) a partir do HEAD que a pasta tem em checkout, commits locais ainda não enviados inclusive, e a põe em

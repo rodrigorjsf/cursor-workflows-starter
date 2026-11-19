@@ -137,6 +137,15 @@ carrega antes de chamar `start_workflow`, pelo `/run-workflow` ou por um pedido 
 A skill ensina a disparar, acompanhar e repassar: tratar checkpoint, custo desconhecido e `secret-blocked`, e não
 mexer nos arquivos enquanto o job roda.
 
+Ela pede que `start_workflow` e `wf start` rodem com **permissão total** (fora do sandbox do agente) e diz ao usuário os quatro
+motivos antes de ele aprovar: rede para `gh`, `glab` e `git push`, que o proxy do sandbox recusa; gravações em
+`~/.cursor-workflows/` (as métricas e o índice de runs); um job destacado que sobrevive ao comando; a porta do dashboard. Ela
+prefere a tool `start_workflow` ao `wf start` quando o servidor `workflows` existe, e o `argument-hint` dela é
+`<workflow> <args> [--worktree] [--no-pr]`. Num workflow que escreve, ela cobre o modo de entrega
+([ADR-0012](../adr/0012-delivery-modes.md)): na árvore principal, avisa que a árvore é do workflow enquanto o job roda; num
+worktree, abre a pasta numa janela nova do Cursor com o CLI `cursor` (no Claude Code e no Codex, dá o caminho); no fim, dá o
+link do PR (o MR no GitLab).
+
 Ela já foi só do usuário (`disable-model-invocation: true`), mas isso não travava nada: o servidor MCP anuncia
 `start_workflow` com o `whenToUse` de cada workflow, e um pedido em prosa chegava à tool sem passar pela skill. A
 trava humana de um workflow pago é a **aprovação da chamada `start_workflow`**, e ela depende do Run Mode
