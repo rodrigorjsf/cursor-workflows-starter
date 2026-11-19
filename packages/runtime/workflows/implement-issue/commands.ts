@@ -81,7 +81,9 @@ function assertOwned(branch: string, action: string, verb: string): void {
 /** A command's output is read whole, but not without limit: this is what the old synchronous calls allowed (`maxBuffer`). */
 const MAX_STDOUT_BYTES = 64 * 1024 * 1024;
 
-const READ_SCRIPT = 'set -o pipefail; "$@" | tee "$WF_STDOUT"';
+const READ_SCRIPT = 'set -o pipefail; "$@" 2> >(tee "$WF_STDERR" >&2) | tee "$WF_STDOUT"';
+
+const READ_TAIL_MAX_CHARS = 32_768;
 
 /** The words of a forge CLI call that name its node in the run's log: `<cli> issue view`, not just `<cli> issue`. */
 const FORGE_LABEL_WORDS = 2;
@@ -240,16 +242,18 @@ export class Commands {
     const { labelWords, env = {}, probe } = extra;
     const dir = mkdtempSync(join(tmpdir(), "wf-stdout-"));
     const file = join(dir, "stdout");
+    const errors = join(dir, "stderr");
     try {
       // The path goes in the environment, not in the arguments: the node's id in the log is derived from the arguments, and
       // a temp path would give the same call another id every time.
       const result = await this.exec("bash", ["-c", READ_SCRIPT, "read", command, ...args], {
         ...this.options(command, args, cwd, timeoutMs, labelWords),
         ...(probe ? { probe: true } : {}),
-        env: { ...env, WF_STDOUT: file },
+        env: { ...env, WF_STDOUT: file, WF_STDERR: errors },
       });
       if (existsSync(file) && statSync(file).size > MAX_STDOUT_BYTES) throw new Error(`${command} ${args[0] ?? ""}: the output is larger than ${MAX_STDOUT_BYTES / 1024 / 1024} MiB`);
-      return { ...result, stdout: existsSync(file) ? readFileSync(file, "utf8") : "" };
+      const stderrTail = existsSync(errors) ? readFileSync(errors, "utf8").slice(-READ_TAIL_MAX_CHARS) : "";
+      return { ...result, tail: stderrTail, stdout: existsSync(file) ? readFileSync(file, "utf8") : "" };
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -99,6 +99,15 @@ test("the stdout of a read command is in the log as the command's output, next t
   assert.equal(execEnd(events, start!).outputChars, "answer\nwarning\n".length, "the end reports the stdout too");
 });
 
+test("a read command that fails is reported with its stderr alone, as before its stdout went to the log", async () => {
+  const failing = "process.stdout.write('stdout-of-a-failed-read\\n'); process.stderr.write('stderr-of-a-failed-read\\n'); process.exitCode = 3";
+  const r = await runWorkflow(readingWorkflow((cmd) => cmd.forgeRead(process.execPath, fx.repo, "-e", failing)), {}, { cwd: fx.repo, metricsDb: false });
+  assert.equal(r.status, "failed");
+  assert.match(r.error ?? "", /exited with code 3: stderr-of-a-failed-read$/);
+  assert.ok(!(r.error ?? "").split("exited with code 3")[1]?.includes("stdout-of-a-failed-read"), r.error);
+  assert.equal(outputLoggedOf(eventsOf(r.runId), "stdout"), "stdout-of-a-failed-read\n", "the log still holds the stdout");
+});
+
 test("the stdout of a read command is cut at what the log keeps per command, and the workflow still reads all of it", async () => {
   const printing = "process.stdout.write(('x'.repeat(99) + '\\n').repeat(3000))";
   const r = await runWorkflow(readingWorkflow(async (cmd) => (await cmd.forgeRead(process.execPath, fx.repo, "-e", printing)).length), {}, { cwd: fx.repo, metricsDb: false });
