@@ -2,7 +2,7 @@
 // run. The data comes from `useRunEvents`, the graph from `buildRunGraph` and the positions from `layoutRunGraph`; this file
 // puts them on a React Flow canvas.
 import { Background, Controls, type Edge, type Node, ReactFlow, ReactFlowProvider, useReactFlow, useStore, useStoreApi } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Glyph, JunctionNode, LaneNode, type LaneNodeData, StartNode, WorkNode, type WorkNodeData } from "./nodes.js";
 import { RunActions } from "./RunActions.js";
 import { SeamsPanel } from "./SeamsPanel.js";
@@ -226,12 +226,13 @@ function Canvas({ graph, layout, now, selectedId, onOpen, jump }: { graph: RunGr
   );
 }
 
-const NARROW_PX = 800;
-const startsOpen = (): boolean => typeof window === "undefined" || window.innerWidth > NARROW_PX;
-
-export function StepMenu({ phases, open, selectedId, onToggle, onPick }: { phases: MenuPhase[]; open: boolean; selectedId?: string; onToggle(): void; onPick(id: string): void }) {
+export function StepMenu({ phases, open, selectedId, onToggle, onPick, onOverlay }: { phases: MenuPhase[]; open: boolean; selectedId?: string; onToggle(): void; onPick(id: string): void; onOverlay(): void }) {
+  const aside = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    if (aside.current && getComputedStyle(aside.current).position === "absolute") onOverlay();
+  }, []);
   return (
-    <aside className={open ? "step-menu" : "step-menu collapsed"} aria-label="Steps">
+    <aside ref={aside} className={open ? "step-menu" : "step-menu collapsed"} aria-label="Steps">
       <button type="button" className="btn menu-toggle" aria-expanded={open} aria-controls={open ? "step-menu-body" : undefined} onClick={onToggle}>
         <span aria-hidden="true">{open ? "◂" : "▸"}</span> Steps
       </button>
@@ -275,7 +276,7 @@ export function RunView({ runId }: { runId: string }) {
   const clock = useClock(!replaying && !settled);
   const [selectedId, setSelectedId] = useState<string>();
   const open = useCallback((id: string) => setSelectedId(id), []);
-  const [menuOpen, setMenuOpen] = useState(startsOpen);
+  const [menuOpen, setMenuOpen] = useState(true);
   const [jump, setJump] = useState<Jump>();
   const pick = useCallback((id: string) => {
     setSelectedId(id);
@@ -460,7 +461,7 @@ export function RunView({ runId }: { runId: string }) {
       )}
       {!replaying && info?.seamsProposal && <SeamsPanel key={info.seamsProposal.digest} runId={runId} proposal={info.seamsProposal} status={status} onChanged={refresh} />}
       <div className="workspace">
-        {menu.length > 0 && <StepMenu phases={menu} open={menuOpen} selectedId={selected?.id} onToggle={() => setMenuOpen(!menuOpen)} onPick={pick} />}
+        {menu.length > 0 && <StepMenu phases={menu} open={menuOpen} selectedId={selected?.id} onToggle={() => setMenuOpen(!menuOpen)} onPick={pick} onOverlay={() => setMenuOpen(false)} />}
         <div className="canvas">
           {layoutError !== undefined ? (
             <p className="notice" role="alert">

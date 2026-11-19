@@ -152,7 +152,7 @@ export const stepMenu = (graph: RunGraph): MenuPhase[] =>
 
 const START = "start";
 
-const str =(value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
+const str = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
 
 /** What the builder remembers about a node besides what the graph shows: where it sits in the run's structure. */
 interface Placement {

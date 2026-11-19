@@ -46,32 +46,33 @@ test("a step or command that takes the keyboard focus asks the canvas to bring i
   assert.deepEqual(focused, ["s1", "s2"], "each node asked once, for the keyboard focus");
 });
 
-const elementsOf = (node: ReactNode): ReactElement<Record<string, any>>[] => (Array.isArray(node) ? node.flatMap(elementsOf) : isValidElement(node) ? [node as ReactElement<Record<string, any>>, ...elementsOf((node.props as { children?: ReactNode }).children)] : []);
+type Props = Record<string, unknown>;
+const elementsOf = (node: ReactNode): ReactElement<Props>[] => (Array.isArray(node) ? node.flatMap(elementsOf) : isValidElement<Props>(node) ? [node, ...elementsOf(node.props.children as ReactNode)] : []);
+const stepButtons = (tree: ReactElement<Props>[]) => tree.filter((e) => e.type === "button" && e.props["aria-pressed"] !== undefined);
+const toggleOf = (tree: ReactElement<Props>[]) => tree.find((e) => e.type === "button" && e.props["aria-expanded"] !== undefined);
+const click = (button: ReactElement<Props> | undefined) => (button!.props.onClick as () => void)();
 
 const sandboxMenu = () => stepMenu(buildRunGraph(sandboxRun(), { settled: true }));
-const menuProps = (over: Partial<Parameters<typeof StepMenu>[0]> = {}) => ({ phases: sandboxMenu(), open: true, onToggle: () => {}, onPick: () => {}, ...over });
+const menuProps = (over: Partial<Parameters<typeof StepMenu>[0]> = {}) => ({ phases: sandboxMenu(), open: true, onToggle: () => {}, onPick: () => {}, onOverlay: () => {}, ...over });
 
 test("the side menu lists every step under its phase, with its state, and each is a button of its own", () => {
   const phases = sandboxMenu();
-  const html = render(StepMenu, menuProps());
-  const text = textOf(html);
+  const text = textOf(render(StepMenu, menuProps()));
 
   for (const title of ["Implementation", "Review", "Delivery"]) assert.ok(text.includes(title), `the phase ${title} is a heading`);
   assert.match(text, /suite:red:1 failed/);
   assert.match(text, /code-1 ok/);
-  const buttons = elementsOf(StepMenu(menuProps())).filter((e) => e.type === "button" && e.props["aria-pressed"] !== undefined);
-  assert.equal(buttons.length, phases.reduce((sum, p) => sum + p.steps.length, 0), "one button per step");
+  assert.equal(stepButtons(elementsOf(StepMenu(menuProps()))).length, phases.reduce((sum, p) => sum + p.steps.length, 0), "one button per step");
 });
 
 test("picking a step in the side menu hands its id over, and the step picked is marked as pressed", () => {
   const picked: string[] = [];
   const phases = sandboxMenu();
-  const menu = menuProps({ phases, selectedId: phases[0]!.steps[2]!.id, onPick: (id: string) => picked.push(id) });
-  const buttons = elementsOf(StepMenu(menu)).filter((e) => e.type === "button" && e.props["aria-pressed"] !== undefined);
+  const buttons = stepButtons(elementsOf(StepMenu(menuProps({ phases, selectedId: phases[0]!.steps[2]!.id, onPick: (id: string) => picked.push(id) }))));
   assert.deepEqual(buttons.flatMap((b, i) => (b.props["aria-pressed"] === true ? [i] : [])), [2], "only the selected step is pressed");
 
-  buttons[1]!.props.onClick();
-  buttons[3]!.props.onClick();
+  click(buttons[1]);
+  click(buttons[3]);
   assert.deepEqual(picked, [phases[0]!.steps[1]!.id, phases[0]!.steps[3]!.id]);
 });
 
@@ -79,13 +80,13 @@ test("the side menu collapses to its button: closed, no step is listed, and the 
   const toggled: boolean[] = [];
   const closed = menuProps({ open: false, onToggle: () => toggled.push(false) });
   const tree = elementsOf(StepMenu(closed));
-  const toggle = tree.find((e) => e.type === "button" && e.props["aria-expanded"] !== undefined);
+  const toggle = toggleOf(tree);
 
   assert.ok(toggle, "the menu keeps a button that opens it");
   assert.equal(toggle.props["aria-expanded"], false);
-  assert.equal(tree.filter((e) => e.type === "button" && e.props["aria-pressed"] !== undefined).length, 0, "no step is listed while it is closed");
+  assert.equal(stepButtons(tree).length, 0, "no step is listed while it is closed");
   assert.doesNotMatch(textOf(render(StepMenu, closed)), /suite:red:1/);
-  toggle.props.onClick();
+  click(toggle);
   assert.equal(toggled.length, 1);
-  assert.equal(elementsOf(StepMenu(menuProps())).find((e) => e.type === "button" && e.props["aria-expanded"] !== undefined)!.props["aria-expanded"], true);
+  assert.equal(toggleOf(elementsOf(StepMenu(menuProps())))!.props["aria-expanded"], true);
 });
