@@ -309,6 +309,14 @@ test("no doc, skill or source file says the team setting source loads team rules
   assert.deepEqual(offenders, [], "team only drives the managed-skill sync of @cursor/sdk 1.3.1: describe it that way");
 });
 
+const DATED_RESEARCH = [join("docs", "research", "verificacoes-locais.md"), join("docs", "research", "relatorio-pesquisa.md")];
+const DROPPED_DEFAULT = /\[\s*"project",\s*"team",\s*"mdm"\s*\]/;
+
+test("no doc, skill, script or source file names project, team and mdm as the engine default, which dropped team on 2026-11-19", () => {
+  const offenders = SHIPPED_TEXT.filter((file) => !DATED_RESEARCH.includes(file) && DROPPED_DEFAULT.test(read(file)));
+  assert.deepEqual(offenders, [], 'the engine default is ["project","mdm"]: only the dated research chapters may name the older list');
+});
+
 test("the authoring book and the authoring skill give the settingSources list closest to an IDE turn and the three routes account and team rules take", () => {
   const book = read("docs", "authoring", "01-escrevendo-workflows.md");
   const skill = filesUnder("skills/cursor-workflow-authoring", /\.md$/).map((file) => read(file)).join("\n");

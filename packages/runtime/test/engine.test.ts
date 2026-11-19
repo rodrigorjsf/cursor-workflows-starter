@@ -35,7 +35,7 @@ test("schema: re-prompt até submit_result válido; 'mcp' entra na allowlist; co
   assert.equal(r.status, "finished");
   assert.deepEqual(r.result, { tier: "MED" });
   assert.deepEqual(calls[0].tools, ["read", "mcp"]);
-  assert.deepEqual(calls[0].local.settingSources, ["project", "team", "mdm"]);
+  assert.deepEqual(calls[0].local.settingSources, ["project", "mdm"]);
   assert.equal(stats.disposed, 1);
 });
 

@@ -240,6 +240,10 @@ Ainda segundo o pacote [PKG]:
 | Salvar e distribuir | `.claude/workflows/`, `~/.claude/workflows/`, plugin `workflows/` (vira `/<plugin>:<nome>`) | — | `packages/runtime/workflows/` do kit + `.agents/workflows/` do repositório (este vence em nome repetido) |
 | Script isolado (sem fs/rede) | Sim | — | **Não**: roda em Node normal, o que é mais poderoso (git, gh, testes no próprio script) e exige disciplina para o resume |
 
+> **Nota (2026-11-19, [#139](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/139)):** o default de `settingSources` do engine que esta
+> seção e as seções 5.1 e 6 citam (`project`, `team` e `mdm`) deixou de ter `team`: a medição de 2026-11-19 não viu `team` acrescentar
+> regra, hook nem skill ([8.2 §18](verificacoes-locais.md)), e o default virou `["project","mdm"]`. As linhas ficam como foram escritas.
+
 ---
 
 ## 4. Como invocar de dentro do Cursor IDE

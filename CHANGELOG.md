@@ -14,6 +14,16 @@
   resume chama a tool de novo. A skill `skill-to-workflow` mapeia "chamada de tool MCP conhecida, com argumentos conhecidos"
   para `ctx.mcp`, e a referência da API do runtime e o capítulo 4.1 a documentam.
 
+### Mudado
+
+- **O default de `settingSources` do engine deixa de ter `team`: é `["project","mdm"]`** (issue #139, spec #137). Medido em
+  2026-11-19 com `composer-2.5` e uma etapa só de leitura, numa conta sem time, `team` não acrescentou regra, hook nem skill: as
+  mesmas contagens (`ruleCount` 1 e 63 skills), o hook do projeto rodou e a marca do `AGENTS.md` chegou nos dois lados
+  ([8.2 §18](docs/research/verificacoes-locais.md)). `team` só sincroniza as skills gerenciadas do time; quem as quer numa etapa passa
+  `settingSources` com `"team"`. `DEFAULT_SETTING_SOURCES`, os testes que o fixam, os capítulos 2.2, 2.3, 3.1, 4.2, 5.1 e 5.2 e as
+  duas skills de autoria passaram a nomear a lista nova; o 8.1 ganhou uma nota, e os workflows `verify-context` e `verify-sandbox` leem
+  a constante em vez de repetir a lista. O `team` continua aceito em `settingSources` e em `caps.allowedSettingSources`.
+
 ## 0.5.0 (pré-release, 2026-11-19)
 
 ### Adicionado

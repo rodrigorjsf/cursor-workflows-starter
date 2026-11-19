@@ -78,7 +78,7 @@ The recipes cited are in [recipes.md](references/recipes.md).
 
 | Origin | Destination |
 |---|---|
-| General instructions (`CLAUDE.md`, `.cursor/rules/`) used by the flow | What is common goes to `AGENTS.md`, which the steps that write load through the engine default (`["project","team","mdm"]`). Read-only steps keep `[]` and get the files that matter in the prompt |
+| General instructions (`CLAUDE.md`, `.cursor/rules/`) used by the flow | What is common goes to `AGENTS.md`, which the steps that write load through the engine default (`["project","mdm"]`). Read-only steps keep `[]` and get the files that matter in the prompt |
 | Skill step executed by the model | `ctx.agent(prompt, { schema, tools, model })`. The prompt is the step's text, in an instructions constant, plus the explicit inputs |
 | Subagent called by delegation | `ctx.agent(subagentBody + task, { model, tools })`; the delegation condition becomes code (step 2) |
 | Several independent subagents, or sub-agents the skill itself fires in parallel | `ctx.parallel` (barrier) or `ctx.pipeline` (per item); the code checks the minimum number of results, and the skill's aggregation becomes code or a judge step |
