@@ -81,6 +81,8 @@ function assertOwned(branch: string, action: string, verb: string): void {
 /** A command's output is read whole, but not without limit: this is what the old synchronous calls allowed (`maxBuffer`). */
 const MAX_STDOUT_BYTES = 64 * 1024 * 1024;
 
+const READ_SCRIPT = 'set -o pipefail; "$@" | tee "$WF_STDOUT"';
+
 /** The words of a forge CLI call that name its node in the run's log: `<cli> issue view`, not just `<cli> issue`. */
 const FORGE_LABEL_WORDS = 2;
 
@@ -125,7 +127,7 @@ export class Commands {
 
   /** `git` whose exit code is the answer (`diff --quiet`, `rev-parse --verify --quiet`): 0 is yes, 1 is no, anything else is an error. */
   async gitIs(cwd: string, ...args: string[]): Promise<boolean> {
-    const r = await this.exec("git", args, this.options("git", args, cwd, this.timeouts.localMs));
+    const r = await this.exec("git", args, { ...this.options("git", args, cwd, this.timeouts.localMs), probe: true });
     if (r.ok) return true;
     if (r.exitCode === 1) return false;
     throw new CommandError("git", args, r, this.timeouts.localMs);
@@ -156,7 +158,7 @@ export class Commands {
   /** The URL `remote` (the origin by default) has in the repository's configuration, as written there (`url.<base>.insteadOf` is not applied); undefined when there is no such remote. */
   async remoteUrl(cwd: string, remote = ORIGIN): Promise<string | undefined> {
     const args = ["config", "--get", `remote.${remote}.url`];
-    const r = await this.read("git", args, cwd, this.timeouts.localMs);
+    const r = await this.read("git", args, cwd, this.timeouts.localMs, { probe: true });
     if (r.exitCode === 1) return undefined; // git config --get: the key is not set
     if (!r.ok) throw new CommandError("git", args, r, this.timeouts.localMs);
     return r.stdout.trim() || undefined;
@@ -206,7 +208,7 @@ export class Commands {
 
   /** `forgeReadOrNothing` with variables added to the CLI's environment (`undefined` removes one), as `forgeReadWith`. */
   async forgeReadOrNothingWith(cli: string, cwd: string, env: Record<string, string | undefined>, nothing: RegExp, ...args: string[]): Promise<string | undefined> {
-    const r = await this.read(cli, args, cwd, this.timeouts.networkMs, FORGE_LABEL_WORDS, env);
+    const r = await this.read(cli, args, cwd, this.timeouts.networkMs, { labelWords: FORGE_LABEL_WORDS, env });
     if (r.ok) return r.stdout;
     if (r.exitCode === 1 && nothing.test(r.tail)) return undefined;
     throw new CommandError(cli, args, r, this.timeouts.networkMs);
@@ -228,20 +230,22 @@ export class Commands {
   }
 
   private async succeedRead(command: string, args: string[], cwd: string, timeoutMs: number | undefined, labelWords?: number, env?: Record<string, string | undefined>): Promise<string> {
-    const r = await this.read(command, args, cwd, timeoutMs, labelWords, env);
+    const r = await this.read(command, args, cwd, timeoutMs, { labelWords, env });
     if (!r.ok) throw new CommandError(command, args, r, timeoutMs);
     return r.stdout;
   }
 
   /** Runs the command with its stdout going to a file, and returns the result with the whole stdout. */
-  private async read(command: string, args: string[], cwd: string, timeoutMs: number | undefined, labelWords?: number, env: Record<string, string | undefined> = {}): Promise<ExecResult & { stdout: string }> {
+  private async read(command: string, args: string[], cwd: string, timeoutMs: number | undefined, extra: { labelWords?: number; env?: Record<string, string | undefined>; probe?: boolean } = {}): Promise<ExecResult & { stdout: string }> {
+    const { labelWords, env = {}, probe } = extra;
     const dir = mkdtempSync(join(tmpdir(), "wf-stdout-"));
     const file = join(dir, "stdout");
     try {
       // The path goes in the environment, not in the arguments: the node's id in the log is derived from the arguments, and
       // a temp path would give the same call another id every time.
-      const result = await this.exec("bash", ["-c", 'exec "$@" >"$WF_STDOUT"', "read", command, ...args], {
+      const result = await this.exec("bash", ["-c", READ_SCRIPT, "read", command, ...args], {
         ...this.options(command, args, cwd, timeoutMs, labelWords),
+        ...(probe ? { probe: true } : {}),
         env: { ...env, WF_STDOUT: file },
       });
       if (existsSync(file) && statSync(file).size > MAX_STDOUT_BYTES) throw new Error(`${command} ${args[0] ?? ""}: the output is larger than ${MAX_STDOUT_BYTES / 1024 / 1024} MiB`);

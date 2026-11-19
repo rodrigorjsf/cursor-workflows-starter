@@ -13,6 +13,7 @@ import implementIssue from "../workflows/implement-issue.js";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import { runnerConfigChanged } from "../workflows/implement-issue/tdd.js";
 import { writeRepoConfig } from "./config-fixtures.js";
+import { defineWorkflow } from "../src/runtime/workflow.js";
 import { PLAN, SUB_CODE, SUB_TEST, branchOf, codegraphCalls, failForge, fx, forgeState, git, issue, names, onOrigin, removeCodegraph, run, seedCodeIndex, setup, submit, teardown, worktreeOf, write } from "./implement-issue.fixture.js";
 
 beforeEach(setup);
@@ -46,6 +47,81 @@ test("the test runs of the TDD loop are command nodes in the event log, each wit
   const green = starts.find((s) => s.label === "suite:green:1")!;
   assert.equal(execEnd(events, green).ok, true);
   assert.match(outputOf(events, green), /ok \d+ - subtract/);
+});
+
+const commandLineOf = (events: WorkflowEvent[], start: ExecStartEvent): string => {
+  const call = events.find((e): e is ContentEvent => e.type === "content" && e.kind === "tool-call" && e.attemptId === start.attemptId)!;
+  const { command, args } = JSON.parse(call.text!) as { command: string; args: string[] };
+  return [command, ...args].join(" ");
+};
+
+test("a run marks its suite runs as nodes and its existence checks as probes, and marks no other command", async () => {
+  issue(["complexity:low"]);
+  const r = await run({});
+  assert.equal(r.status, "finished", r.error);
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+
+  const events = eventsOf(r.runId);
+  const starts = execStarts(events);
+  const suites = starts.filter((s) => s.label.startsWith("suite:"));
+  assert.ok(suites.length >= 4, `suite runs: ${suites.map((s) => s.label).join(", ")}`);
+  assert.deepEqual(suites.filter((s) => !s.node).map((s) => s.label), [], "every suite run is a node");
+  assert.deepEqual(starts.filter((s) => s.node && !s.label.startsWith("suite:")).map((s) => s.label), [], "nothing else is a node");
+
+  const existenceCheck = /(^| )git (rev-parse --verify --quiet |diff --cached --quiet|ls-files --error-unmatch |config --get remote\.)/;
+  const lines = starts.map((s) => ({ line: commandLineOf(events, s), probe: execEnd(events, s).probe === true }));
+  assert.ok(lines.some((l) => l.probe && l.line.includes("git rev-parse --verify --quiet ")), "a rev-parse check is a probe");
+  assert.ok(lines.some((l) => l.probe && l.line.includes("git diff --cached --quiet")), "the delivery's diff check is a probe");
+  assert.deepEqual(lines.filter((l) => l.probe !== existenceCheck.test(l.line)).map((l) => l.line), [], "a command is a probe exactly when its exit code is the answer");
+});
+
+const readingWorkflow = <R>(read: (cmd: Commands) => Promise<R>) =>
+  defineWorkflow<unknown, R>({
+    meta: { name: "readwf", description: "reads with the commands of implement-issue" },
+    defaults: { model: { id: "m" } },
+    run: (ctx) => read(new Commands((command, args, opts) => ctx.exec(command, args, opts), { networkMs: 60_000 })),
+  });
+const outputLoggedOf = (events: WorkflowEvent[], stream: "stdout" | "stderr") =>
+  events
+    .filter((e): e is ContentEvent => e.type === "content" && e.kind === "command-output" && e.stream === stream)
+    .map((e) => e.text ?? "")
+    .join("");
+
+test("the stdout of a read command is in the log as the command's output, next to its stderr; the workflow still reads the stdout alone, whole", async () => {
+  const printing = "process.stdout.write('answer\\n'); process.stderr.write('warning\\n')";
+  const r = await runWorkflow(readingWorkflow((cmd) => cmd.forgeRead(process.execPath, fx.repo, "-e", printing)), {}, { cwd: fx.repo, metricsDb: false });
+  assert.equal(r.status, "finished", r.error);
+  assert.equal(r.result, "answer\n");
+  const events = eventsOf(r.runId);
+  assert.equal(outputLoggedOf(events, "stdout"), "answer\n");
+  assert.equal(outputLoggedOf(events, "stderr"), "warning\n");
+  const [start] = execStarts(events);
+  assert.equal(execEnd(events, start!).outputChars, "answer\nwarning\n".length, "the end reports the stdout too");
+});
+
+test("the stdout of a read command is cut at what the log keeps per command, and the workflow still reads all of it", async () => {
+  const printing = "process.stdout.write(('x'.repeat(99) + '\\n').repeat(3000))";
+  const r = await runWorkflow(readingWorkflow(async (cmd) => (await cmd.forgeRead(process.execPath, fx.repo, "-e", printing)).length), {}, { cwd: fx.repo, metricsDb: false });
+  assert.equal(r.status, "finished", r.error);
+  assert.equal(r.result, 300_000, "the workflow reads the whole stdout, not the log's share of it");
+  const events = eventsOf(r.runId);
+  assert.equal(outputLoggedOf(events, "stdout").length, 262_144);
+  const end = execEnd(events, execStarts(events)[0]!);
+  assert.equal(end.outputChars, 300_000);
+  assert.equal(end.outputTruncated, true);
+});
+
+test("a credential in the URL a read command printed is redacted in the log, and the workflow reads the real URL", async () => {
+  const withPassword = "https://alice:s3cr3tpassw0rd@example.com/o/r.git";
+  const withToken = "https://0123456789abcdefghij@gitlab.example/o/r.git";
+  git(fx.repo, "remote", "set-url", "origin", withPassword);
+  git(fx.repo, "remote", "add", "mirror", withToken);
+  const r = await runWorkflow(readingWorkflow(async (cmd) => [await cmd.remoteUrl(fx.repo), await cmd.remoteUrl(fx.repo, "mirror")]), {}, { cwd: fx.repo, metricsDb: false });
+  assert.equal(r.status, "finished", r.error);
+  assert.deepEqual(r.result, [withPassword, withToken], "the workflow reads what git printed");
+  const events = eventsOf(r.runId);
+  assert.ok(!JSON.stringify(events).includes("s3cr3tpassw0rd") && !JSON.stringify(events).includes("0123456789abcdefghij"), "no credential is in the log");
+  assert.equal(outputLoggedOf(events, "stdout"), "https://alice:[REDACTED]@example.com/o/r.git\nhttps://[REDACTED]@gitlab.example/o/r.git\n", "the scheme, the user and the host stay");
 });
 
 // ── The test command: its limit, its environment, its output ──────────────────────────

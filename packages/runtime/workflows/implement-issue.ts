@@ -1063,7 +1063,7 @@ export default defineWorkflow<Args>({
         };
       }
       const testCommand = testCommandOf(plan, ctx.args.testCommand);
-      const suite = (label: string) => runTests(cmd, testCommand, worktree, { timeoutMs: testTimeout, label: `suite:${label}` });
+      const suite = (label: string) => runTests(cmd, testCommand, worktree, { timeoutMs: testTimeout, label: `suite:${label}`, node: true });
       if (!progress.data.baselineGreen) {
         if (ctx.args.setupCommand) {
           const setup = await runTests(cmd, ctx.args.setupCommand, worktree, { timeoutMs: testTimeout, label: "setup" });
