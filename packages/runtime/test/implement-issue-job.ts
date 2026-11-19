@@ -27,4 +27,4 @@ for (let i = 0; i < 50; i++)
   });
 
 installCrashHandlers();
-startJob(implementIssue, { issue: 7, testCommand: "node --test" } as any, { cwd: repo }, createJob(repo, "implement-issue", { runId, jobId }));
+startJob(implementIssue, { issue: 7, testCommand: "node --test", worktree: true } as any, { cwd: repo }, createJob(repo, "implement-issue", { runId, jobId }));

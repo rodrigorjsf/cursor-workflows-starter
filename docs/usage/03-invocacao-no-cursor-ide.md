@@ -90,6 +90,17 @@ wf gc --dry-run            # mostra os worktrees e branches de runs terminados q
 
 `wf start` e `wf run` têm dois atalhos de entrega para o `implement-issue`: `--worktree` põe `worktree: true` nos args e `--no-pr` põe `openPr: false`. Um atalho que contradiz a mesma chave dada em `--args` é recusado com exit 2, sem criar job. Os dois valores também são ajustes do workflow (`worktree`, padrão `false`, e `openPr`, padrão `true`, em `workflows.implement-issue.settings`) que o `wf config set <caminho.com.pontos> <valor>` grava no arquivo global, ou no do repositório com `--repo`, depois de validar o arquivo inteiro contra o esquema ([6.2](../reference/config.md)). A ordem é: args, arquivo do repositório, arquivo global, padrão do código; o `wf config show` diz de qual camada veio cada ajuste. Sem nenhum deles o run abre o PR (o MR no GitLab) e devolve o link em `prUrl`.
 
+Sem `--worktree`, o `implement-issue` trabalha na **árvore principal**: ele cria a branch do run (`wf/issue-<n>-<run>`) a partir do HEAD que a
+pasta tem em checkout, commits locais ainda não enviados inclusive, e a põe em checkout nessa pasta, que é a que o IDE tem aberta. Você vê os
+arquivos mudarem enquanto os agentes escrevem, e quando o run termina a pasta continua na branch dele, com o commit da entrega. Enquanto o job
+roda a pasta é do workflow: um arquivo que você salva ali pode ser desfeito por uma etapa que escreve, ou entrar no commit.
+
+- **Uma árvore suja recusa o início** antes de qualquer etapa, com `status: "dirty-tree"`: o `reason` lista os arquivos modificados, no índice
+  ou não rastreados (fora do `.workflows/`) e dá as duas saídas, commitar, guardar ou descartar, ou iniciar com `--worktree`. Nada é criado.
+- **Só um run por repositório trabalha na árvore principal.** Um segundo início, ainda que de outra issue, volta `status: "main-tree-busy"`
+  com o id do run que a tem e a sugestão de `--worktree`. Um início com `--worktree` ao lado dele é permitido: o worktree é uma pasta do run.
+- O resultado do run traz `branch` e `mainTree: true`, e não traz `worktree`.
+
 O `wf start` confere, antes de criar o job, que `~/.cursor-workflows/` (ou `WF_HOME`) aceita escrita. Se não aceita, sai com
 código 1 e uma mensagem que cita o sandbox do agente como causa provável: nenhum diretório de run foi criado, então rode o
 comando com permissão total. O `wf status` e o `wf wait` de um run cujo custo a API não informou (`spentCents` 0 e um aviso

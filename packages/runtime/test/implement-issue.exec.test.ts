@@ -217,7 +217,7 @@ test("a failing suite is red even when the workflow itself runs under `node --te
 test("cancelling the run while the suite is running kills the suite at once instead of waiting for it", async () => {
   issue(["complexity:low"]);
   const controller = new AbortController();
-  const r = await runWorkflow(implementIssue, { issue: 7, testCommand: "sleep 60" } as any, {
+  const r = await runWorkflow(implementIssue, { issue: 7, testCommand: "sleep 60", worktree: true } as any, {
     cwd: fx.repo,
     signal: controller.signal,
     onEvent: (e) => {
@@ -336,7 +336,7 @@ test("cancelling in the middle of a write step leaves the worktree as before the
     return { hang: true };
   };
   const controller = new AbortController();
-  const first = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test" } as any, {
+  const first = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test", worktree: true } as any, {
     cwd: fx.repo,
     signal: controller.signal,
     onEvent: (e) => {

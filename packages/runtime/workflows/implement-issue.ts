@@ -418,6 +418,55 @@ async function defaultBranchHead(cmd: Commands, cwd: string): Promise<string> {
   throw new Error(`the default branch ${name} has no commit in this repository: fetch it, or check out the branch the run should start from`);
 }
 
+const MAIN_TREE_LOCK = "main-tree";
+const LISTED_FILES = 20;
+const WORKTREE_WAY_OUT = "start with --worktree (worktree: true in the args, or the worktree setting) to work in a folder of the run's own";
+
+function excludeCodeIndex(cwd: string): void {
+  if (findOnPath("codegraph", process.env.PATH)) ensureExcluded(cwd, `${CODE_INDEX_DIR}/`);
+}
+
+function dirtyTreeReason(files: string[]): string {
+  const listed = files.slice(0, LISTED_FILES);
+  const unlisted = files.length - listed.length;
+  return [
+    "this tree has uncommitted changes, and the run works in it: a write step would revert them, or the delivery would commit them into the PR. The files:",
+    ...listed,
+    ...(unlisted > 0 ? [`and ${unlisted} more`] : []),
+    `To go on, commit, stash or discard them and start again, or ${WORKTREE_WAY_OUT}`,
+  ].join("\n");
+}
+
+async function dirtyTreeRefusal(cmd: Commands, cwd: string): Promise<{ status: "dirty-tree"; files: string[]; reason: string } | undefined> {
+  excludeCodeIndex(cwd);
+  const files = (await cmd.gitRead(cwd, "status", "--porcelain", "--untracked-files=all")).split("\n").filter(Boolean);
+  return files.length ? { status: "dirty-tree", files, reason: dirtyTreeReason(files) } : undefined;
+}
+
+async function enterMainTree(cmd: Commands, progress: ProgressStore, cwd: string, branch: string, log: (message: string) => void) {
+  if (progress.data.branch && (await branchExists(cmd, cwd, branch))) {
+    const checkedOut = (await cmd.gitRead(cwd, "branch", "--show-current")).trim();
+    if (checkedOut === branch) return undefined;
+    return {
+      status: "branch-switched",
+      branch,
+      reason: `this run works on ${branch}, and this tree is on ${checkedOut || "a detached HEAD"}: switch back to ${branch} (git switch ${branch}) and resume the run, or start a new run`,
+    };
+  }
+  const refusal = await dirtyTreeRefusal(cmd, cwd);
+  if (refusal) return refusal;
+  if (!progress.data.branch) {
+    if (await branchExists(cmd, cwd, branch)) throw new Error(`branch ${branch} already exists and was not created by this run: remove it, or run again under another run id`);
+    progress.data.mainTree = true;
+    progress.data.branch = branch;
+    progress.data.baseCommit = (await cmd.gitRead(cwd, "rev-parse", "HEAD")).trim();
+    progress.save();
+  }
+  await cmd.git(cwd, "switch", "--create", branch, progress.data.baseCommit!);
+  log(`branch ${branch} is checked out in ${cwd}, started at ${progress.data.baseCommit}`);
+  return undefined;
+}
+
 /**
  * Puts the run's delivered commit on the origin's copy of its branch. On a resume the history is rewritten (a commit an agent
  * made is undone, the tree is committed again), so a plain push is refused once the branch has been pushed. The push is a force
@@ -561,6 +610,7 @@ export default defineWorkflow<Args>({
     // repositório que não o do cwd: a issue #5 de outro repositório é outra issue) e vale até o run terminar, qualquer que seja
     // o jeito (status, erro, cancelamento).
     let releaseIssue: () => void;
+    let releaseMainTree: (() => void) | undefined;
     try {
       releaseIssue = acquireNamedLock(ctx.cwd, await issueLockName(forge, ctx.cwd, ctx.args.issue, ctx.args.repo, (m) => ctx.log(m)), ctx.runId);
     } catch (err) {
@@ -578,6 +628,24 @@ export default defineWorkflow<Args>({
     try {
       progress.data.forge = forge.name; // `wf gc` asks this forge about the run's PR, whatever is detected later
       progress.save();
+      const mainTree = progress.data.mainTree ?? (progress.data.worktree === undefined && progress.data.baseCommit === undefined && !(ctx.args.worktree ?? settings.worktree));
+      if (mainTree) {
+        try {
+          releaseMainTree = acquireNamedLock(ctx.cwd, MAIN_TREE_LOCK, ctx.runId);
+        } catch (err) {
+          if (!(err instanceof NamedLockedError)) throw err;
+          return {
+            issue: ctx.args.issue,
+            status: "main-tree-busy",
+            activeRunId: err.holderRunId,
+            reason: `run ${err.holderRunId ?? "unknown"} is working in this repository's own tree, and a second run would fight it for the files: wait for it to end, or cancel it, or ${WORKTREE_WAY_OUT}`,
+            lock: err.message,
+          };
+        }
+        const branchIsThere = progress.data.branch !== undefined && (await branchExists(cmd, ctx.cwd, progress.data.branch));
+        const refusal = branchIsThere ? undefined : await dirtyTreeRefusal(cmd, ctx.cwd);
+        if (refusal) return { issue: ctx.args.issue, ...refusal };
+      }
       const { issue: number, repo } = ctx.args;
       const openPr = ctx.args.openPr ?? settings.openPr;
       const globs = ctx.args.testGlobs?.length ? ctx.args.testGlobs : DEFAULT_TEST_GLOBS;
@@ -819,8 +887,8 @@ export default defineWorkflow<Args>({
       // Cada run tem a sua branch e o seu worktree, com o id do run no nome. O worktree só é reaproveitado pelo run que o registrou.
       const legacy = !progress.data.worktree && progress.data.baseCommit !== undefined; // run começado quando a branch era `wf/issue-<n>`, fixa
       const branch = progress.data.branch ?? (legacy ? issueBranch(issue.number) : runBranch(issue.number, ctx.runId));
-      const worktree = progress.data.worktree ?? worktreeOf(ctx.cwd, branch);
-      if (!progress.data.worktree) {
+      const worktree = mainTree ? ctx.cwd : (progress.data.worktree ?? worktreeOf(ctx.cwd, branch));
+      if (!mainTree && !progress.data.worktree) {
         // Nada deste run ainda. O que estiver no lugar dele não foi criado por ele (com o id do run no nome, só sobra um run apagado ou um engano): não se reaproveita.
         if (!legacy && (existsSync(worktree) || (await branchExists(cmd, ctx.cwd, branch)))) {
           throw new Error(`${worktree} (branch ${branch}) already exists and was not created by this run: remove it, or run again under another run id`);
@@ -829,13 +897,16 @@ export default defineWorkflow<Args>({
         progress.data.worktree = worktree;
         progress.save();
       }
-      if (existsSync(worktree) && !(await isWorktreeRoot(cmd, worktree))) {
+      if (!mainTree && existsSync(worktree) && !(await isWorktreeRoot(cmd, worktree))) {
         // O run registrou este caminho, mas ele não é um worktree: o `git worktree add` caiu no meio. Um git rodado ali agiria no repositório em volta.
         ctx.log(`${worktree} is the run's, but is not a worktree (an interrupted \`git worktree add\`); removing it to create it again`);
         rmSync(worktree, { recursive: true, force: true });
         await cmd.git(ctx.cwd, "worktree", "prune");
       }
-      if (existsSync(worktree)) ctx.log(`worktree ${worktree} is this run's; reusing it`);
+      if (mainTree) {
+        const refusal = await enterMainTree(cmd, progress, ctx.cwd, branch, (message) => ctx.log(message));
+        if (refusal) return { ...base, ...refusal };
+      } else if (existsSync(worktree)) ctx.log(`worktree ${worktree} is this run's; reusing it`);
       else if (await branchExists(cmd, ctx.cwd, branch)) await cmd.git(ctx.cwd, "worktree", "add", worktree, branch); // resume: mantém os commits
       else {
         // Nem o worktree nem a branch: ou o run ainda não os fez, ou alguém os removeu (`wf gc`, ou à mão). Refazê-los vazios,
@@ -852,7 +923,8 @@ export default defineWorkflow<Args>({
         progress.data.baseCommit = (await cmd.gitRead(worktree, "rev-parse", "HEAD")).trim();
         progress.save();
       }
-      if (codeIndexWorks) await refreshCodeIndex(cmd, worktree, (message) => ctx.warn(message));
+      if (codeIndexWorks && !mainTree) await refreshCodeIndex(cmd, worktree, (message) => ctx.warn(message));
+      const where = mainTree ? { branch, mainTree: true } : { worktree };
       // Uma etapa de escrita interrompida (o processo caiu no meio, ou o run foi cancelado nela): volta ao estado de antes dela.
       if (progress.data.inFlight) {
         const { id, before, interrupted, execution: startedIn } = progress.data.inFlight;
@@ -885,7 +957,7 @@ export default defineWorkflow<Args>({
           step,
           crashes,
           limit: settings.maxStepCrashes,
-          worktree,
+          ...where,
           hint: "find what makes this step kill the process, or raise workflows.implement-issue.settings.maxStepCrashes in the config and resume the run; a new run starts the count again",
         };
       }
@@ -894,11 +966,11 @@ export default defineWorkflow<Args>({
       if (!progress.data.baselineGreen) {
         if (ctx.args.setupCommand) {
           const setup = await runTests(cmd, ctx.args.setupCommand, worktree, { timeoutMs: testTimeout, label: "setup" });
-          if (!setup.ok) return { ...base, status: "setup-failed", worktree, output: setup.output };
+          if (!setup.ok) return { ...base, status: "setup-failed", ...where, output: setup.output };
         }
         const baseline = await suite("baseline");
-        if (baseline.kind === "timeout" || baseline.kind === "killed") return { ...base, status: `tests-${baseline.kind}`, worktree, output: baseline.output };
-        if (!baseline.ok && !looksLikeNoTests(baseline.output)) return { ...base, status: "baseline-red", worktree, output: baseline.output };
+        if (baseline.kind === "timeout" || baseline.kind === "killed") return { ...base, status: `tests-${baseline.kind}`, ...where, output: baseline.output };
+        if (!baseline.ok && !looksLikeNoTests(baseline.output)) return { ...base, status: "baseline-red", ...where, output: baseline.output };
         if (!baseline.ok) ctx.log("the baseline suite has no tests: counted as green");
         progress.data.baselineGreen = true;
         progress.save();
@@ -1094,7 +1166,7 @@ export default defineWorkflow<Args>({
         const failed = await runSlice(sliceKey("s", sl.behavior, sl.seam), String(i + 1), sl);
         if (failed) {
           if (failed !== "tdd-violation" && failed !== "test-not-red") await revertTo(cmd, worktree, start);
-          return { ...base, status: failed, slice: i + 1, reason: lastProblem || undefined, worktree };
+          return { ...base, status: failed, slice: i + 1, reason: lastProblem || undefined, ...where };
         }
       }
 
@@ -1141,7 +1213,7 @@ export default defineWorkflow<Args>({
         progress.save();
         return true;
       };
-      if (!(await review(AXES, 1))) return { ...base, status: "review-failed", worktree };
+      if (!(await review(AXES, 1))) return { ...base, status: "review-failed", ...where };
       for (const a of AXES) ctx.metric(`review_${a}_findings`, reports[a]?.findings.length ?? 0);
       const redo = blockingAxes(reports);
       ctx.metric("review_blocking_axes", redo.length);
@@ -1157,7 +1229,7 @@ export default defineWorkflow<Args>({
           const failed = await runSlice(key, `extra-${i + 1}`, { behavior, seam, testIdea: `issue requirement: "${f.quote}"` });
           if (failed) {
             if (failed !== "tdd-violation" && failed !== "test-not-red") await revertTo(cmd, worktree, start);
-            return { ...base, status: failed, slice: `extra-${i + 1}`, reason: lastProblem || undefined, worktree };
+            return { ...base, status: failed, slice: `extra-${i + 1}`, reason: lastProblem || undefined, ...where };
           }
           const rec = progress.slice(key);
           if (rec?.alreadySatisfied) refuted.push(`${behavior}: ${rec.alreadySatisfied}`); // o review se enganou
@@ -1174,7 +1246,7 @@ export default defineWorkflow<Args>({
           if (refactorProblem) {
             await revertTo(cmd, worktree, before);
             settle();
-            return { ...base, status: "tdd-violation", step: "refactor-1", reason: refactorProblem, worktree };
+            return { ...base, status: "tdd-violation", step: "refactor-1", reason: refactorProblem, ...where };
           }
           const after = await suite("refactor");
           if (!after.ok) {
@@ -1182,15 +1254,15 @@ export default defineWorkflow<Args>({
             settle();
             // Como em toda suíte: passar do teto ou morrer por um sinal não é uma suíte vermelha.
             const status = after.kind === "timeout" || after.kind === "killed" ? `tests-${after.kind}` : "tests-failed-after-review";
-            return { ...base, status, worktree, output: after.output };
+            return { ...base, status, ...where, output: after.output };
           }
           settle();
           progress.data.refactorDone = true;
           progress.data.refactorSummary = fix.summary;
           progress.save();
         }
-        if (!(await review(redo, 2))) return { ...base, status: "review-failed", worktree };
-        if (blockingAxes(reports).length) return { ...base, status: "review-blocking", worktree, findings: blockingOf(reports) };
+        if (!(await review(redo, 2))) return { ...base, status: "review-failed", ...where };
+        if (blockingAxes(reports).length) return { ...base, status: "review-blocking", ...where, findings: blockingOf(reports) };
       }
       ctx.metric("tdd_retries", tddRetries);
       ctx.metric("red_unattributed", redUnattributed);
@@ -1200,7 +1272,7 @@ export default defineWorkflow<Args>({
       // ── Entrega (pr): suíte verde, commit e PR feitos pelo código; idempotentes no resume ─
       ctx.phase("Delivery");
       const final = await suite("final");
-      if (!final.ok) return { ...base, status: final.kind === "failed" ? "tests-failed" : `tests-${final.kind}`, worktree, output: final.output };
+      if (!final.ok) return { ...base, status: final.kind === "failed" ? "tests-failed" : `tests-${final.kind}`, ...where, output: final.output };
       const baseCommit = progress.data.baseCommit!;
       const head = (await cmd.gitRead(worktree, "rev-parse", "HEAD")).trim();
       const deliveryMessage = `feat: ${issue.title} (#${issue.number})`;
@@ -1213,7 +1285,7 @@ export default defineWorkflow<Args>({
           // Nada de commit, push ou PR. O worktree fica para inspeção; o motivo não repete o segredo.
           ctx.metric("secret_blocked", 1);
           ctx.log(`delivery blocked: ${secret}`);
-          return { ...base, status: "secret-blocked", reason: secret, branch, worktree, spentCents: ctx.budget.spentCents() };
+          return { ...base, status: "secret-blocked", reason: secret, branch, ...where, spentCents: ctx.budget.spentCents() };
         }
         if (!(await cmd.gitIs(worktree, "diff", "--cached", "--quiet"))) await cmd.git(worktree, "commit", "-m", deliveryMessage);
         progress.data.deliveredCommit = (await cmd.gitRead(worktree, "rev-parse", "HEAD")).trim();
@@ -1240,10 +1312,10 @@ export default defineWorkflow<Args>({
             forge: forge.name,
           });
           const leak = findSecretInText(body);
-          if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the PR body`, branch, worktree };
+          if (leak) return { ...base, status: "secret-blocked", reason: `${leak} in the PR body`, branch, ...where };
         }
         const refused = await pushDelivery(cmd, progress, worktree, branch, repo, deliveryMessage);
-        if (refused) return { ...base, status: "push-refused", reason: refused, branch, worktree };
+        if (refused) return { ...base, status: "push-refused", reason: refused, branch, ...where };
         if (body !== undefined) {
           prUrl = await withBodyFile(body, (bodyFile) => forge.openPr(worktree, { branch, title: `${issue.title} (#${issue.number})`, bodyFile, repo }));
         }
@@ -1253,7 +1325,7 @@ export default defineWorkflow<Args>({
         ...base,
         status: "done",
         branch,
-        worktree,
+        ...where,
         prUrl,
         slices: progress.data.slices.filter((s) => s.done).map((s) => ({ behavior: s.behavior, test: s.testName, alreadySatisfied: Boolean(s.alreadySatisfied) })),
         deferred,
@@ -1273,6 +1345,7 @@ export default defineWorkflow<Args>({
       }
       throw err;
     } finally {
+      releaseMainTree?.();
       releaseIssue();
     }
   },

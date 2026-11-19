@@ -11,7 +11,7 @@ import { calls } from "./fake-sdk.js";
 import type { ContentEvent, ExecStartEvent } from "../src/runtime/events.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
-import { SUB_CODE, branchOf, failForge, forgeState, forgeTest, fx, git, issue, names, run, submit, worktreeOf, write } from "./implement-issue.fixture.js";
+import { SUB_CODE, branchOf, failForge, forgeState, forgeTest, fx, git, issue, names, originBranches, removeCodegraph, run, seedCodeIndex, submit, worktreeOf, write } from "./implement-issue.fixture.js";
 
 const res = (r: { result?: unknown }) => r.result as any;
 const commitOnMain = (file: string) => {
@@ -426,4 +426,200 @@ test("the workflow force-pushes only branches under its own prefix, and always w
     ["push", "--force-with-lease=wf/issue-7-a:abc123", "-u", "origin", "wf/issue-7-a"],
     ["push", "--force-with-lease=wf/issue-7-a:", "-u", "origin", "wf/issue-7-a"],
   ]);
+});
+
+// ── The main tree: the run's branch is checked out in the folder the user has open ─────
+
+const currentBranch = () => git(fx.repo, "branch", "--show-current").trim();
+const runBranches = () => git(fx.repo, "branch", "--list", "wf/*", "--format=%(refname:short)").split("\n").filter(Boolean);
+const treeStatus = () => git(fx.repo, "status", "--porcelain");
+const mainTreeRun = (args: Record<string, unknown> = {}, runId?: string) => run({ worktree: false, ...args }, runId);
+
+function holdFirstCodeStep() {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let reached!: () => void;
+  const atCodeStep = new Promise<void>((resolve) => (reached = resolve));
+  let held = false;
+  fx.handlers["code-1"] = async (o) => {
+    if (!held) {
+      held = true;
+      reached();
+      await gate;
+    }
+    write(o, "src/math.js", SUB_CODE);
+    submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
+  };
+  return { atCodeStep, release };
+}
+
+forgeTest("a main-tree run has its branch checked out in the repository's own folder during the run, and the tree stays on it after the run ends", async () => {
+  issue(["complexity:low"]);
+  const checkedOutAtCodeStep: string[] = [];
+  fx.handlers["code-1"] = (o) => {
+    checkedOutAtCodeStep.push(currentBranch());
+    write(o, "src/math.js", SUB_CODE);
+    submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
+  };
+  const r = await mainTreeRun();
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  assert.deepEqual(checkedOutAtCodeStep, [branchOf(r.runId)], "the IDE's folder is on the run's branch while the agents write");
+  assert.equal(currentBranch(), branchOf(r.runId), "and after the run ended");
+  assert.equal(res(r).branch, branchOf(r.runId));
+  assert.equal(res(r).mainTree, true);
+  assert.equal(res(r).worktree, undefined, "there is no worktree to name");
+  assert.ok(!existsSync(join(fx.repo, ".workflows", "worktrees")), "and none was made");
+  assert.equal(treeStatus().trim(), "", "the delivery left the tree committed");
+  assert.equal(git(fx.repo, "show", `${branchOf(r.runId)}:src/math.js`), SUB_CODE);
+});
+
+forgeTest("the main-tree run's branch starts at the HEAD the user had checked out, local unpushed commits included", async () => {
+  issue(["complexity:low"]);
+  const mainBefore = git(fx.repo, "rev-parse", "main").trim();
+  git(fx.repo, "checkout", "-q", "-b", "feature");
+  commitOnMain("local.txt");
+  const head = git(fx.repo, "rev-parse", "HEAD").trim();
+  const r = await mainTreeRun();
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  assert.equal(currentBranch(), branchOf(r.runId));
+  assert.equal(git(fx.repo, "rev-parse", `${branchOf(r.runId)}~1`).trim(), head);
+  assert.equal(git(fx.repo, "rev-parse", "feature").trim(), head, "the user's own branch did not move");
+  assert.equal(git(fx.repo, "rev-parse", "main").trim(), mainBefore);
+  assert.ok(existsSync(join(fx.repo, "local.txt")));
+});
+
+const UNCOMMITTED = [
+  { kind: "a modified file", file: "src/math.js", make: () => writeFileSync(join(fx.repo, "src", "math.js"), "export const changed = 1;\n") },
+  {
+    kind: "a staged file",
+    file: "staged.txt",
+    make: () => {
+      writeFileSync(join(fx.repo, "staged.txt"), "staged\n");
+      git(fx.repo, "add", "staged.txt");
+    },
+  },
+  { kind: "an untracked file", file: "notes.txt", make: () => writeFileSync(join(fx.repo, "notes.txt"), "notes\n") },
+];
+
+for (const uncommitted of UNCOMMITTED) {
+  forgeTest(`${uncommitted.kind} refuses a main-tree start before any step: the message lists it and both ways out, and nothing is created`, async () => {
+    issue(["complexity:low"]);
+    uncommitted.make();
+    const before = treeStatus();
+    const r = await mainTreeRun();
+    assert.equal(res(r).status, "dirty-tree", JSON.stringify(res(r)));
+    assert.deepEqual(res(r).files.map((line: string) => line.slice(3)), [uncommitted.file]);
+    assert.ok(res(r).reason.includes(uncommitted.file), "the reason lists the file");
+    assert.match(res(r).reason, /commit, stash or discard/);
+    assert.match(res(r).reason, /--worktree/);
+    assert.deepEqual(names(), [], "no step ran");
+    assert.deepEqual(runBranches(), [], "no branch was made");
+    assert.ok(!existsSync(join(fx.repo, ".workflows", "worktrees")), "and no worktree");
+    assert.equal(currentBranch(), "main");
+    assert.equal(treeStatus(), before, "the user's files are as they were");
+    assert.deepEqual(forgeState().comments, []);
+  });
+}
+
+forgeTest("the refusal of a dirty tree lists at most the first twenty files and counts the rest", async () => {
+  issue(["complexity:low"]);
+  for (let i = 0; i < 25; i++) writeFileSync(join(fx.repo, `scratch-${String(i).padStart(2, "0")}.txt`), "x\n");
+  const r = await mainTreeRun();
+  assert.equal(res(r).status, "dirty-tree");
+  assert.equal(res(r).files.length, 25, "the result keeps every file");
+  assert.equal(res(r).reason.split("\n").filter((line: string) => line.startsWith("?? ")).length, 20);
+  assert.match(res(r).reason, /and 5 more/);
+});
+
+forgeTest("the kit's own .workflows/ folder is not a dirty file: a run starts in the tree that an earlier run left", async () => {
+  issue(["complexity:low"]);
+  const first = await mainTreeRun();
+  assert.equal(res(first).status, "done", JSON.stringify(res(first)));
+  assert.ok(existsSync(join(fx.repo, ".workflows", "runs")));
+  assert.equal(currentBranch(), branchOf(first.runId));
+  git(fx.repo, "checkout", "-q", "main");
+  const second = await mainTreeRun();
+  assert.equal(res(second).status, "done", JSON.stringify(res(second)));
+});
+
+forgeTest("a .codegraph/ that the run itself indexes into is not a dirty file, and never part of the delivery", async () => {
+  issue(["complexity:low"]);
+  seedCodeIndex(fx.repo);
+  const r = await mainTreeRun();
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  assert.ok(!git(fx.repo, "ls-tree", "-r", "--name-only", branchOf(r.runId)).includes(".codegraph"), "the index is not in the delivery");
+});
+
+forgeTest("a .codegraph/ on a machine without codegraph is a dirty file: the delivery would commit it, and nothing excludes it", async () => {
+  issue(["complexity:low"]);
+  removeCodegraph();
+  seedCodeIndex(fx.repo);
+  const r = await mainTreeRun();
+  assert.equal(res(r).status, "dirty-tree", JSON.stringify(res(r)));
+  assert.deepEqual(res(r).files.map((line: string) => line.slice(3)), [".codegraph/codegraph.db"]);
+});
+
+forgeTest("a second main-tree start while one runs is refused with a message that names --worktree; a --worktree start alongside it is allowed; the tree is free once the run ends", async () => {
+  issue(["complexity:low"]);
+  const { atCodeStep, release } = holdFirstCodeStep();
+  const first = mainTreeRun({}, "run-a");
+  try {
+    await atCodeStep;
+    const agentsBefore = calls.length;
+    const refused = await mainTreeRun({ issue: 8 }, "run-b");
+    assert.equal(res(refused).status, "main-tree-busy", JSON.stringify(res(refused)));
+    assert.equal(res(refused).activeRunId, "run-a");
+    assert.match(res(refused).reason, /run-a/);
+    assert.match(res(refused).reason, /--worktree/);
+    assert.equal(calls.length, agentsBefore, "the refused run asks no agent");
+    assert.deepEqual(runBranches(), [branchOf("run-a")], "and makes no branch");
+    assert.equal(currentBranch(), branchOf("run-a"), "the tree is still the first run's");
+
+    const alongside = await run({ issue: 9, worktree: true }, "run-c");
+    assert.equal(res(alongside).status, "done", `a worktree run is not locked out: ${JSON.stringify(res(alongside))}`);
+  } finally {
+    release();
+  }
+  assert.equal(res(await first).status, "done");
+  git(fx.repo, "checkout", "-q", "main");
+  const after = await mainTreeRun({}, "run-d");
+  assert.equal(res(after).status, "done", `the run that ended released the tree: ${JSON.stringify(res(after))}`);
+});
+
+forgeTest("a main-tree run delivers only its own changes and opens the PR (the MR on GitLab) from the user's folder", async (forge) => {
+  issue(["complexity:low"]);
+  commitOnMain("local.txt");
+  const base = git(fx.repo, "rev-parse", "HEAD").trim();
+  const r = await mainTreeRun({ openPr: undefined });
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  const branch = branchOf(r.runId);
+  assert.equal(git(fx.repo, "rev-list", "--count", `${base}..${branch}`).trim(), "1");
+  assert.deepEqual(git(fx.repo, "diff", "--name-only", base, branch).split("\n").filter(Boolean).sort(), ["src/math.js", "test/sub.test.js"], "no index, no state folder, nothing of the user's");
+  const [opened] = forgeState().prs;
+  assert.ok(opened, `the forge opened the ${forge === "gitlab" ? "MR" : "PR"}`);
+  assert.equal(opened.head, branch);
+  assert.equal(res(r).prUrl, opened.url);
+  assert.ok(!opened.body.includes(fx.repo), "the body names no local path");
+  assert.deepEqual(originBranches(), [branch]);
+  assert.equal(currentBranch(), branch);
+});
+
+forgeTest("a main-tree run resumed on its branch goes on there; resumed from another branch it stops and names the branch", async () => {
+  issue(["complexity:low"]);
+  const first = await mainTreeRun();
+  assert.equal(res(first).status, "done", JSON.stringify(res(first)));
+  const branch = branchOf(first.runId);
+  const delivered = git(fx.repo, "rev-parse", "HEAD").trim();
+
+  const onBranch = await mainTreeRun({}, first.runId);
+  assert.equal(res(onBranch).status, "done", JSON.stringify(res(onBranch)));
+  assert.equal(git(fx.repo, "rev-parse", "HEAD").trim(), delivered);
+  assert.equal(currentBranch(), branch);
+
+  git(fx.repo, "checkout", "-q", "main");
+  const switched = await mainTreeRun({}, first.runId);
+  assert.equal(res(switched).status, "branch-switched", JSON.stringify(res(switched)));
+  assert.equal(res(switched).branch, branch);
+  assert.ok(res(switched).reason.includes(branch));
+  assert.equal(currentBranch(), "main", "the run does not move the user's tree on a resume it refused");
 });

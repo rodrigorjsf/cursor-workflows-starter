@@ -13,7 +13,7 @@
   JSON entra como JSON, o resto como texto, e um `.` dentro de um nome se escreve `\.`. Ele valida o arquivo inteiro que
   resultaria (o esquema e os nomes que cada workflow declara), recusa um valor inválido ou um caminho desconhecido com o erro
   de campo sem tocar no arquivo, e grava de forma atômica. O `wf config show` já dizia a camada de cada ajuste, e agora diz a dos
-  dois novos. Até o modo da árvore principal chegar, o run ainda trabalha num worktree com qualquer valor de `worktree`.
+  dois novos.
 - **O `implement-issue` deixa o índice de código em dia antes da primeira etapa de agente** (issue #118, spec #114). Depois da
   checagem do autor da issue e antes de qualquer agente, o run roda `codegraph init` quando o repositório do run não tem
   `.codegraph/` e `codegraph sync` quando tem, como um nó de comando do log, sob o teto dos comandos de rede
@@ -37,6 +37,22 @@
   - **O `wf status`, o `wf wait` e o `get_workflow_status`/`wait_workflow` dizem que o custo é desconhecido.** Com `spentCents` 0 e um
     aviso `getUsage() failed` no log, o estado traz `costNote`: "cost unknown: N tokens spent (getUsage() failed, so 0 cents is not
     the cost)". Um run gratuito que informou seu uso, ou um com custo já somado, não traz.
+- **O `implement-issue` trabalha por padrão na árvore principal: a branch do run fica em checkout na pasta do usuário** (issue #123,
+  spec #114, [ADR-0012](docs/adr/0012-delivery-modes.md)). Com `worktree` falso (o padrão), o run cria a branch dele
+  (`wf/issue-<n>-<run>`) a partir do HEAD que a pasta tem em checkout, commits locais ainda não enviados inclusive, e a põe em
+  checkout nessa pasta: o IDE mostra os arquivos mudando enquanto os agentes escrevem. A entrega commita só o que o run mudou e abre o
+  PR (o MR no GitLab) dali, e no fim a pasta continua na branch do run.
+  - **Uma árvore suja recusa o início, antes de qualquer etapa.** Um arquivo modificado, no índice ou não rastreado, fora do
+    `.workflows/`, devolve `status: "dirty-tree"` com `files` (as linhas do `git status --porcelain`) e um `reason` que lista até
+    vinte deles e dá as duas saídas: commitar, guardar ou descartar, ou iniciar com `--worktree`. Nada é criado: nem branch, nem
+    worktree, nem passo de agente. Uma pasta `.codegraph/` não conta quando o `codegraph` está no `PATH` (o run a exclui do git antes de
+    olhar a árvore); sem o `codegraph`, ela é um arquivo sujo, porque nada a impediria de entrar no commit.
+  - **Só um run por repositório trabalha na árvore principal.** O segundo início, ainda que numa outra issue, devolve
+    `status: "main-tree-busy"` com `activeRunId` e um `reason` que manda usar `--worktree`; um início com `--worktree` ao lado dele é
+    permitido. O lock é `main-tree`, em `.workflows/locks/`, e vale até o run terminar.
+  - **O resultado traz `branch` e `mainTree: true`, sem `worktree`.** Um resume numa pasta que saiu da branch do run devolve
+    `status: "branch-switched"` e não mexe na pasta. O checkout da branch no resume, a recusa de árvore suja no resume, o cancelamento
+    e o `wf gc` na árvore principal são da issue #126. `--worktree` (ou `worktree: true`) mantém o comportamento anterior.
 - **O dashboard aprova ou troca as seams que um run do `implement-issue` propôs** (issue #98). Um run MED ou HIGH que parou em
   `seams-proposed` (ou, com `seams` e sem `testCommand`, em `test-command-proposed`) mostra no Run view o painel **Seams
   proposed** (ou **Test command proposed**): as seams, as fatias e o comando de teste que o run executa depois da aprovação,

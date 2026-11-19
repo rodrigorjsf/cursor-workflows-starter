@@ -271,9 +271,11 @@ etapa interrompida deixaria edições pela metade. Por isso o `implement-issue`:
 - guarda os relatórios de review por rodada, para o resume não pedir um review novo sobre um diff diferente;
 - reaproveita a branch existente no resume (sem `worktree add -B`, que a zeraria) e roda a suíte de novo antes do
   commit;
-- dá a cada run a sua branch e o seu worktree (o id do run no nome), registrados no progresso: um run novo parte da
-  cabeça atual da branch padrão e nunca reaproveita o worktree de outro; o lock `issue-<n>` (em `.workflows/locks/`)
-  recusa um segundo run na mesma issue. A issue do próprio repositório do cwd trava `issue-<n>`, com ou sem o arg
+- dá a cada run a sua branch (o id do run no nome), registrada no progresso, e a põe em checkout na pasta do usuário (a
+  árvore principal, o padrão: parte do HEAD que a pasta tem, e uma árvore suja recusa o início) ou, com `worktree`, num
+  worktree do run, que parte da cabeça atual da branch padrão e nunca é reaproveitado por outro run; o lock `issue-<n>` (em
+  `.workflows/locks/`) recusa um segundo run na mesma issue, e na árvore principal o lock `main-tree` recusa um segundo run
+  no repositório. A issue do próprio repositório do cwd trava `issue-<n>`, com ou sem o arg
   `repo`; o nome só ganha um hash do repositório quando `repo` aponta para outro repositório (comparado pela URL que o
   forge devolve, em minúsculas: `gh repo view --json url` no GitHub, o `web_url` de `glab api projects/<caminho>` no
   GitLab; se o CLI do forge não responde, o hash é do valor de `repo` em minúsculas, mesmo que ele nomeie o
