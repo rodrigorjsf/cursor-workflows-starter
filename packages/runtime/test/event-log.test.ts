@@ -3,11 +3,11 @@
 process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
 import { blockedUserDir, withUserDir } from "./isolate-home.js";
-import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { calls, costConfig, script, stats } from "./fake-sdk.js";
+import { repoWithOneCommit } from "./git-fixtures.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import type { WorkflowEvent } from "../src/runtime/events.js";
 import { eventLogPath, readEventLog, runDirPath } from "../src/runtime/run-store.js";
@@ -221,12 +221,7 @@ test("a step served from the journal emits a start event as well as an end event
 });
 
 test("a step served from the memo emits a start event as well as an end event", async () => {
-  mkdirSync(cwd, { recursive: true });
-  const git = (...a: string[]) => execFileSync("git", a, { cwd, stdio: "ignore" });
-  git("init", "-q");
-  writeFileSync(join(cwd, "a.txt"), "1");
-  git("add", ".");
-  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init");
+  repoWithOneCommit(cwd);
   const wf = defineWorkflow({
     meta: { name: "memoed", description: "memoed" },
     defaults: { model: { id: "m" } },

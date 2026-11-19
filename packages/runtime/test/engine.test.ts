@@ -7,6 +7,7 @@ import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writ
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { calls, costConfig, script, stats } from "./fake-sdk.js";
+import { repoWithOneCommit } from "./git-fixtures.js";
 import { runWorkflow } from "../src/runtime/engine.js";
 import { defineWorkflow, type AgentCallOptions } from "../src/runtime/workflow.js";
 
@@ -112,15 +113,6 @@ function allFilesUnder(dir: string): string[] {
   });
 }
 
-function repoWithOneCommit() {
-  mkdirSync(cwd, { recursive: true });
-  const git = (...args: string[]) => execFileSync("git", args, { cwd, stdio: "ignore" });
-  git("init", "-q");
-  writeFileSync(join(cwd, "a.txt"), "1");
-  git("add", ".");
-  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init");
-}
-
 test("a resume where only the step's mcpServers changed runs the step again, against the new servers", async () => {
   let options: AgentCallOptions = { mcpServers: databaseServer("first") };
   const wf = workflowWith(() => options);
@@ -160,7 +152,7 @@ test("a resume where nothing changed makes no agent call", async () => {
 });
 
 test("a memoized read-only step is not reused when its mcpServers changed, and is reused when they did not", async () => {
-  repoWithOneCommit();
+  repoWithOneCommit(cwd);
   let options: AgentCallOptions = { tools: ["read", "grep"], memo: true, mcpServers: databaseServer("first") };
   const wf = workflowWith(() => options);
 
@@ -174,7 +166,7 @@ test("a memoized read-only step is not reused when its mcpServers changed, and i
 });
 
 test("a memoized read-only step is not reused when its sandbox changed", async () => {
-  repoWithOneCommit();
+  repoWithOneCommit(cwd);
   let options: AgentCallOptions = { tools: ["read"], memo: true, sandbox: false };
   const wf = workflowWith(() => options);
 
@@ -186,7 +178,7 @@ test("a memoized read-only step is not reused when its sandbox changed", async (
 });
 
 test("no value from a server's env or headers reaches the journal, the memo store, or any other file of the run", async () => {
-  repoWithOneCommit();
+  repoWithOneCommit(cwd);
   const valueInEnv = "marmot-quartz-4417";
   const valueInHeaders = "walnut-copper-9082";
   const servers = {
@@ -249,7 +241,7 @@ test("settingSources por etapa sobrescreve o default do run", async () => {
 });
 
 test("memo: reaproveita entre runs no mesmo estado do repo e invalida quando o repo muda", async () => {
-  repoWithOneCommit();
+  repoWithOneCommit(cwd);
   const wf = defineWorkflow({ meta: { name: "m", description: "m" }, defaults: { model: { id: "m" } }, run: (ctx) => ctx.agent("plan", { tools: ["read", "grep"], memo: true }) });
 
   await runWorkflow(wf, {}, { cwd }); // runId novo a cada chamada
@@ -266,7 +258,7 @@ test("memo: reaproveita entre runs no mesmo estado do repo e invalida quando o r
 });
 
 test("memo still serves a step when the local changes diff past 1 MiB", async () => {
-  repoWithOneCommit();
+  repoWithOneCommit(cwd);
   const localChangePastOneMebibyte = "line of local change\n".repeat(120_000);
   writeFileSync(join(cwd, "a.txt"), localChangePastOneMebibyte);
   const wf = defineWorkflow({ meta: { name: "mb", description: "mb" }, defaults: { model: { id: "m" } }, run: (ctx) => ctx.agent("plan", { tools: ["read"], memo: true }) });
@@ -277,7 +269,7 @@ test("memo still serves a step when the local changes diff past 1 MiB", async ()
 });
 
 test("the git the engine runs itself (the memo's repo state, the run's repo identity) never blocks the process", async () => {
-  repoWithOneCommit();
+  repoWithOneCommit(cwd);
   // A slow git (a large repo, a slow disk): `diff` and `remote` take a second each.
   const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
   const bin = join(cwd, "..", `slow-git-${process.pid}`);
