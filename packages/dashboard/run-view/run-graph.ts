@@ -65,11 +65,8 @@ export interface NodeDetail {
   error?: string;
   /** Where the result came from when it was not computed now. */
   cached?: "journal" | "memo";
-  /** How the command ended, when the process ran and exited. */
   exitCode?: number;
-  /** The signal that killed the command. */
   signal?: string;
-  /** The caller marked the command as a probe: a non-zero exit is its answer. */
   probe?: boolean;
 }
 
