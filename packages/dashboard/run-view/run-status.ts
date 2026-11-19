@@ -77,3 +77,5 @@ export function runElapsed(run: { startedAt?: string; endedAt?: string }, settle
   if (run.startedAt === undefined || (settled && run.endedAt === undefined)) return undefined;
   return Math.max(0, (run.endedAt !== undefined ? Date.parse(run.endedAt) : now) - Date.parse(run.startedAt));
 }
+
+export const costUnknown = (run: Pick<RunProgress, "costCents" | "costFinal">): boolean => run.costCents === 0 && !run.costFinal;

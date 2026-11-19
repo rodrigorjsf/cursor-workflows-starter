@@ -102,6 +102,7 @@ export interface RunProgress {
   /** Tokens and cents spent now by the nodes shown. */
   tokens: number;
   costCents: number;
+  costFinal: boolean;
 }
 
 export interface GraphEdge {
@@ -227,7 +228,7 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
     at.work.location ??= str(event.location);
   };
 
-  const run: RunProgress = { status: "running", executions: 0, tokens: 0, costCents: 0 };
+  const run: RunProgress = { status: "running", executions: 0, tokens: 0, costCents: 0, costFinal: true };
   for (const event of events) {
     if (!readable(event)) continue;
     switch (event.type) {
@@ -384,6 +385,7 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
   for (const node of nodes.values()) {
     run.tokens += node.detail.tokens;
     run.costCents += node.detail.costCents;
+    run.costFinal &&= node.detail.costFinal;
   }
   return { nodes: [...nodes.values()], edges, lanes, run };
 }
