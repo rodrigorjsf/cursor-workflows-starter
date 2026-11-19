@@ -1,5 +1,8 @@
 // Events written the way the runtime writes them, for the tests of the run graph and its layout. `engine-log.test.ts` checks
 // against a real run that these shapes are what the engine emits.
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { RunEvent } from "../run-view/run-graph.js";
 
 export const T0 = Date.parse("2026-01-10T10:00:00.000Z");
@@ -62,3 +65,8 @@ export const groupEnd = (groupId: string, ok = true): Draft => ({ type: "group-e
 /** A step that ran to the end: its start and its end. */
 export const step = (stepId: string, label: string, r: Ref = {}): Draft[] => [stepStart(stepId, label, r), stepEnd(stepId, label, r)];
 
+export const sandboxRun = (): RunEvent[] =>
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "implement-issue-sandbox.events.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as RunEvent);

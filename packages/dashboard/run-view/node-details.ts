@@ -37,7 +37,7 @@ export function describeNode(node: GraphNode, now: number): NodeRow[] {
     rows.push({ name: "Cost", value: `${formatCents(d.costCents)}${d.costFinal ? "" : " (not final)"}` });
   }
   rows.push({ name: "Duration", value: formatDuration(d.durationMs + elapsed) });
-  if (d.errorKind !== undefined) rows.push({ name: "Error kind", value: d.errorKind });
+  if (d.errorKind !== undefined) rows.push({ name: node.state === "neutral" ? "Answer" : "Error kind", value: d.errorKind });
   if (d.error !== undefined) rows.push({ name: "Error", value: d.error.length > 300 ? `${d.error.slice(0, 299)}…` : d.error });
   return rows;
 }

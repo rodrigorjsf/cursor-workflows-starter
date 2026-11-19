@@ -5,19 +5,120 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type GraphNode, KNOWN_EVENT_VERSION, type RunEvent, buildRunGraph, joinIdOf } from "../run-view/run-graph.js";
-import { type Draft, cloudAgent, execEnd, execStart, groupEnd, groupStart, phase, ref, RUN, runStart, stamp, step, stepEnd, stepStart, T0 } from "./run-log.js";
+import { type Draft, cloudAgent, execEnd, execStart, groupEnd, groupStart, phase, ref, RUN, runStart, sandboxRun, stamp, step, stepEnd, stepStart, T0 } from "./run-log.js";
 
 const idsOf = (nodes: GraphNode[]) => nodes.map((n) => n.id);
 const arrows = (graph: { edges: Array<{ source: string; target: string }> }) => graph.edges.map((e) => `${e.source}>${e.target}`).sort();
 
-test("steps and commands are nodes, chained from a start node by the parent id of each", () => {
-  const graph = buildRunGraph(stamp([runStart, phase("Build"), ...step("s-a", "plan"), stepStart("s-b", "code", { parentId: "s-a" }), execStart("x-1", "test", { parentId: "s-b" })]));
+test("steps and the commands marked as nodes are nodes, chained from a start node by the parent id of each", () => {
+  const graph = buildRunGraph(stamp([runStart, phase("Build"), ...step("s-a", "plan"), stepStart("s-b", "code", { parentId: "s-a" }), execStart("x-1", "test", { parentId: "s-b" }, { node: true })]));
 
   assert.deepEqual(
     graph.nodes.map((n) => [n.id, n.kind, n.label]),
     [["start", "start", "demo"], ["s-a", "step", "plan"], ["s-b", "step", "code"], ["x-1", "command", "test"]],
   );
   assert.deepEqual(arrows(graph), ["s-a>s-b", "s-b>x-1", "start>s-a"]);
+});
+
+const SUITE = (n: number) => `x-7589c5601a70.${n}`;
+const TEST_1 = "s-e47a373472ae.0";
+const CODE_1 = "s-0627cf788f08.0";
+const REVIEW_SPEC_1 = "s-7720409f62fc.0";
+const REVIEW_STANDARDS_1 = "s-b488463f0829.0";
+const REVIEW_SECURITY_1 = "s-37297b5b5f4c.0";
+const TEST_EXTRA_1 = "s-613bbe36ecdc.0";
+const TEST_EXTRA_2 = "s-dbe7881c2149.0";
+const TEST_EXTRA_2_RETRY = "s-263b4ccd42fb.0";
+const REVIEW_SPEC_2 = "s-2bfed702788b.0";
+
+test("the sandbox run's graph draws only its steps, its groups, its start and its test suites, in run order", () => {
+  const graph = buildRunGraph(sandboxRun(), { settled: true });
+
+  assert.deepEqual(
+    graph.nodes.map((n) => [n.id, n.kind, n.label]),
+    [
+      ["start", "start", "implement-issue"],
+      [SUITE(0), "command", "suite:baseline"],
+      [TEST_1, "step", "test-1"],
+      [SUITE(1), "command", "suite:red:1"],
+      [CODE_1, "step", "code-1"],
+      [SUITE(2), "command", "suite:green:1"],
+      ["g1", "fork", "parallel ×3"],
+      [REVIEW_SPEC_1, "step", "review:spec:1"],
+      [REVIEW_STANDARDS_1, "step", "review:standards:1"],
+      [REVIEW_SECURITY_1, "step", "review:security:1"],
+      [joinIdOf("g1"), "join", "join"],
+      [TEST_EXTRA_1, "step", "test-extra-1"],
+      [SUITE(3), "command", "suite:red:extra-1"],
+      [TEST_EXTRA_2, "step", "test-extra-2"],
+      [SUITE(4), "command", "suite:red:extra-2"],
+      [TEST_EXTRA_2_RETRY, "step", "test-extra-2:2"],
+      [SUITE(5), "command", "suite:red:extra-2"],
+      ["g2", "fork", "parallel ×1"],
+      [REVIEW_SPEC_2, "step", "review:spec:2"],
+      [joinIdOf("g2"), "join", "join"],
+      [SUITE(6), "command", "suite:final"],
+    ],
+  );
+  assert.deepEqual(arrows(graph), [
+    `${SUITE(0)}>${TEST_1}`,
+    `${SUITE(1)}>${CODE_1}`,
+    `${SUITE(2)}>g1`,
+    `${SUITE(3)}>${TEST_EXTRA_2}`,
+    `${SUITE(4)}>${TEST_EXTRA_2_RETRY}`,
+    `${SUITE(5)}>g2`,
+    `${CODE_1}>${SUITE(2)}`,
+    `${TEST_1}>${SUITE(1)}`,
+    `${TEST_EXTRA_1}>${SUITE(3)}`,
+    `${TEST_EXTRA_2}>${SUITE(4)}`,
+    `${TEST_EXTRA_2_RETRY}>${SUITE(5)}`,
+    `${REVIEW_SPEC_2}>${joinIdOf("g2")}`,
+    `${joinIdOf("g1")}>${TEST_EXTRA_1}`,
+    `${joinIdOf("g2")}>${SUITE(6)}`,
+    `${REVIEW_SECURITY_1}>${joinIdOf("g1")}`,
+    `${REVIEW_SPEC_1}>${joinIdOf("g1")}`,
+    `${REVIEW_STANDARDS_1}>${joinIdOf("g1")}`,
+    "g1>" + REVIEW_SPEC_1,
+    "g1>" + REVIEW_STANDARDS_1,
+    "g1>" + REVIEW_SECURITY_1,
+    `g2>${REVIEW_SPEC_2}`,
+    `start>${SUITE(0)}`,
+  ].sort());
+});
+
+test("every command the graph leaves out is listed under the step it follows or under its phase, and none is lost", () => {
+  const events = sandboxRun();
+  const ran = [...new Set(events.filter((e) => e.type === "exec-start").map((e) => String(e.stepId)))];
+  const graph = buildRunGraph(events, { settled: true });
+
+  const listed = [
+    ...graph.nodes.filter((n) => n.kind === "command").map((n) => n.id),
+    ...graph.nodes.flatMap((n) => n.commands.map((c) => c.id)),
+    ...graph.lanes.flatMap((l) => l.commands.map((c) => c.id)),
+  ];
+  assert.equal(ran.length, 88, "89 commands ran; one of them ran again in the second execution");
+  assert.deepEqual([...listed].sort(), [...ran].sort());
+  assert.equal(new Set(listed).size, listed.length, "each is listed once");
+});
+
+test("a command is listed under the nearest step it continues from, and a command that follows no step goes to its phase, in run order", () => {
+  const graph = buildRunGraph(sandboxRun(), { settled: true });
+  const labels = (commands: GraphNode[]) => commands.map((c) => c.label);
+
+  assert.deepEqual(labels(nodeOf(graph, TEST_1).commands), [
+    "git ls-files", "git add", "git write-tree", "git diff", "git ls-tree", "git checkout", "git ls-files", "git add", "git write-tree", "git show", "git show",
+    "git ls-files", "git add", "git write-tree",
+  ]);
+  assert.deepEqual(labels(graph.lanes.find((l) => l.title === "Triage")!.commands), ["git config", "gh issue view"]);
+  assert.deepEqual(labels(graph.lanes.find((l) => l.title === "Delivery")!.commands), ["git rev-parse", "git add", "git diff", "git diff", "git diff", "git commit", "git rev-parse"]);
+  assert.deepEqual(graph.nodes.filter((n) => n.kind === "fork" || n.kind === "join" || n.kind === "start").flatMap((n) => n.commands), [], "only a step holds commands");
+});
+
+test("the phases of the sandbox run are its lanes, a phase of commands only included, and the commands before any phase join the first one", () => {
+  const graph = buildRunGraph(sandboxRun(), { settled: true });
+
+  assert.deepEqual(graph.lanes.map((l) => l.title), ["Triage", "Implementation", "Review", "Delivery"]);
+  assert.deepEqual(["start", SUITE(0), joinIdOf("g1"), SUITE(6)].map((id) => nodeOf(graph, id).lane), [0, 1, 2, 3]);
 });
 
 test("a parallel group fans out from a fork to its branches and back in at a join, and the next step continues from the join", () => {
@@ -96,6 +197,8 @@ test("a group that has not ended has a fork and no join yet; an empty group join
 const stateOf = (graph: { nodes: GraphNode[] }, id: string) => graph.nodes.find((n) => n.id === id)?.state;
 const nodeOf = (graph: { nodes: GraphNode[] }, id: string) => graph.nodes.find((n) => n.id === id)!;
 
+const node = { node: true };
+
 test("a node shows its final state: running until its end, then ok, failed, cancelled or cached", () => {
   const graph = buildRunGraph(
     stamp([
@@ -108,13 +211,13 @@ test("a node shows its final state: running until its end, then ok, failed, canc
       stepEnd("s-stop", "stopped", {}, { ok: false, errorKind: "cancelled" }),
       stepStart("s-old", "from the journal", {}, { cached: "journal" }),
       stepEnd("s-old", "from the journal", {}, { cached: "journal" }),
-      execStart("x-ok", "tests"),
+      execStart("x-ok", "tests", {}, node),
       execEnd("x-ok", "tests"),
-      execStart("x-bad", "lint"),
+      execStart("x-bad", "lint", {}, node),
       execEnd("x-bad", "lint", {}, { ok: false, exitCode: 2 }),
-      execStart("x-slow", "build"),
+      execStart("x-slow", "build", {}, node),
       execEnd("x-slow", "build", {}, { ok: false, outcome: "timeout", exitCode: undefined, signal: "SIGTERM" }),
-      execStart("x-gone", "deploy"),
+      execStart("x-gone", "deploy", {}, node),
       execEnd("x-gone", "deploy", {}, { ok: false, outcome: "cancelled" }),
     ]),
   );
@@ -123,6 +226,54 @@ test("a node shows its final state: running until its end, then ok, failed, canc
     ["s-run", "s-ok", "s-bad", "s-stop", "s-old", "x-ok", "x-bad", "x-slow", "x-gone"].map((id) => stateOf(graph, id)),
     ["running", "ok", "failed", "cancelled", "cached", "ok", "failed", "failed", "cancelled"],
   );
+});
+
+const commandOf = (graph: { nodes: GraphNode[]; lanes: Array<{ commands: GraphNode[] }> }, id: string): GraphNode =>
+  [...graph.nodes, ...graph.nodes.flatMap((n) => n.commands), ...graph.lanes.flatMap((l) => l.commands)].find((n) => n.id === id)!;
+
+test("a probe that exits with its answer is neutral and keeps its exit code, while any other failure is red, probe or not", () => {
+  const probe = { probe: true };
+  const graph = buildRunGraph(
+    stamp([
+      runStart,
+      execStart("x-answer", "git rev-parse"),
+      execEnd("x-answer", "git rev-parse", {}, { ok: false, exitCode: 1, ...probe }),
+      execStart("x-broken", "git diff"),
+      execEnd("x-broken", "git diff", {}, { ok: false, exitCode: 128, ...probe }),
+      execStart("x-hung", "git fetch"),
+      execEnd("x-hung", "git fetch", {}, { ok: false, outcome: "timeout", exitCode: undefined, ...probe }),
+      execStart("x-plain", "git rev-parse"),
+      execEnd("x-plain", "git rev-parse", {}, { ok: false, exitCode: 1 }),
+      execStart("x-clear", "git diff"),
+      execEnd("x-clear", "git diff", {}, probe),
+    ]),
+  );
+
+  assert.deepEqual(
+    ["x-answer", "x-broken", "x-hung", "x-plain", "x-clear"].map((id) => commandOf(graph, id).state),
+    ["neutral", "failed", "failed", "failed", "ok"],
+  );
+  assert.equal(commandOf(graph, "x-answer").detail.errorKind, "exit 1");
+  assert.equal(commandOf(graph, "x-broken").detail.errorKind, "exit 128");
+});
+
+test("a probe marked as a node is neutral too, and a probe still running is running", () => {
+  const graph = buildRunGraph(
+    stamp([runStart, execStart("x-a", "git rev-parse", {}, node), execEnd("x-a", "git rev-parse", {}, { ok: false, exitCode: 1, probe: true }), execStart("x-b", "git diff", {}, node)]),
+  );
+  assert.deepEqual([stateOf(graph, "x-a"), stateOf(graph, "x-b")], ["neutral", "running"]);
+});
+
+test("in the sandbox run the existence checks are neutral and the failed test suite is red", () => {
+  const graph = buildRunGraph(sandboxRun(), { settled: true });
+  const states = (commands: GraphNode[]) => commands.map((c) => [c.label, c.state, c.detail.errorKind]);
+
+  assert.deepEqual(
+    states(graph.lanes.find((l) => l.title === "Implementation")!.commands.filter((c) => c.state !== "ok")),
+    [["git rev-parse", "neutral", "exit 1"], ["git rev-parse", "neutral", "exit 1"]],
+  );
+  assert.deepEqual(states(graph.lanes.find((l) => l.title === "Delivery")!.commands.filter((c) => c.state !== "ok")), [["git diff", "neutral", "exit 1"]]);
+  assert.deepEqual([stateOf(graph, SUITE(1)), nodeOf(graph, SUITE(1)).detail.errorKind, stateOf(graph, SUITE(2))], ["failed", "exit 1", "ok"]);
 });
 
 test("a retried step keeps one node: attempts, tokens, cost and time add up, and the last failure's kind stays", () => {
@@ -204,11 +355,11 @@ test("a command shows how it ended: the exit code, or the outcome when it was ki
   const graph = buildRunGraph(
     stamp([
       runStart,
-      execStart("x-a", "lint"),
+      execStart("x-a", "lint", {}, node),
       execEnd("x-a", "lint", {}, { ok: false, exitCode: 2, durationMs: 1500 }),
-      execStart("x-b", "build"),
+      execStart("x-b", "build", {}, node),
       execEnd("x-b", "build", {}, { ok: false, outcome: "timeout", exitCode: undefined, durationMs: 600000 }),
-      execStart("x-c", "ghost"),
+      execStart("x-c", "ghost", {}, node),
       execEnd("x-c", "ghost", {}, { ok: false, outcome: "spawn-error", exitCode: undefined, error: "spawn ghost ENOENT", durationMs: 2 }),
     ]),
   );
@@ -251,7 +402,7 @@ test("phases are lanes, in the order they first appear, and a group sits in the 
     ]),
   );
 
-  assert.deepEqual(graph.lanes, [{ index: 0, title: "Plan" }, { index: 1, title: "Build" }, { index: 2, title: "Ship" }]);
+  assert.deepEqual(graph.lanes.map(({ index, title }) => [index, title]), [[0, "Plan"], [1, "Build"], [2, "Ship"]]);
   assert.deepEqual(
     ["start", "s-a", "g1", "s-b1", "s-b2", joinIdOf("g1"), "s-c"].map((id) => laneOf(graph, id)),
     [0, 0, 1, 1, 1, 1, 2],
@@ -277,7 +428,7 @@ test("a step names its own phase, and no edge runs backwards from a later lane t
 
 test("a run with no phases has one unnamed lane", () => {
   const graph = buildRunGraph(stamp([runStart, ...step("s-a", "only")]));
-  assert.deepEqual(graph.lanes, [{ index: 0, title: "" }]);
+  assert.deepEqual(graph.lanes.map(({ index, title }) => [index, title]), [[0, ""]]);
   assert.equal(laneOf(graph, "s-a"), 0);
 });
 

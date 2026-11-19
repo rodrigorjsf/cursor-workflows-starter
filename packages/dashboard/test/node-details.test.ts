@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { formatCents, formatDuration } from "../app/format.js";
 import { cloudAgentUrl, describeFacts, describeNode, runsInCloud } from "../run-view/node-details.js";
 import { type GraphNode, buildRunGraph } from "../run-view/run-graph.js";
-import { cloudAgent, execEnd, execStart, groupStart, runStart, stamp, step, stepEnd, stepStart, T0, type Draft } from "./run-log.js";
+import { cloudAgent, execEnd, execStart, groupStart, runStart, sandboxRun, stamp, step, stepEnd, stepStart, T0, type Draft } from "./run-log.js";
 
 const nodeOf = (drafts: Draft[], id: string, settled = false): GraphNode => buildRunGraph(stamp(drafts), { settled }).nodes.find((n) => n.id === id)!;
 const rows = (node: GraphNode, now = 0) => Object.fromEntries(describeNode(node, now).map((row) => [row.name, row.value]));
@@ -48,8 +48,27 @@ test("a step served from the journal or the memo says where its result came from
 });
 
 test("a command lists the program, where it ran, attempts, duration and how it ended; it has no model, tokens or cost", () => {
-  const node = nodeOf([runStart, execStart("x-1", "test"), execEnd("x-1", "test", {}, { ok: false, exitCode: 1, durationMs: 2500 })], "x-1");
+  const node = nodeOf([runStart, execStart("x-1", "test", {}, { node: true }), execEnd("x-1", "test", {}, { ok: false, exitCode: 1, durationMs: 2500 })], "x-1");
   assert.deepEqual(rows(node), { State: "failed", Command: "npm", Location: "local", Attempts: "1", Duration: "2.5s", "Error kind": "exit 1" });
+});
+
+test("a probe that exited with its answer reads neutral and says its exit code", () => {
+  const node = nodeOf([runStart, execStart("x-1", "git rev-parse", {}, { node: true }), execEnd("x-1", "git rev-parse", {}, { ok: false, exitCode: 1, probe: true, durationMs: 30 })], "x-1");
+  assert.deepEqual(rows(node), { State: "neutral", Command: "npm", Location: "local", Attempts: "1", Duration: "30ms", Answer: "exit 1" });
+});
+
+test("the hover card of a step of the sandbox run keeps its state, model, location, attempts, tokens and duration", () => {
+  const graph = buildRunGraph(sandboxRun(), { settled: true });
+  assert.deepEqual(rows(graph.nodes.find((n) => n.label === "test-1")!), {
+    State: "ok",
+    Model: "composer-2.5",
+    Location: "local",
+    Attempts: "1",
+    Tokens: "106,031",
+    Cost: "0¢ (not final)",
+    Duration: "29.9s",
+  });
+  assert.deepEqual(rows(graph.nodes.find((n) => n.label === "suite:red:1")!), { State: "failed", Command: "bash", Location: "local", Attempts: "1", Duration: "230ms", "Error kind": "exit 1" });
 });
 
 test("a cloud step says it ran in the cloud and names its agent as a link to it in Cursor, next to its cost", () => {
@@ -109,12 +128,12 @@ test("the facts above a step's log are the short list; a cloud step adds where i
   assert.equal(describeFacts(cloud, 0).find((row) => row.name === "Cloud agent")!.href, "https://cursor.com/agents/bc-7");
   assert.equal(describeFacts(cloud, 0).find((row) => row.name === "Cost")!.value, "4¢");
 
-  const command = nodeOf([runStart, execStart("x-1", "test"), execEnd("x-1", "test")], "x-1");
+  const command = nodeOf([runStart, execStart("x-1", "test", {}, { node: true }), execEnd("x-1", "test")], "x-1");
   assert.deepEqual(names(command), ["State", "Command", "Attempts", "Duration"]);
 });
 
 test("only a step that ran in the cloud is marked as one: not a local step, not a command, not the start or a fork", () => {
-  const graph = buildRunGraph(stamp([runStart, stepStart("s-a", "remote", {}, { location: "cloud" }), stepStart("s-b", "here", {}, { location: "local" }), stepStart("s-c", "older log"), execStart("x-1", "test"), groupStart("g1", "parallel", 1, null)]));
+  const graph = buildRunGraph(stamp([runStart, stepStart("s-a", "remote", {}, { location: "cloud" }), stepStart("s-b", "here", {}, { location: "local" }), stepStart("s-c", "older log"), execStart("x-1", "test", {}, { node: true }), groupStart("g1", "parallel", 1, null)]));
   const marked = graph.nodes.filter(runsInCloud).map((node) => node.id);
   assert.deepEqual(marked, ["s-a"]);
 });
