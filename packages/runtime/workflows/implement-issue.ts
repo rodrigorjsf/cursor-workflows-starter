@@ -329,9 +329,15 @@ function tierOfLabels(labels: Array<{ name: string }>, labelTiers: Record<string
 
 const CODE_INDEX_DIR = ".codegraph";
 
-async function codeIndexFailure(cmd: Commands, cwd: string): Promise<string | undefined> {
+function excludeCodeIndex(cwd: string): string | undefined {
   if (!findOnPath("codegraph", process.env.PATH)) return "codegraph is not on the PATH";
   if (!ensureExcluded(cwd, `${CODE_INDEX_DIR}/`)) return `${CODE_INDEX_DIR}/ cannot be excluded from git in ${cwd}, so the index would show up as changes of the tree`;
+  return undefined;
+}
+
+async function codeIndexFailure(cmd: Commands, cwd: string): Promise<string | undefined> {
+  const notExcluded = excludeCodeIndex(cwd);
+  if (notExcluded) return notExcluded;
   const dir = join(cwd, CODE_INDEX_DIR);
   const entries = existsSync(dir) ? readdirSync(dir) : undefined;
   return cmd.codegraphFailure(cwd, entries && entries.join() !== ".gitignore" ? "sync" : "init");
@@ -418,10 +424,6 @@ async function defaultBranchHead(cmd: Commands, cwd: string): Promise<string> {
 const MAIN_TREE_LOCK = "main-tree";
 const MAX_LISTED_FILES = 20;
 const WORKTREE_WAY_OUT = "start with --worktree (worktree: true in the args, or the worktree setting) to work in a folder of the run's own";
-
-function excludeCodeIndex(cwd: string): void {
-  if (findOnPath("codegraph", process.env.PATH)) ensureExcluded(cwd, `${CODE_INDEX_DIR}/`);
-}
 
 interface DirtyTree {
   status: "dirty-tree";
