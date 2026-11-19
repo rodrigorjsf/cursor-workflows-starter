@@ -1,7 +1,7 @@
 # Install Cursor Workflows (guide for coding agents)
 
 You are a coding agent installing the Cursor Workflows kit for your user, then setting up the repo you are in. This
-guide is pinned to release `v0.4.0` and needs no other document. Run the steps in order. Each step ends on a stated
+guide is pinned to release `v0.5.0` and needs no other document. Run the steps in order. Each step ends on a stated
 result: when you cannot reach it, stop and tell the user what failed, with the command output.
 
 The kit runs deterministic workflows on the Cursor SDK from the Cursor IDE chat (MCP), Claude Code or a terminal. The
@@ -25,17 +25,17 @@ Stop until they have.
 
 ```bash
 installer="$(mktemp)"
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/scripts/install.sh -o "$installer"
-bash "$installer" --tag v0.4.0
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.5.0/scripts/install.sh -o "$installer"
+bash "$installer" --tag v0.5.0
 ```
 
 The installer:
 
-- checks the tag before it clones or checks out anything: it reads the GitHub release of `v0.4.0` and stops unless the
+- checks the tag before it clones or checks out anything: it reads the GitHub release of `v0.5.0` and stops unless the
   release is immutable (GitHub locks an immutable release's tag to its commit, so nobody can move the tag to other
   code), and, when a clone of the kit already exists, it fetches the tags without `--force`, so a tag that moved since
   the last fetch stops the install;
-- clones the kit at tag `v0.4.0` into `~/.cursor-workflows/kit` and installs its dependencies;
+- clones the kit at tag `v0.5.0` into `~/.cursor-workflows/kit` and installs its dependencies;
 - writes the `wf` command to `~/.local/bin/wf`;
 - links the kit's skills (`run-workflow`, `cursor-workflow-authoring`, `skill-to-workflow`, `cursor-workflows-setup`)
   into `~/.claude/skills/`, which Cursor and Claude Code both read;
