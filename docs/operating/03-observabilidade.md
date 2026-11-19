@@ -328,9 +328,9 @@ para um run em andamento e para um que já terminou):
   está lá: nenhuma aresta volta para uma raia anterior.
 - **Estado.** Um nó em andamento pisca e a aresta que chega a ele se move; depois vira verde (ok), vermelho (falhou), âmbar
   (cancelado) ou cinza (servido do journal ou do memo, num resume). Se o run termina, ou o processo cai, com um nó ainda em
-  andamento, o nó vira "interrompido" (tracejado) em vez de piscar para sempre. Uma sonda (`probe: true`) que sai com o
-  código 1, a resposta esperada dela, fica neutra (círculo vazio) em vez de vermelha, e a linha **Answer** do tooltip
-  diz o código; qualquer outra falha, de um comando com ou sem `probe`, segue vermelha.
+  andamento, o nó vira "interrompido" (tracejado) em vez de piscar para sempre. Uma sonda (`probe: true`) que sai com
+  código diferente de zero, a resposta esperada dela, fica neutra (círculo vazio) em vez de vermelha, e a linha **Answer**
+  do tooltip diz o código; um timeout, uma interrupção ou um comando sem `probe` que falha seguem vermelhos.
 - **Passar o mouse** sobre um nó mostra o modelo (ou o programa, num comando), onde rodou (`local` ou `cloud`), as
   tentativas, os tokens, o custo, a duração e o tipo do erro (`timeout`, `rate-limit`…; num comando, `exit 2`,
   `timeout`…). Os números somam todas as tentativas e todas as execuções do run; o custo é o que o teto de custo conta (o

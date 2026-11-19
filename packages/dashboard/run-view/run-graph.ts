@@ -131,8 +131,6 @@ export const commandCount = (graph: RunGraph): number =>
 
 const START = "start";
 
-const PROBE_ANSWER_EXIT = 1;
-
 const str = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
 
 /** What the builder remembers about a node besides what the graph shows: where it sits in the run's structure. */
@@ -331,7 +329,7 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
         at.attempt.ok = event.ok === true;
         at.attempt.durationMs = num(event.durationMs) ?? 0;
         at.attempt.errorKind = execErrorKind(event);
-        at.attempt.answered = event.probe === true && event.outcome === "exit" && num(event.exitCode) === PROBE_ANSWER_EXIT;
+        at.attempt.answered = event.probe === true && event.outcome === "exit" && (num(event.exitCode) ?? 0) !== 0;
         at.attempt.error = str(event.error);
         break;
       }
@@ -374,38 +372,11 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
     if (run.status === "running") run.status = "interrupted";
   }
 
-  const removed = new Set([...work.keys()].filter((id) => nodes.get(id)!.kind === "command" && !marked.has(id)));
-  const continuesFrom = (parentId: string | null): string | null => {
-    const seen = new Set<string>();
-    let at = parentId;
-    while (at !== null && removed.has(at) && !seen.has(at)) {
-      seen.add(at);
-      at = placed.get(at)?.parentId ?? null;
-    }
-    return at;
+  const { removed, phaseCommands } = fileUnmarkedCommands(work, nodes, placed, marked);
+  const continuesFrom = (id: string): string | null => {
+    for (const ancestor of parentsOf(id, placed)) if (!removed.has(ancestor)) return ancestor;
+    return null;
   };
-  const startedAt = (id: string): number => Date.parse([...(work.get(id)?.attempts.values() ?? [])][0]?.startedAt ?? "");
-  const runningAt = (stepId: string, time: number): boolean =>
-    [...work.get(stepId)!.attempts.values()].some((a) => Date.parse(a.startedAt ?? "") <= time && time <= (a.endedAt === undefined ? Infinity : Date.parse(a.endedAt)));
-  const stepEnclosing = (id: string): string | undefined => {
-    const time = startedAt(id);
-    const seen = new Set<string>();
-    let at = placed.get(id)?.parentId ?? null;
-    while (at !== null && !seen.has(at)) {
-      seen.add(at);
-      const kind = nodes.get(at)?.kind;
-      if (kind === "step" && runningAt(at, time)) return at;
-      if (kind !== "step" && kind !== "command") return undefined;
-      at = placed.get(at)?.parentId ?? null;
-    }
-    return undefined;
-  };
-  const phaseItems: GraphNode[] = [];
-  for (const id of removed) {
-    const owner = stepEnclosing(id);
-    (owner === undefined ? phaseItems : nodes.get(owner)!.commands).push(nodes.get(id)!);
-  }
-  for (const id of removed) nodes.delete(id);
 
   /** Where a node that names `parentId` as its parent continues from. */
   const sourceOf = (parentId: string | null, inGroup: string | null): string => {
@@ -415,7 +386,7 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
   };
   const edges: GraphEdge[] = [];
   const link = (source: string, target: string) => edges.push({ id: `${source}>${target}`, source, target });
-  for (const [id, where] of placed) if (!removed.has(id)) link(sourceOf(continuesFrom(where.parentId), where.inGroup), id);
+  for (const [id, where] of placed) if (!removed.has(id)) link(sourceOf(continuesFrom(id), where.inGroup), id);
 
   // The branches of an ended group flow into its join: from every node inside it that nothing else inside it continues from.
   for (const groupId of groups.keys()) {
@@ -427,7 +398,7 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
     for (const tail of tails.length > 0 ? tails.map(outputOf) : [groupId]) link(tail, joinIdOf(groupId));
   }
 
-  const lanes = assignLanes([...nodes.values()], edges, phaseOf, phases, phaseItems);
+  const lanes = assignLanes([...nodes.values()], edges, phaseOf, phases, phaseCommands);
   for (const node of nodes.values()) {
     run.tokens += node.detail.tokens;
     run.costCents += node.detail.costCents;
@@ -436,11 +407,42 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
   return { nodes: [...nodes.values()], edges, lanes, run };
 }
 
+function* parentsOf(id: string, placed: Map<string, Placement>): Generator<string> {
+  const seen = new Set<string>();
+  for (let at = placed.get(id)?.parentId ?? null; at !== null && !seen.has(at); at = placed.get(at)?.parentId ?? null) {
+    seen.add(at);
+    yield at;
+  }
+}
+
+function fileUnmarkedCommands(work: Map<string, Work>, nodes: Map<string, GraphNode>, placed: Map<string, Placement>, marked: Set<string>): { removed: Set<string>; phaseCommands: GraphNode[] } {
+  const removed = new Set([...work.keys()].filter((id) => nodes.get(id)!.kind === "command" && !marked.has(id)));
+  const startedAt = (id: string): number => Date.parse([...work.get(id)!.attempts.values()][0]?.startedAt ?? "");
+  const runningAt = (stepId: string, time: number): boolean =>
+    [...work.get(stepId)!.attempts.values()].some((a) => Date.parse(a.startedAt ?? "") <= time && time <= (a.endedAt === undefined ? Infinity : Date.parse(a.endedAt)));
+  const stepEnclosing = (id: string): string | undefined => {
+    const time = startedAt(id);
+    for (const ancestor of parentsOf(id, placed)) {
+      const kind = nodes.get(ancestor)?.kind;
+      if (kind === "step" && runningAt(ancestor, time)) return ancestor;
+      if (kind !== "step" && kind !== "command") return undefined;
+    }
+    return undefined;
+  };
+  const phaseCommands: GraphNode[] = [];
+  for (const id of removed) {
+    const owner = stepEnclosing(id);
+    (owner === undefined ? phaseCommands : nodes.get(owner)!.commands).push(nodes.get(id)!);
+  }
+  for (const id of removed) nodes.delete(id);
+  return { removed, phaseCommands };
+}
+
 /**
  * Puts each node in the lane of its phase, then moves a node later when it continues from a node in a later lane, so that no
  * edge runs backwards. Lanes nobody ends up in are dropped. Sets `lane` on the nodes and returns the lanes.
  */
-function assignLanes(nodes: GraphNode[], edges: GraphEdge[], phaseOf: Map<string, string>, phases: string[], phaseItems: GraphNode[]): GraphLane[] {
+function assignLanes(nodes: GraphNode[], edges: GraphEdge[], phaseOf: Map<string, string>, phases: string[], phaseCommands: GraphNode[]): GraphLane[] {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const phaseLane = (id: string) => Math.max(0, phases.indexOf(phaseOf.get(id) ?? ""));
   for (const node of nodes) node.lane = phaseLane(node.id);
@@ -455,15 +457,15 @@ function assignLanes(nodes: GraphNode[], edges: GraphEdge[], phaseOf: Map<string
       }
     }
   }
-  for (const item of phaseItems) item.lane = phaseLane(item.id);
+  for (const item of phaseCommands) item.lane = phaseLane(item.id);
   const drawn = new Set(nodes.filter((n) => n.kind !== "start").map((n) => n.lane));
   const bare = (lane: number) => phases[lane] === "" && !drawn.has(lane);
-  const titled = [...new Set([...drawn, ...phaseItems.map((i) => i.lane).filter((lane) => !bare(lane))])].sort((a, b) => a - b);
-  for (const item of phaseItems) if (bare(item.lane)) item.lane = titled.find((lane) => lane > item.lane) ?? item.lane;
-  const used = [...new Set([...drawn, ...phaseItems.map((i) => i.lane)])].sort((a, b) => a - b);
+  const titled = [...new Set([...drawn, ...phaseCommands.map((i) => i.lane).filter((lane) => !bare(lane))])].sort((a, b) => a - b);
+  for (const item of phaseCommands) if (bare(item.lane)) item.lane = titled.find((lane) => lane > item.lane) ?? item.lane;
+  const used = [...new Set([...drawn, ...phaseCommands.map((i) => i.lane)])].sort((a, b) => a - b);
   if (used.length === 0) used.push(0);
-  for (const node of [...nodes, ...phaseItems]) node.lane = Math.max(0, used.indexOf(node.lane));
+  for (const node of [...nodes, ...phaseCommands]) node.lane = Math.max(0, used.indexOf(node.lane));
   const lanes = used.map((phase, index): GraphLane => ({ index, title: phases[phase] ?? "", commands: [] }));
-  for (const item of phaseItems) lanes[item.lane]!.commands.push(item);
+  for (const item of phaseCommands) lanes[item.lane]!.commands.push(item);
   return lanes;
 }

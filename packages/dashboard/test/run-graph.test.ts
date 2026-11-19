@@ -215,7 +215,7 @@ test("a group that has not ended has a fork and no join yet; an empty group join
 const stateOf = (graph: { nodes: GraphNode[] }, id: string) => graph.nodes.find((n) => n.id === id)?.state;
 const nodeOf = (graph: { nodes: GraphNode[] }, id: string) => graph.nodes.find((n) => n.id === id)!;
 
-const node = { node: true };
+const asNode = { node: true };
 
 test("a node shows its final state: running until its end, then ok, failed, cancelled or cached", () => {
   const graph = buildRunGraph(
@@ -229,13 +229,13 @@ test("a node shows its final state: running until its end, then ok, failed, canc
       stepEnd("s-stop", "stopped", {}, { ok: false, errorKind: "cancelled" }),
       stepStart("s-old", "from the journal", {}, { cached: "journal" }),
       stepEnd("s-old", "from the journal", {}, { cached: "journal" }),
-      execStart("x-ok", "tests", {}, node),
+      execStart("x-ok", "tests", {}, asNode),
       execEnd("x-ok", "tests"),
-      execStart("x-bad", "lint", {}, node),
+      execStart("x-bad", "lint", {}, asNode),
       execEnd("x-bad", "lint", {}, { ok: false, exitCode: 2 }),
-      execStart("x-slow", "build", {}, node),
+      execStart("x-slow", "build", {}, asNode),
       execEnd("x-slow", "build", {}, { ok: false, outcome: "timeout", exitCode: undefined, signal: "SIGTERM" }),
-      execStart("x-gone", "deploy", {}, node),
+      execStart("x-gone", "deploy", {}, asNode),
       execEnd("x-gone", "deploy", {}, { ok: false, outcome: "cancelled" }),
     ]),
   );
@@ -249,17 +249,19 @@ test("a node shows its final state: running until its end, then ok, failed, canc
 const commandOf = (graph: { nodes: GraphNode[]; lanes: Array<{ commands: GraphNode[] }> }, id: string): GraphNode =>
   [...graph.nodes, ...graph.nodes.flatMap((n) => n.commands), ...graph.lanes.flatMap((l) => l.commands)].find((n) => n.id === id)!;
 
-test("a probe that exits with its answer is neutral and keeps its exit code, while any other failure is red, probe or not", () => {
+test("a probe that exits non-zero is neutral and keeps its exit code, while a timeout, a kill and a command that is no probe are red", () => {
   const probe = { probe: true };
   const graph = buildRunGraph(
     stamp([
       runStart,
       execStart("x-answer", "git rev-parse"),
       execEnd("x-answer", "git rev-parse", {}, { ok: false, exitCode: 1, ...probe }),
-      execStart("x-broken", "git diff"),
-      execEnd("x-broken", "git diff", {}, { ok: false, exitCode: 128, ...probe }),
+      execStart("x-other", "git diff"),
+      execEnd("x-other", "git diff", {}, { ok: false, exitCode: 128, ...probe }),
       execStart("x-hung", "git fetch"),
       execEnd("x-hung", "git fetch", {}, { ok: false, outcome: "timeout", exitCode: undefined, ...probe }),
+      execStart("x-killed", "git gc"),
+      execEnd("x-killed", "git gc", {}, { ok: false, outcome: "exit", exitCode: undefined, signal: "SIGKILL", ...probe }),
       execStart("x-plain", "git rev-parse"),
       execEnd("x-plain", "git rev-parse", {}, { ok: false, exitCode: 1 }),
       execStart("x-clear", "git diff"),
@@ -268,16 +270,15 @@ test("a probe that exits with its answer is neutral and keeps its exit code, whi
   );
 
   assert.deepEqual(
-    ["x-answer", "x-broken", "x-hung", "x-plain", "x-clear"].map((id) => commandOf(graph, id).state),
-    ["neutral", "failed", "failed", "failed", "ok"],
+    ["x-answer", "x-other", "x-hung", "x-killed", "x-plain", "x-clear"].map((id) => commandOf(graph, id).state),
+    ["neutral", "neutral", "failed", "failed", "failed", "ok"],
   );
-  assert.equal(commandOf(graph, "x-answer").detail.errorKind, "exit 1");
-  assert.equal(commandOf(graph, "x-broken").detail.errorKind, "exit 128");
+  assert.deepEqual(["x-answer", "x-other", "x-hung"].map((id) => commandOf(graph, id).detail.errorKind), ["exit 1", "exit 128", "timeout"]);
 });
 
 test("a probe marked as a node is neutral too, and a probe still running is running", () => {
   const graph = buildRunGraph(
-    stamp([runStart, execStart("x-a", "git rev-parse", {}, node), execEnd("x-a", "git rev-parse", {}, { ok: false, exitCode: 1, probe: true }), execStart("x-b", "git diff", {}, node)]),
+    stamp([runStart, execStart("x-a", "git rev-parse", {}, asNode), execEnd("x-a", "git rev-parse", {}, { ok: false, exitCode: 1, probe: true }), execStart("x-b", "git diff", {}, asNode)]),
   );
   assert.deepEqual([stateOf(graph, "x-a"), stateOf(graph, "x-b")], ["neutral", "running"]);
 });
@@ -373,11 +374,11 @@ test("a command shows how it ended: the exit code, or the outcome when it was ki
   const graph = buildRunGraph(
     stamp([
       runStart,
-      execStart("x-a", "lint", {}, node),
+      execStart("x-a", "lint", {}, asNode),
       execEnd("x-a", "lint", {}, { ok: false, exitCode: 2, durationMs: 1500 }),
-      execStart("x-b", "build", {}, node),
+      execStart("x-b", "build", {}, asNode),
       execEnd("x-b", "build", {}, { ok: false, outcome: "timeout", exitCode: undefined, durationMs: 600000 }),
-      execStart("x-c", "ghost", {}, node),
+      execStart("x-c", "ghost", {}, asNode),
       execEnd("x-c", "ghost", {}, { ok: false, outcome: "spawn-error", exitCode: undefined, error: "spawn ghost ENOENT", durationMs: 2 }),
     ]),
   );
