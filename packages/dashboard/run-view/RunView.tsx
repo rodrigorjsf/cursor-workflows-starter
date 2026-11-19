@@ -166,26 +166,28 @@ function Canvas({ graph, layout, now, selectedId, onOpen, phases, jump }: { grap
   const store = useStoreApi();
   const userMoved = useRef(false);
   const following = useRef<string | undefined>(undefined);
+  const moveTo = useCallback(
+    (target: { x: number; y: number; zoom: number }) => {
+      userMoved.current = true;
+      void setCenter(target.x, target.y, { zoom: target.zoom, duration: 200 });
+    },
+    [setCenter],
+  );
   const focus = useCallback(
     (id: string) => {
       const box = layout.nodes[id];
-      const { transform, width, height } = store.getState(); // read now: the pane may have changed since the last render
+      const { transform, width, height } = store.getState();
       const target = box && panTarget(box, { x: transform[0], y: transform[1], zoom: transform[2] }, { width, height });
-      if (!target) return;
-      userMoved.current = true;
-      void setCenter(target.x, target.y, { zoom: transform[2], duration: 200 });
+      if (target) moveTo({ ...target, zoom: transform[2] });
     },
-    [layout, store, setCenter],
+    [layout, store, moveTo],
   );
   const centreOn = useCallback(
     (id: string) => {
       const box = layout.nodes[id];
-      if (!box) return;
-      const target = jumpTarget(box, store.getState().transform[2]);
-      userMoved.current = true;
-      void setCenter(target.x, target.y, { zoom: target.zoom, duration: 200 });
+      if (box) moveTo(jumpTarget(box, store.getState().transform[2]));
     },
-    [layout, store, setCenter],
+    [layout, store, moveTo],
   );
   const { nodes, edges } = useMemo(() => toFlow(graph, layout, { now, selectedId, open: onOpen, focus, phases }), [graph, layout, now, selectedId, onOpen, focus, phases]);
   const pane = useStore((s) => ({ width: s.width, height: s.height }), (a, b) => a.width === b.width && a.height === b.height);
