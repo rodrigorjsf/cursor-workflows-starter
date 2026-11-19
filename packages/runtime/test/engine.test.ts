@@ -2,12 +2,13 @@
 process.env.WF_METRICS = "off"; // estes testes não gravam no banco do usuário
 import assert from "node:assert/strict";
 import "./isolate-home.js";
-import { rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { calls, costConfig, script, stats } from "./fake-sdk.js";
 import { runWorkflow } from "../src/runtime/engine.js";
-import { defineWorkflow } from "../src/runtime/workflow.js";
+import { defineWorkflow, type AgentCallOptions } from "../src/runtime/workflow.js";
 
 const cwd = join(import.meta.dirname, ".tmp", String(process.pid)); // one directory per test process: concurrent runs must not share it
 const SCHEMA = { type: "object", required: ["tier"], properties: { tier: { enum: ["LOW", "MED", "HIGH"] } } };
@@ -94,6 +95,119 @@ test("resume: mesmo runId não cria agentes de novo", async () => {
   assert.deepEqual(r2.result, r1.result);
 });
 
+function workflowWith(options: () => AgentCallOptions) {
+  return defineWorkflow({
+    meta: { name: "resume-key", description: "resume-key" },
+    defaults: { model: { id: "m" } },
+    run: (ctx) => ctx.agent("explore", options()),
+  });
+}
+
+const databaseServer = (database: string) => ({ db: { command: "db-server", args: ["--database", database] } });
+
+function allFilesUnder(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name);
+    return statSync(path).isDirectory() ? allFilesUnder(path) : [path];
+  });
+}
+
+function repoWithOneCommit() {
+  mkdirSync(cwd, { recursive: true });
+  const git = (...args: string[]) => execFileSync("git", args, { cwd, stdio: "ignore" });
+  git("init", "-q");
+  writeFileSync(join(cwd, "a.txt"), "1");
+  git("add", ".");
+  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init");
+}
+
+test("a resume where only the step's mcpServers changed runs the step again, against the new servers", async () => {
+  let options: AgentCallOptions = { mcpServers: databaseServer("first") };
+  const wf = workflowWith(() => options);
+  const first = await runWorkflow(wf, {}, { cwd });
+  assert.equal(calls.length, 1);
+
+  options = { mcpServers: databaseServer("second") };
+  const resumed = await runWorkflow(wf, {}, { cwd, runId: first.runId });
+
+  assert.equal(resumed.status, "finished");
+  assert.equal(calls.length, 2, "the finished step must not be served from the journal");
+  assert.deepEqual(calls[1].mcpServers.db.args, ["--database", "second"]);
+});
+
+test("a resume where only the step's sandbox changed runs the step again", async () => {
+  let options: AgentCallOptions = { sandbox: false };
+  const wf = workflowWith(() => options);
+  const first = await runWorkflow(wf, {}, { cwd });
+  assert.equal(calls[0].local.sandboxOptions, undefined);
+
+  options = { sandbox: true };
+  await runWorkflow(wf, {}, { cwd, runId: first.runId });
+
+  assert.equal(calls.length, 2, "a result produced without the sandbox must not be reused under it");
+  assert.deepEqual(calls[1].local.sandboxOptions, { enabled: true });
+});
+
+test("a resume where nothing changed makes no agent call", async () => {
+  const wf = workflowWith(() => ({ mcpServers: databaseServer("first"), sandbox: true }));
+  const first = await runWorkflow(wf, {}, { cwd });
+  const created = calls.length;
+
+  const resumed = await runWorkflow(wf, {}, { cwd, runId: first.runId });
+
+  assert.equal(calls.length, created);
+  assert.deepEqual(resumed.result, first.result);
+});
+
+test("a memoized read-only step is not reused when its mcpServers changed, and is reused when they did not", async () => {
+  repoWithOneCommit();
+  let options: AgentCallOptions = { tools: ["read", "grep"], memo: true, mcpServers: databaseServer("first") };
+  const wf = workflowWith(() => options);
+
+  await runWorkflow(wf, {}, { cwd });
+  await runWorkflow(wf, {}, { cwd });
+  assert.equal(calls.length, 1, "same servers, same repository state: the memo serves the second run");
+
+  options = { tools: ["read", "grep"], memo: true, mcpServers: databaseServer("second") };
+  await runWorkflow(wf, {}, { cwd });
+  assert.equal(calls.length, 2, "another server: the memo must miss");
+});
+
+test("a memoized read-only step is not reused when its sandbox changed", async () => {
+  repoWithOneCommit();
+  let options: AgentCallOptions = { tools: ["read"], memo: true, sandbox: false };
+  const wf = workflowWith(() => options);
+
+  await runWorkflow(wf, {}, { cwd });
+  options = { tools: ["read"], memo: true, sandbox: true };
+  await runWorkflow(wf, {}, { cwd });
+
+  assert.equal(calls.length, 2);
+});
+
+test("no value from a server's env or headers reaches the journal, the memo store, or any other file of the run", async () => {
+  repoWithOneCommit();
+  const valueInEnv = "marmot-quartz-4417";
+  const valueInHeaders = "walnut-copper-9082";
+  const servers = {
+    local: { command: "db-server", env: { DATABASE_PASSWORD: valueInEnv } },
+    remote: { type: "http" as const, url: "https://example.invalid/mcp", headers: { Authorization: `Bearer ${valueInHeaders}` } },
+  };
+  const wf = workflowWith(() => ({ tools: ["read"], memo: true, mcpServers: servers }));
+
+  const run = await runWorkflow(wf, {}, { cwd });
+  await runWorkflow(wf, {}, { cwd, runId: run.runId });
+  assert.equal(calls.length, 1);
+
+  const stateFiles = allFilesUnder(join(cwd, ".workflows"));
+  assert.ok(stateFiles.some((file) => file.includes("memo")), "the memo store has a file");
+  assert.ok(stateFiles.some((file) => file.endsWith(".jsonl")), "the run has a journal and an event log");
+  for (const file of stateFiles) {
+    const text = readFileSync(file, "utf8");
+    assert.ok(!text.includes(valueInEnv), `${file} holds a value from env`);
+    assert.ok(!text.includes(valueInHeaders), `${file} holds a value from headers`);
+  }
+});
 test("concorrência respeita o limite", async () => {
   const wf = defineWorkflow({
     meta: { name: "c", description: "c" },
@@ -135,14 +249,7 @@ test("settingSources por etapa sobrescreve o default do run", async () => {
 });
 
 test("memo: reaproveita entre runs no mesmo estado do repo e invalida quando o repo muda", async () => {
-  const { execFileSync } = await import("node:child_process");
-  const { mkdirSync, writeFileSync } = await import("node:fs");
-  mkdirSync(cwd, { recursive: true });
-  const git = (...a: string[]) => execFileSync("git", a, { cwd, stdio: "ignore" });
-  git("init", "-q");
-  writeFileSync(join(cwd, "a.txt"), "1");
-  git("add", ".");
-  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init");
+  repoWithOneCommit();
   const wf = defineWorkflow({ meta: { name: "m", description: "m" }, defaults: { model: { id: "m" } }, run: (ctx) => ctx.agent("plan", { tools: ["read", "grep"], memo: true }) });
 
   await runWorkflow(wf, {}, { cwd }); // runId novo a cada chamada
@@ -159,15 +266,9 @@ test("memo: reaproveita entre runs no mesmo estado do repo e invalida quando o r
 });
 
 test("memo still serves a step when the local changes diff past 1 MiB", async () => {
-  const { execFileSync } = await import("node:child_process");
-  const { mkdirSync, writeFileSync } = await import("node:fs");
-  mkdirSync(cwd, { recursive: true });
-  const git = (...a: string[]) => execFileSync("git", a, { cwd, stdio: "ignore" });
-  git("init", "-q");
-  writeFileSync(join(cwd, "big.txt"), "1");
-  git("add", ".");
-  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init");
-  writeFileSync(join(cwd, "big.txt"), "line of local change\n".repeat(120_000)); // ~2.5 MB diff, past Node's 1 MiB default buffer
+  repoWithOneCommit();
+  const localChangePastOneMebibyte = "line of local change\n".repeat(120_000);
+  writeFileSync(join(cwd, "a.txt"), localChangePastOneMebibyte);
   const wf = defineWorkflow({ meta: { name: "mb", description: "mb" }, defaults: { model: { id: "m" } }, run: (ctx) => ctx.agent("plan", { tools: ["read"], memo: true }) });
 
   await runWorkflow(wf, {}, { cwd });
@@ -176,14 +277,7 @@ test("memo still serves a step when the local changes diff past 1 MiB", async ()
 });
 
 test("the git the engine runs itself (the memo's repo state, the run's repo identity) never blocks the process", async () => {
-  const { execFileSync } = await import("node:child_process");
-  const { chmodSync, mkdirSync, writeFileSync } = await import("node:fs");
-  mkdirSync(cwd, { recursive: true });
-  const git = (...a: string[]) => execFileSync("git", a, { cwd, stdio: "ignore" });
-  git("init", "-q");
-  writeFileSync(join(cwd, "a.txt"), "1");
-  git("add", ".");
-  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init");
+  repoWithOneCommit();
   // A slow git (a large repo, a slow disk): `diff` and `remote` take a second each.
   const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
   const bin = join(cwd, "..", `slow-git-${process.pid}`);

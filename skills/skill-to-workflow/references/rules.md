@@ -14,9 +14,11 @@ can make a decision, code **makes** it.
 ## The nine rules
 
 1. **Prompt and options are the step's key.** The journal (resume) recognizes a step by the hash of the prompt and of
-   the call fingerprint (model, schema, `cwd`, `tools`, `disallowedTools`, `agents`, `settingSources`), plus the order
-   in which that hash appears in the run. `label`, `timeoutMs`, `mcpServers` and `sandbox` stay out. The `memo` and the
-   provider's prompt cache also depend on the prompt. Build the prompt from instructions in module constants plus
+   the call fingerprint (model, schema, `cwd`, `tools`, `disallowedTools`, `agents`, `settingSources`, `mcpServers` and
+   whether the step runs sandboxed, with `caps.requireSandbox` applied), plus the order in which that hash appears in the
+   run. `label` and `timeoutMs` stay out. A resume whose `mcpServers` or sandbox changed runs the step again, and the
+   hash keeps the `env` and `headers` values of a server out of the journal. The `memo` follows the same fingerprint, and
+   the provider's prompt cache also depends on the prompt. Build the prompt from instructions in module constants plus
    deterministic data only: `args`, step results, and what the code computes from them and from disk (test output,
    diff). A date enters through `args`, not through `Date.now()`. Give a worktree a path derived from the item
    (`wf/migrate-<item>`). Two calls that must stay distinct (the same step in different rounds) carry the round in the

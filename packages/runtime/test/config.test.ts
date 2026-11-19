@@ -504,6 +504,30 @@ test("requireSandbox in the global caps sandboxes every step, even one whose cod
   assert.deepEqual(calls.map((c) => c.local?.sandboxOptions), [undefined, undefined], "without the cap the code decides; a repo file cannot set caps");
 });
 
+test("a resume where the global requireSandbox cap changed runs the step again, though the step's own sandbox did not", async () => {
+  const wf = configWorkflow((ctx) => ctx.agent("p", { role: "classify", label: "c", sandbox: false }));
+  const first = await runWorkflow(wf, {}, { cwd });
+  assert.equal(calls.length, 1);
+
+  writeGlobalConfig({ caps: { requireSandbox: true } });
+  await runWorkflow(wf, {}, { cwd, runId: first.runId });
+
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1].local?.sandboxOptions, { enabled: true });
+});
+
+test("a resume where the step's sandbox changed under a requireSandbox cap that sandboxes it either way does not run the step again", async () => {
+  writeGlobalConfig({ caps: { requireSandbox: true } });
+  let sandbox = false;
+  const wf = configWorkflow((ctx) => ctx.agent("p", { role: "classify", label: "c", sandbox }));
+  const first = await runWorkflow(wf, {}, { cwd });
+
+  sandbox = true;
+  await runWorkflow(wf, {}, { cwd, runId: first.runId });
+
+  assert.equal(calls.length, 1, "the effective sandbox is the same, so the finished step is reused");
+});
+
 test("tighten-only overrides (the chat): a lower limit applies, a looser one is a violation with no effect", async () => {
   writeGlobalConfig({ caps: { maxCents: 400 } });
   writeRepoConfig(cwd, { workflows: { cfg: { maxTokens: 1_000_000, maxCents: 300 } } });
