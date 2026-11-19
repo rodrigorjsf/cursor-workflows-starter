@@ -128,7 +128,6 @@ import {
   isTestFile,
   looksLikeNoTests,
   matchesAny,
-  peekTree,
   restorePaths,
   revertTo,
   runTests,
@@ -452,7 +451,7 @@ async function dirtyTreeRefusal(cmd: Commands, cwd: string, reasonOf = startDirt
 
 async function handedBackRefusal(cmd: Commands, cwd: string, handedBack: string): Promise<DirtyTree | undefined> {
   excludeCodeIndex(cwd);
-  const now = await peekTree(cmd, cwd);
+  const now = await cmd.peekTree(cwd);
   if (now === handedBack) return undefined;
   const files = (await changesBetween(cmd, cwd, handedBack, now)).map((change) => `${change.status.padStart(2)} ${change.path}`);
   const reason = dirtyTreeReason(
@@ -666,7 +665,7 @@ export default defineWorkflow<Args>({
     let handsTreeBack = false;
     const recordHandedBack = async () => {
       try {
-        progress.data.handedBack = await peekTree(cmd, ctx.cwd);
+        progress.data.handedBack = await cmd.peekTree(ctx.cwd);
       } catch (err) {
         if (!(err instanceof CommandError) || err.result.exitCode === null) throw err;
         ctx.warn(`the tree this run leaves could not be recorded, so a resume cannot tell your changes from the run's: ${err.message}`);
@@ -701,7 +700,7 @@ export default defineWorkflow<Args>({
           : await dirtyTreeRefusal(cmd, ctx.cwd);
         if (refusal) return { issue: ctx.args.issue, ...refusal };
         handsTreeBack = true;
-        progress.data.handedBack = await peekTree(cmd, ctx.cwd);
+        progress.data.handedBack = await cmd.peekTree(ctx.cwd);
         progress.save();
       }
       const { issue: number, repo } = ctx.args;
@@ -1070,7 +1069,7 @@ export default defineWorkflow<Args>({
         progress.data.inFlight = undefined;
         progress.save();
         if (!mainTree) return;
-        progress.data.handedBack = await peekTree(cmd, worktree);
+        progress.data.handedBack = await cmd.peekTree(worktree);
         progress.save();
       };
       /** O que uma etapa de código (green, correção, refactor) não pode mudar. Vazio = nenhuma violação. */

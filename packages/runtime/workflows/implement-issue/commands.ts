@@ -1,7 +1,7 @@
 // Every command implement-issue runs (the tests of the TDD loop, `git`, the forge's CLI) goes through `ctx.exec`: it never blocks
 // the process (status and cancel stay responsive), it is killed at its timeout, and the run's event log shows it as a step node.
 // The forge's CLI is named in forge.ts alone: this file knows only that such a CLI is a network command (`forgeRead`).
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NETWORK_GIT_ENV } from "../../src/runtime/git-transport.js";
@@ -109,12 +109,18 @@ export class Commands {
     return (await this.gitRead(cwd, "branch", "--show-current")).trim();
   }
 
-  async gitWithEnv(cwd: string, env: Record<string, string | undefined>, ...args: string[]): Promise<void> {
-    await this.succeed("git", args, cwd, this.timeouts.localMs, env);
-  }
-
-  async gitReadWithEnv(cwd: string, env: Record<string, string | undefined>, ...args: string[]): Promise<string> {
-    return this.succeedRead("git", args, cwd, this.timeouts.localMs, undefined, env);
+  async peekTree(cwd: string): Promise<string> {
+    const dir = mkdtempSync(join(tmpdir(), "wf-index-"));
+    try {
+      const index = join(dir, "index");
+      const own = (await this.gitRead(cwd, "rev-parse", "--path-format=absolute", "--git-path", "index")).trim();
+      if (existsSync(own)) copyFileSync(own, index);
+      const env = { GIT_INDEX_FILE: index };
+      await this.succeed("git", ["add", "-A"], cwd, this.timeouts.localMs, env);
+      return (await this.succeedRead("git", ["write-tree"], cwd, this.timeouts.localMs, undefined, env)).trim();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }
 
   /** `git` whose exit code is the answer (`diff --quiet`, `rev-parse --verify --quiet`): 0 is yes, 1 is no, anything else is an error. */
