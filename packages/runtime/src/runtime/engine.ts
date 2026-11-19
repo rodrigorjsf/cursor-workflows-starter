@@ -1189,16 +1189,20 @@ async function executeRun<A, R>(
           }
         };
 
+  function refuseCallThatCannotStart(api: "ctx.exec" | "ctx.mcp", timeoutMs: number): void {
+    if (!(timeoutMs > 0) || !Number.isFinite(timeoutMs)) throw new StepFailedError(`${api}: timeoutMs must be a positive number of milliseconds, got ${timeoutMs}`);
+    if (signal?.aborted) {
+      interrupted = true;
+      throw new RunCancelledError(cancelMessage);
+    }
+  }
+
   /** One `ctx.exec` call: a step node of the run. The command runs in its own process, and the call returns what the command did. */
   async function execCall(command: string, args: string[] = [], callOpts: ExecOptions = {}): Promise<ExecResult> {
     const flow = currentFlow();
     const cwd = callOpts.cwd ?? opts.cwd;
     const timeoutMs = callOpts.timeoutMs ?? resolved.config.execTimeoutMs;
-    if (!(timeoutMs > 0) || !Number.isFinite(timeoutMs)) throw new StepFailedError(`ctx.exec: timeoutMs must be a positive number of milliseconds, got ${timeoutMs}`);
-    if (signal?.aborted) {
-      interrupted = true; // a cancelled run starts no command: no node either
-      throw new RunCancelledError(cancelMessage);
-    }
+    refuseCallThatCannotStart("ctx.exec", timeoutMs);
     // The node's id comes from the call's shape and its branch (`flow.prefix`: where it sits in the groups), computed before
     // any await: the numbering does not depend on which parallel branch gets there first.
     const ref = execNodeRef(flow, [command, args, cwd]);
@@ -1258,11 +1262,7 @@ async function executeRun<A, R>(
   async function mcpCall(server: McpStdioServer, tool: string, args: Record<string, unknown> = {}, callOpts: McpCallOptions = {}): Promise<McpResult> {
     const flow = currentFlow();
     const timeoutMs = callOpts.timeoutMs ?? MCP_CALL_TIMEOUT_MS;
-    if (!(timeoutMs > 0) || !Number.isFinite(timeoutMs)) throw new StepFailedError(`ctx.mcp: timeoutMs must be a positive number of milliseconds, got ${timeoutMs}`);
-    if (signal?.aborted) {
-      interrupted = true;
-      throw new RunCancelledError(cancelMessage);
-    }
+    refuseCallThatCannotStart("ctx.mcp", timeoutMs);
     const ref = execNodeRef(flow, ["mcp", server.command, server.args ?? [], tool, args]);
     return inNode(runMcp(server, tool, args, timeoutMs, callOpts, ref), flow, ref, () => true);
   }
