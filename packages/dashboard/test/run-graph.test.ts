@@ -383,9 +383,36 @@ test("a command shows how it ended: the exit code, or the outcome when it was ki
     ]),
   );
 
-  assert.deepEqual(nodeOf(graph, "x-a").detail, { command: "npm", location: "local", attempts: 1, tokens: 0, costCents: 0, costFinal: true, durationMs: 1500, errorKind: "exit 2" });
+  assert.deepEqual(nodeOf(graph, "x-a").detail, { command: "npm", location: "local", attempts: 1, tokens: 0, costCents: 0, costFinal: true, durationMs: 1500, errorKind: "exit 2", exitCode: 2 });
   assert.equal(nodeOf(graph, "x-b").detail.errorKind, "timeout");
   assert.deepEqual([nodeOf(graph, "x-c").detail.errorKind, nodeOf(graph, "x-c").detail.error], ["spawn-error", "spawn ghost ENOENT"]);
+});
+
+test("a command keeps the exit code or the signal it ended with, and whether its caller marked it as a probe", () => {
+  const graph = buildRunGraph(
+    stamp([
+      runStart,
+      execStart("x-ok", "lint", {}, asNode),
+      execEnd("x-ok", "lint", {}, { durationMs: 40 }),
+      execStart("x-fail", "build", {}, asNode),
+      execEnd("x-fail", "build", {}, { ok: false, exitCode: 2 }),
+      execStart("x-probe", "git rev-parse", {}, asNode),
+      execEnd("x-probe", "git rev-parse", {}, { ok: false, exitCode: 1, probe: true }),
+      execStart("x-hung", "git fetch", {}, asNode),
+      execEnd("x-hung", "git fetch", {}, { ok: false, outcome: "timeout", exitCode: undefined, signal: "SIGTERM" }),
+      execStart("x-live", "sleep", {}, asNode),
+    ]),
+  );
+  const facts = (id: string) => {
+    const { exitCode, signal, probe } = nodeOf(graph, id).detail;
+    return { exitCode, signal, probe };
+  };
+
+  assert.deepEqual(facts("x-ok"), { exitCode: 0, signal: undefined, probe: undefined });
+  assert.deepEqual(facts("x-fail"), { exitCode: 2, signal: undefined, probe: undefined });
+  assert.deepEqual(facts("x-probe"), { exitCode: 1, signal: undefined, probe: true });
+  assert.deepEqual(facts("x-hung"), { exitCode: undefined, signal: "SIGTERM", probe: undefined });
+  assert.deepEqual(facts("x-live"), { exitCode: undefined, signal: undefined, probe: undefined }, "a command still going has not ended with anything");
 });
 
 test("a group is ok when it ended well and failed when a fatal error aborted it", () => {

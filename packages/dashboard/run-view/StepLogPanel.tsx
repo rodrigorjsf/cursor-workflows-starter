@@ -3,12 +3,13 @@
 // stood at a replay's position when the run is being replayed. Everything is drawn as text: a log holds what an agent wrote.
 import { type ReactNode, useEffect, useMemo, useRef } from "react";
 import { formatCount } from "../app/format.js";
-import { focusOnClose, focusOnOpen } from "./log-focus.js";
+import { commandItemSelector, focusOnClose, focusOnOpen, phaseEntrySelector, restoreFocus } from "./log-focus.js";
 import { NodeRows } from "./NodeRows.js";
-import { describeFacts } from "./node-details.js";
+import { Glyph } from "./nodes.js";
+import { describeCommand, describeFacts } from "./node-details.js";
 import type { GraphNode } from "./run-graph.js";
 import { type Body, type LogEntry, type OutputBlock, buildStepLog } from "./step-log.js";
-import { useStepLog } from "./use-step-log.js";
+import { type StepLogFeed, useStepLog } from "./use-step-log.js";
 
 /** How close to the bottom (in pixels) a reader still counts as following the tail. */
 const FOLLOW_SLACK_PX = 40;
@@ -82,10 +83,12 @@ export interface StepLogPanelProps {
   live: boolean;
   /** During a replay, the log line the replay has reached: the panel shows the log up to it. Undefined: everything. */
   upTo?: number;
+  openCommandId?: string;
+  onOpenCommand(id: string | undefined): void;
   onClose(): void;
 }
 
-export function StepLogPanel({ runId, node, now, live, upTo, onClose }: StepLogPanelProps) {
+export function StepLogPanel({ runId, node, now, live, upTo, openCommandId, onOpenCommand, onClose }: StepLogPanelProps) {
   const feed = useStepLog(runId, node.id, live);
   const log = useMemo(() => buildStepLog(feed.items, { upTo }), [feed.items, upTo]);
   const scroller = useRef<HTMLDivElement>(null);
@@ -151,6 +154,7 @@ export function StepLogPanel({ runId, node, now, live, upTo, onClose }: StepLogP
         </button>
       </header>
       <NodeRows rows={rows} className="facts" />
+      <CommandList commands={node.commands} openId={openCommandId} onSelect={onOpenCommand} />
       <div
         className="log"
         ref={scroller}
@@ -166,5 +170,187 @@ export function StepLogPanel({ runId, node, now, live, upTo, onClose }: StepLogP
         {body}
       </div>
     </aside>
+  );
+}
+
+export interface CommandListProps {
+  commands: GraphNode[];
+  openId?: string;
+  onSelect(id: string | undefined): void;
+}
+
+export function CommandList({ commands, openId, onSelect }: CommandListProps) {
+  if (commands.length === 0) return null;
+  return (
+    <section className="commands" aria-label="Commands">
+      <h3>
+        Commands <span className="count">{formatCount(commands.length)}</span>
+      </h3>
+      <ul>
+        {commands.map((command) => {
+          const open = command.id === openId;
+          return (
+            <li key={command.id}>
+              <button
+                type="button"
+                className={`command-item state-${command.state}`}
+                data-command-id={command.id}
+                aria-pressed={open}
+                aria-label={`${command.label}: ${command.state}. Open its output`}
+                title={command.label}
+                onClick={() => onSelect(open ? undefined : command.id)}
+              >
+                <Glyph state={command.state} />
+                <span className="label">{command.label}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+const OWN_ESCAPE = new Set(["INPUT", "SELECT", "TEXTAREA"]);
+
+export function closesOnEscape(event: { key: string; defaultPrevented: boolean; target: unknown }): boolean {
+  const tag = (event.target as { tagName?: string } | null)?.tagName;
+  return event.key === "Escape" && !event.defaultPrevented && !OWN_ESCAPE.has(tag ?? "");
+}
+
+function useEscape(onClose: () => void, capture: boolean) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!closesOnEscape(event)) return;
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", onKey, capture);
+    return () => window.removeEventListener("keydown", onKey, capture);
+  }, [onClose, capture]);
+}
+
+function useFocusInto(selectorToRestore: string) {
+  const panel = useRef<HTMLElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (panel.current && closeButton.current) focusOnOpen(panel.current, closeButton.current, (el) => getComputedStyle(el));
+    return () => restoreFocus(document, selectorToRestore);
+  }, []);
+  return { panel, closeButton };
+}
+
+export interface PhasePanelProps {
+  lane: number;
+  title: string;
+  commands: GraphNode[];
+  openId?: string;
+  onSelect(id: string | undefined): void;
+  onClose(): void;
+}
+
+export function PhasePanel({ lane, title, commands, openId, onSelect, onClose }: PhasePanelProps) {
+  const { panel, closeButton } = useFocusInto(phaseEntrySelector(lane));
+  useEscape(onClose, false);
+  const name = title === "" ? "the run" : title;
+  return (
+    <aside className="step-panel phase-panel" ref={panel} aria-label={`Workflow commands of ${name}`}>
+      <header>
+        <h2 title={name}>
+          {title === "" ? "Run" : title} <span className="kind">workflow</span>
+        </h2>
+        <button type="button" className="btn close" ref={closeButton} onClick={onClose} aria-label="Close the list">
+          <span aria-hidden="true">×</span>
+        </button>
+      </header>
+      <div className="log" tabIndex={0} aria-label="Workflow commands">
+        {commands.length === 0 ? <p className="notice">No command ran outside a step.</p> : <CommandList commands={commands} openId={openId} onSelect={onSelect} />}
+      </div>
+    </aside>
+  );
+}
+
+export interface CommandDetailsProps {
+  command: GraphNode;
+  feed: StepLogFeed;
+  now: number;
+  live: boolean;
+  upTo?: number;
+}
+
+export function CommandDetails({ command, feed, now, live, upTo }: CommandDetailsProps) {
+  const log = useMemo(() => buildStepLog(feed.items, { upTo }), [feed.items, upTo]);
+  const scroller = useRef<HTMLDivElement>(null);
+  const following = useRef(live);
+  useEffect(() => {
+    const el = scroller.current;
+    if (el && following.current) el.scrollTop = el.scrollHeight;
+  }, [log.count]);
+
+  let body: ReactNode;
+  if (feed.status === "loading") body = <p className="notice">Reading the command…</p>;
+  else if (feed.status === "error") {
+    body = (
+      <p className="notice" role="alert">
+        The output of this command could not be read: {feed.error}
+      </p>
+    );
+  } else if (log.attempts.length === 0) {
+    body = <p className="notice">{live ? "Waiting for the command to write something…" : upTo !== undefined && feed.items.length > 0 ? "Nothing of this command is written at this point of the replay." : "This command wrote no output."}</p>;
+  } else {
+    body = log.attempts.map((attempt) => (
+      <div key={attempt.attemptId} className="attempt">
+        {log.attempts.length > 1 && <h2>Attempt {attempt.number}</h2>}
+        {attempt.entries.map((entry) => (
+          <Entry key={entry.id} entry={entry} reprompt={false} />
+        ))}
+      </div>
+    ));
+  }
+  return (
+    <>
+      <NodeRows rows={describeCommand(command, now)} className="facts" />
+      <div
+        className="log"
+        ref={scroller}
+        role="log"
+        aria-live="off"
+        tabIndex={0}
+        aria-label="Command output"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          following.current = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_SLACK_PX;
+        }}
+      >
+        {body}
+      </div>
+    </>
+  );
+}
+
+export interface CommandPanelProps {
+  runId: string;
+  command: GraphNode;
+  now: number;
+  live: boolean;
+  upTo?: number;
+  onClose(): void;
+}
+
+export function CommandPanel({ runId, command, now, live, upTo, onClose }: CommandPanelProps) {
+  const feed = useStepLog(runId, command.id, live);
+  const { panel, closeButton } = useFocusInto(commandItemSelector(command.id));
+  useEscape(onClose, true);
+  return (
+    <section className="command-panel" role="dialog" aria-label={`Command ${command.label}`} ref={panel}>
+      <header>
+        <h2 title={command.label}>{command.label}</h2>
+        <span className={`tail${live ? " live" : ""}`}>{live ? "running" : upTo !== undefined ? "replay" : ""}</span>
+        <button type="button" className="btn close" ref={closeButton} onClick={onClose} aria-label="Close the command">
+          <span aria-hidden="true">×</span>
+        </button>
+      </header>
+      <CommandDetails command={command} feed={feed} now={now} live={live} upTo={upTo} />
+    </section>
   );
 }

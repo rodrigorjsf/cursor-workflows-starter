@@ -16,12 +16,15 @@ export interface WorkNodeData extends Record<string, unknown> {
 }
 export interface LaneNodeData extends Record<string, unknown> {
   title: string;
+  commands: number;
+  open: boolean;
+  onOpen?: () => void;
 }
 
 const GLYPH: Record<NodeState, string> = { running: "●", ok: "✓", failed: "✗", cancelled: "⊘", cached: "↺", interrupted: "‖", neutral: "○" };
 
 /** The state as a word a screen reader says; the glyph alone is decoration. */
-function Glyph({ state }: { state: NodeState }) {
+export function Glyph({ state }: { state: NodeState }) {
   return (
     <span className="glyph" aria-hidden="true">
       {GLYPH[state]}
@@ -109,10 +112,15 @@ export function LaneNode({ data }: NodeProps<Node<LaneNodeData, "lane">>) {
   const { top, left, height } = LANE_TITLE;
   return (
     <div className="lane">
-      {data.title !== "" && (
-        <span className="lane-title" style={{ top, left, right: left, height, lineHeight: `${height}px` }}>
-          {data.title}
-        </span>
+      {(data.title !== "" || data.commands > 0) && (
+        <div className="lane-header" style={{ top, left, right: left, height, lineHeight: `${height}px` }}>
+          <span className="lane-title">{data.title}</span>
+          {data.commands > 0 && (
+            <button type="button" className="phase-entry nopan" aria-pressed={data.open} aria-label={`Workflow of ${data.title === "" ? "the run" : data.title}: ${data.commands} commands. Open the list`} onClick={data.onOpen}>
+              workflow · {data.commands}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
