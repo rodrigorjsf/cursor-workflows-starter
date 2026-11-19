@@ -12,7 +12,7 @@ import { after, afterEach, before, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
-import { blockedUserDir, withUserDir } from "./user-dir.js";
+import { blockedUserDir, withUserDir } from "./isolate-home.js";
 
 const PACKAGE = join(import.meta.dirname, "..");
 let sandbox: string;

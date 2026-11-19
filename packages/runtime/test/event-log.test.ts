@@ -2,7 +2,7 @@
 // log (`.workflows/runs/<runId>/events.jsonl`), never on internal calls.
 process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
-import "./isolate-home.js";
+import { blockedUserDir, withUserDir } from "./isolate-home.js";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -14,7 +14,6 @@ import { eventLogPath, readEventLog, runDirPath } from "../src/runtime/run-store
 import { discoverWorkflows } from "../src/runtime/registry.js";
 import { readRunsIndex } from "../src/runtime/runs-index.js";
 import { defineWorkflow } from "../src/runtime/workflow.js";
-import { blockedUserDir, withUserDir } from "./user-dir.js";
 
 const cwd = join(import.meta.dirname, ".tmp", `event-log-${process.pid}`); // one directory per test process
 afterEach(() => {
