@@ -108,6 +108,37 @@ escolhe o forge: `github.com` é GitHub (`gh`), `gitlab.com` é GitLab (`glab`) 
 - Uma etapa na nuvem num repositório do GitLab depende do suporte do próprio Cursor ao GitLab; o kit não valida esse
   caminho ([6.2](../reference/config.md)).
 
+### Chamadas MCP do script: `ctx.mcp`
+
+Quando o código já decide a tool e os argumentos (listar as tabelas, descrever um esquema, rodar uma consulta fixa),
+`ctx.mcp(servidor, tool, args, { label, phase, timeoutMs })` chama a tool de um servidor MCP sem agente: não custa um
+turno de modelo e não tem variância ([ADR-0013](../adr/0013-script-side-mcp-calls.md)). Uma tool que o modelo precisa escolher
+continua numa etapa de agente, com `mcpServers` na etapa.
+
+```ts
+const servidor = { command: "node", args: ["db-server.mjs"], env: { DB_PATH: "app.sqlite" } };
+const tabelas = await ctx.mcp(servidor, "list_tables", {}, { label: "tabelas" });
+if (!tabelas.ok) return { status: "failed", reason: tabelas.error };
+```
+
+- O `servidor` é uma config stdio escrita no código do workflow (`command`, `args`, `env`). Nunca se resolve por nome a partir
+  do `.cursor/mcp.json` do repositório: num repositório em que você não confia, esse arquivo decidiria o que o workflow
+  executa. Servidores HTTP ficam de fora até um workflow precisar de um. O servidor sobe no cwd do run, com `HOME`,
+  `LOGNAME`, `PATH`, `SHELL`, `TERM` e `USER` do processo mais o `env`, e roda fora do sandbox do SDK, com a confiança de
+  um comando de `ctx.exec`. Um servidor configurado só no IDE precisa ter a config copiada para o workflow.
+- Devolve `{ ok, text, content, structuredContent?, timedOut, error? }`. Tool com erro, tool desconhecida, servidor que não
+  inicia ou que morre e tempo estourado (`timedOut: true`, 10 minutos por padrão no `timeoutMs`, contando a subida do
+  servidor) são **resultados** com `ok: false`, não exceções, como no `ctx.exec`. Um run cancelado fecha o cliente, termina o
+  processo do servidor e lança `RunCancelledError`.
+- A chamada reaproveita os eventos do `ctx.exec`: um `exec-start` e um `exec-end` com `command: "mcp"` e o servidor e a tool
+  no `label` (o `label` da chamada o substitui; o padrão é `mcp <comando> <primeiro argumento que não é flag> <tool>`, como `mcp node server.mjs echo`), então o run a desenha como desenha um comando e o esquema de eventos não muda
+  ([6.1](../reference/events.md#exec-start)). A tool, os argumentos e o servidor (o comando, os argumentos e só os nomes das
+  variáveis de `env`) são um `content` do tipo `tool-call`, e o resultado é `content` do tipo `command-output`, com a redação, o
+  corte e a retenção do conteúdo de um agente. O valor de uma chave com nome de segredo em `args` (`apiKey`,
+  `db_password`) e o de uma variável com nome de segredo em `env` também são redigidos.
+- **Não** entra no journal: o resume chama a tool de novo, e uma tool com efeitos roda duas vezes. A etapa de agente
+  seguinte, cujo prompt não mudou, ainda volta do journal.
+
 ## Custo
 
 Toda receita abaixo deve passar pelo checklist de custo ([5.2 §6](../operating/02-custos-e-cache.md#6-checklist-de-custo)). As

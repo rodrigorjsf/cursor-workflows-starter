@@ -11,6 +11,7 @@
 process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { calls, costConfig, resetCloud, script } from "../../runtime/test/fake-sdk.js";
 import { runWorkflow } from "../../runtime/src/runtime/engine.js";
@@ -18,7 +19,7 @@ import { EVENT_SCHEMA_VERSION } from "../../runtime/src/runtime/events.js";
 import { defineWorkflow } from "../../runtime/src/runtime/workflow.js";
 import { repoWithRemote } from "../../runtime/test/cloud-fixtures.js";
 import { clearConfig, configWorkflow, writeGlobalConfig } from "../../runtime/test/config-fixtures.js";
-import { describeNode } from "../run-view/node-details.js";
+import { describeCommand, describeNode } from "../run-view/node-details.js";
 import { EMPTY_ARGS_HASH, argsHashOf } from "../run-view/resume-command.js";
 import { costUnknown } from "../run-view/run-status.js";
 import { type GraphNode, KNOWN_EVENT_VERSION, type RunEvent, buildRunGraph, joinIdOf } from "../run-view/run-graph.js";
@@ -131,6 +132,42 @@ test("the graph of a real run draws the step and the command marked as a node; t
   assert.deepEqual(graph.lanes.map((l) => [l.title, l.commands.map((c) => [c.label, c.state, c.detail.errorKind])]), [
     ["Prep", [["setup", "ok", undefined], ["check", "neutral", "exit 1"], ["lint", "failed", "exit 2"]]],
   ]);
+});
+
+const MCP_SERVER = { command: process.execPath, args: [join(import.meta.dirname, "..", "..", "runtime", "test", "fixtures", "mcp-stdio", "server.mjs")] };
+
+const withMcpCalls = defineWorkflow<unknown, string>({
+  meta: { name: "with-mcp", description: "with mcp calls", phases: [{ title: "Ask" }] },
+  defaults: { model: { id: "m" } },
+  async run(ctx) {
+    ctx.phase("Ask");
+    await ctx.mcp(MCP_SERVER, "echo", { text: "hello" }, { label: "greeting" });
+    await ctx.mcp(MCP_SERVER, "fail", {}, { label: "broken" });
+    return "ok";
+  },
+});
+
+test("the graph of a real run lists a ctx.mcp call under its phase as it lists a command: a tool error is failed, and the step log shows the call and its result", async () => {
+  const repo = box.repo("repo");
+  const result = await runWorkflow(withMcpCalls, {}, { cwd: repo });
+  assert.equal(result.status, "finished", result.error);
+
+  const graph = buildRunGraph(eventsOf(repo, result.runId));
+  assert.deepEqual(graph.nodes.map((n) => [n.kind, n.label]), [["start", "with-mcp"]]);
+  assert.deepEqual(graph.lanes.map((l) => [l.title, l.commands.map((c) => [c.label, c.state, c.detail.command])]), [["Ask", [["greeting", "ok", "mcp"], ["broken", "failed", "mcp"]]]]);
+  const [greeting, broken] = graph.lanes[0]!.commands;
+  assert.deepEqual(describeCommand(greeting!, 0).map((r) => r.name), ["State", "Duration"]);
+  assert.deepEqual(describeCommand(broken!, 0).filter((r) => r.name === "Error").map((r) => r.value), ["the tool failed on purpose"]);
+
+  dash = await startDashboard({ port: 0 });
+  const reply = await http(dash.url, `/api/runs/${encodeURIComponent(result.runId)}/steps/${encodeURIComponent(greeting!.id)}/content`);
+  assert.equal(reply.status, 200);
+  const log = buildNodeLog((reply.json as { content: ContentItem[] }).content, { attemptIds: [] });
+  const tool = log.attempts[0]!.entries.find((entry) => entry.kind === "tool");
+  assert.ok(tool && tool.kind === "tool");
+  assert.equal(tool.title, "mcp: echo");
+  assert.deepEqual(JSON.parse(tool.args!).arguments, { text: "hello" });
+  assert.deepEqual(tool.output.map((o) => [o.stream, o.text]), [["stdout", "echo: hello"]]);
 });
 
 test("the hash the engine writes for empty args is the one the resume command recognises, and any other args are not mistaken for it", async () => {

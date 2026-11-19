@@ -172,6 +172,27 @@ poderia estourar o tempo dela e a saída dela ficaria invisível.
    `RunCancelledError`: o workflow não segue. O run espera o comando parar antes de gravar o `run-end`. Um segundo sinal
    (que sai do processo na hora) mata antes todos os comandos que ainda rodam.
 
+## Chamadas MCP do script (`ctx.mcp`)
+
+`ctx.mcp(servidor, tool, args, { label, phase, timeoutMs })` chama uma tool conhecida de um servidor MCP stdio sem agente
+([ADR-0013](../adr/0013-script-side-mcp-calls.md)). O motor a trata como um comando de `ctx.exec`, e só o transporte muda.
+
+1. **Cliente.** O `mcp-call.ts` sobe o servidor com o `StdioClientTransport` do `@modelcontextprotocol/sdk` (o `command` e os
+   `args` da config inline, no cwd do run, com o ambiente mínimo do SDK mais o `env`), chama a tool e fecha o cliente, que
+   termina o processo do servidor: `stdin` fechado, `SIGTERM` e, dois segundos depois, `SIGKILL`. Um processo que sai sem
+   ter fechado os clientes (um segundo sinal) mata antes os servidores que ainda rodam. A config só vem do código do
+   workflow: nunca do `.cursor/mcp.json`, que contornaria o `caps.allowedSettingSources`.
+2. **Nó do run.** A chamada é um nó com `stepId` (`x-…`, da config, da tool e dos argumentos mais a ocorrência), `parentId` e
+   `groupId`, e abre um `exec-start` e fecha um `exec-end` com `command: "mcp"`. O `outcome` é `exit` quando o servidor
+   respondeu (com `ok: false` se a tool reportou erro ou não existe), `spawn-error` quando o servidor não subiu ou
+   não completou o `initialize`, `timeout` no tempo estourado e `cancelled` no cancelamento; não há `exitCode`. Os argumentos
+   e o resultado são `content` (`tool-call` com `tool: "mcp"`, e `command-output`), sob a mesma redação, o mesmo corte e a
+   mesma retenção, e o resultado passa pelo mesmo corte de 262144 caracteres por chamada.
+3. **Falha é resultado.** Servidor que não sobe, tool desconhecida, erro da tool e tempo estourado voltam como
+   `{ ok: false, error }`, sem lançar. O resultado completo volta ao workflow; o log guarda a parte que cabe nele.
+4. **Cancelamento e resume.** O cancelamento do run fecha o cliente, termina o servidor, fecha o nó como `cancelled` e a
+   chamada lança `RunCancelledError`. A chamada **não** entra no journal: o resume a faz de novo.
+
 ## O `AgentBackend`: quem roda a tentativa
 
 O motor não sabe onde o agente roda: cada tentativa de uma etapa passa por um `AgentBackend`

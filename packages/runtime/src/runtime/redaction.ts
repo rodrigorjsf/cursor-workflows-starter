@@ -100,6 +100,7 @@ export interface Redactor {
   value<T>(value: T): T;
   /** Redacts, from now on, the values of the secret-named variables of `env` too (the environment a command runs with, say). */
   learn(env: Record<string, string | undefined>): void;
+  learnValues(values: readonly string[]): void;
 }
 
 /** The values to redact: those of the secret-named variables of `env`, and `extra`, longest first (so one never hides inside another). */
@@ -118,6 +119,9 @@ export function createRedactor(
   const learn = (env: Record<string, string | undefined>) => {
     secrets = secretValues(env, secrets);
   };
+  const learnValues = (values: readonly string[]) => {
+    secrets = secretValues({}, [...secrets, ...values]);
+  };
   const text = (input: string): string => {
     let out = input;
     for (const secret of secrets) if (out.includes(secret)) out = out.split(secret).join(REDACTED);
@@ -132,5 +136,11 @@ export function createRedactor(
     }
     return input;
   };
-  return { text, value, learn };
+  return { text, value, learn, learnValues };
+}
+
+export function secretValuesOf(value: unknown, named = false): string[] {
+  if (typeof value === "string") return named ? [value] : [];
+  if (typeof value !== "object" || value === null) return [];
+  return Object.entries(value).flatMap(([key, item]) => secretValuesOf(item, named || isSecretName(key)));
 }

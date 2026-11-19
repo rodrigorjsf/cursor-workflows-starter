@@ -12,7 +12,7 @@ what runs, when it runs and how many times; the model only executes each step. C
 ## Steps
 
 1. **Shape the steps.** Read [references/runtime-api.md](references/runtime-api.md): the skeleton, the `ctx` calls, the
-   `agent()` and `exec()` options and how the caps behave. Done when each step has a name, a model, `tools`,
+   `agent()`, `exec()` and `mcp()` options and how the caps behave. Done when each step has a name, a model, `tools`,
    `settingSources` and, if the code reads its result, a `schema`, and every command the code runs (tests, `git`, `gh` or
    `glab`) goes through `ctx.exec`, never a synchronous call (`execFileSync`). When a step must behave like the same
    request typed in the IDE chat, read "Parity with an IDE chat turn" in the same file: the `settingSources` list that
