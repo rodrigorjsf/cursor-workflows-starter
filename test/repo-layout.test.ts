@@ -193,9 +193,11 @@ test("the validate reference names what the kit ships: its scripts exist, the ch
   assert.match(four, /openPr/, "scenario 4 must ask the chat to open the PR");
 });
 
+const runWorkflowStep2 = (skill: string): string => skill.slice(skill.indexOf("\n2. "), skill.indexOf("\n3. Chain `wait_workflow`"));
+
 test("the run-workflow skill opens the dashboard link that start_workflow returns in Cursor's built-in browser", () => {
   const skill = read("skills", "run-workflow", "SKILL.md");
-  const step2 = skill.slice(skill.indexOf("\n2. "), skill.indexOf("\n3. Chain `wait_workflow`"));
+  const step2 = runWorkflowStep2(skill);
   assert.match(step2, /`dashboardUrl`/, "step 2 must tell the agent what to do with dashboardUrl");
   assert.match(step2, /built-in browser/i, "the link opens in Cursor's built-in browser");
   assert.match(step2, /`dashboardWarning`/, "a dashboard that could not start is relayed, not ignored");
@@ -235,7 +237,7 @@ test("the run-workflow skill asks for full permissions and gives the user the fo
 
 test("the run-workflow skill prefers the start_workflow tool and sends a down dashboard to supported commands, never to the kit's source", () => {
   const skill = read("skills", "run-workflow", "SKILL.md");
-  const step2 = skill.slice(skill.indexOf("\n2. "), skill.indexOf("\n3. Chain `wait_workflow`"));
+  const step2 = runWorkflowStep2(skill);
   assert.match(step2, /Prefer `start_workflow` to `wf start` whenever the `workflows` server is available/);
   assert.match(step2, /wf config set dashboard\.autoStart true/, "a dashboard that stays down for lack of auto-start is turned on by a supported command");
   assert.match(step2, /next `start_workflow` or `wf start` starts it/);
