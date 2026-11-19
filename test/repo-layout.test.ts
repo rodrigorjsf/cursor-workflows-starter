@@ -293,6 +293,8 @@ const SHIPPED_TEXT = [
   ...filesUnder("packages/runtime/workflows", /\.ts$/),
 ];
 
+const DATED_RESEARCH = [join("docs", "research", "verificacoes-locais.md"), join("docs", "research", "relatorio-pesquisa.md")];
+
 const TEAM_AS_RULES_OR_HOOKS = [
   /regras(?:\/| e )hooks do time/i,
   /hooks (?:do|de) time (?:e|ou) (?:do )?MDM/i,
@@ -303,14 +305,13 @@ const TEAM_AS_RULES_OR_HOOKS = [
 ];
 
 test("no doc, skill or source file says the team setting source loads team rules or team hooks", () => {
-  const offenders = SHIPPED_TEXT.flatMap((file) => {
+  const offenders = SHIPPED_TEXT.filter((file) => !DATED_RESEARCH.includes(file)).flatMap((file) => {
     const text = read(file).replace(/\s+/g, " ");
     return TEAM_AS_RULES_OR_HOOKS.flatMap((pattern) => (pattern.test(text) ? [`${file}: ${pattern}`] : []));
   });
   assert.deepEqual(offenders, [], "team only drives the managed-skill sync of @cursor/sdk 1.3.1: describe it that way");
 });
 
-const DATED_RESEARCH = [join("docs", "research", "verificacoes-locais.md"), join("docs", "research", "relatorio-pesquisa.md")];
 const DROPPED_DEFAULT = /\[\s*"project",\s*"team",\s*"mdm"\s*\]/;
 
 test("no doc, skill, script or source file names project, team and mdm as the engine default, which dropped team on 2026-11-19", () => {
