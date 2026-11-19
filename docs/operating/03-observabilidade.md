@@ -315,15 +315,22 @@ run como `missing`, com o motivo em `error`; os outros runs e o stream de evento
 `http://127.0.0.1:<porta>/runs/<runId>` desenha o run como um grafo que cresce enquanto os eventos chegam (a mesma tela serve
 para um run em andamento e para um que já terminou):
 
-- **Nós.** O começo do run, cada etapa de agente e cada comando de `ctx.exec`. Um `parallel` ou `pipeline` abre num nó
+- **Nós.** O começo do run, cada etapa de agente e cada comando de `ctx.exec` que a chamada marcou com `node: true` (as
+  suítes de teste do `implement-issue`). Os demais comandos não viram nó: o grafo guarda cada um na etapa que estava em
+  andamento quando ele começou ou, se ele rodou entre etapas, na fase dele. Um `parallel` ou `pipeline` abre num nó
   (`parallel ×3`) e fecha num círculo, onde os ramos voltam a se juntar; o que vem depois do grupo continua desse círculo. O
   grafo sai só dos campos `stepId`, `parentId` e `groupId` dos eventos (veja a referência de eventos, [6.1](../reference/events.md)),
   então um nó aparece quando o `step-start` ou o `exec-start` dele chega.
-- **Raias.** Cada fase (`ctx.phase`) é uma faixa, na ordem em que aparecem. Um nó fica na raia da fase que ele declara, ou
-  numa raia mais adiante quando continua de um nó que já está lá: nenhuma aresta volta para uma raia anterior.
+- **Raias.** Cada fase (`ctx.phase`) é uma faixa, empilhada de cima para baixo na ordem em que aparecem; uma fase só de
+  comandos também tem a sua. Dentro da faixa o fluxo vai da esquerda para a direita e uma sequência longa quebra em linhas,
+  para o grafo não passar de 1400 px de largura: o do run `implement-issue` de exemplo cabe numa página de 1500 px, sem
+  rolagem horizontal. Um nó fica na raia da fase que ele declara, ou numa raia mais adiante quando continua de um nó que já
+  está lá: nenhuma aresta volta para uma raia anterior.
 - **Estado.** Um nó em andamento pisca e a aresta que chega a ele se move; depois vira verde (ok), vermelho (falhou), âmbar
   (cancelado) ou cinza (servido do journal ou do memo, num resume). Se o run termina, ou o processo cai, com um nó ainda em
-  andamento, o nó vira "interrompido" (tracejado) em vez de piscar para sempre.
+  andamento, o nó vira "interrompido" (tracejado) em vez de piscar para sempre. Uma sonda (`probe: true`) que sai com o
+  código 1, a resposta esperada dela, fica neutra (círculo vazio) em vez de vermelha, e a linha **Answer** do tooltip
+  diz o código; qualquer outra falha, de um comando com ou sem `probe`, segue vermelha.
 - **Passar o mouse** sobre um nó mostra o modelo (ou o programa, num comando), onde rodou (`local` ou `cloud`), as
   tentativas, os tokens, o custo, a duração e o tipo do erro (`timeout`, `rate-limit`…; num comando, `exit 2`,
   `timeout`…). Os números somam todas as tentativas e todas as execuções do run; o custo é o que o teto de custo conta (o
@@ -342,7 +349,7 @@ para um run em andamento e para um que já terminou):
   run teria naquele instante, e o painel de log aberto mostra o log da etapa como ele estava naquele ponto (o replay anda
   pelos eventos que mudam o desenho: o log de uma etapa aparece inteiro quando ela termina; a barra deixa parar em
   qualquer evento).
-- Um run grande (o `implement-issue` passa de 50 comandos) não cabe na tela em tamanho legível: a tela enquadra só os nós
+- Um run com mais nós do que cabem na tela em tamanho legível não aparece inteiro: a tela enquadra só os nós
   que cabem com o texto legível, em volta de um foco (o nó com o log aberto; num run que terminou, o primeiro nó que
   falhou, foi cancelado ou foi interrompido, ou senão a primeira etapa; num run em andamento, o nó mais recente), e
   **Fit View** mostra tudo. Ao chegar pelo Tab a um nó fora da tela, a tela o centraliza no mesmo zoom; a partir daí não
