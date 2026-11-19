@@ -601,4 +601,4 @@ condicional** sobre o Cursor SDK. Esse é o espaço que o starter kit ocupa.
 
 ---
 
-[← Anterior: 7.12 · ADR-0012: Delivery modes: the main tree by default, a worktree on request](../adr/0012-delivery-modes.md) · [Índice](../README.md) · [Próximo: 8.2 · Verificações locais (2026-11-11) →](verificacoes-locais.md)
+[← Anterior: 7.13 · ADR-0013: Script-side MCP calls with `ctx.mcp`](../adr/0013-script-side-mcp-calls.md) · [Índice](../README.md) · [Próximo: 8.2 · Verificações locais (2026-11-11) →](verificacoes-locais.md)

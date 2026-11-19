@@ -66,4 +66,4 @@ user's own folder. A worktree is used only on request, per run or in the config.
 
 ---
 
-[← Anterior: 7.11 · ADR-0011: The npm package is a bootstrapper for the tag install](0011-npm-bootstrapper.md) · [Índice](../README.md) · [Próximo: 8.1 · Cursor SDK como motor de workflows determinísticos: relatório de pesquisa →](../research/relatorio-pesquisa.md)
+[← Anterior: 7.11 · ADR-0011: The npm package is a bootstrapper for the tag install](0011-npm-bootstrapper.md) · [Índice](../README.md) · [Próximo: 7.13 · ADR-0013: Script-side MCP calls with `ctx.mcp` →](0013-script-side-mcp-calls.md)
