@@ -372,6 +372,14 @@ Clicar num nó abre o log da etapa ao lado do grafo (abaixo de 800 px de largura
   continuou rodando mostra só a resposta final dele (o run reanexado não tem stream).
 - **Comando de `ctx.exec`:** a linha de comando (`$ git commit -m …`), o diretório e a saída, com `stdout` e `stderr`
   separados e na ordem em que chegaram.
+- **Comandos.** Entre os dados e o log, a seção **Commands** lista, como itens compactos (ícone de estado e rótulo), os
+  comandos de `ctx.exec` que rodaram enquanto a etapa estava em andamento, na ordem em que começaram. Os comandos que
+  rodaram fora de qualquer etapa ficam na entrada **workflow** da fase: o botão `workflow · N` no cabeçalho da faixa da
+  fase abre um painel só com essa lista. Os itens são botões, então o Tab chega a eles e Enter ou Espaço os aciona.
+- **Painel de um comando.** Clicar num item abre um painel flutuante com a linha de comando inteira, o diretório, o código
+  de saída (ou o sinal que matou o comando), se a chamada era uma sonda (`probe: true`), a duração e a saída, a de um
+  comando de leitura também. Enquanto o comando roda, a saída chega ao painel aberto do mesmo jeito que o conteúdo de uma
+  etapa. O foco vai para o painel quando ele abre; Esc (ou o botão ×) fecha só ele e devolve o foco ao item.
 - **Ao vivo.** Enquanto a etapa roda, o painel lê o conteúdo que já existe (`/api/runs/<runId>/steps/<stepId>/content`) e
   segue o resto pelo stream (`/events?stepId=<stepId>&lastEventId=<a última linha lida>`), sem lacuna e sem repetição.
   A vista acompanha o fim do log até o leitor subir a barra de rolagem; ao terminar a etapa, o painel lê o conteúdo mais uma

@@ -263,7 +263,7 @@ export function PhasePanel({ lane, title, commands, openId, onSelect, onClose }:
           <span aria-hidden="true">×</span>
         </button>
       </header>
-      <div className="log" tabIndex={0} aria-label="Workflow commands">
+      <div className="log" role="region" tabIndex={0} aria-label="Workflow commands">
         {commands.length === 0 ? <p className="notice">No command ran outside a step.</p> : <CommandList commands={commands} openId={openId} onSelect={onSelect} />}
       </div>
     </aside>
