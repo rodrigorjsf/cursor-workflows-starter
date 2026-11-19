@@ -7,6 +7,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { builtinModules } from "node:module";
 import { test } from "node:test";
 import ts from "@typescript/typescript6";
+import { tableRows } from "../scripts/lib/markdown.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const read = (...p: string[]) => readFileSync(join(ROOT, ...p), "utf8");
@@ -324,9 +325,6 @@ test("the authoring book and the authoring skill give the settingSources list cl
     assert.ok(text.includes(managedSkills[name]), `the ${name} does not say team syncs ${managedSkills[name]}`);
   }
 });
-
-const tableRows = (md: string): string[][] =>
-  md.split("\n").filter((line) => line.startsWith("| ")).map((line) => line.slice(1, -1).split(" | ").map((cell) => cell.trim()));
 
 const mappingRow = (rows: string[][], origin: RegExp): string[] => {
   const row = rows.find(([cell]) => origin.test(cell!));

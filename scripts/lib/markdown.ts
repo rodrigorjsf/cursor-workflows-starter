@@ -179,3 +179,12 @@ export function anchorsOf(parsed: ParsedMarkdown): Set<string> {
   }
   return anchors;
 }
+
+export function tableRows(section: string): string[][] {
+  return section
+    .split("\n")
+    .filter((line) => line.startsWith("|"))
+    .map((line) => line.slice(1, line.lastIndexOf("|")).split("|").map((cell) => cell.trim()))
+    .filter((cells) => !cells.every((cell) => /^-+$/.test(cell)))
+    .slice(1);
+}
