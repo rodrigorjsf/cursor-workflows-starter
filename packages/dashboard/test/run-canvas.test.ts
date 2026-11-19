@@ -68,6 +68,26 @@ test("a phase with commands but no steps still has its band, so that its workflo
   assert.deepEqual(nodes.filter((n) => n.type === "lane").map((n) => [n.data.title, n.data.commandCount, n.data.open]), [["Triage", 1, false]]);
 });
 
+type Focusable = ReactElement<{ className?: string; children?: ReactNode; onFocus?: (event: { currentTarget: { matches(selector: string): boolean } }) => void }>;
+const findByClass = (node: ReactNode, className: string): Focusable | undefined => {
+  if (Array.isArray(node)) return node.map((child) => findByClass(child, className)).find(Boolean);
+  if (!isValidElement(node)) return undefined;
+  const element = node as Focusable;
+  return element.props.className?.split(" ").includes(className) ? element : findByClass(element.props.children, className);
+};
+
+test("a phase's workflow entry that takes the keyboard focus asks the canvas to bring its band's header into view; a click's focus does not", async () => {
+  const graph = withLooseCommands("Delivery");
+  const focused: number[] = [];
+  const { nodes } = toFlow(graph, await layoutRunGraph(graph), { now: 0, open: () => {}, focus: () => {}, phases: { onOpen: () => {}, onFocus: (lane) => focused.push(lane) } });
+  const [band] = nodes.filter((n) => n.type === "lane");
+  const entry = findByClass(LaneNode({ data: band!.data } as never), "phase-entry");
+  assert.ok(entry, "the band draws its workflow entry");
+  entry.props.onFocus?.({ currentTarget: { matches: (selector) => selector !== ":focus-visible" } });
+  entry.props.onFocus?.({ currentTarget: { matches: (selector) => selector === ":focus-visible" } });
+  assert.deepEqual(focused, [0]);
+});
+
 test("the band's header holds a button for the workflow entry, named after its phase and its count; with no commands it is only the title", () => {
   const lane = (data: object) => render(LaneNode, { data } as never);
   const withEntry = lane({ title: "Delivery", commandCount: 7, open: false });

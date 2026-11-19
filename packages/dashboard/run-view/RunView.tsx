@@ -12,7 +12,7 @@ import { frameOf, jumpTarget, panTarget } from "./framing.js";
 import { formatCents, formatCount, formatDuration } from "../app/format.js";
 import { type MenuPhase, type RunGraph, type RunProgress, buildRunGraph, commandCount, currentExecution, executionsOf, isWork, shownEvents, stepMenu } from "./run-graph.js";
 import { costUnknown, executionNote, headerStatus, offeredActions, runElapsed } from "./run-status.js";
-import { type Box, type RunLayout, layoutRunGraph } from "./run-layout.js";
+import { type Box, type RunLayout, laneTitleBox, layoutRunGraph } from "./run-layout.js";
 import { type Connection, useRunEvents } from "./use-run-events.js";
 import { errorText } from "../app/error-text.js";
 
@@ -74,6 +74,7 @@ export interface FlowView {
 export interface PhaseEntries {
   openIndex?: number;
   onOpen(lane: number): void;
+  onFocus?(lane: number): void;
 }
 
 /** What React Flow draws for `graph` laid out as `layout`. `open` opens a node's log; `focus` brings a node that took the keyboard focus into view. */
@@ -83,7 +84,7 @@ export function toFlow(graph: RunGraph, layout: RunLayout, view: FlowView): { no
     id: `lane-${lane.index}`,
     type: "lane",
     position: { x: lane.x, y: lane.y },
-    data: { title: lane.title, commandCount: graph.lanes[lane.index]?.commands.length ?? 0, open: lane.index === phases.openIndex, onOpen: () => phases.onOpen(lane.index) },
+    data: { title: lane.title, commandCount: graph.lanes[lane.index]?.commands.length ?? 0, open: lane.index === phases.openIndex, onOpen: () => phases.onOpen(lane.index), onFocus: () => phases.onFocus?.(lane.index) },
     width: lane.width,
     height: lane.height,
     zIndex: -1,
@@ -173,14 +174,24 @@ function Canvas({ graph, layout, now, selectedId, onOpen, phases, jump }: { grap
     },
     [setCenter],
   );
-  const focus = useCallback(
-    (id: string) => {
-      const box = layout.nodes[id];
+  const reveal = useCallback(
+    (box: Box | undefined) => {
       const { transform, width, height } = store.getState();
       const target = box && panTarget(box, { x: transform[0], y: transform[1], zoom: transform[2] }, { width, height });
       if (target) moveTo({ ...target, zoom: transform[2] });
     },
-    [layout, store, moveTo],
+    [store, moveTo],
+  );
+  const focus = useCallback((id: string) => reveal(layout.nodes[id]), [layout, reveal]);
+  const entries = useMemo<PhaseEntries>(
+    () => ({
+      ...phases,
+      onFocus: (lane: number) => {
+        const band = layout.lanes.find((l) => l.index === lane);
+        if (band) reveal(laneTitleBox(band));
+      },
+    }),
+    [phases, layout, reveal],
   );
   const centreOn = useCallback(
     (id: string) => {
@@ -189,7 +200,7 @@ function Canvas({ graph, layout, now, selectedId, onOpen, phases, jump }: { grap
     },
     [layout, store, moveTo],
   );
-  const { nodes, edges } = useMemo(() => toFlow(graph, layout, { now, selectedId, open: onOpen, focus, phases }), [graph, layout, now, selectedId, onOpen, focus, phases]);
+  const { nodes, edges } = useMemo(() => toFlow(graph, layout, { now, selectedId, open: onOpen, focus, phases: entries }), [graph, layout, now, selectedId, onOpen, focus, entries]);
   const pane = useStore((s) => ({ width: s.width, height: s.height }), (a, b) => a.width === b.width && a.height === b.height);
   useEffect(() => {
     following.current = jump?.id;

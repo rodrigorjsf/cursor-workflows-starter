@@ -19,6 +19,7 @@ export interface LaneNodeData extends Record<string, unknown> {
   commandCount: number;
   open: boolean;
   onOpen?: () => void;
+  onFocus?: () => void;
 }
 
 const GLYPH: Record<NodeState, string> = { running: "●", ok: "✓", failed: "✗", cancelled: "⊘", cached: "↺", interrupted: "‖", neutral: "○" };
@@ -116,7 +117,12 @@ export function LaneNode({ data }: NodeProps<Node<LaneNodeData, "lane">>) {
         <div className="lane-header" style={{ top, left, right: left, height, lineHeight: `${height}px` }}>
           <span className="lane-title">{data.title}</span>
           {data.commandCount > 0 && (
-            <button type="button" className="phase-entry nopan" aria-pressed={data.open} aria-label={`Workflow of ${phaseName(data.title)}: ${data.commandCount} commands. Open the list`} onClick={data.onOpen}>
+            <button type="button" className="phase-entry nopan" aria-pressed={data.open} aria-label={`Workflow of ${phaseName(data.title)}: ${data.commandCount} commands. Open the list`}
+              onClick={data.onOpen}
+              onFocus={(event) => {
+                if (event.currentTarget.matches(":focus-visible")) data.onFocus?.();
+              }}
+            >
               workflow · {data.commandCount}
             </button>
           )}
