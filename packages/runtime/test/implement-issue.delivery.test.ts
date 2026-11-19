@@ -428,8 +428,6 @@ test("the workflow force-pushes only branches under its own prefix, and always w
   ]);
 });
 
-// ── The main tree: the run's branch is checked out in the folder the user has open ─────
-
 const currentBranch = () => git(fx.repo, "branch", "--show-current").trim();
 const runBranches = () => git(fx.repo, "branch", "--list", "wf/*", "--format=%(refname:short)").split("\n").filter(Boolean);
 const treeStatus = () => git(fx.repo, "status", "--porcelain");
