@@ -54,10 +54,6 @@
 //     (testes: `testTimeoutSec`; `git push` e o CLI do forge: `networkTimeoutSec`; git local: o `execTimeoutMs` da configuração) e como nó de comando no log
 //     do run. Um erro do CLI do forge ou do `git` falha o run com a mensagem dele; "sem PR" é só a resposta conhecida do forge;
 //   - the forge (host of the issue and the PR: github.com, gitlab.com or one the config's `forges` map declares; an unknown host fails the run before any step) sits behind implement-issue/forge.ts, the only file naming its CLI; the run records it in its progress;
-//   - cada run tem a sua branch (`wf/issue-<n>-<run>`) e o seu worktree, criados a partir da cabeça ATUAL da branch padrão; o
-//     worktree só é reaproveitado pelo run que o registrou no progresso. Uma issue tem no máximo um run ativo: o segundo run
-//     devolve "issue-locked" com o id do que está ativo (lock `issue-<n>` no run store, por repositório; um `repo` que o forge
-//     diz ser o repositório do cwd é o mesmo lock que um run sem `repo`);
 //   - a entrega empurra com `--force-with-lease`, só em branch `wf/`, e só quando o commit que o origin tem na branch é um que
 //     este run empurrou: o resume depois do PR refaz o commit e entrega por cima; commit de outra pessoa na branch dá
 //     "push-refused" e não é sobrescrito.
