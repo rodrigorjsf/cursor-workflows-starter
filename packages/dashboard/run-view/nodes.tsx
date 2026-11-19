@@ -21,7 +21,7 @@ export interface LaneNodeData extends Record<string, unknown> {
 const GLYPH: Record<NodeState, string> = { running: "●", ok: "✓", failed: "✗", cancelled: "⊘", cached: "↺", interrupted: "‖", neutral: "○" };
 
 /** The state as a word a screen reader says; the glyph alone is decoration. */
-function Glyph({ state }: { state: NodeState }) {
+export function Glyph({ state }: { state: NodeState }) {
   return (
     <span className="glyph" aria-hidden="true">
       {GLYPH[state]}

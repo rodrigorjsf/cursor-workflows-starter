@@ -129,9 +129,30 @@ export const joinIdOf = (groupId: string): string => `join:${groupId}`;
 export const commandCount = (graph: RunGraph): number =>
   graph.nodes.reduce((sum, node) => sum + (node.kind === "command" ? 1 : 0) + node.commands.length, 0) + graph.lanes.reduce((sum, lane) => sum + lane.commands.length, 0);
 
+export interface MenuStep {
+  id: string;
+  label: string;
+  state: NodeState;
+}
+
+export interface MenuPhase {
+  index: number;
+  title: string;
+  steps: MenuStep[];
+}
+
+export const stepMenu = (graph: RunGraph): MenuPhase[] =>
+  graph.lanes
+    .map((lane) => ({
+      index: lane.index,
+      title: lane.title,
+      steps: graph.nodes.filter((node) => isWork(node.kind) && node.lane === lane.index).map(({ id, label, state }) => ({ id, label, state })),
+    }))
+    .filter((phase) => phase.steps.length > 0);
+
 const START = "start";
 
-const str = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
+const str =(value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
 
 /** What the builder remembers about a node besides what the graph shows: where it sits in the run's structure. */
 interface Placement {

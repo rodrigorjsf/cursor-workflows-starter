@@ -33,8 +33,12 @@ export function boundsOf(boxes: Box[]): Box {
 export function panTarget(box: Box, viewport: { x: number; y: number; zoom: number }, pane: { width: number; height: number }): { x: number; y: number } | undefined {
   const { x, y, zoom } = viewport;
   const inView = box.x * zoom + x >= 0 && (box.x + box.width) * zoom + x <= pane.width && box.y * zoom + y >= 0 && (box.y + box.height) * zoom + y <= pane.height;
-  return inView ? undefined : { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  return inView ? undefined : centreOf(box);
 }
+
+const centreOf = (box: Box): { x: number; y: number } => ({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
+
+export const jumpTarget = (box: Box, zoom: number): { x: number; y: number; zoom: number } => ({ ...centreOf(box), zoom: Math.max(zoom, READABLE_ZOOM) });
 
 /**
  * How to frame the run in a pane of `pane` pixels: all of it when that stays readable; otherwise as many nodes as fit at a

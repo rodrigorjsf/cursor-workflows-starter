@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildRunGraph } from "../run-view/run-graph.js";
-import { RunCost } from "../run-view/RunView.js";
+import { RunCost, RunView } from "../run-view/RunView.js";
 import { headerStatus, offeredActions, runElapsed } from "../run-view/run-status.js";
 import { render, textOf } from "./render.js";
 import { cloudAgent, phase, runStart, stamp, step, stepEnd, stepStart, type Draft } from "./run-log.js";
@@ -115,4 +115,13 @@ test("one attempt that did not report its cost leaves the run's 0 unknown; once 
 
 test("a log from before events said whether the cost was final reads as final", () => {
   assert.equal(costOf([runStart, ...costed("s-a", { rawCents: 0, chargedCents: 0 })]), "0¢");
+});
+
+test("the header has a visible button back to the Runs list, and the breadcrumb's Runs is a link to the same place", () => {
+  const html = render(RunView, { runId: "wf-aaaa0001" });
+  const back = /<a class="btn back" href="\/#\/runs">(.*?)<\/a>/.exec(html);
+  assert.ok(back, "a link styled as a button points at #/runs");
+  assert.equal(textOf(back[1]!), "← Back to Runs");
+  assert.match(html, /<nav class="crumbs" aria-label="Breadcrumb"><a href="\/#\/runs">Runs<\/a>/);
+  assert.ok(html.indexOf(back[0]) < html.indexOf('class="run-stats"'), "the button is in the header, above the run's numbers");
 });
