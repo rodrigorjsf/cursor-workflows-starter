@@ -29,14 +29,6 @@ export function assertUserDirWritable(): void {
 
 const excludeFiles = new Map<string, string>();
 
-/**
- * Garante `.workflows/` fora do git no repositório alvo (via info/exclude, sem tocar no .gitignore). Em um worktree
- * ligado ou submódulo o `.git` é um arquivo: é o git que diz onde está o `info/exclude` (`--git-path`).
- */
-export function ensureIgnored(cwd: string): void {
-  ensureExcluded(cwd, ".workflows/");
-}
-
 export function ensureExcluded(cwd: string, entry: string): boolean {
   if (!existsSync(join(cwd, ".git"))) return false;
   let exclude = excludeFiles.get(cwd);
@@ -59,7 +51,7 @@ export const stateRootIn = (cwd: string): string => join(cwd, ".workflows");
 
 /** A folder of the repo's run state (`.workflows/<parts>`), made when it is not there, for its user alone (`PRIVATE_DIR`): it holds the private source of the repo. */
 export function stateDir(cwd: string, ...parts: string[]): string {
-  ensureIgnored(cwd);
+  ensureExcluded(cwd, ".workflows/");
   const dir = join(stateRootIn(cwd), ...parts);
   mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR });
   return dir;
