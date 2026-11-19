@@ -443,6 +443,18 @@ const startDirtyTreeReason = (files: string[]) =>
     `To go on, commit, stash or discard them and start again, or ${WORKTREE_WAY_OUT}`,
   );
 
+const ENV_FILES_SHOWN = 5;
+
+async function envFilesOutsideGit(cmd: Commands, cwd: string): Promise<string[]> {
+  return (await cmd.gitRead(cwd, "ls-files", "--others", "-z", "--", ":(top,glob)**/.env", ":(top,glob)**/.env.*")).split("\0").filter(Boolean);
+}
+
+function envFilesNamed(files: string[]): string {
+  const shown = files.slice(0, ENV_FILES_SHOWN).join(", ");
+  const more = files.length > ENV_FILES_SHOWN ? ` and ${files.length - ENV_FILES_SHOWN} more` : "";
+  return files.length === 1 ? `${shown} is` : `${shown}${more} are`;
+}
+
 async function dirtyTreeRefusal(cmd: Commands, cwd: string, reasonOf = startDirtyTreeReason): Promise<DirtyTree | undefined> {
   excludeCodeIndex(cwd);
   const files = (await cmd.gitRead(cwd, "status", "--porcelain", "--untracked-files=all")).split("\n").filter(Boolean);
@@ -690,7 +702,14 @@ export default defineWorkflow<Args>({
     try {
       progress.data.forge = forge.name; // `wf gc` asks this forge about the run's PR, whatever is detected later
       progress.save();
-      const mainTree = progress.data.mainTree ?? (progress.data.worktree === undefined && progress.data.baseCommit === undefined && !(ctx.args.worktree ?? settings.worktree));
+      let mainTree = progress.data.mainTree ?? (progress.data.worktree === undefined && progress.data.baseCommit === undefined && !(ctx.args.worktree ?? settings.worktree));
+      if (mainTree && progress.data.mainTree === undefined) {
+        const envFiles = await envFilesOutsideGit(cmd, ctx.cwd);
+        if (envFiles.length) {
+          mainTree = false;
+          ctx.log(`${envFilesNamed(envFiles)} outside git (untracked or ignored), and a step working in this folder could read it: the run works in a worktree of its own instead of the repository's folder`);
+        }
+      }
       if (mainTree) {
         const claim = claimMainTree(ctx.cwd, ctx.runId, ctx.args.issue);
         if ("refusal" in claim) return claim.refusal;
