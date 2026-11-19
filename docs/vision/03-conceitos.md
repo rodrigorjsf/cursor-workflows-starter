@@ -83,6 +83,12 @@ o que faz o resume pular as etapas prontas. Não registra o que aconteceu, só o
 A retenção apaga o resultado de cada linha do journal de um run velho e marca o run: ele não retoma mais.
 _Evite_: histórico, log.
 
+**Checkpoint**:
+Um ponto em que o workflow devolve o controle à pessoa. O `run` faz `return` de um objeto com um `status` próprio, o
+`runId` e um `next` (o comando de resume), e o run termina `finished`. A resposta da pessoa entra como `args` de uma
+execução nova do mesmo run (`resumeRunId`); as etapas já concluídas voltam do journal.
+_Evite_: pausa, `paused` (não há status pausado), elicitation.
+
 **Log de eventos** (*event log*):
 O `events.jsonl` do run: cada fato do run, em ordem. Todo evento leva a versão do schema, o horário e o `runId`, e os
 das etapas levam também `stepId`, `parentId` e `groupId`. É a fonte da verdade do status, das linhas recentes e do gasto
