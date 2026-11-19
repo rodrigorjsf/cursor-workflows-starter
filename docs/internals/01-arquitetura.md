@@ -69,7 +69,7 @@ são o que o backend local faz numa tentativa.
      Antes disso, medido em 2026-11-11: uma etapa começou abaixo de `--max-tokens 300000` e o run fechou em 344 mil
      ([8.2 §9](../research/verificacoes-locais.md)).
 4. **Agente novo:** `Agent.create` com o modelo da etapa, a allowlist de tools, os subagents e MCP servers
-   inline, o sandbox (se pedido) e `settingSources: ["project","team","mdm"]`.
+   inline, o sandbox (se pedido) e `settingSources: ["project","mdm"]`.
    - Com `schema`, registra a custom tool `submit_result` e garante `"mcp"` na allowlist.
    - Quando a etapa carrega camadas de arquivo (`project`, `user`, `plugins` ou `all`), registra também um MCP
      inline `workflows` (ou `WF_MCP_SERVER_NAME`) sem tools, `packages/runtime/src/runtime/nested-mcp-guard.mjs`. Ele vence o

@@ -161,8 +161,9 @@ IDE sobre o mesmo checkout é `["project","user","plugins","mdm"]`. Passe-a na c
 - **`project` lê o checkout, não a sessão do IDE.** O que só existe na janela aberta (um arquivo não salvo, uma regra anexada à
   mão) não chega à etapa.
 - **`team` fica de fora da lista.** Ele só sincroniza as skills gerenciadas do time: não busca Team Rules e não tem caminho de
-  hooks. É uma leitura estática do bundle do `@cursor/sdk@1.3.1`, não uma medição; a linha "Contexto fixo por camada" de
-  [8.2 §7](../research/verificacoes-locais.md) é coerente com ela.
+  hooks. A leitura estática do bundle do `@cursor/sdk@1.3.1` diz isso, e a medição de 2026-11-19 ([8.2 §18](../research/verificacoes-locais.md))
+  o confirmou numa conta sem time: com `team` na lista, as mesmas regras e skills, o mesmo hook e a mesma marca do `AGENTS.md`. Por isso
+  ele também saiu do default do engine.
 - **As regras da conta e as do time não têm transporte.** As User Rules da conta e as Team Rules do dashboard não têm campo nem
   busca no SDK. Elas chegam a uma etapa por três caminhos: o `AGENTS.md` do repositório, uma regra `.mdc` em `.cursor/rules/` com
   `alwaysApply: true` (os dois exigem `project`) ou o prompt da etapa. Que uma regra `alwaysApply` chegue a todo turno sem

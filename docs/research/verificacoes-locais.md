@@ -117,6 +117,8 @@ Workflows de verificação em `.agents/workflows/` de um repositório de teste l
 
 > **Nota (2026-11-19, [#138](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/138)):** a coluna "Ação tomada" da linha "Contexto fixo por camada" dizia que `team` traz hooks do time. A leitura estática do bundle do `@cursor/sdk@1.3.1` mostra que `team` só dirige a sincronização das skills gerenciadas do time, sem caminho de hooks nem de Team Rules. É uma leitura, não uma medição: o resultado medido da linha (58 skills e nenhuma marca do `AGENTS.md` com `["team","mdm"]`) é coerente com ela, e a pendência de hooks do dashboard no §12 segue aberta.
 
+> **Nota (2026-11-19, [#139](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/139)):** a §18 mediu o par `["project","mdm"]` × `["project","team","mdm"]`: as mesmas contagens de regras e skills, o mesmo hook e a mesma marca. O default do engine deixou de ter `team`. As linhas desta seção ficam como foram medidas, com o default antigo.
+
 ## 8. Fase 2, Bloco 6: cache de prompt entre agentes irmãos
 
 **Ambiente:** Premium da The X Subscription · `@cursor/sdk@1.3.1` · `composer-2.5` · `settingSources: []` · Linux
@@ -522,6 +524,51 @@ cerca de 825 mil tokens na §13, bem acima do que sobra dos 100 centavos.
 
 **Não medido:** o MED e o HIGH com o sandbox ligado (mais fatias, rodadas de correção e o refactor, que usam as mesmas etapas de
 escrita no mesmo worktree); um `setupCommand` real (ele roda fora do sandbox, pelo código); macOS e Windows; um kernel sem Landlock.
+
+## 18. Fase 11: o que `team` acrescenta ao `settingSources` do engine (2026-11-19)
+
+O [#139](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/139) perguntava se `team` no default do engine
+(`["project","team","mdm"]`) acrescenta algo além das skills gerenciadas do time. A leitura estática do bundle do `@cursor/sdk@1.3.1`
+dizia que não ([#138](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/138)); faltava medir.
+
+**Ambiente (runs de 2026-11-19):** Premium da The X Subscription, conta pessoal sem time · `@cursor/sdk@1.3.1` · `composer-2.5` ·
+Linux x64 (WSL2). O repositório alvo veio do `scripts/verify/setup-probe-repo.sh` (`AGENTS.md` com a palavra `ORNITORRINCO-42` e
+`.cursor/hooks.json` com `postToolUse`, que grava em `.probe/cursor-hooks.log`). A etapa, a mesma nos quatro runs, é só de leitura
+(`tools: ["read"]`, `schema` com `marker` e `version`): pergunta a palavra do `AGENTS.md` e lê o `package.json`. O workflow era um
+`team-probe` descartável, fora do repositório, que passa os `settingSources` dos `args` à etapa. Tetos de cada run:
+`--max-tokens 120000` e `--max-cents 50`.
+
+```bash
+WORKFLOWS_DIR=<pasta do team-probe> WF_METRICS_DB=<banco descartável> npm run wf -- run team-probe --cwd <repositório de sonda> \
+  --args '{"sources":["project","mdm"]}' --max-tokens 120000 --max-cents 50
+```
+
+`skillCount` e `ruleCount` vêm das linhas `INFO` do SDK no stderr: `LocalCursorRulesService` (`ruleCount: 1`, o `AGENTS.md`) e
+`AgentSkillsCursorRulesService` (`ruleCount` e `skillCount` iguais). `inputTokens` vem do `step-end`.
+
+| Run | `settingSources` | `skillCount` | `ruleCount` | `inputTokens` | Hook do projeto rodou | Marca do `AGENTS.md` |
+|---|---|---|---|---|---|---|
+| 1 | `["project","mdm"]` | 66 | 1 e 66 | 36.285 | sim (`postToolUse` para `Read` e `MCP:submit_result`) | `ORNITORRINCO-42` |
+| 2 | `["project","team","mdm"]` | 63 | 1 e 63 | 30.367 | sim (os mesmos dois) | `ORNITORRINCO-42` |
+| 3 | `["project","team","mdm"]` | 63 | 1 e 63 | 40.691 | sim (os mesmos dois) | `ORNITORRINCO-42` |
+| 4 | `["project","mdm"]` | 63 | 1 e 63 | 27.059 | sim (os mesmos dois) | `ORNITORRINCO-42` |
+
+Os runs 1 e 2 são o par pedido; os runs 3 e 4 repetem o par na ordem inversa, porque o `inputTokens` de um envio varia com o que o
+modelo faz.
+
+| Item | Método | Resultado | Evidência | Ação tomada |
+|---|---|---|---|---|
+| `team` acrescenta regra, hook ou skill? | a tabela acima | ❌ não, nesta conta | `ruleCount` 1 e `skillCount` iguais nos dois lados (63 em três dos quatro runs; os 66 do run 1 vieram do lado **sem** `team`, então não vêm dele); o hook do projeto e a marca do `AGENTS.md` chegaram nos quatro runs | O default do engine passa a `["project","mdm"]` em `DEFAULT_SETTING_SOURCES`; os docs, as skills e os testes que o nomeiam mudaram junto |
+| `team` muda o `inputTokens`? | os quatro runs | ❔ sem efeito que se separe do ruído | com `team`: 30.367 e 40.691 (média 35.529); sem: 36.285 e 27.059 (média 31.672). A faixa de cada lado cobre a do outro | Não decide nada: a decisão vem das contagens e do hook |
+| Custo | `wf stats` do banco descartável | ✅ dentro do teto | os quatro runs somam 135.983 tokens e 4,17 centavos no preço de lista (`composer-2.5`), 0 cobrado; o `getUsage()` segue `feature_unavailable`, então o `--max-cents` ficou cego e só o `--max-tokens` limitou | — |
+
+**Decisão (#139):** `team` não trouxe regra, hook nem skill além do que `["project","mdm"]` já carrega, então ele sai do default. Quem
+quer as skills gerenciadas do time numa etapa passa `settingSources` com `"team"`. As origens das skills (63 nesta máquina) não foram
+isoladas, como na §7. Os runs das §7, §9 e §16 acima foram feitos com o default antigo e ficam como foram medidos.
+
+**Não medido:** uma conta de time. Esta conta não tem time, então a medição não mostra o que `team` carrega para quem tem skills
+gerenciadas, Team Rules ou um hook do dashboard; a leitura estática do bundle diz que são só as skills, e a pendência de hooks do §12
+(conta de time) segue aberta.
 
 
 ---

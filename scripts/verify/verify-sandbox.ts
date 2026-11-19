@@ -291,7 +291,7 @@ export default defineWorkflow<{ readBoundary?: ReadBoundary }>({
       ctx.phase("attempts");
       try {
         // All tools and the engine's default settingSources spelled out, as a kit write step has them (implement-issue's test, code and fix steps).
-        await ctx.agent(probePrompt(token, home), { role: "probe", label: STEP_LABEL, settingSources: ["project", "team", "mdm"], sandbox: true, revertOnRetry: true });
+        await ctx.agent(probePrompt(token, home), { role: "probe", label: STEP_LABEL, settingSources: ["project", "mdm"], sandbox: true, revertOnRetry: true });
       } catch (err) {
         const message = errorText(err);
         if (/bubblewrap|bwrap/i.test(message)) throw new Error(`verify-sandbox: the SDK could not start its sandbox: ${message}. This is not a sandbox result, so nothing is recorded.`);

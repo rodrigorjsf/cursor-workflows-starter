@@ -14,7 +14,7 @@ import type { EffectiveConfig } from "./events.js";
 import { isRecord } from "./parse-json.js";
 
 /** The setting sources a step loads when its role, its call and the run's options say none: the engine's default. */
-export const DEFAULT_SETTING_SOURCES: SettingSource[] = ["project", "team", "mdm"];
+export const DEFAULT_SETTING_SOURCES: SettingSource[] = ["project", "mdm"];
 
 /** One command a repository's settings would run: where it is declared, which event or server, and the command line. */
 export interface RepoCommand {

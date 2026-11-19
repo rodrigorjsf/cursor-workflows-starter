@@ -215,7 +215,7 @@ test("label globs are the fallback for steps without a role; the glob with the m
     ["label-narrow", "label-wide", "fallback-model", "from-role"],
   );
   assert.deepEqual(calls[2].local.settingSources, [], "the catch-all glob applies to the step no other glob matches");
-  assert.deepEqual(calls[3].local.settingSources, ["project", "team", "mdm"], "a step with a role ignores the label globs");
+  assert.deepEqual(calls[3].local.settingSources, ["project", "mdm"], "a step with a role ignores the label globs");
   const start = runStartOf(logOf(r.runId));
   assert.deepEqual(Object.keys(start.config.labels).sort(), ["*", "design:*", "design:a*"]);
   assert.deepEqual(start.provenance["/labels/design:a*/retries"], { layer: "repo", ref: repoConfigPath(cwd) });
@@ -341,7 +341,7 @@ test("allowedSettingSources: lists intersect, a role asking for 'all' is reduced
   const r = await runWorkflow(wf, {}, { cwd });
   assert.equal(r.status, "finished", r.error);
   assert.deepEqual(calls[0].local.settingSources, ["project"]);
-  assert.deepEqual(calls[1].local.settingSources, ["project", "team", "mdm"], "inside the cap: untouched");
+  assert.deepEqual(calls[1].local.settingSources, ["project", "mdm"], "inside the cap: untouched");
   const start = runStartOf(logOf(r.runId));
   assert.deepEqual(start.config.roles.classify!.settingSources, ["project"]);
   assert.equal(start.violations.length, 1);

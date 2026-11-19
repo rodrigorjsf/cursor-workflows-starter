@@ -146,12 +146,13 @@ contexto que as etapas carregam (`settingSources`):
 ## Políticas de admin que se aplicam
 
 - **Hooks Enterprise (MDM) e Team** (dashboard): o engine carrega `mdm` por padrão
-  (`settingSources: ["project","team","mdm"]`). Um deny em qualquer fonte vence ask e allow
+  (`settingSources: ["project","mdm"]`). Um deny em qualquer fonte vence ask e allow
   ([DOC](https://cursor.com/docs/hooks#configuration)). Hooks Team só existem no Enterprise, e hooks de plugins
-  entram depois das quatro fontes (Enterprise, Team, projeto, usuário). O `team` do `settingSources` só sincroniza as
-  skills gerenciadas do time: pela leitura estática do bundle do `@cursor/sdk@1.3.1` (não medida,
-  [2.2 §5](../usage/02-configuracao-inicial.md#5-contexto-do-projeto-nos-agentes)) ele não tem caminho de hooks Team, então
-  não presuma que um hook Team do dashboard chegue a uma etapa. Exemplos úteis do cookbook: auditoria em
+  entram depois das quatro fontes (Enterprise, Team, projeto, usuário). O `team` do `settingSources` está fora do
+  default e só sincroniza as skills gerenciadas do time: pela leitura estática do bundle do `@cursor/sdk@1.3.1`
+  ([2.2 §5](../usage/02-configuracao-inicial.md#5-contexto-do-projeto-nos-agentes)) ele não tem caminho de hooks Team, e a
+  medição de 2026-11-19 numa conta sem time não viu hook nem regra a mais com ele
+  ([8.2 §18](../research/verificacoes-locais.md)), então não presuma que um hook Team do dashboard chegue a uma etapa. Exemplos úteis do cookbook: auditoria em
   JSONL, bloqueio de prompts com segredos e bloqueio de modelos por origem do repositório. Nas runs locais,
   hooks de projeto, inclusive um deny de `PreToolUse` do Claude Code, valeram com `"project"` (medido em
   2026-11-11); os de `mdm` não foram testados (conta pessoal). `settingSources: []` desliga também

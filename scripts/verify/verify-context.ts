@@ -31,7 +31,7 @@ export default defineWorkflow({
   meta: { name: "verify-context", description: "Verification: AGENTS.md, Cursor and Claude Code hooks, .cursor/mcp.json and the recursion guard." },
   defaults: { model: { id: process.env.WF_VERIFY_MODEL ?? "composer-2.5" }, timeoutMs: 5 * 60_000, retries: 0 },
   async run(ctx) {
-    const project = await ctx.agent(PROMPT, { label: "with-project", tools: ["shell", "mcp"], schema: SCHEMA, settingSources: ["project", "team", "mdm"] });
+    const project = await ctx.agent(PROMPT, { label: "with-project", tools: ["shell", "mcp"], schema: SCHEMA, settingSources: ["project", "mdm"] });
     const none = await ctx.agent(PROMPT + " ", { label: "no-settings", tools: ["shell", "mcp"], schema: SCHEMA, settingSources: [] });
     return { status: "done", project, none };
   },
