@@ -52,7 +52,7 @@ test("the test runs of the TDD loop are command nodes in the event log, each wit
 const commandLineOf = (events: WorkflowEvent[], start: ExecStartEvent): string => {
   const call = events.find((e): e is ContentEvent => e.type === "content" && e.kind === "tool-call" && e.attemptId === start.attemptId)!;
   const { command, args } = JSON.parse(call.text!) as { command: string; args: string[] };
-  return (command === "bash" && args[2] === "read" ? args.slice(3) : [command, ...args]).join(" ");
+  return [command, ...args].join(" ");
 };
 
 test("a run marks its suite runs as nodes and its existence checks as probes, and marks no other command", async () => {
@@ -68,10 +68,10 @@ test("a run marks its suite runs as nodes and its existence checks as probes, an
   assert.deepEqual(suites.filter((s) => !s.node).map((s) => s.label), [], "every suite run is a node");
   assert.deepEqual(starts.filter((s) => s.node && !s.label.startsWith("suite:")).map((s) => s.label), [], "nothing else is a node");
 
-  const existenceCheck = /^git (rev-parse --verify --quiet |diff --cached --quiet|ls-files --error-unmatch |config --get remote\.)/;
+  const existenceCheck = /(^| )git (rev-parse --verify --quiet |diff --cached --quiet|ls-files --error-unmatch |config --get remote\.)/;
   const lines = starts.map((s) => ({ line: commandLineOf(events, s), probe: execEnd(events, s).probe === true }));
-  assert.ok(lines.some((l) => l.probe && l.line.startsWith("git rev-parse --verify --quiet ")), "a rev-parse check is a probe");
-  assert.ok(lines.some((l) => l.probe && l.line.startsWith("git diff --cached --quiet")), "the delivery's diff check is a probe");
+  assert.ok(lines.some((l) => l.probe && l.line.includes("git rev-parse --verify --quiet ")), "a rev-parse check is a probe");
+  assert.ok(lines.some((l) => l.probe && l.line.includes("git diff --cached --quiet")), "the delivery's diff check is a probe");
   assert.deepEqual(lines.filter((l) => l.probe !== existenceCheck.test(l.line)).map((l) => l.line), [], "a command is a probe exactly when its exit code is the answer");
 });
 
@@ -81,14 +81,9 @@ const readingWorkflow = <R>(read: (cmd: Commands) => Promise<R>) =>
     defaults: { model: { id: "m" } },
     run: (ctx) => read(new Commands((command, args, opts) => ctx.exec(command, args, opts), { networkMs: 60_000 })),
   });
-const stdoutLoggedOf = (events: WorkflowEvent[]) =>
+const outputLoggedOf = (events: WorkflowEvent[], stream: "stdout" | "stderr") =>
   events
-    .filter((e): e is ContentEvent => e.type === "content" && e.kind === "command-output" && e.stream === "stdout")
-    .map((e) => e.text ?? "")
-    .join("");
-const stderrLoggedOf = (events: WorkflowEvent[]) =>
-  events
-    .filter((e): e is ContentEvent => e.type === "content" && e.kind === "command-output" && e.stream === "stderr")
+    .filter((e): e is ContentEvent => e.type === "content" && e.kind === "command-output" && e.stream === stream)
     .map((e) => e.text ?? "")
     .join("");
 
@@ -98,8 +93,8 @@ test("the stdout of a read command is in the log as the command's output, next t
   assert.equal(r.status, "finished", r.error);
   assert.equal(r.result, "answer\n");
   const events = eventsOf(r.runId);
-  assert.equal(stdoutLoggedOf(events), "answer\n");
-  assert.equal(stderrLoggedOf(events), "warning\n");
+  assert.equal(outputLoggedOf(events, "stdout"), "answer\n");
+  assert.equal(outputLoggedOf(events, "stderr"), "warning\n");
   const [start] = execStarts(events);
   assert.equal(execEnd(events, start!).outputChars, "answer\nwarning\n".length, "the end reports the stdout too");
 });
@@ -110,7 +105,7 @@ test("the stdout of a read command is cut at what the log keeps per command, and
   assert.equal(r.status, "finished", r.error);
   assert.equal(r.result, 300_000, "the workflow reads the whole stdout, not the log's share of it");
   const events = eventsOf(r.runId);
-  assert.equal(stdoutLoggedOf(events).length, 262_144);
+  assert.equal(outputLoggedOf(events, "stdout").length, 262_144);
   const end = execEnd(events, execStarts(events)[0]!);
   assert.equal(end.outputChars, 300_000);
   assert.equal(end.outputTruncated, true);
@@ -126,7 +121,7 @@ test("a credential in the URL a read command printed is redacted in the log, and
   assert.deepEqual(r.result, [withPassword, withToken], "the workflow reads what git printed");
   const events = eventsOf(r.runId);
   assert.ok(!JSON.stringify(events).includes("s3cr3tpassw0rd") && !JSON.stringify(events).includes("0123456789abcdefghij"), "no credential is in the log");
-  assert.equal(stdoutLoggedOf(events), "https://alice:[REDACTED]@example.com/o/r.git\nhttps://[REDACTED]@gitlab.example/o/r.git\n", "the scheme, the user and the host stay");
+  assert.equal(outputLoggedOf(events, "stdout"), "https://alice:[REDACTED]@example.com/o/r.git\nhttps://[REDACTED]@gitlab.example/o/r.git\n", "the scheme, the user and the host stay");
 });
 
 // ── The test command: its limit, its environment, its output ──────────────────────────

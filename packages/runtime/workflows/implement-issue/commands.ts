@@ -158,7 +158,7 @@ export class Commands {
   /** The URL `remote` (the origin by default) has in the repository's configuration, as written there (`url.<base>.insteadOf` is not applied); undefined when there is no such remote. */
   async remoteUrl(cwd: string, remote = ORIGIN): Promise<string | undefined> {
     const args = ["config", "--get", `remote.${remote}.url`];
-    const r = await this.read("git", args, cwd, this.timeouts.localMs, undefined, {}, { probe: true });
+    const r = await this.read("git", args, cwd, this.timeouts.localMs, { probe: true });
     if (r.exitCode === 1) return undefined; // git config --get: the key is not set
     if (!r.ok) throw new CommandError("git", args, r, this.timeouts.localMs);
     return r.stdout.trim() || undefined;
@@ -208,7 +208,7 @@ export class Commands {
 
   /** `forgeReadOrNothing` with variables added to the CLI's environment (`undefined` removes one), as `forgeReadWith`. */
   async forgeReadOrNothingWith(cli: string, cwd: string, env: Record<string, string | undefined>, nothing: RegExp, ...args: string[]): Promise<string | undefined> {
-    const r = await this.read(cli, args, cwd, this.timeouts.networkMs, FORGE_LABEL_WORDS, env);
+    const r = await this.read(cli, args, cwd, this.timeouts.networkMs, { labelWords: FORGE_LABEL_WORDS, env });
     if (r.ok) return r.stdout;
     if (r.exitCode === 1 && nothing.test(r.tail)) return undefined;
     throw new CommandError(cli, args, r, this.timeouts.networkMs);
@@ -230,13 +230,14 @@ export class Commands {
   }
 
   private async succeedRead(command: string, args: string[], cwd: string, timeoutMs: number | undefined, labelWords?: number, env?: Record<string, string | undefined>): Promise<string> {
-    const r = await this.read(command, args, cwd, timeoutMs, labelWords, env);
+    const r = await this.read(command, args, cwd, timeoutMs, { labelWords, env });
     if (!r.ok) throw new CommandError(command, args, r, timeoutMs);
     return r.stdout;
   }
 
   /** Runs the command with its stdout going to a file, and returns the result with the whole stdout. */
-  private async read(command: string, args: string[], cwd: string, timeoutMs: number | undefined, labelWords?: number, env: Record<string, string | undefined> = {}, kind: Pick<ExecOptions, "probe"> = {}): Promise<ExecResult & { stdout: string }> {
+  private async read(command: string, args: string[], cwd: string, timeoutMs: number | undefined, extra: { labelWords?: number; env?: Record<string, string | undefined>; probe?: boolean } = {}): Promise<ExecResult & { stdout: string }> {
+    const { labelWords, env = {}, probe } = extra;
     const dir = mkdtempSync(join(tmpdir(), "wf-stdout-"));
     const file = join(dir, "stdout");
     try {
@@ -244,7 +245,7 @@ export class Commands {
       // a temp path would give the same call another id every time.
       const result = await this.exec("bash", ["-c", READ_SCRIPT, "read", command, ...args], {
         ...this.options(command, args, cwd, timeoutMs, labelWords),
-        ...kind,
+        ...(probe ? { probe: true } : {}),
         env: { ...env, WF_STDOUT: file },
       });
       if (existsSync(file) && statSync(file).size > MAX_STDOUT_BYTES) throw new Error(`${command} ${args[0] ?? ""}: the output is larger than ${MAX_STDOUT_BYTES / 1024 / 1024} MiB`);
