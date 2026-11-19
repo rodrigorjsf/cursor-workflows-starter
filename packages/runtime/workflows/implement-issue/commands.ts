@@ -258,8 +258,8 @@ export class Commands {
         env: { ...env, WF_STDOUT: file, WF_STDERR: errors },
       });
       if (existsSync(file) && statSync(file).size > MAX_STDOUT_BYTES) throw new Error(`${command} ${args[0] ?? ""}: the output is larger than ${MAX_STDOUT_BYTES / 1024 / 1024} MiB`);
-      const stderrTail = existsSync(errors) ? readFileSync(errors, "utf8").slice(-READ_TAIL_MAX_CHARS) : "";
-      return { ...result, tail: stderrTail, stdout: existsSync(file) ? readFileSync(file, "utf8") : "" };
+      const tail = existsSync(errors) ? readFileSync(errors, "utf8").slice(-READ_TAIL_MAX_CHARS) : result.tail;
+      return { ...result, tail, stdout: existsSync(file) ? readFileSync(file, "utf8") : "" };
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
