@@ -139,8 +139,8 @@ export function createRedactor(
   return { text, value, learn, learnValues };
 }
 
-export function secretValuesOf(value: unknown, named = false): string[] {
-  if (typeof value === "string") return named ? [value] : [];
+export function secretValuesOf(value: unknown, underSecretName = false): string[] {
+  if (typeof value === "string") return underSecretName ? [value] : [];
   if (typeof value !== "object" || value === null) return [];
-  return Object.entries(value).flatMap(([key, item]) => secretValuesOf(item, named || isSecretName(key)));
+  return Object.entries(value).flatMap(([key, item]) => secretValuesOf(item, underSecretName || isSecretName(key)));
 }
