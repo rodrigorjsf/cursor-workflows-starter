@@ -4,6 +4,7 @@
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { TAIL_MAX_CHARS } from "../../src/runtime/command-runner.js";
 import { NETWORK_GIT_ENV } from "../../src/runtime/git-transport.js";
 import type { ExecOptions, ExecResult } from "../../src/runtime/workflow.js";
 
@@ -81,6 +82,14 @@ function assertOwned(branch: string, action: string, verb: string): void {
 /** A command's output is read whole, but not without limit: this is what the old synchronous calls allowed (`maxBuffer`). */
 const MAX_STDOUT_BYTES = 64 * 1024 * 1024;
 
+const READ_SCRIPT = 'set -o pipefail; "$@" 2> >(tee "$WF_STDERR" >&2) | tee "$WF_STDOUT"';
+
+interface ReadOptions {
+  labelWords?: number;
+  env?: Record<string, string | undefined>;
+  probe?: boolean;
+}
+
 /** The words of a forge CLI call that name its node in the run's log: `<cli> issue view`, not just `<cli> issue`. */
 const FORGE_LABEL_WORDS = 2;
 
@@ -117,7 +126,7 @@ export class Commands {
       if (existsSync(own)) copyFileSync(own, index);
       const env = { GIT_INDEX_FILE: index };
       await this.succeed("git", ["add", "-A"], cwd, this.timeouts.localMs, env);
-      return (await this.succeedRead("git", ["write-tree"], cwd, this.timeouts.localMs, undefined, env)).trim();
+      return (await this.succeedRead("git", ["write-tree"], cwd, this.timeouts.localMs, { env })).trim();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -125,7 +134,7 @@ export class Commands {
 
   /** `git` whose exit code is the answer (`diff --quiet`, `rev-parse --verify --quiet`): 0 is yes, 1 is no, anything else is an error. */
   async gitIs(cwd: string, ...args: string[]): Promise<boolean> {
-    const r = await this.exec("git", args, this.options("git", args, cwd, this.timeouts.localMs));
+    const r = await this.exec("git", args, { ...this.options("git", args, cwd, this.timeouts.localMs), probe: true });
     if (r.ok) return true;
     if (r.exitCode === 1) return false;
     throw new CommandError("git", args, r, this.timeouts.localMs);
@@ -138,7 +147,7 @@ export class Commands {
 
   /** The commit `branch` points at on the origin, or undefined when the origin has no such branch. A network command. */
   async remoteBranchHead(cwd: string, branch: string): Promise<string | undefined> {
-    const out = await this.succeedRead("git", ["ls-remote", "--heads", "origin", `refs/heads/${branch}`], cwd, this.timeouts.networkMs, undefined, NETWORK_GIT_ENV);
+    const out = await this.succeedRead("git", ["ls-remote", "--heads", "origin", `refs/heads/${branch}`], cwd, this.timeouts.networkMs, { env: NETWORK_GIT_ENV });
     return out.trim().split(/\s+/)[0] || undefined;
   }
 
@@ -156,7 +165,7 @@ export class Commands {
   /** The URL `remote` (the origin by default) has in the repository's configuration, as written there (`url.<base>.insteadOf` is not applied); undefined when there is no such remote. */
   async remoteUrl(cwd: string, remote = ORIGIN): Promise<string | undefined> {
     const args = ["config", "--get", `remote.${remote}.url`];
-    const r = await this.read("git", args, cwd, this.timeouts.localMs);
+    const r = await this.read("git", args, cwd, this.timeouts.localMs, { probe: true });
     if (r.exitCode === 1) return undefined; // git config --get: the key is not set
     if (!r.ok) throw new CommandError("git", args, r, this.timeouts.localMs);
     return r.stdout.trim() || undefined;
@@ -168,7 +177,7 @@ export class Commands {
    */
   async remoteOwnedHeads(cwd: string, remote = ORIGIN, prefix = WORKFLOW_BRANCH_PREFIX): Promise<Map<string, string>> {
     if (!(await this.gitIs(cwd, "config", "--get", `remote.${remote}.url`))) return new Map();
-    const out = await this.succeedRead("git", ["ls-remote", "--heads", remote, `refs/heads/${prefix}*`], cwd, this.timeouts.networkMs, undefined, NETWORK_GIT_ENV);
+    const out = await this.succeedRead("git", ["ls-remote", "--heads", remote, `refs/heads/${prefix}*`], cwd, this.timeouts.networkMs, { env: NETWORK_GIT_ENV });
     const heads = new Map<string, string>();
     for (const line of out.split("\n")) {
       const [sha, ref] = line.trim().split(/\s+/);
@@ -188,12 +197,12 @@ export class Commands {
 
   /** The forge's CLI (`cli`) in `cwd`, which has to succeed; returns all of its stdout. A network command. */
   async forgeRead(cli: string, cwd: string, ...args: string[]): Promise<string> {
-    return this.succeedRead(cli, args, cwd, this.timeouts.networkMs, FORGE_LABEL_WORDS);
+    return this.succeedRead(cli, args, cwd, this.timeouts.networkMs, { labelWords: FORGE_LABEL_WORDS });
   }
 
   /** `forgeRead` with variables added to the CLI's environment (`undefined` removes one): a host the CLI takes from there. */
   async forgeReadWith(cli: string, cwd: string, env: Record<string, string | undefined>, ...args: string[]): Promise<string> {
-    return this.succeedRead(cli, args, cwd, this.timeouts.networkMs, FORGE_LABEL_WORDS, env);
+    return this.succeedRead(cli, args, cwd, this.timeouts.networkMs, { labelWords: FORGE_LABEL_WORDS, env });
   }
 
   /**
@@ -206,7 +215,7 @@ export class Commands {
 
   /** `forgeReadOrNothing` with variables added to the CLI's environment (`undefined` removes one), as `forgeReadWith`. */
   async forgeReadOrNothingWith(cli: string, cwd: string, env: Record<string, string | undefined>, nothing: RegExp, ...args: string[]): Promise<string | undefined> {
-    const r = await this.read(cli, args, cwd, this.timeouts.networkMs, FORGE_LABEL_WORDS, env);
+    const r = await this.read(cli, args, cwd, this.timeouts.networkMs, { labelWords: FORGE_LABEL_WORDS, env });
     if (r.ok) return r.stdout;
     if (r.exitCode === 1 && nothing.test(r.tail)) return undefined;
     throw new CommandError(cli, args, r, this.timeouts.networkMs);
@@ -227,25 +236,29 @@ export class Commands {
     if (!r.ok) throw new CommandError(command, args, r, timeoutMs);
   }
 
-  private async succeedRead(command: string, args: string[], cwd: string, timeoutMs: number | undefined, labelWords?: number, env?: Record<string, string | undefined>): Promise<string> {
-    const r = await this.read(command, args, cwd, timeoutMs, labelWords, env);
+  private async succeedRead(command: string, args: string[], cwd: string, timeoutMs: number | undefined, options: ReadOptions = {}): Promise<string> {
+    const r = await this.read(command, args, cwd, timeoutMs, options);
     if (!r.ok) throw new CommandError(command, args, r, timeoutMs);
     return r.stdout;
   }
 
   /** Runs the command with its stdout going to a file, and returns the result with the whole stdout. */
-  private async read(command: string, args: string[], cwd: string, timeoutMs: number | undefined, labelWords?: number, env: Record<string, string | undefined> = {}): Promise<ExecResult & { stdout: string }> {
+  private async read(command: string, args: string[], cwd: string, timeoutMs: number | undefined, options: ReadOptions = {}): Promise<ExecResult & { stdout: string }> {
+    const { labelWords, env = {}, probe } = options;
     const dir = mkdtempSync(join(tmpdir(), "wf-stdout-"));
-    const file = join(dir, "stdout");
+    const stdoutFile = join(dir, "stdout");
+    const stderrFile = join(dir, "stderr");
     try {
       // The path goes in the environment, not in the arguments: the node's id in the log is derived from the arguments, and
       // a temp path would give the same call another id every time.
-      const result = await this.exec("bash", ["-c", 'exec "$@" >"$WF_STDOUT"', "read", command, ...args], {
+      const result = await this.exec("bash", ["-c", READ_SCRIPT, "read", command, ...args], {
         ...this.options(command, args, cwd, timeoutMs, labelWords),
-        env: { ...env, WF_STDOUT: file },
+        ...(probe ? { probe: true } : {}),
+        env: { ...env, WF_STDOUT: stdoutFile, WF_STDERR: stderrFile },
       });
-      if (existsSync(file) && statSync(file).size > MAX_STDOUT_BYTES) throw new Error(`${command} ${args[0] ?? ""}: the output is larger than ${MAX_STDOUT_BYTES / 1024 / 1024} MiB`);
-      return { ...result, stdout: existsSync(file) ? readFileSync(file, "utf8") : "" };
+      if (existsSync(stdoutFile) && statSync(stdoutFile).size > MAX_STDOUT_BYTES) throw new Error(`${command} ${args[0] ?? ""}: the output is larger than ${MAX_STDOUT_BYTES / 1024 / 1024} MiB`);
+      const tail = existsSync(stderrFile) ? readFileSync(stderrFile, "utf8").slice(-TAIL_MAX_CHARS) : result.tail;
+      return { ...result, tail, stdout: existsSync(stdoutFile) ? readFileSync(stdoutFile, "utf8") : "" };
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

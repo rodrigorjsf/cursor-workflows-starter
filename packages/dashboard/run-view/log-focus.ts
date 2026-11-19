@@ -9,8 +9,13 @@ export interface FocusDoc {
   querySelector(selectors: string): { focus(): void } | null;
 }
 
+const escapedForAttribute = (value: string): string => value.replace(/["\\]/g, "\\$&");
+
 /** The element of the node `id` that takes the focus: the step or command drawn inside React Flow's wrapper. */
-const nodeSelector = (id: string): string => `.react-flow__node[data-id="${id.replace(/["\\]/g, "\\$&")}"] .work`;
+const nodeSelector = (id: string): string => `.react-flow__node[data-id="${escapedForAttribute(id)}"] .work`;
+
+export const commandItemSelector = (id: string): string => `.command-item[data-command-id="${escapedForAttribute(id)}"]`;
+export const phaseEntrySelector = (lane: number): string => `.react-flow__node[data-id="lane-${lane}"] .phase-entry`;
 
 /** On open: into the log (its Close button) when the panel is positioned over the canvas, which then hides the focus. */
 export function focusOnOpen(panel: Element, close: { focus(): void }, style: (el: Element) => { position: string }): void {
@@ -22,6 +27,10 @@ export function focusOnOpen(panel: Element, close: { focus(): void }, style: (el
  * elsewhere, such as on another node the reader clicked to open its log, stays where it is.
  */
 export function focusOnClose(doc: FocusDoc, nodeId: string): void {
+  restoreFocus(doc, nodeSelector(nodeId));
+}
+
+export function restoreFocus(doc: FocusDoc, selector: string): void {
   if (doc.activeElement !== null && doc.activeElement !== doc.body) return;
-  doc.querySelector(nodeSelector(nodeId))?.focus();
+  doc.querySelector(selector)?.focus();
 }

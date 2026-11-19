@@ -55,7 +55,7 @@ documento explica o *porquê* das regras e traz as receitas, que a skill aponta.
 
 ### Comandos: `ctx.exec`
 
-Todo comando que o workflow roda (testes, `git`, `gh` ou `glab`) passa por `ctx.exec(comando, args, { label, timeoutMs, cwd, env, scrubSecrets })`,
+Todo comando que o workflow roda (testes, `git`, `gh` ou `glab`) passa por `ctx.exec(comando, args, { label, timeoutMs, cwd, env, scrubSecrets, probe, node })`,
 nunca por `execFileSync`, `execSync` ou `spawnSync`: uma chamada síncrona congela o processo do job, então o
 cancelamento espera atrás dela e nada a interrompe. O `npm test` reprova um arquivo de workflow que faça uma delas.
 
@@ -72,6 +72,9 @@ if (!tests.ok) await ctx.agent(`${FIX_INSTRUCTIONS}\n\n${tests.tail}`, { label: 
   `PASSWORD` (`CURSOR_API_KEY`, `GH_TOKEN`...). Use para um comando que roda código em que o run não confia, como a
   suíte de testes do repositório alvo; o `env` da chamada ainda acrescenta o que você nomear. O padrão é `false`: um
   `git` ou o CLI do forge (`gh` ou `glab`) precisa do token.
+- `probe: true` marca um comando cujo código de saída diferente de zero é uma resposta esperada (`git rev-parse --verify`,
+  `git diff --quiet`): o `exec-end` leva `probe: true`, e o resultado que o workflow recebe é o mesmo de sempre.
+- `node: true` marca um comando que o run desenha como nó, como a suíte de testes: o `exec-start` leva `node: true`.
 - A saída vai para o log de eventos enquanto o comando roda, com a redação e a retenção do conteúdo de um agente, e cada
   chamada é um nó do run, ao lado das etapas ([3.1](../internals/01-arquitetura.md#comandos-do-workflow-ctxexec)). `tail`
   é a saída real, sem redação: antes de levá-la a um texto que sai da máquina, passe pela trava de segredos.

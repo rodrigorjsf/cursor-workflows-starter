@@ -3,7 +3,7 @@ import { Handle, type Node, type NodeProps, Position } from "@xyflow/react";
 import { NodeRows } from "./NodeRows.js";
 import { describeNode, runsInCloud } from "./node-details.js";
 import { LANE_TITLE, NODE_SIZE, NODE_TEXT_PX } from "./run-layout.js";
-import type { GraphNode, NodeState } from "./run-graph.js";
+import { type GraphNode, type NodeState, phaseName } from "./run-graph.js";
 
 export interface WorkNodeData extends Record<string, unknown> {
   node: GraphNode;
@@ -16,12 +16,16 @@ export interface WorkNodeData extends Record<string, unknown> {
 }
 export interface LaneNodeData extends Record<string, unknown> {
   title: string;
+  commandCount: number;
+  open: boolean;
+  onOpen?: () => void;
+  onFocus?: () => void;
 }
 
-const GLYPH: Record<NodeState, string> = { running: "●", ok: "✓", failed: "✗", cancelled: "⊘", cached: "↺", interrupted: "‖" };
+const GLYPH: Record<NodeState, string> = { running: "●", ok: "✓", failed: "✗", cancelled: "⊘", cached: "↺", interrupted: "‖", neutral: "○" };
 
 /** The state as a word a screen reader says; the glyph alone is decoration. */
-function Glyph({ state }: { state: NodeState }) {
+export function Glyph({ state }: { state: NodeState }) {
   return (
     <span className="glyph" aria-hidden="true">
       {GLYPH[state]}
@@ -34,6 +38,8 @@ function Handles() {
     <>
       <Handle type="target" position={Position.Left} isConnectable={false} />
       <Handle type="source" position={Position.Right} isConnectable={false} />
+      <Handle id="above" type="target" position={Position.Top} isConnectable={false} />
+      <Handle id="below" type="source" position={Position.Bottom} isConnectable={false} />
     </>
   );
 }
@@ -107,10 +113,20 @@ export function LaneNode({ data }: NodeProps<Node<LaneNodeData, "lane">>) {
   const { top, left, height } = LANE_TITLE;
   return (
     <div className="lane">
-      {data.title !== "" && (
-        <span className="lane-title" style={{ top, left, right: left, height, lineHeight: `${height}px` }}>
-          {data.title}
-        </span>
+      {(data.title !== "" || data.commandCount > 0) && (
+        <div className="lane-header" style={{ top, left, right: left, height, lineHeight: `${height}px` }}>
+          <span className="lane-title">{data.title}</span>
+          {data.commandCount > 0 && (
+            <button type="button" className="phase-entry nopan" aria-pressed={data.open} aria-label={`Workflow of ${phaseName(data.title)}: ${data.commandCount} commands. Open the list`}
+              onClick={data.onOpen}
+              onFocus={(event) => {
+                if (event.currentTarget.matches(":focus-visible")) data.onFocus?.();
+              }}
+            >
+              workflow · {data.commandCount}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

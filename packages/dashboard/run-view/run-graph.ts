@@ -1,8 +1,6 @@
 // The run as a graph, derived from its event log alone. Pure: no DOM, no clock, no network, so the live view, the replay and
 // the tests all call the same function on the events they have.
 //
-// - Nodes are the run's start, its agent steps and its `ctx.exec` commands, plus the fork and the join of each `parallel` or
-//   `pipeline` group.
 // - Edges come from `parentId`. The group id is both the fork and (once the group has ended) the join: a step that names the
 //   group as its parent and sits inside it continues from the fork; one that sits outside continues from the join. The tails of
 //   the branches (the nodes nothing inside the group continues from) flow into the join.
@@ -39,7 +37,7 @@ export type NodeKind = "start" | "step" | "command" | "fork" | "join";
 /** A node that stands for work (an agent step or a command), as opposed to the start and the forks and joins of groups. */
 export const isWork = (kind: NodeKind): boolean => kind === "step" || kind === "command";
 /** `interrupted`: the run stopped (or its process died) with this node still going. */
-export type NodeState = "running" | "ok" | "failed" | "cancelled" | "cached" | "interrupted";
+export type NodeState = "running" | "ok" | "failed" | "cancelled" | "cached" | "interrupted" | "neutral";
 
 /** What hovering a node shows. Numbers are totals over every attempt the node had, in every execution of the run. */
 export interface NodeDetail {
@@ -67,6 +65,9 @@ export interface NodeDetail {
   error?: string;
   /** Where the result came from when it was not computed now. */
   cached?: "journal" | "memo";
+  exitCode?: number;
+  signal?: string;
+  probe?: boolean;
 }
 
 export interface GraphNode {
@@ -77,6 +78,8 @@ export interface GraphNode {
   /** The lane the node is drawn in: an index into `RunGraph.lanes`. */
   lane: number;
   detail: NodeDetail;
+  commands: GraphNode[];
+  attemptIds: string[];
 }
 
 /** A phase, drawn as a band. A step is drawn in the lane of its phase, or in a later one when it continues from a node in a later lane. */
@@ -84,6 +87,7 @@ export interface GraphLane {
   index: number;
   /** The phase title; empty for the nodes that come before the first `ctx.phase`, and for a run with no phases. */
   title: string;
+  commands: GraphNode[];
 }
 
 /** How the run stands: `interrupted` is a run with no `run-end` whose events have stopped coming. */
@@ -102,6 +106,7 @@ export interface RunProgress {
   /** Tokens and cents spent now by the nodes shown. */
   tokens: number;
   costCents: number;
+  costFinal: boolean;
 }
 
 export interface GraphEdge {
@@ -125,9 +130,60 @@ export interface GraphOptions {
 /** The id of the node a group's branches flow into. The group's own id is its fork. */
 export const joinIdOf = (groupId: string): string => `join:${groupId}`;
 
+export const phaseName = (title: string): string => (title === "" ? "the run" : title);
+
+export const allWork = (graph: RunGraph): GraphNode[] => [...graph.nodes, ...graph.nodes.flatMap((node) => node.commands), ...graph.lanes.flatMap((lane) => lane.commands)];
+
+export const commandCount = (graph: RunGraph): number => allWork(graph).filter((node) => node.kind === "command").length;
+
+export const failedWork = (graph: RunGraph): GraphNode[] => allWork(graph).filter((node) => isWork(node.kind) && node.state === "failed");
+
+export interface Execution {
+  from: number;
+  to: number;
+}
+
+export function executionsOf(events: readonly RunEvent[]): Execution[] {
+  const cuts = events.flatMap((event, index) => (readable(event) && event.type === "run-start" ? [index] : [])).slice(1);
+  return [0, ...cuts].map((from, n) => ({ from, to: cuts[n] ?? events.length }));
+}
+
+export const currentExecution = (executions: readonly Execution[], picked: number | undefined): number => Math.min(picked ?? executions.length - 1, executions.length - 1);
+
+export const replayLength = (execution: Execution): number => execution.to - execution.from;
+
+export const atReplay = <T>(items: readonly T[], execution: Execution, position: number): T | undefined => (position < 1 ? undefined : items[execution.from + position - 1]);
+
+export function shownEvents(events: readonly RunEvent[], execution: Execution, replayAt: number | null): { execution: RunEvent[]; run: RunEvent[] } {
+  if (replayAt === null) return { execution: events.slice(execution.from, execution.to), run: [...events] };
+  const end = Math.min(execution.from + replayAt, execution.to);
+  return { execution: events.slice(execution.from, end), run: events.slice(0, end) };
+}
+
+export interface MenuStep {
+  id: string;
+  label: string;
+  state: NodeState;
+}
+
+export interface MenuPhase {
+  index: number;
+  title: string;
+  steps: MenuStep[];
+}
+
+export const stepMenu = (graph: RunGraph): MenuPhase[] =>
+  graph.lanes
+    .map((lane) => ({
+      index: lane.index,
+      title: lane.title,
+      steps: graph.nodes.filter((node) => isWork(node.kind) && node.lane === lane.index).map(({ id, label, state }) => ({ id, label, state })),
+    }))
+    .filter((phase) => phase.steps.length > 0);
+
 const START = "start";
 
-const str = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
+const str =(value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
 
 /** What the builder remembers about a node besides what the graph shows: where it sits in the run's structure. */
 interface Placement {
@@ -145,9 +201,11 @@ interface GroupInfo {
 /** One attempt of a step or command, folded from its start, its turns and its end. */
 interface Attempt {
   startedAt?: string;
+  endedAt?: string;
   ended: boolean;
   ok: boolean;
   cached: false | "journal" | "memo";
+  answered: boolean;
   /** Tokens of the turns finished so far (what is known while the attempt runs). */
   turnTokens: number;
   /** Tokens the end reported. */
@@ -157,6 +215,9 @@ interface Attempt {
   durationMs: number;
   errorKind?: string;
   error?: string;
+  exitCode?: number;
+  signal?: string;
+  probe: boolean;
 }
 
 /** What is known about a step or command across its attempts. */
@@ -192,9 +253,10 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
   /** The phase each node names (the title, "" for none), and the order in which phases first show up. */
   const phaseOf = new Map<string, string>();
   const phases: string[] = [];
-  const add = (node: Omit<GraphNode, "detail" | "lane">, placement: Placement | null, phase = currentPhase) => {
+  const marked = new Set<string>();
+  const add = (node: Omit<GraphNode, "detail" | "lane" | "commands" | "attemptIds">, placement: Placement | null, phase = currentPhase) => {
     if (nodes.has(node.id)) return;
-    nodes.set(node.id, { ...node, lane: 0, detail: emptyDetail() });
+    nodes.set(node.id, { ...node, lane: 0, detail: emptyDetail(), commands: [], attemptIds: [] });
     if (placement) placed.set(node.id, placement);
     if (node.kind === "start") return;
     phaseOf.set(node.id, phase);
@@ -211,7 +273,7 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
     const attemptId = str(event.attemptId);
     const key = attemptId ?? `${stepId}#${found.attempts.size + 1}`;
     let attempt = attemptId === undefined && !starting ? [...found.attempts.values()].at(-1) : found.attempts.get(key);
-    if (!attempt && starting) found.attempts.set(key, (attempt = { ended: false, ok: false, cached: false, turnTokens: 0, costCents: 0, costFinal: true, durationMs: 0 }));
+    if (!attempt && starting) found.attempts.set(key, (attempt = { ended: false, ok: false, cached: false, answered: false, probe: false, turnTokens: 0, costCents: 0, costFinal: true, durationMs: 0 }));
     return attempt && { work: found, attempt };
   };
   const begin = (event: RunEvent, kind: "step" | "command") => {
@@ -227,7 +289,7 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
     at.work.location ??= str(event.location);
   };
 
-  const run: RunProgress = { status: "running", executions: 0, tokens: 0, costCents: 0 };
+  const run: RunProgress = { status: "running", executions: 0, tokens: 0, costCents: 0, costFinal: true };
   for (const event of events) {
     if (!readable(event)) continue;
     switch (event.type) {
@@ -279,9 +341,12 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
       case "step-start":
         begin(event, "step");
         break;
-      case "exec-start":
+      case "exec-start": {
         begin(event, "command");
+        const id = str(event.stepId);
+        if (id !== undefined && event.node === true) marked.add(id);
         break;
+      }
       case "cloud-agent": {
         const found = work.get(str(event.stepId) ?? "");
         const agentId = str(event.agentId);
@@ -300,6 +365,7 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
         const { attempt } = at;
         const usage = event.usage as Record<string, unknown> | undefined;
         attempt.ended = true;
+        attempt.endedAt = str(event.ts);
         attempt.ok = event.ok === true;
         attempt.cached = cachedOf(event.cached);
         attempt.tokens = num(usage?.totalTokens) ?? (usage ? (num(usage.inputTokens) ?? 0) + (num(usage.outputTokens) ?? 0) : undefined);
@@ -318,6 +384,10 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
         at.attempt.ok = event.ok === true;
         at.attempt.durationMs = num(event.durationMs) ?? 0;
         at.attempt.errorKind = execErrorKind(event);
+        at.attempt.answered = event.probe === true && event.outcome === "exit" && (num(event.exitCode) ?? 0) !== 0;
+        at.attempt.probe = event.probe === true;
+        at.attempt.exitCode = num(event.exitCode);
+        at.attempt.signal = str(event.signal);
         at.attempt.error = str(event.error);
         break;
       }
@@ -331,8 +401,9 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
     const last = attempts.at(-1)!;
     const real = attempts.filter((a) => !a.cached);
     const failed = real.filter((a) => a.ended && !a.ok).at(-1);
-    const state: NodeState = !last.ended ? "running" : !last.ok ? (last.errorKind === "cancelled" ? "cancelled" : "failed") : last.cached ? "cached" : "ok";
+    const state: NodeState = !last.ended ? "running" : !last.ok ? (last.errorKind === "cancelled" ? "cancelled" : last.answered ? "neutral" : "failed") : last.cached ? "cached" : "ok";
     node.state = state;
+    node.attemptIds = [...w.attempts].filter(([, a]) => !a.cached).map(([attemptId]) => attemptId);
     node.detail = {
       ...(w.model !== undefined && { model: w.model }),
       ...(w.command !== undefined && { command: w.command }),
@@ -347,6 +418,9 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
       ...(failed?.errorKind !== undefined && { errorKind: failed.errorKind }),
       ...(failed?.error !== undefined && { error: failed.error }),
       ...(last.cached && { cached: last.cached }),
+      ...(last.exitCode !== undefined && { exitCode: last.exitCode }),
+      ...(last.signal !== undefined && { signal: last.signal }),
+      ...(last.probe && { probe: true }),
     };
   }
   for (const [id, group] of groups) {
@@ -360,6 +434,12 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
     if (run.status === "running") run.status = "interrupted";
   }
 
+  const { removed, phaseCommands } = fileUnmarkedCommands(work, nodes, placed, marked);
+  const continuesFrom = (id: string): string | null => {
+    for (const ancestor of parentsOf(id, placed)) if (!removed.has(ancestor)) return ancestor;
+    return null;
+  };
+
   /** Where a node that names `parentId` as its parent continues from. */
   const sourceOf = (parentId: string | null, inGroup: string | null): string => {
     if (parentId === null) return START;
@@ -368,33 +448,66 @@ export function buildRunGraph(events: readonly RunEvent[], options: GraphOptions
   };
   const edges: GraphEdge[] = [];
   const link = (source: string, target: string) => edges.push({ id: `${source}>${target}`, source, target });
-  for (const [id, where] of placed) link(sourceOf(where.parentId, where.inGroup), id);
+  for (const [id, where] of placed) if (!removed.has(id)) link(sourceOf(continuesFrom(id), where.inGroup), id);
 
   // The branches of an ended group flow into its join: from every node inside it that nothing else inside it continues from.
   for (const groupId of groups.keys()) {
     if (!nodes.has(joinIdOf(groupId))) continue;
-    const members = [...placed].filter(([, where]) => where.inGroup === groupId).map(([id]) => id);
+    const members = [...placed].filter(([id, where]) => where.inGroup === groupId && !removed.has(id)).map(([id]) => id);
     const outputOf = (id: string) => (nodes.get(id)?.kind === "fork" && nodes.has(joinIdOf(id)) ? joinIdOf(id) : id);
     const continued = new Set(edges.filter((e) => members.includes(e.target)).map((e) => e.source));
     const tails = members.filter((id) => !continued.has(outputOf(id)));
     for (const tail of tails.length > 0 ? tails.map(outputOf) : [groupId]) link(tail, joinIdOf(groupId));
   }
 
-  const lanes = assignLanes([...nodes.values()], edges, phaseOf, phases);
+  const lanes = assignLanes([...nodes.values()], edges, phaseOf, phases, phaseCommands);
   for (const node of nodes.values()) {
     run.tokens += node.detail.tokens;
     run.costCents += node.detail.costCents;
+    run.costFinal &&= node.detail.costFinal;
   }
   return { nodes: [...nodes.values()], edges, lanes, run };
+}
+
+function* parentsOf(id: string, placed: Map<string, Placement>): Generator<string> {
+  const seen = new Set<string>();
+  for (let at = placed.get(id)?.parentId ?? null; at !== null && !seen.has(at); at = placed.get(at)?.parentId ?? null) {
+    seen.add(at);
+    yield at;
+  }
+}
+
+function fileUnmarkedCommands(work: Map<string, Work>, nodes: Map<string, GraphNode>, placed: Map<string, Placement>, marked: Set<string>): { removed: Set<string>; phaseCommands: GraphNode[] } {
+  const removed = new Set([...work.keys()].filter((id) => nodes.get(id)!.kind === "command" && !marked.has(id)));
+  const startedAt = (id: string): number => Date.parse([...work.get(id)!.attempts.values()][0]?.startedAt ?? "");
+  const runningAt = (stepId: string, time: number): boolean =>
+    [...work.get(stepId)!.attempts.values()].some((a) => Date.parse(a.startedAt ?? "") <= time && time <= (a.endedAt === undefined ? Infinity : Date.parse(a.endedAt)));
+  const stepEnclosing = (id: string): string | undefined => {
+    const time = startedAt(id);
+    for (const ancestor of parentsOf(id, placed)) {
+      const kind = nodes.get(ancestor)?.kind;
+      if (kind === "step" && runningAt(ancestor, time)) return ancestor;
+      if (kind !== "step" && kind !== "command") return undefined;
+    }
+    return undefined;
+  };
+  const phaseCommands: GraphNode[] = [];
+  for (const id of removed) {
+    const owner = stepEnclosing(id);
+    (owner === undefined ? phaseCommands : nodes.get(owner)!.commands).push(nodes.get(id)!);
+  }
+  for (const id of removed) nodes.delete(id);
+  return { removed, phaseCommands };
 }
 
 /**
  * Puts each node in the lane of its phase, then moves a node later when it continues from a node in a later lane, so that no
  * edge runs backwards. Lanes nobody ends up in are dropped. Sets `lane` on the nodes and returns the lanes.
  */
-function assignLanes(nodes: GraphNode[], edges: GraphEdge[], phaseOf: Map<string, string>, phases: string[]): GraphLane[] {
+function assignLanes(nodes: GraphNode[], edges: GraphEdge[], phaseOf: Map<string, string>, phases: string[], phaseCommands: GraphNode[]): GraphLane[] {
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  for (const node of nodes) node.lane = Math.max(0, phases.indexOf(phaseOf.get(node.id) ?? ""));
+  const phaseLane = (id: string) => Math.max(0, phases.indexOf(phaseOf.get(id) ?? ""));
+  for (const node of nodes) node.lane = phaseLane(node.id);
   for (let moved = true; moved; ) {
     moved = false;
     for (const { source, target } of edges) {
@@ -406,8 +519,15 @@ function assignLanes(nodes: GraphNode[], edges: GraphEdge[], phaseOf: Map<string
       }
     }
   }
-  const used = [...new Set(nodes.filter((n) => n.kind !== "start").map((n) => n.lane))].sort((a, b) => a - b);
+  for (const item of phaseCommands) item.lane = phaseLane(item.id);
+  const drawn = new Set(nodes.filter((n) => n.kind !== "start").map((n) => n.lane));
+  const bare = (lane: number) => phases[lane] === "" && !drawn.has(lane);
+  const titled = [...new Set([...drawn, ...phaseCommands.map((i) => i.lane).filter((lane) => !bare(lane))])].sort((a, b) => a - b);
+  for (const item of phaseCommands) if (bare(item.lane)) item.lane = titled.find((lane) => lane > item.lane) ?? item.lane;
+  const used = [...new Set([...drawn, ...phaseCommands.map((i) => i.lane)])].sort((a, b) => a - b);
   if (used.length === 0) used.push(0);
-  for (const node of nodes) node.lane = Math.max(0, used.indexOf(node.lane));
-  return used.map((phase, index) => ({ index, title: phases[phase] ?? "" }));
+  for (const node of [...nodes, ...phaseCommands]) node.lane = Math.max(0, used.indexOf(node.lane));
+  const lanes = used.map((phase, index): GraphLane => ({ index, title: phases[phase] ?? "", commands: [] }));
+  for (const item of phaseCommands) lanes[item.lane]!.commands.push(item);
+  return lanes;
 }

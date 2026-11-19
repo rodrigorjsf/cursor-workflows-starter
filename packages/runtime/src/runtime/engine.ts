@@ -1216,7 +1216,7 @@ async function executeRun<A, R>(
     // The command can print any variable it runs with: the secret-named ones it gets (the call's, and any the workflow set
     // after the run opened its log) are redacted like those the run started with.
     store.learnSecrets({ ...process.env, ...callOpts.env });
-    emit({ type: "exec-start", ...ref, attemptId, label, phase, command, timeoutMs });
+    emit({ type: "exec-start", ...ref, attemptId, label, phase, command, timeoutMs, node: callOpts.node || undefined });
     // The command line and the output are content: same redaction, same cut and same retention as an agent's.
     const content = attemptContent(ref, attemptId);
     content.write("tool-call", JSON.stringify({ command, args, cwd }), { tool: "exec", callId: attemptId });
@@ -1245,6 +1245,7 @@ async function executeRun<A, R>(
       durationMs: Date.now() - startedAt,
       outputChars: done.outputChars,
       outputTruncated: log.truncated || undefined,
+      probe: callOpts.probe || undefined,
     });
     if (done.outcome === "cancelled") throw new RunCancelledError(cancelMessage); // the command is dead: the workflow must not go on
     return result;

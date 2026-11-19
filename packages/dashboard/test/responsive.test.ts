@@ -105,3 +105,13 @@ test("while the log covers the canvas, the canvas is hidden, so its nodes and zo
   const nodes = rules.find((r) => r.width === overlay.width && /:has\(\s*\.step-panel\s*\)/.test(r.selector) && /\.react-flow__node\b/.test(r.selector) && /visibility:\s*hidden\s*!important/.test(r.decls));
   assert.ok(nodes, `under ${overlay.width}px, the canvas's nodes are hidden too, over React Flow's inline style (!important)`);
 });
+
+test("while the side menu is open over the canvas, the canvas is hidden, so its nodes leave the Tab order", () => {
+  const css = readFileSync(join(PACKAGE, "run-view", "run-view.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = narrowRules(css).flatMap(({ width, body }) => [...body.matchAll(/([^{}]+)\{([^}]*)\}/g)].map((r) => ({ width, selector: r[1]!.trim(), decls: r[2]! })));
+  const overlay = rules.find((r) => r.selector === ".step-menu:not(.collapsed)" && /position:\s*(absolute|fixed)/.test(r.decls));
+  assert.ok(overlay, "the open menu is drawn over the canvas on a narrow screen");
+  const openMenu = /:has\(\s*\.step-menu:not\(\.collapsed\)\s*\)/;
+  assert.ok(rules.some((r) => r.width === overlay.width && openMenu.test(r.selector) && /\.canvas$/.test(r.selector) && /visibility:\s*hidden/.test(r.decls)), "the canvas is hidden");
+  assert.ok(rules.some((r) => r.width === overlay.width && openMenu.test(r.selector) && /\.react-flow__node\b/.test(r.selector) && /visibility:\s*hidden\s*!important/.test(r.decls)), "its nodes are hidden over React Flow's inline style");
+});

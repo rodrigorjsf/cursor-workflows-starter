@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FitViewOptions } from "@xyflow/react";
-import { boundsOf, fitZoom, frameOf, panTarget } from "../run-view/framing.js";
+import { READABLE_ZOOM, boundsOf, fitZoom, frameOf, jumpTarget, panTarget } from "../run-view/framing.js";
 import { buildRunGraph, isWork } from "../run-view/run-graph.js";
 import { type Box, type RunLayout, layoutRunGraph } from "../run-view/run-layout.js";
 import { groupEnd, groupStart, phase, runStart, stamp, step, stepStart, type Draft } from "./run-log.js";
@@ -70,5 +70,23 @@ test("focusing any step or command puts the whole of it on the canvas; a step al
         assert.ok(inView(box, after, pane), `${pane.width}px ${running ? "live" : "settled"}: ${node.label} is off the canvas when focused`);
       }
     }
+  }
+});
+
+test("jumping to a step centres it on the canvas, whether or not it was in view, at the zoom the reader is at, or the readable zoom when that is smaller", async () => {
+  const pane = { width: 1000, height: 600 };
+  const graph = buildRunGraph(stamp(long(false)), { settled: true });
+  const layout = await layoutRunGraph(graph);
+  for (const node of graph.nodes.filter((n) => isWork(n.kind))) {
+    const box = layout.nodes[node.id]!;
+    for (const zoom of [0.1, 0.5, 1]) {
+      const target = jumpTarget(box, zoom);
+      const after = centredOn(target, target.zoom, pane);
+      assert.ok(Math.abs((box.x + box.width / 2) * after.zoom + after.x - pane.width / 2) < 0.001, `${node.label} at zoom ${zoom}: centred across`);
+      assert.ok(Math.abs((box.y + box.height / 2) * after.zoom + after.y - pane.height / 2) < 0.001, `${node.label} at zoom ${zoom}: centred down`);
+      assert.ok(inView(box, after, pane), `${node.label} at zoom ${zoom}: on the canvas`);
+    }
+    assert.equal(jumpTarget(box, 1).zoom, 1, "the reader's zoom is kept when it is readable");
+    assert.equal(jumpTarget(box, 0.1).zoom, READABLE_ZOOM, "a zoom too small to read is raised to the readable one");
   }
 });

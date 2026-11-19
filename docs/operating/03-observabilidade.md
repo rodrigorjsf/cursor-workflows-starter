@@ -315,18 +315,25 @@ run como `missing`, com o motivo em `error`; os outros runs e o stream de evento
 `http://127.0.0.1:<porta>/runs/<runId>` desenha o run como um grafo que cresce enquanto os eventos chegam (a mesma tela serve
 para um run em andamento e para um que já terminou):
 
-- **Nós.** O começo do run, cada etapa de agente e cada comando de `ctx.exec`. Um `parallel` ou `pipeline` abre num nó
+- **Nós.** O começo do run, cada etapa de agente e cada comando de `ctx.exec` que a chamada marcou com `node: true` (as
+  suítes de teste do `implement-issue`). Os demais comandos não viram nó: o grafo guarda cada um na etapa que estava em
+  andamento quando ele começou ou, se ele rodou entre etapas, na fase dele. Um `parallel` ou `pipeline` abre num nó
   (`parallel ×3`) e fecha num círculo, onde os ramos voltam a se juntar; o que vem depois do grupo continua desse círculo. O
   grafo sai só dos campos `stepId`, `parentId` e `groupId` dos eventos (veja a referência de eventos, [6.1](../reference/events.md)),
   então um nó aparece quando o `step-start` ou o `exec-start` dele chega.
-- **Raias.** Cada fase (`ctx.phase`) é uma faixa, na ordem em que aparecem. Um nó fica na raia da fase que ele declara, ou
-  numa raia mais adiante quando continua de um nó que já está lá: nenhuma aresta volta para uma raia anterior.
+- **Raias.** Cada fase (`ctx.phase`) é uma faixa, empilhada de cima para baixo na ordem em que aparecem; uma fase só de
+  comandos também tem a sua. Dentro da faixa o fluxo vai da esquerda para a direita e uma sequência longa quebra em linhas,
+  para o grafo não passar de 1400 px de largura: o do run `implement-issue` de exemplo cabe numa página de 1500 px, sem
+  rolagem horizontal. Um nó fica na raia da fase que ele declara, ou numa raia mais adiante quando continua de um nó que já
+  está lá: nenhuma aresta volta para uma raia anterior.
 - **Estado.** Um nó em andamento pisca e a aresta que chega a ele se move; depois vira verde (ok), vermelho (falhou), âmbar
   (cancelado) ou cinza (servido do journal ou do memo, num resume). Se o run termina, ou o processo cai, com um nó ainda em
-  andamento, o nó vira "interrompido" (tracejado) em vez de piscar para sempre.
+  andamento, o nó vira "interrompido" (tracejado) em vez de piscar para sempre. Uma sonda (`probe: true`) que sai com
+  código diferente de zero, a resposta esperada dela, fica neutra (círculo vazio) em vez de vermelha, e a linha **Answer**
+  do tooltip diz o código; um timeout, uma interrupção ou um comando sem `probe` que falha seguem vermelhos.
 - **Passar o mouse** sobre um nó mostra o modelo (ou o programa, num comando), onde rodou (`local` ou `cloud`), as
   tentativas, os tokens, o custo, a duração e o tipo do erro (`timeout`, `rate-limit`…; num comando, `exit 2`,
-  `timeout`…). Os números somam todas as tentativas e todas as execuções do run; o custo é o que o teto de custo conta (o
+  `timeout`…). Os números somam todas as tentativas da etapa na execução mostrada; o custo é o que o teto de custo conta (o
   maior entre o bruto e o cobrado), com "(not final)" enquanto a Cursor não fechou o custo de uma tentativa.
 - **Etapas na nuvem.** Uma etapa que rodou como cloud agent da Cursor (`location: "cloud"` no `step-start`) ganha o selo
   **☁ cloud** no nó, e os detalhes ganham a linha **Cloud agent** com o id (`bc-…`) como link para o agente na Cursor
@@ -335,14 +342,28 @@ para um run em andamento e para um que já terminou):
   último. O link só é feito para um id no formato `bc-…`; qualquer outro valor aparece como texto. O tooltip de uma etapa
   na nuvem aceita o ponteiro, para o link poder ser clicado; para chegar ao link pelo teclado, abra o log da etapa (Enter no
   nó), que repete a localização, o agente e o custo.
+- **Execuções.** Um run retomado (um resume) tem mais de uma execução, cada uma aberta por um `run-start`. A tela abre na
+  última; o seletor **Execution 1 / 2** do cabeçalho troca o grafo e os logs para os de uma execução anterior, e uma nota ao
+  lado dele diz o que falhou nela (`Execution 1 failed: gh issue view (exit 1)`). O cabeçalho continua somando todas as
+  execuções (custo, tokens, etapas e comandos), qualquer que seja a mostrada. O log de uma etapa mostra só as tentativas da
+  execução mostrada; uma etapa servida do journal ou do memo não tentou nada nela, e mostra as tentativas de onde rodou. O
+  **Replay** anda pelos eventos da execução escolhida.
 - **Clicar** num nó (ou Enter nele) abre o [log da etapa](#o-log-de-uma-etapa) ao lado do grafo (abaixo de 800 px de
   largura, por cima dele).
+- **Menu de etapas.** À esquerda do grafo, um menu lista as etapas, e os comandos marcados com `node: true`, agrupados pela
+  fase em que o grafo os desenha, na ordem do run e cada um com o estado (`ok`, `failed`, `running`…). Clicar numa etapa
+  centraliza o grafo nela, no zoom em que o leitor está (ou no legível, se o zoom for menor), e a seleciona: o log dela abre,
+  como num clique no nó. O botão **Steps** recolhe o menu para o grafo ficar com o espaço; abaixo de 800 px de largura o menu
+  começa recolhido e, aberto, cobre o grafo.
+- **Voltar.** O cabeçalho tem o botão **Back to Runs**, que leva à lista (`#/runs`), e o **Runs** do breadcrumb é um link
+  sublinhado. O menu, o botão e o breadcrumb se operam pelo teclado: Tab chega a cada um e Enter (ou espaço, num botão) o
+  aciona.
 - **Replay.** Num run que não está em andamento, **Replay** reconstrói o grafo evento a evento, na ordem do log, com
   velocidade de 1× a 20×, pausa e uma barra para ir a qualquer ponto. O grafo de qualquer trecho do log é o mesmo que o
   run teria naquele instante, e o painel de log aberto mostra o log da etapa como ele estava naquele ponto (o replay anda
   pelos eventos que mudam o desenho: o log de uma etapa aparece inteiro quando ela termina; a barra deixa parar em
   qualquer evento).
-- Um run grande (o `implement-issue` passa de 50 comandos) não cabe na tela em tamanho legível: a tela enquadra só os nós
+- Um run com mais nós do que cabem na tela em tamanho legível não aparece inteiro: a tela enquadra só os nós
   que cabem com o texto legível, em volta de um foco (o nó com o log aberto; num run que terminou, o primeiro nó que
   falhou, foi cancelado ou foi interrompido, ou senão a primeira etapa; num run em andamento, o nó mais recente), e
   **Fit View** mostra tudo. Ao chegar pelo Tab a um nó fora da tela, a tela o centraliza no mesmo zoom; a partir daí não
@@ -365,6 +386,14 @@ Clicar num nó abre o log da etapa ao lado do grafo (abaixo de 800 px de largura
   continuou rodando mostra só a resposta final dele (o run reanexado não tem stream).
 - **Comando de `ctx.exec`:** a linha de comando (`$ git commit -m …`), o diretório e a saída, com `stdout` e `stderr`
   separados e na ordem em que chegaram.
+- **Comandos.** Entre os dados e o log, a seção **Commands** lista, como itens compactos (ícone de estado e rótulo), os
+  comandos de `ctx.exec` que rodaram enquanto a etapa estava em andamento, na ordem em que começaram. Os comandos que
+  rodaram fora de qualquer etapa ficam na entrada **workflow** da fase: o botão `workflow · N` no cabeçalho da faixa da
+  fase abre um painel só com essa lista. Os itens são botões, então o Tab chega a eles e Enter ou Espaço os aciona.
+- **Painel de um comando.** Clicar num item abre um painel flutuante com a linha de comando inteira, o diretório, o código
+  de saída (ou o sinal que matou o comando), se a chamada era uma sonda (`probe: true`), a duração e a saída, a de um
+  comando de leitura também. Enquanto o comando roda, a saída chega ao painel aberto do mesmo jeito que o conteúdo de uma
+  etapa. O foco vai para o painel quando ele abre; Esc (ou o botão ×) fecha só ele e devolve o foco ao item.
 - **Ao vivo.** Enquanto a etapa roda, o painel lê o conteúdo que já existe (`/api/runs/<runId>/steps/<stepId>/content`) e
   segue o resto pelo stream (`/events?stepId=<stepId>&lastEventId=<a última linha lida>`), sem lacuna e sem repetição.
   A vista acompanha o fim do log até o leitor subir a barra de rolagem; ao terminar a etapa, o painel lê o conteúdo mais uma

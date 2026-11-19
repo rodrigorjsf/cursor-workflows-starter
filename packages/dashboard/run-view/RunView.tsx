@@ -2,17 +2,17 @@
 // run. The data comes from `useRunEvents`, the graph from `buildRunGraph` and the positions from `layoutRunGraph`; this file
 // puts them on a React Flow canvas.
 import { Background, Controls, type Edge, type Node, ReactFlow, ReactFlowProvider, useReactFlow, useStore, useStoreApi } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { JunctionNode, LaneNode, type LaneNodeData, StartNode, WorkNode, type WorkNodeData } from "./nodes.js";
+import { type KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Glyph, JunctionNode, LaneNode, type LaneNodeData, StartNode, WorkNode, type WorkNodeData } from "./nodes.js";
 import { RunActions } from "./RunActions.js";
 import { SeamsPanel } from "./SeamsPanel.js";
 import { argsHashOf } from "./resume-command.js";
-import { StepLogPanel } from "./StepLogPanel.js";
-import { frameOf, panTarget } from "./framing.js";
+import { CommandPanel, PhasePanel, StepLogPanel, closesOnEscape } from "./StepLogPanel.js";
+import { frameOf, jumpTarget, panTarget } from "./framing.js";
 import { formatCents, formatCount, formatDuration } from "../app/format.js";
-import { type RunGraph, buildRunGraph, isWork } from "./run-graph.js";
-import { headerStatus, offeredActions, runElapsed } from "./run-status.js";
-import { type RunLayout, layoutRunGraph } from "./run-layout.js";
+import { type MenuPhase, type RunGraph, type RunProgress, atReplay, buildRunGraph, commandCount, currentExecution, executionsOf, isWork, replayLength, shownEvents, stepMenu } from "./run-graph.js";
+import { costUnknown, executionNote, headerStatus, offeredActions, runElapsed } from "./run-status.js";
+import { type Box, type RunLayout, laneTitleBox, layoutRunGraph } from "./run-layout.js";
 import { type Connection, useRunEvents } from "./use-run-events.js";
 import { errorText } from "../app/error-text.js";
 
@@ -61,15 +61,32 @@ function useClock(active: boolean): number {
   return now;
 }
 
+const wraps = (from: Box, to: Box): boolean => to.x < from.x + from.width;
+
+export interface FlowView {
+  now: number;
+  selectedId?: string;
+  open(id: string): void;
+  focus(id: string): void;
+  phases: PhaseEntries;
+}
+
+export interface PhaseEntries {
+  openIndex?: number;
+  onOpen(lane: number): void;
+  onFocus?(lane: number): void;
+}
+
 /** What React Flow draws for `graph` laid out as `layout`. `open` opens a node's log; `focus` brings a node that took the keyboard focus into view. */
-export function toFlow(graph: RunGraph, layout: RunLayout, now: number, selectedId: string | undefined, open: (id: string) => void, focus: (id: string) => void): { nodes: Node[]; edges: Edge[] } {
+export function toFlow(graph: RunGraph, layout: RunLayout, view: FlowView): { nodes: Node[]; edges: Edge[] } {
+  const { now, selectedId, open, focus, phases } = view;
   const lanes: Node<LaneNodeData, "lane">[] = layout.lanes.map((lane) => ({
     id: `lane-${lane.index}`,
     type: "lane",
-    position: { x: lane.x, y: 0 },
-    data: { title: lane.title },
+    position: { x: lane.x, y: lane.y },
+    data: { title: lane.title, commandCount: graph.lanes[lane.index]?.commands.length ?? 0, open: lane.index === phases.openIndex, onOpen: () => phases.onOpen(lane.index), onFocus: () => phases.onFocus?.(lane.index) },
     width: lane.width,
-    height: layout.height,
+    height: lane.height,
     zIndex: -1,
     draggable: false,
     selectable: false,
@@ -87,12 +104,54 @@ export function toFlow(graph: RunGraph, layout: RunLayout, now: number, selected
   const state = new Map(graph.nodes.map((n) => [n.id, n.state]));
   const edges: Edge[] = graph.edges
     .filter((e) => layout.nodes[e.source] && layout.nodes[e.target])
-    .map((e) => ({ id: e.id, source: e.source, target: e.target, animated: state.get(e.target) === "running", className: `edge-${state.get(e.target)}`, focusable: false })); // an edge has no action: not a Tab stop
-  return { nodes: [...(layout.lanes.some((l) => l.title !== "") ? lanes : []), ...work], edges };
+    .map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      ...(wraps(layout.nodes[e.source]!, layout.nodes[e.target]!) && { sourceHandle: "below", targetHandle: "above" }),
+      animated: state.get(e.target) === "running",
+      className: `edge-${state.get(e.target)}`,
+      focusable: false,
+    }));
+  return { nodes: [...(lanes.some((l) => l.data.title !== "" || l.data.commandCount > 0) ? lanes : []), ...work], edges };
+}
+
+export function RunCost({ run }: { run: RunProgress }) {
+  return costUnknown(run) ? (
+    <span className="none" title="Cursor did not report the cost of these steps: 0¢ is not what the run cost">
+      unknown
+    </span>
+  ) : (
+    <>{formatCents(run.costCents)}</>
+  );
+}
+
+export function ExecutionPicker({ count, current, note, onPick }: { count: number; current: number; note?: string; onPick(index: number): void }) {
+  if (count < 2) return null;
+  return (
+    <div className="executions">
+      <select aria-label="Execution shown" value={current} onChange={(event) => onPick(Number(event.target.value))}>
+        {Array.from({ length: count }, (_, index) => (
+          <option key={index} value={index}>
+            Execution {index + 1} / {count}
+          </option>
+        ))}
+      </select>
+      {note !== undefined && (
+        <p className="execution-note" role="alert">
+          {note}
+        </p>
+      )}
+    </div>
+  );
 }
 
 /** The height the page's header takes, to guess the size of the canvas before it is measured. */
 const HEADER_PX = 160;
+
+interface Jump {
+  id: string;
+}
 
 /** The pane's size, or a guess from the window's before React Flow has measured it. */
 const paneOrWindow = (pane: { width: number; height: number }) => (pane.width > 0 && pane.height > 0 ? pane : { width: window.innerWidth, height: window.innerHeight - HEADER_PX });
@@ -103,23 +162,53 @@ const paneOrWindow = (pane: { width: number; height: number }) => (pane.width > 
  * (or what is framed) changes. A node that takes the keyboard focus off the canvas is panned into view, at the same zoom;
  * that counts as the user moving the view, so the run stays where the reader tabbed to (Fit View hands it back).
  */
-function Canvas({ graph, layout, now, selectedId, onOpen }: { graph: RunGraph; layout: RunLayout; now: number; selectedId?: string; onOpen(id: string): void }) {
+function Canvas({ graph, layout, now, selectedId, onOpen, phases, jump }: { graph: RunGraph; layout: RunLayout; now: number; selectedId?: string; onOpen(id: string): void; phases: PhaseEntries; jump?: Jump }) {
   const { fitView, setCenter } = useReactFlow();
   const store = useStoreApi();
   const userMoved = useRef(false);
-  const focus = useCallback(
+  const following = useRef<string | undefined>(undefined);
+  const moveTo = useCallback(
+    (target: { x: number; y: number; zoom: number }) => {
+      userMoved.current = true;
+      void setCenter(target.x, target.y, { zoom: target.zoom, duration: 200 });
+    },
+    [setCenter],
+  );
+  const reveal = useCallback(
+    (box: Box | undefined) => {
+      const { transform, width, height } = store.getState();
+      const target = box && panTarget(box, { x: transform[0], y: transform[1], zoom: transform[2] }, { width, height });
+      if (target) moveTo({ ...target, zoom: transform[2] });
+    },
+    [store, moveTo],
+  );
+  const focus = useCallback((id: string) => reveal(layout.nodes[id]), [layout, reveal]);
+  const entries = useMemo<PhaseEntries>(
+    () => ({
+      ...phases,
+      onFocus: (lane: number) => {
+        const band = layout.lanes.find((l) => l.index === lane);
+        if (band) reveal(laneTitleBox(band));
+      },
+    }),
+    [phases, layout, reveal],
+  );
+  const centreOn = useCallback(
     (id: string) => {
       const box = layout.nodes[id];
-      const { transform, width, height } = store.getState(); // read now: the pane may have changed since the last render
-      const target = box && panTarget(box, { x: transform[0], y: transform[1], zoom: transform[2] }, { width, height });
-      if (!target) return;
-      userMoved.current = true;
-      void setCenter(target.x, target.y, { zoom: transform[2], duration: 200 });
+      if (box) moveTo(jumpTarget(box, store.getState().transform[2]));
     },
-    [layout, store, setCenter],
+    [layout, store, moveTo],
   );
-  const { nodes, edges } = useMemo(() => toFlow(graph, layout, now, selectedId, onOpen, focus), [graph, layout, now, selectedId, onOpen, focus]);
+  const { nodes, edges } = useMemo(() => toFlow(graph, layout, { now, selectedId, open: onOpen, focus, phases: entries }), [graph, layout, now, selectedId, onOpen, focus, entries]);
   const pane = useStore((s) => ({ width: s.width, height: s.height }), (a, b) => a.width === b.width && a.height === b.height);
+  useEffect(() => {
+    following.current = jump?.id;
+  }, [jump]);
+  useEffect(() => {
+    if (following.current !== selectedId) following.current = undefined;
+    if (following.current !== undefined) centreOn(following.current);
+  }, [jump, selectedId, centreOn, pane.width, pane.height]);
   const firstFrame = useRef(frameOf(graph, layout, paneOrWindow(pane), selectedId));
   const settled = graph.nodes.every((n) => n.state !== "running");
   const drawn = useRef(false);
@@ -166,7 +255,9 @@ function Canvas({ graph, layout, now, selectedId, onOpen }: { graph: RunGraph; l
       minZoom={0.1}
       maxZoom={1.5}
       onMoveStart={(event) => {
-        if (event) userMoved.current = true; // a gesture of the user; the null event is our own fitView
+        if (!event) return;
+        userMoved.current = true;
+        following.current = undefined;
       }}
       ariaLabelConfig={FLOW_LABELS}
     >
@@ -175,9 +266,64 @@ function Canvas({ graph, layout, now, selectedId, onOpen }: { graph: RunGraph; l
         showInteractive={false}
         onFitView={() => {
           userMoved.current = false;
+          following.current = undefined;
         }}
       />
     </ReactFlow>
+  );
+}
+
+export function StepMenu({ phases, open, selectedId, onToggle, onPick, onOverlay }: { phases: MenuPhase[]; open: boolean; selectedId?: string; onToggle(): void; onPick(id: string): void; onOverlay(): void }) {
+  const aside = useRef<HTMLElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const overlays = () => aside.current !== null && getComputedStyle(aside.current).position === "absolute";
+  useLayoutEffect(() => {
+    if (overlays()) onOverlay();
+  }, []);
+  useEffect(() => {
+    if (!open) return;
+    const onResize = () => {
+      if (overlays()) onOverlay();
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [open, onOverlay]);
+  const pick = (id: string) => {
+    onPick(id);
+    if (overlays()) onOverlay();
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (!open || !closesOnEscape(event) || !overlays()) return;
+    event.preventDefault();
+    onOverlay();
+    toggle.current?.focus();
+  };
+  return (
+    <aside ref={aside} className={open ? "step-menu" : "step-menu collapsed"} aria-label="Steps" onKeyDown={onKeyDown}>
+      <button type="button" ref={toggle} className="btn menu-toggle" aria-expanded={open} aria-controls={open ? "step-menu-body" : undefined} onClick={onToggle}>
+        <span aria-hidden="true">{open ? "◂" : "▸"}</span> Steps
+      </button>
+      {open && (
+        <div id="step-menu-body" className="menu-body">
+          {phases.map((phase) => (
+            <section key={phase.index}>
+              {phase.title !== "" && <h2>{phase.title}</h2>}
+              <ul>
+                {phase.steps.map((step) => (
+                  <li key={step.id}>
+                    <button type="button" className={`menu-step state-${step.state}`} aria-pressed={step.id === selectedId} onClick={() => pick(step.id)}>
+                      <Glyph state={step.state} />
+                      <span className="label">{step.label}</span>
+                      <span className="state">{step.state}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      )}
+    </aside>
   );
 }
 
@@ -189,48 +335,93 @@ export function RunView({ runId }: { runId: string }) {
   const [replayAt, setReplayAt] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(0);
+  const [picked, setPicked] = useState<number>();
   const replaying = replayAt !== null;
-  const shown = useMemo(() => (replayAt === null ? events : events.slice(0, replayAt)), [events, replayAt]);
-  const settled = replaying ? replayAt >= events.length : status !== undefined && status !== "running";
-  const graph = useMemo(() => buildRunGraph(shown, { settled }), [shown, settled]);
+  const executions = useMemo(() => executionsOf(events), [events]);
+  const current = currentExecution(executions, picked);
+  const execution = executions[current]!;
+  const executionLength = replayLength(execution);
+  const shown = useMemo(() => shownEvents(events, execution, replayAt), [events, execution.from, execution.to, replayAt]);
+  const settled = replaying ? replayAt >= executionLength : status !== undefined && status !== "running";
+  const executionSettled = settled || current < executions.length - 1;
+  const graph = useMemo(() => buildRunGraph(shown.execution, { settled: executionSettled }), [shown.execution, executionSettled]);
+  const whole = useMemo(() => (shown.run.length === shown.execution.length ? graph : buildRunGraph(shown.run, { settled })), [graph, shown, settled]);
   const { layout, error: layoutError } = useLayout(graph);
   const clock = useClock(!replaying && !settled);
   const [selectedId, setSelectedId] = useState<string>();
-  const open = useCallback((id: string) => setSelectedId(id), []);
-  const close = useCallback(() => setSelectedId(undefined), []);
-  const now = replaying ? Date.parse(String(shown.at(-1)?.ts ?? "")) || 0 : clock;
+  const [phaseIndex, setPhaseIndex] = useState<number>();
+  const [commandId, setCommandId] = useState<string>();
+  const open = useCallback((id: string) => {
+    setSelectedId(id);
+    setPhaseIndex(undefined);
+    setCommandId(undefined);
+  }, []);
+  const close = useCallback(() => {
+    setSelectedId(undefined);
+    setCommandId(undefined);
+  }, []);
+  const openPhase = useCallback((lane: number) => {
+    setPhaseIndex(lane);
+    setSelectedId(undefined);
+    setCommandId(undefined);
+  }, []);
+  const closePhase = useCallback(() => {
+    setPhaseIndex(undefined);
+    setCommandId(undefined);
+  }, []);
+  const phases = useMemo<PhaseEntries>(() => ({ openIndex: phaseIndex, onOpen: openPhase }), [phaseIndex, openPhase]);
+  const [menuOpen, setMenuOpen] = useState(true);
+  const [jump, setJump] = useState<Jump>();
+  const pickStep = useCallback(
+    (id: string) => {
+      open(id);
+      setJump({ id });
+    },
+    [open],
+  );
+  const closeCommand = useCallback(() => setCommandId(undefined), []);
+  const now = replaying ? Date.parse(String(shown.execution.at(-1)?.ts ?? "")) || 0 : clock;
 
   useEffect(() => {
-    document.title = `${graph.run.workflow ?? "run"} · ${runId}`;
-  }, [graph.run.workflow, runId]);
+    document.title = `${whole.run.workflow ?? "run"} · ${runId}`;
+  }, [whole.run.workflow, runId]);
 
   // The replay: step to the next event that changes the picture.
   useEffect(() => {
     if (!playing || replayAt === null) return;
-    if (replayAt >= events.length) {
+    if (replayAt >= executionLength) {
       setPlaying(false);
       return;
     }
     const timer = setTimeout(() => {
       let next = replayAt + 1;
-      while (next < events.length && !VISIBLE.has(String(events[next - 1]?.type))) next++;
-      setReplayAt(Math.min(next, events.length));
+      while (next < executionLength && !VISIBLE.has(String(atReplay(events, execution, next)?.type))) next++;
+      setReplayAt(Math.min(next, executionLength));
     }, SPEEDS[speed]![1]);
     return () => clearTimeout(timer);
-  }, [playing, replayAt, speed, events]);
+  }, [playing, replayAt, speed, events, execution, executionLength]);
 
   const togglePlay = () => {
-    if (!playing && replayAt !== null && replayAt >= events.length) setReplayAt(FIRST_FRAME); // again, from the start
+    if (!playing && replayAt !== null && replayAt >= executionLength) setReplayAt(FIRST_FRAME);
     setPlaying(!playing);
   };
+  const pick = (index: number) => {
+    setPicked(index === executions.length - 1 ? undefined : index);
+    setPlaying(false);
+    if (replaying) setReplayAt(FIRST_FRAME);
+  };
 
-  const { run } = graph;
+  const { run } = whole;
   const selected = graph.nodes.find((n) => n.id === selectedId && isWork(n.kind));
+  const phase = phaseIndex === undefined || selected ? undefined : graph.lanes[phaseIndex];
+  const openCommand = (selected?.commands ?? phase?.commands)?.find((c) => c.id === commandId);
+  const menu = useMemo(() => stepMenu(graph), [graph]);
   /** In a replay, the log line it has reached; at its end, and outside a replay, the whole log. */
-  const upTo = replaying && replayAt < events.length ? (ids[replayAt - 1] ?? 0) : undefined;
-  const counts = { steps: graph.nodes.filter((n) => n.kind === "step").length, commands: graph.nodes.filter((n) => n.kind === "command").length };
+  const upTo = replaying && replayAt < executionLength ? (atReplay(ids, execution, replayAt) ?? 0) : undefined;
+  const counts = { steps: whole.nodes.filter((n) => n.kind === "step").length, commands: commandCount(whole) };
   const header = headerStatus({ api: { status, error }, run, replaying, settled });
-  const offered = offeredActions(status, graph, error);
+  const offered = offeredActions(status, whole, error);
+  const note = current < executions.length - 1 ? executionNote(graph, current + 1) : undefined;
   const elapsed = runElapsed(run, settled, now);
 
   if (connection === "not-found") {
@@ -251,11 +442,16 @@ export function RunView({ runId }: { runId: string }) {
   return (
     <main className="page">
       <header className="run-header">
-        <nav className="crumbs" aria-label="Breadcrumb">
-          <a href="/#/runs">Runs</a>
-          <span aria-hidden="true">/</span>
-          <span>{run.workflow ?? info?.workflow ?? "…"}</span>
-        </nav>
+        <div className="run-nav">
+          <a className="btn back" href="/#/runs">
+            <span aria-hidden="true">←</span> Back to Runs
+          </a>
+          <nav className="crumbs" aria-label="Breadcrumb">
+            <a href="/#/runs">Runs</a>
+            <span aria-hidden="true">/</span>
+            <span aria-current="page">{run.workflow ?? info?.workflow ?? "…"}</span>
+          </nav>
+        </div>
         <div className="title-row">
           <h1>
             <span className="workflow">{run.workflow ?? info?.workflow ?? "…"}</span> <code>{runId}</code>
@@ -282,7 +478,9 @@ export function RunView({ runId }: { runId: string }) {
           </div>
           <div>
             <dt>Cost</dt>
-            <dd>{formatCents(run.costCents)}</dd>
+            <dd>
+              <RunCost run={run} />
+            </dd>
           </div>
           <div>
             <dt>Tokens</dt>
@@ -304,6 +502,7 @@ export function RunView({ runId }: { runId: string }) {
           )}
         </dl>
         <div className="toolbar">
+        <ExecutionPicker count={executions.length} current={current} note={note} onPick={pick} />
         <div className="replay">
           {!replaying && status !== undefined && status !== "running" && events.length > 0 && (
             <button
@@ -320,13 +519,13 @@ export function RunView({ runId }: { runId: string }) {
           {replaying && (
             <>
               <button type="button" className="btn" onClick={togglePlay}>
-                {playing ? "⏸ Pause" : replayAt >= events.length ? "↻ Again" : "▶ Play"}
+                {playing ? "⏸ Pause" : replayAt >= executionLength ? "↻ Again" : "▶ Play"}
               </button>
               <input
                 type="range"
                 aria-label="replay position"
                 min={FIRST_FRAME}
-                max={events.length}
+                max={executionLength}
                 value={replayAt}
                 onChange={(e) => {
                   setPlaying(false);
@@ -368,20 +567,23 @@ export function RunView({ runId }: { runId: string }) {
       )}
       {!replaying && info?.seamsProposal && <SeamsPanel key={info.seamsProposal.digest} runId={runId} proposal={info.seamsProposal} status={status} onChanged={refresh} />}
       <div className="workspace">
+        {menu.length > 0 && <StepMenu phases={menu} open={menuOpen} selectedId={selected?.id} onToggle={() => setMenuOpen(!menuOpen)} onPick={pickStep} onOverlay={() => setMenuOpen(false)} />}
         <div className="canvas">
           {layoutError !== undefined ? (
             <p className="notice" role="alert">
               The run could not be drawn: {layoutError}
             </p>
           ) : layout && status !== undefined ? (
-            <ReactFlowProvider>
-              <Canvas graph={graph} layout={layout} now={now} selectedId={selected?.id} onOpen={open} />
+            <ReactFlowProvider key={current}>
+              <Canvas graph={graph} layout={layout} now={now} selectedId={selected?.id} onOpen={open} phases={phases} jump={jump} />
             </ReactFlowProvider>
           ) : (
             <p className="notice">{connection === "waiting" ? "Waiting for the run to start…" : "Drawing the run…"}</p>
           )}
         </div>
-        {selected && <StepLogPanel key={selected.id} runId={runId} node={selected} now={now} live={!replaying && selected.state === "running"} upTo={upTo} onClose={close} />}
+        {selected && <StepLogPanel key={selected.id} runId={runId} node={selected} now={now} live={!replaying && selected.state === "running"} upTo={upTo} openCommandId={openCommand?.id} onOpenCommand={setCommandId} onClose={close} />}
+        {phase && <PhasePanel key={phaseIndex} lane={phase.index} title={phase.title} commands={phase.commands} openId={openCommand?.id} onSelect={setCommandId} onClose={closePhase} />}
+        {openCommand && <CommandPanel key={openCommand.id} runId={runId} command={openCommand} now={now} live={!replaying && openCommand.state === "running"} upTo={upTo} onClose={closeCommand} />}
       </div>
     </main>
   );

@@ -180,6 +180,31 @@ test("the same call made twice is two nodes; a resume numbers them the same way"
   assert.deepEqual(ids.slice(2), ids.slice(0, 2));
 });
 
+test("a probe that exits non-zero ends its node carrying the probe flag, and the workflow gets the same result as for any other command", async () => {
+  const code = "process.stdout.write('no\\n'); process.exit(1)";
+  const wf = workflow(async (ctx) => [await ctx.exec(...node(code), { probe: true }), await ctx.exec(...node(code))]);
+  const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });
+  assert.equal(r.status, "finished");
+  const [probed, plain] = r.result as ExecResult[];
+  assert.deepEqual(probed, { ok: false, exitCode: 1, timedOut: false, tail: "no\n" });
+  assert.deepEqual(plain, probed);
+  const [probeEnd, plainEnd] = execEnds(eventsOf(r.runId));
+  assert.deepEqual([probeEnd!.probe, probeEnd!.ok, probeEnd!.exitCode], [true, false, 1]);
+  assert.ok(!("probe" in plainEnd!));
+});
+
+test("a call marked node carries the flag on its start; a call that is not marked carries none", async () => {
+  const wf = workflow(async (ctx) => {
+    await ctx.exec(...node("0"), { label: "drawn", node: true });
+    await ctx.exec(...node("0"), { label: "listed" });
+  });
+  const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });
+  assert.equal(r.status, "finished");
+  const [drawn, listed] = execStarts(eventsOf(r.runId));
+  assert.equal(drawn!.node, true);
+  assert.ok(!("node" in listed!));
+});
+
 test("listeners see the command's start and end, never its output", async () => {
   const seen: WorkflowEvent[] = [];
   const wf = workflow(async (ctx) => (await ctx.exec(...node("process.stdout.write('OUTPUT-MARKER')"))).ok); // the result is the workflow's to return: only the output is content

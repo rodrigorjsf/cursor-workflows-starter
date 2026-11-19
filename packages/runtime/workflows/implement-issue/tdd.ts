@@ -160,8 +160,8 @@ export interface TestRun {
  * in its name): the suite and the `setupCommand` run code of the target repository that an agent has just written, and that code
  * inherits nothing it could send away. The workflow's own `git` and forge CLI calls do not come through here and keep their tokens.
  */
-export async function runTests(cmd: Commands, command: string, cwd: string, opts: { timeoutMs: number; label: string }): Promise<TestRun> {
-  const r = await cmd.exec("bash", ["-c", command], { cwd, env: { NODE_TEST_CONTEXT: undefined }, scrubSecrets: true, timeoutMs: opts.timeoutMs, label: opts.label });
+export async function runTests(cmd: Commands, command: string, cwd: string, opts: { timeoutMs: number; label: string; node?: boolean }): Promise<TestRun> {
+  const r = await cmd.exec("bash", ["-c", command], { cwd, env: { NODE_TEST_CONTEXT: undefined }, scrubSecrets: true, timeoutMs: opts.timeoutMs, label: opts.label, ...(opts.node ? { node: true } : {}) });
   const output = (r.error ? `${r.error}\n${r.tail}` : r.tail).slice(-4000);
   if (r.timedOut) return { ok: false, output, kind: "timeout" };
   if (r.exitCode === null) return { ok: false, output, kind: "killed" };

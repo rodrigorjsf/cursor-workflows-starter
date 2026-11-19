@@ -22,7 +22,7 @@ export const runsInCloud = (node: GraphNode): boolean => isWork(node.kind) && no
 export function describeNode(node: GraphNode, now: number): NodeRow[] {
   if (!isWork(node.kind)) return [];
   const d = node.detail;
-  const elapsed = node.state === "running" && d.runningSince !== undefined ? Math.max(0, now - Date.parse(d.runningSince)) : 0;
+  const elapsed = elapsedSince(node, now);
   const rows: NodeRow[] = [{ name: "State", value: node.state }];
   if (node.kind === "step" && d.model !== undefined) rows.push({ name: "Model", value: d.model });
   if (node.kind === "command" && d.command !== undefined) rows.push({ name: "Command", value: d.command });
@@ -37,8 +37,23 @@ export function describeNode(node: GraphNode, now: number): NodeRow[] {
     rows.push({ name: "Cost", value: `${formatCents(d.costCents)}${d.costFinal ? "" : " (not final)"}` });
   }
   rows.push({ name: "Duration", value: formatDuration(d.durationMs + elapsed) });
-  if (d.errorKind !== undefined) rows.push({ name: "Error kind", value: d.errorKind });
-  if (d.error !== undefined) rows.push({ name: "Error", value: d.error.length > 300 ? `${d.error.slice(0, 299)}…` : d.error });
+  if (d.errorKind !== undefined) rows.push({ name: node.state === "neutral" ? "Answer" : "Error kind", value: d.errorKind });
+  if (d.error !== undefined) rows.push({ name: "Error", value: shortened(d.error) });
+  return rows;
+}
+
+const elapsedSince = (node: GraphNode, now: number): number => (node.state === "running" && node.detail.runningSince !== undefined ? Math.max(0, now - Date.parse(node.detail.runningSince)) : 0);
+const shortened = (text: string): string => (text.length > 300 ? `${text.slice(0, 299)}…` : text);
+
+export function describeCommand(node: GraphNode, now: number): NodeRow[] {
+  const d = node.detail;
+  const rows: NodeRow[] = [{ name: "State", value: node.state }];
+  if (d.exitCode !== undefined) rows.push({ name: "Exit", value: String(d.exitCode) });
+  if (d.signal !== undefined) rows.push({ name: "Signal", value: d.signal });
+  if (d.probe) rows.push({ name: "Probe", value: "yes, a non-zero exit is an expected answer" });
+  if (d.errorKind !== undefined && d.errorKind !== `exit ${d.exitCode}` && d.errorKind !== `signal ${d.signal}`) rows.push({ name: "Error kind", value: d.errorKind });
+  rows.push({ name: "Duration", value: formatDuration(d.durationMs + elapsedSince(node, now)) });
+  if (d.error !== undefined) rows.push({ name: "Error", value: shortened(d.error) });
   return rows;
 }
 

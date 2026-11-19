@@ -12,7 +12,7 @@ process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, test } from "node:test";
-import { calls, resetCloud, script } from "../../runtime/test/fake-sdk.js";
+import { calls, costConfig, resetCloud, script } from "../../runtime/test/fake-sdk.js";
 import { runWorkflow } from "../../runtime/src/runtime/engine.js";
 import { EVENT_SCHEMA_VERSION } from "../../runtime/src/runtime/events.js";
 import { defineWorkflow } from "../../runtime/src/runtime/workflow.js";
@@ -20,8 +20,9 @@ import { repoWithRemote } from "../../runtime/test/cloud-fixtures.js";
 import { clearConfig, configWorkflow, writeGlobalConfig } from "../../runtime/test/config-fixtures.js";
 import { describeNode } from "../run-view/node-details.js";
 import { EMPTY_ARGS_HASH, argsHashOf } from "../run-view/resume-command.js";
+import { costUnknown } from "../run-view/run-status.js";
 import { type GraphNode, KNOWN_EVENT_VERSION, type RunEvent, buildRunGraph, joinIdOf } from "../run-view/run-graph.js";
-import { type ContentItem, buildStepLog } from "../run-view/step-log.js";
+import { type ContentItem, buildNodeLog } from "../run-view/step-log.js";
 import { type DashboardServer, startDashboard } from "../src/server.js";
 import { http, type Sandbox, logPath, sandbox } from "./support.js";
 
@@ -39,6 +40,7 @@ afterEach(async () => {
   box.dispose();
   script.length = 0;
   calls.length = 0;
+  costConfig.getUsageError = undefined;
   resetCloud();
 });
 
@@ -58,10 +60,10 @@ const workflow = defineWorkflow<unknown, string>({
         await ctx.agent("left 2", { label: "left-2" });
       },
       async () => {
-        await ctx.exec(...NODE, { label: "right-cmd" });
+        await ctx.exec(...NODE, { label: "right-cmd", node: true });
       },
       async () => {
-        await ctx.pipeline(["x", "y"], (item) => ctx.exec(...NODE, { label: `stage-1:${item}` }), (_prev, item) => ctx.exec(...NODE, { label: `stage-2:${item}` }));
+        await ctx.pipeline(["x", "y"], (item) => ctx.exec(...NODE, { label: `stage-1:${item}`, node: true }), (_prev, item) => ctx.exec(...NODE, { label: `stage-2:${item}`, node: true }));
       },
     ]);
     await ctx.agent("merge", { label: "merge" });
@@ -74,7 +76,7 @@ function eventsOf(repo: string, runId: string): RunEvent[] {
 }
 const byLabel = (nodes: GraphNode[], label: string) => nodes.find((n) => n.label === label)!;
 
-test("the graph of a real run: every step and command is a node, the groups fork and join, and what follows a group continues from its join", async () => {
+test("the graph of a real run: every step and every command marked as a node is a node, the groups fork and join, and what follows a group continues from its join", async () => {
   const repo = box.repo("repo");
   const result = await runWorkflow(workflow, {}, { cwd: repo });
   assert.equal(result.status, "finished", result.error);
@@ -105,6 +107,32 @@ test("the graph of a real run: every step and command is a node, the groups fork
   assert.equal(byLabel(graph.nodes, "merge").lane, 1);
 });
 
+const withCommands = defineWorkflow<unknown, string>({
+  meta: { name: "with-commands", description: "with commands", phases: [{ title: "Prep" }] },
+  defaults: { model: { id: "m" } },
+  async run(ctx) {
+    ctx.phase("Prep");
+    await ctx.exec(...NODE, { label: "setup" });
+    await ctx.agent("go", { label: "go" });
+    await ctx.exec(...NODE, { label: "suite", node: true });
+    await ctx.exec(process.execPath, ["-e", "process.exit(1)"], { label: "check", probe: true });
+    await ctx.exec(process.execPath, ["-e", "process.exit(2)"], { label: "lint" });
+    return "ok";
+  },
+});
+
+test("the graph of a real run draws the step and the command marked as a node; the other commands are listed under the phase, a probe's exit 1 neutral and another failure red", async () => {
+  const repo = box.repo("repo");
+  const result = await runWorkflow(withCommands, {}, { cwd: repo });
+  assert.equal(result.status, "finished", result.error);
+
+  const graph = buildRunGraph(eventsOf(repo, result.runId));
+  assert.deepEqual(graph.nodes.map((n) => [n.kind, n.label]), [["start", "with-commands"], ["step", "go"], ["command", "suite"]]);
+  assert.deepEqual(graph.lanes.map((l) => [l.title, l.commands.map((c) => [c.label, c.state, c.detail.errorKind])]), [
+    ["Prep", [["setup", "ok", undefined], ["check", "neutral", "exit 1"], ["lint", "failed", "exit 2"]]],
+  ]);
+});
+
 test("the hash the engine writes for empty args is the one the resume command recognises, and any other args are not mistaken for it", async () => {
   const repo = box.repo("repo");
   const empty = await runWorkflow(workflow, {}, { cwd: repo });
@@ -126,6 +154,30 @@ test("a resumed run keeps its nodes: the steps served from the journal show as c
   assert.deepEqual(byLabel(both.nodes, "plan").detail.cached, "journal");
   assert.equal(byLabel(both.nodes, "plan").state, "cached");
   assert.equal(byLabel(both.nodes, "plan").detail.attempts, 1, "the attempt of the first execution still counts");
+});
+
+const oneStep = defineWorkflow<unknown, string>({
+  meta: { name: "one-step", description: "one step", phases: [{ title: "Only" }] },
+  defaults: { model: { id: "m" } },
+  async run(ctx) {
+    ctx.phase("Only");
+    await ctx.agent("go", { label: "go" });
+    return "ok";
+  },
+});
+
+test("the cost of a real run is unknown, with its tokens, when the SDK could not read the usage, and known when it could", async () => {
+  const repo = box.repo("repo");
+  const read = await runWorkflow(oneStep, {}, { cwd: repo });
+  assert.equal(read.status, "finished", read.error);
+  const known = buildRunGraph(eventsOf(repo, read.runId)).run;
+  assert.deepEqual([costUnknown(known), known.costCents, known.tokens], [false, 9, 110]);
+
+  costConfig.getUsageError = "403 feature_unavailable";
+  const unread = await runWorkflow(oneStep, {}, { cwd: repo });
+  assert.equal(unread.status, "finished", unread.error);
+  const unknown = buildRunGraph(eventsOf(repo, unread.runId)).run;
+  assert.deepEqual([costUnknown(unknown), unknown.costCents, unknown.tokens], [true, 0, 110], "the tokens come from the turns, and 0 cents is not the cost");
 });
 
 test("the Run view knows the event schema version the engine writes: a version bump makes this fail until the reader learns it", () => {
@@ -205,7 +257,7 @@ test("the step log of a cloud step shows what the cloud agent said, read through
   dash = await startDashboard({ port: 0 });
   const reply = await http(dash.url, `/api/runs/${encodeURIComponent(result.runId)}/steps/${encodeURIComponent(cloud.id)}/content`);
   assert.equal(reply.status, 200);
-  const log = buildStepLog((reply.json as { content: ContentItem[] }).content);
+  const log = buildNodeLog((reply.json as { content: ContentItem[] }).content, { attemptIds: [] });
 
   assert.equal(log.attempts.length, 1);
   const entries = log.attempts[0]!.entries;
