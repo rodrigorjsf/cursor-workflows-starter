@@ -36,8 +36,9 @@ são o que o backend local faz numa tentativa.
    `WF_INSIDE_WORKFLOW=1`. O shell das etapas herda a marca (medido em 2026-11-11), e o CLI recusa `run`/`start`
    com ela. Os servidores do `.cursor/mcp.json` **não** herdam, porque o SDK não repassa o ambiente a eles; por
    isso o passo 4 encobre o servidor `workflows`.
-1. **Chave do journal:** `sha256(prompt + {model, schema, cwd, tools, agents, settingSources})` mais o número da
-   ocorrência.
+1. **Chave do journal:** `sha256(prompt + {model, schema, cwd, tools, disallowedTools, agents, settingSources, mcpServers,
+   sandbox})` mais o número da ocorrência. `sandbox` é o efetivo (com `caps.requireSandbox` aplicado). Ser um hash mantém os
+   valores de `env` e `headers` de um `mcpServers` fora do journal.
    - Se a chave já estiver no journal, devolve o resultado salvo sem chamar a API.
    - Com `memo: true` (só etapas de leitura), consulta também `.workflows/memo/`, com chave na etapa e no estado do
      repositório (HEAD + mudanças locais + arquivos novos). Um acerto vale entre runs diferentes.

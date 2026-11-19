@@ -753,6 +753,7 @@ async function executeRun<A, R>(
     label: string;
     phase: string | undefined;
     sources: SettingSource[];
+    sandbox: boolean;
     /** Where the step runs: its role's location in the config, once the global `allowedLocations` cap has applied. */
     location: StepLocation;
     /** How a cloud step delivers a structured result: its role's `resultVia` in the config. */
@@ -785,6 +786,7 @@ async function executeRun<A, R>(
     const phase = o.phase ?? currentPhase;
     const sources = allowedSources(caps.allowedSettingSources, o.settingSources ?? settingSources);
     const mKey = modelKey(o.model);
+    const sandbox = caps.requireSandbox === true || Boolean(o.sandbox);
     const fingerprint = {
       model: o.model,
       schema: o.schema,
@@ -793,11 +795,13 @@ async function executeRun<A, R>(
       disallowedTools: o.disallowedTools,
       agents: o.agents,
       settingSources: sources,
+      mcpServers: o.mcpServers,
+      sandbox,
     };
     // Chave calculada de forma síncrona, antes de qualquer await.
     const key = journal.keyFor(prompt, fingerprint);
     const ref: StepRef = { stepId: stepIdOf(key), parentId: flow.last, groupId: flow.groupId };
-    const step: StepContext = { o, role, promptHash, label, phase, sources, location: overrides.location, resultVia: overrides.resultVia, mKey, fingerprint, key, ref, started: false, tokenCap: overrides.maxTokensPerStep, tokens: 0 };
+    const step: StepContext = { o, role, promptHash, label, phase, sources, sandbox, location: overrides.location, resultVia: overrides.resultVia, mKey, fingerprint, key, ref, started: false, tokenCap: overrides.maxTokensPerStep, tokens: 0 };
     return inNode(runStep<T>(prompt, step), flow, ref, () => step.started);
   }
 
@@ -820,7 +824,7 @@ async function executeRun<A, R>(
   }
 
   async function runStep<T>(prompt: string, step: StepContext): Promise<T> {
-    const { o, role, promptHash, label, phase, sources, location, mKey, fingerprint, key, ref } = step;
+    const { o, role, promptHash, label, phase, sources, sandbox, location, mKey, fingerprint, key, ref } = step;
     const emitStart = (attemptId: string, attempt: number, cachedFrom: false | "journal" | "memo") => {
       step.started = true;
       emit({
@@ -912,8 +916,7 @@ async function executeRun<A, R>(
       mcpServers: location === "cloud" ? o.mcpServers : withGuard(nestedGuard(sources), o.mcpServers),
       cwd: stepCwd,
       settingSources: sources,
-      // The global cap wins over the workflow code: a pull request that edits a workflow cannot turn sandboxing off.
-      sandbox: caps.requireSandbox === true || Boolean(o.sandbox),
+      sandbox,
       writes,
       schema: o.schema,
       schemaRetries: o.schemaRetries ?? 2,
