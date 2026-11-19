@@ -35,7 +35,9 @@ usa recebe depois os próprios arquivos, do `wf init` ([2.3](03-invocacao-no-cur
 Aponte qualquer agente de código para o guia, fixado numa tag:
 `https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.4.0/INSTALL-AGENT.md`. Ele checa a máquina,
 instala o kit, confere o login, pede que você confirme que o Privacy Mode está ligado (veja [§4](#4-login-e-modelos)), roda o
-`wf init` no repositório atual e termina no `wf doctor`. O guia é público, está
+`wf init` no repositório atual, pergunta se os runs trabalham num worktree e se abrem um PR por padrão (grava as respostas no
+arquivo global com `wf config set`, e mostra o `wf config set --repo` que muda cada padrão num repositório) e termina no
+`wf doctor`. O guia é público, está
 em inglês (texto escrito para agentes) e não depende de nenhum outro documento. A tag que ele traz é sempre a versão do
 pacote: o `npm test` reprova se os dois divergirem, então uma versão nova só sai com o guia apontando para ela.
 

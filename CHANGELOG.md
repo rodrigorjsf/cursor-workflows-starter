@@ -14,6 +14,15 @@
   resultaria (o esquema e os nomes que cada workflow declara), recusa um valor inválido ou um caminho desconhecido com o erro
   de campo sem tocar no arquivo, e grava de forma atômica. O `wf config show` já dizia a camada de cada ajuste, e agora diz a dos
   dois novos. Até o modo da árvore principal chegar, o run ainda trabalha num worktree com qualquer valor de `worktree`.
+- **O guia de instalação e a skill `cursor-workflows-setup` perguntam os padrões de entrega** (issue #124, spec #114,
+  [ADR-0012](docs/adr/0012-delivery-modes.md)). Depois do `wf init`, o `INSTALL-AGENT.md` ganhou o passo 6 ("Choose the delivery
+  defaults"), que renumera o doctor para 7 e a entrega final para 8, e a skill ganhou a seção de mesmo nome, no passo 3 de "Init a
+  repo". O agente pergunta, com a ferramenta de perguntas do host (`AskQuestion` no Cursor, `AskUserQuestion` no Claude Code),
+  se os runs trabalham num worktree e se abrem um PR por padrão, grava cada resposta no config global com
+  `wf config set workflows.implement-issue.settings.worktree` e `.openPr`, e mostra os comandos `wf config set --repo` que
+  mudam cada padrão num repositório. O bootstrapper do npm ([ADR-0011](docs/adr/0011-npm-bootstrapper.md)) não tem agente e
+  fica com os padrões do código. O `test/install-guide.test.ts` prende o passo e roda no CLI de verdade cada `wf config set` que o
+  guia e a skill citam; o guia continua preso à tag da versão do pacote.
 - **O `implement-issue` deixa o índice de código em dia antes da primeira etapa de agente** (issue #118, spec #114). Depois da
   checagem do autor da issue e antes de qualquer agente, o run roda `codegraph init` quando o repositório do run não tem
   `.codegraph/` e `codegraph sync` quando tem, como um nó de comando do log, sob o teto dos comandos de rede
