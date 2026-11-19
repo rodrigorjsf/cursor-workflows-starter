@@ -9,7 +9,7 @@ Apply the checklist to every step before writing it, then estimate each path. Th
 - [ ] Every step has an explicit model; the frontier model only where justified; there is escalation on failure.
 - [ ] Read-only steps (classify, plan, review, write the PR text) have read-only `tools`, `memo: true` and
   `settingSources: []`; those that read the repository get the context files that matter and exist listed in the
-  prompt. `["team","mdm"]` only when the step needs team or MDM hooks (it still loads the skills). Steps that write keep
+  prompt. `mdm` in the list only when the step needs the Enterprise (MDM) hooks. Steps that write keep
   the engine default (`["project","team","mdm"]`), so leave `settingSources` out.
 - [ ] `tools` is an allowlist; no `"task"` unless the step delegates; `mcpServers` only where used.
 - [ ] Prompts: instructions constant first, data last; nothing volatile at the start.
@@ -46,7 +46,7 @@ Fixed context is paid on **every** call of **every** step, and it grows with wha
 
 | Context source | How to reduce it |
 |---|---|
-| `settingSources: "project"`: `AGENTS.md`, rules, **skill descriptions**, hooks and the **tools of the project's MCP servers** | `["team","mdm"]` drops `AGENTS.md` but **not** the skills (the SDK loaded the same 58 skills with it and with `"project"`); only `[]` removed them, and it also drops team and MDM hooks. Same prompt with `shell` and `mcp`: 30.4k input tokens with `"project"` against 25.5k with `[]`. For read-only steps `[]` cuts the most: in place of `AGENTS.md`, the code lists in the prompt the context files that matter and exist (patterns, glossary, ADRs). |
+| `settingSources: "project"`: `AGENTS.md`, rules, **skill descriptions**, hooks and the **tools of the project's MCP servers** | `["team","mdm"]` drops `AGENTS.md` but **not** the skills (the SDK loaded the same 58 skills with it and with `"project"`); `team` only syncs the team's managed skills and loads no team rules or hooks (a static read of the `@cursor/sdk` 1.3.1 bundle, not a measurement); only `[]` removed the skills, and it also drops the MDM hooks. Same prompt with `shell` and `mcp`: 30.4k input tokens with `"project"` against 25.5k with `[]`. For read-only steps `[]` cuts the most: in place of `AGENTS.md`, the code lists in the prompt the context files that matter and exist (patterns, glossary, ADRs). |
 | `"user"`: `~/.cursor/agents`, `~/.cursor/skills`, `~/.claude/skills`, the user's MCP | Do not load `user`; 60+ subagents there once added about 10k tokens at the start of every chat. |
 | Tool `task`: its description lists name and description of **every custom subagent**, so context grows linearly with their number | An allowlist of `tools` without `"task"`, unless the step must delegate. |
 | Tool definitions | An allowlist of `tools`. `[]` = text only (the runtime adds `mcp` when there is a schema). |

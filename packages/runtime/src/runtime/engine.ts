@@ -139,11 +139,6 @@ export interface RunOptions {
   concurrency?: number;
   /** The chat's overrides (`start_workflow`): they can only tighten the resolved limits; a looser one is a violation and has no effect. */
   mcpOverrides?: LimitOverrides;
-  /**
-   * Camadas de configuração carregadas pelos agentes das etapas. Default ["project","team","mdm"]:
-   * AGENTS.md, .cursor/rules, skills (.agents/skills, .cursor/skills, ...), hooks e MCP do projeto,
-   * mais regras/hooks do time e hooks Enterprise (MDM). Remova "project" em repositórios não confiáveis.
-   */
   settingSources?: SettingSource[];
   /** Onde ficam journal e estado. Default <cwd>/.workflows/runs. */
   stateDir?: string;

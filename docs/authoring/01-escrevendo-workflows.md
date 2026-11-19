@@ -119,6 +119,28 @@ práticas que mais pesam:
 - prompt com parte fixa primeiro;
 - modelo certo por etapa.
 
+## Paridade com um turno do chat do IDE
+
+Uma etapa recebe só o que está no disco e entra por `settingSources`. A lista que mais se aproxima de um turno do chat do
+IDE sobre o mesmo checkout é `["project","user","plugins","mdm"]`. Passe-a na chamada `agent()` ou no papel da etapa
+([6.2](../reference/config.md#papéis-globs-de-label-e-variáveis)), e confira que `caps.allowedSettingSources` lista `user` e
+`plugins`. Cada camada soma contexto fixo a toda chamada
+([5.2 §4.3](../operating/02-custos-e-cache.md#43-contexto-fixo-mínimo-por-etapa)): dê a lista só à etapa que precisa da paridade.
+
+- **`project` lê o checkout, não a sessão do IDE.** O que só existe na janela aberta (um arquivo não salvo, uma regra anexada à
+  mão) não chega à etapa.
+- **`team` fica de fora da lista.** Ele só sincroniza as skills gerenciadas do time: não busca Team Rules e não tem caminho de
+  hooks. É uma leitura estática do bundle do `@cursor/sdk@1.3.1`, não uma medição; a linha "Contexto fixo por camada" de
+  [8.2 §7](../research/verificacoes-locais.md) é coerente com ela.
+- **As regras da conta e as do time não têm transporte.** As User Rules da conta e as Team Rules do dashboard não têm campo nem
+  busca no SDK. Elas chegam a uma etapa por três caminhos: o `AGENTS.md` do repositório, uma regra `.mdc` em `.cursor/rules/` com
+  `alwaysApply: true` (os dois exigem `project`) ou o prompt da etapa. Que uma regra `alwaysApply` chegue a todo turno sem
+  interface não foi medido.
+- **O corpo de uma skill com `disable-model-invocation: true` nunca vem do catálogo de skills**, e o SDK não tem `/nome` para
+  anexá-lo como o IDE faz. Para a etapa receber essas instruções, ponha o corpo no prompt.
+- **Etapas na nuvem ignoram a lista local.** A VM carrega as camadas que sempre carrega (`project`, `team` e `plugins`)
+  ([6.2 §Etapas na nuvem](../reference/config.md#etapas-na-nuvem)).
+
 ## Receitas
 
 ### Roteamento por label → modelo

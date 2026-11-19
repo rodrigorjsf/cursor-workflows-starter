@@ -77,10 +77,27 @@ export default defineWorkflow<{ target: string }>({
 | `timeoutMs` | Time limit of each send (the request and each schema re-prompt get their own). Default 20 min. |
 | `retries` | Extra attempts when the run ends in error or is cancelled. Default 1. A configuration or authentication error the SDK marks not retryable (a bad model id, an invalid key) fails the step at once. |
 | `schemaRetries` | Re-prompts when the agent skips `submit_result` or sends invalid JSON. Default 2. |
-| `settingSources` | Which config layers the step loads: `"project"` (AGENTS.md, rules, skills, hooks, project MCP), `"team"`, `"mdm"`, `"user"`, `"plugins"`, `"all"` (the global cap `allowedSettingSources` leaves `"all"` out by default). Default when omitted: `["project","team","mdm"]`. Every layer adds fixed context to every call (cost.md). |
+| `settingSources` | Which config layers the step loads: `"project"` (AGENTS.md, rules, skills, hooks, project MCP), `"team"` (only syncs the team's managed skills: no team rules, no team hooks), `"mdm"` (Enterprise hooks), `"user"`, `"plugins"`, `"all"` (the global cap `allowedSettingSources` leaves `"all"` out by default). Default when omitted: `["project","team","mdm"]`. Every layer adds fixed context to every call (cost.md). To bring a step close to an IDE chat turn, see "Parity with an IDE chat turn" below. |
 | `memo` | Result cache across runs, keyed by prompt, model, schema, tools, context and repository state. Accepted only with read-only `tools`. |
 | `revertOnRetry` | Before each retry of a step that can write, puts `cwd` back as it was when the step started (files created are deleted, files changed are restored, the index is unstaged). Default off. Use it only when no other step writes in that directory at the same time (a worktree of the step's own): the undo restores the whole directory. In a directory that is not a git repository the retry runs anyway, with a warning. |
 | `sandbox` | Turns on the SDK's local sandbox (Linux needs `bubblewrap` or a kernel with Landlock). Measured: it denies the network except the hosts of `.cursor/sandbox.json`, blocks shell writes outside `cwd` (the `edit` tool did not create a file there either), and refuses reading `~/.cursor/sdk/auth.json` only with `readBoundary: "workspace"` in the repository's `.cursor/sandbox.json`. The installer's global config already turns it on for every step (`caps.requireSandbox`); a step that downloads packages then needs its hosts listed. |
+
+### Parity with an IDE chat turn
+
+A step loads only what is on disk and named in `settingSources`. The list closest to an IDE chat turn on the same checkout is
+`["project","user","plugins","mdm"]`. Pass it on the call or on the role in the config; the global cap `allowedSettingSources`
+must list `user` and `plugins`. Every layer adds fixed context to every call (cost.md), so give the list only to the step that
+needs the parity.
+
+- `project` reads the checkout the run works in, not the IDE session: what exists only in an open editor does not reach the step.
+- `team` stays out of the list. It only syncs the team's managed skills: it has no hook path and fetches no Team Rules. This is a
+  static read of the `@cursor/sdk` 1.3.1 bundle, not a measurement.
+- Account User Rules and dashboard Team Rules have no field and no fetch in the SDK. They reach a step by three routes: `AGENTS.md`,
+  an `.mdc` rule with `alwaysApply: true`, or the step prompt. That an `alwaysApply` rule reaches every headless turn has not been
+  measured.
+- The body of a skill with `disable-model-invocation: true` is never loaded by the catalog, and the SDK has no `/name` to attach
+  it: put the body in the step prompt.
+- A cloud step ignores the list: the cloud VM loads the project, team and plugin settings it always loads.
 
 ## `exec()`: commands the workflow runs itself
 

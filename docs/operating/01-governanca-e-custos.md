@@ -145,14 +145,17 @@ contexto que as etapas carregam (`settingSources`):
 
 ## Políticas de admin que se aplicam
 
-- **Hooks Enterprise (MDM) e Team** (dashboard): o engine carrega `team` e `mdm` por padrão
+- **Hooks Enterprise (MDM) e Team** (dashboard): o engine carrega `mdm` por padrão
   (`settingSources: ["project","team","mdm"]`). Um deny em qualquer fonte vence ask e allow
   ([DOC](https://cursor.com/docs/hooks#configuration)). Hooks Team só existem no Enterprise, e hooks de plugins
-  entram depois das quatro fontes (Enterprise, Team, projeto, usuário). Exemplos úteis do cookbook: auditoria em
+  entram depois das quatro fontes (Enterprise, Team, projeto, usuário). O `team` do `settingSources` só sincroniza as
+  skills gerenciadas do time: pela leitura estática do bundle do `@cursor/sdk@1.3.1` (não medida,
+  [2.2 §5](../usage/02-configuracao-inicial.md#5-contexto-do-projeto-nos-agentes)) ele não tem caminho de hooks Team, então
+  não presuma que um hook Team do dashboard chegue a uma etapa. Exemplos úteis do cookbook: auditoria em
   JSONL, bloqueio de prompts com segredos e bloqueio de modelos por origem do repositório. Nas runs locais,
   hooks de projeto, inclusive um deny de `PreToolUse` do Claude Code, valeram com `"project"` (medido em
-  2026-11-11); os de `team` e `mdm` não foram testados (conta pessoal). `settingSources: []` desliga também
-  esses hooks.
+  2026-11-11); os de `mdm` não foram testados (conta pessoal). `settingSources: []` desliga também
+  os hooks do projeto e do MDM.
 - **Políticas de MCP, rede e tools do admin:** só parte está documentada para runs locais do SDK. A denylist de
   comandos do admin vale: comandos de shell que casam com ela são rejeitados antes de rodar, inclusive nos
   caminhos sem aprovação (SDK 1.0.27, [DOC](https://cursor.com/docs/release-notes/sdk)). Uma política do admin
