@@ -83,8 +83,8 @@ export async function peekTree(cmd: Commands, cwd: string): Promise<string> {
     const own = (await cmd.gitRead(cwd, "rev-parse", "--path-format=absolute", "--git-path", "index")).trim();
     if (existsSync(own)) copyFileSync(own, index);
     const env = { GIT_INDEX_FILE: index };
-    await cmd.gitWith(cwd, env, "add", "-A");
-    return (await cmd.gitReadWith(cwd, env, "write-tree")).trim();
+    await cmd.gitWithEnv(cwd, env, "add", "-A");
+    return (await cmd.gitReadWithEnv(cwd, env, "write-tree")).trim();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -215,23 +215,17 @@ export async function planGc(options: {
     plan.errors.push(`the origin's branches cannot be listed, so no origin branch is removed: ${errorText(err)}`);
   }
 
-  const checkedOut = (await commands.gitRead(cwd, "branch", "--show-current")).trim();
+  const checkedOut = await commands.currentBranch(cwd);
   for (const { runId, progress } of runs) {
     const { branch } = progress;
     const mainTree = progress.mainTree === true;
     const worktree = mainTree ? undefined : progress.worktree;
     if (!branch || (!worktree && !mainTree)) continue;
-    if (mainTree) {
-      if (!branch.startsWith(WORKFLOW_BRANCH_PREFIX)) {
-        plan.kept.push({ runId, why: `its progress names ${branch}, which is not under ${WORKFLOW_BRANCH_PREFIX}: not touched` });
-        continue;
-      }
-    } else {
-      const inside = relative(worktreesDir, resolve(worktree!));
-      if (!branch.startsWith(WORKFLOW_BRANCH_PREFIX) || inside === "" || inside.startsWith("..") || isAbsolute(inside)) {
-        plan.kept.push({ runId, why: `its progress names ${branch} and ${worktree}, which are not under ${WORKFLOW_BRANCH_PREFIX} and ${worktreesDir}: not touched` });
-        continue;
-      }
+    const inside = worktree === undefined ? undefined : relative(worktreesDir, resolve(worktree));
+    const outsideWorktrees = inside !== undefined && (inside === "" || inside.startsWith("..") || isAbsolute(inside));
+    if (!branch.startsWith(WORKFLOW_BRANCH_PREFIX) || outsideWorktrees) {
+      plan.kept.push({ runId, why: `its progress names ${branch}${worktree === undefined ? "" : ` and ${worktree}`}, which are not under ${WORKFLOW_BRANCH_PREFIX}${worktree === undefined ? "" : ` and ${worktreesDir}`}: not touched` });
+      continue;
     }
 
     const hasWorktree = worktree !== undefined && (existsSync(worktree) || registered.has(normal(worktree)));

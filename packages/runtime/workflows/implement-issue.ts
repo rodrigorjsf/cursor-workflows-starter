@@ -452,7 +452,7 @@ async function dirtyTreeRefusal(cmd: Commands, cwd: string, reasonOf = startDirt
   return files.length ? { status: "dirty-tree", files, reason: reasonOf(files) } : undefined;
 }
 
-async function changedSinceHandedBack(cmd: Commands, cwd: string, handedBack: string): Promise<DirtyTree | undefined> {
+async function handedBackRefusal(cmd: Commands, cwd: string, handedBack: string): Promise<DirtyTree | undefined> {
   excludeCodeIndex(cwd);
   const now = await peekTree(cmd, cwd);
   if (now === handedBack) return undefined;
@@ -467,8 +467,8 @@ async function changedSinceHandedBack(cmd: Commands, cwd: string, handedBack: st
 
 async function resumeRefusal(cmd: Commands, progress: ProgressStore, cwd: string, log: (message: string) => void): Promise<DirtyTree | undefined> {
   const branch = progress.data.branch!;
-  const checkedOut = (await cmd.gitRead(cwd, "branch", "--show-current")).trim();
-  if (checkedOut === branch) return progress.data.handedBack === undefined ? undefined : changedSinceHandedBack(cmd, cwd, progress.data.handedBack);
+  const checkedOut = await cmd.currentBranch(cwd);
+  if (checkedOut === branch) return progress.data.handedBack === undefined ? undefined : handedBackRefusal(cmd, cwd, progress.data.handedBack);
   const refusal = await dirtyTreeRefusal(cmd, cwd, (files) =>
     dirtyTreeReason(
       files,
@@ -504,7 +504,7 @@ function claimMainTree(cwd: string, runId: string, issue: number) {
 
 async function enterMainTree(cmd: Commands, progress: ProgressStore, cwd: string, branch: string, log: (message: string) => void) {
   if (await runBranchIsThere(cmd, progress, cwd)) {
-    if ((await cmd.gitRead(cwd, "branch", "--show-current")).trim() !== branch) await cmd.git(cwd, "switch", branch);
+    if ((await cmd.currentBranch(cwd)) !== branch) await cmd.git(cwd, "switch", branch);
     return undefined;
   }
   const refusal = await dirtyTreeRefusal(cmd, cwd);
@@ -703,7 +703,7 @@ export default defineWorkflow<Args>({
           : await dirtyTreeRefusal(cmd, ctx.cwd);
         if (refusal) return { issue: ctx.args.issue, ...refusal };
         handsTreeBack = true;
-        progress.data.handedBack = undefined;
+        progress.data.handedBack = await peekTree(cmd, ctx.cwd);
         progress.save();
       }
       const { issue: number, repo } = ctx.args;
@@ -1047,6 +1047,7 @@ export default defineWorkflow<Args>({
         progress.data.writeSeq = seq;
         execution ??= executionsOf(ctx.cwd, ctx.runId).length; // esta execução: a última do log, que o engine abriu antes do run
         progress.data.inFlight = { id, before, execution };
+        progress.data.handedBack = undefined;
         progress.save();
         try {
           // revertOnRetry: o worktree é só desta etapa, e uma nova tentativa não pode herdar o que a que falhou deixou.
@@ -1055,7 +1056,7 @@ export default defineWorkflow<Args>({
         } catch (err) {
           try {
             await revertTo(cmd, worktree, before);
-            settle();
+            await settle();
           } catch {
             // O desfazer falhou (o run foi cancelado, ou o git travou): o erro da etapa é o que sobe, e o registro "em andamento" fica,
             // para o resume voltar ao snapshot de antes dela. O catch do run o marca `interrupted`: o processo não caiu.
@@ -1067,8 +1068,11 @@ export default defineWorkflow<Args>({
           throw err;
         }
       };
-      const settle = () => {
+      const settle = async () => {
         progress.data.inFlight = undefined;
+        progress.save();
+        if (!mainTree) return;
+        progress.data.handedBack = await peekTree(cmd, worktree);
         progress.save();
       };
       /** O que uma etapa de código (green, correção, refactor) não pode mudar. Vazio = nenhuma violação. */
@@ -1120,7 +1124,7 @@ export default defineWorkflow<Args>({
             const deleted = changes.filter((c) => c.status === "D" && isTest(c.path)).map((c) => c.path);
             if (deleted.length || await runnerConfigChanged(cmd, worktree, before, after)) {
               await revertTo(cmd, worktree, before);
-              settle();
+              await settle();
               problem =
                 `The change was undone: ${deleted.length ? `you deleted tests (${deleted.join(", ")})` : "you changed the runner configuration"}. ` +
                 "Write or update tests, without deleting any.";
@@ -1131,18 +1135,18 @@ export default defineWorkflow<Args>({
             const res = await suite(`red:${sfx}`);
             if (res.kind === "timeout" || res.kind === "killed") {
               await revertTo(cmd, worktree, before);
-              settle();
+              await settle();
               return `tests-${res.kind}`;
             }
             if (res.ok) {
               if (t.alreadySatisfied) {
-                settle(); // o comportamento já existia: o teste fica como regressão, sem etapa de código
+                await settle();
                 Object.assign(rec, { testFile: t.testFile, testName: t.testName, alreadySatisfied: t.evidence ?? "confirmed by the test step", green: res.output, done: true });
                 progress.upsert(rec);
                 return undefined;
               }
               await revertTo(cmd, worktree, before);
-              settle();
+              await settle();
               problem =
                 "The test passed without implementation. If the behaviour already exists, answer alreadySatisfied: true with the evidence; " +
                 "otherwise, write a test that fails because the slice's behaviour is missing.";
@@ -1150,7 +1154,7 @@ export default defineWorkflow<Args>({
               if (attempt === settings.redGreenAttempts) return "test-not-red";
               continue;
             }
-            settle();
+            await settle();
             if (!res.output.includes(t.testName) && !res.output.includes(basename(t.testFile))) {
               redUnattributed++;
               ctx.log(`slice ${sfx}: the red output does not name ${t.testName}; check that the failure comes from the new test`);
@@ -1177,11 +1181,11 @@ export default defineWorkflow<Args>({
             if (problem) {
               lastProblem = problem;
               await revertTo(cmd, worktree, before);
-              settle();
+              await settle();
               if (attempt === settings.redGreenAttempts) return "tdd-violation";
               continue;
             }
-            settle();
+            await settle();
             rec.greenDone = true;
             progress.upsert(rec);
           }
@@ -1203,7 +1207,7 @@ export default defineWorkflow<Args>({
           lastProblem = await codeViolation(before, await snapshotTree(cmd, worktree), rec);
           if (lastProblem) {
             await revertTo(cmd, worktree, before);
-            settle();
+            await settle();
             return "tdd-violation";
           }
           // settle e rodada contada numa só gravação: nenhuma queda entre as duas desfaz uma correção já contada.
@@ -1309,18 +1313,18 @@ export default defineWorkflow<Args>({
           const refactorProblem = await codeViolation(before, await snapshotTree(cmd, worktree));
           if (refactorProblem) {
             await revertTo(cmd, worktree, before);
-            settle();
+            await settle();
             return { ...base, status: "tdd-violation", step: "refactor-1", reason: refactorProblem, ...where };
           }
           const after = await suite("refactor");
           if (!after.ok) {
             await revertTo(cmd, worktree, before); // volta ao último verde
-            settle();
+            await settle();
             // Como em toda suíte: passar do teto ou morrer por um sinal não é uma suíte vermelha.
             const status = after.kind === "timeout" || after.kind === "killed" ? `tests-${after.kind}` : "tests-failed-after-review";
             return { ...base, status, ...where, output: after.output };
           }
-          settle();
+          await settle();
           progress.data.refactorDone = true;
           progress.data.refactorSummary = fix.summary;
           progress.save();

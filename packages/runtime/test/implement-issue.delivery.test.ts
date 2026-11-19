@@ -14,7 +14,7 @@ import { runWorkflow } from "../src/runtime/engine.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import implementIssue from "../workflows/implement-issue.js";
-import { SUB_CODE, SUB_TEST, branchOf, failForge, forgeState, forgeTest, fx, git, issue, names, originBranches, removeCodegraph, run, seedCodeIndex, submit, worktreeOf, write } from "./implement-issue.fixture.js";
+import { SUB_CODE, SUB_TEST, branchOf, currentBranch, failForge, forgeState, forgeTest, fx, git, issue, names, originBranches, removeCodegraph, run, seedCodeIndex, submit, worktreeOf, write } from "./implement-issue.fixture.js";
 
 const res = (r: { result?: unknown }) => r.result as any;
 const commitOnMain = (file: string) => {
@@ -431,7 +431,6 @@ test("the workflow force-pushes only branches under its own prefix, and always w
   ]);
 });
 
-const currentBranch = () => git(fx.repo, "branch", "--show-current").trim();
 const runBranches = () => git(fx.repo, "branch", "--list", "wf/*", "--format=%(refname:short)").split("\n").filter(Boolean);
 const treeStatus = () => git(fx.repo, "status", "--porcelain");
 const mainTreeRun = (args: Record<string, unknown> = {}, runId?: string) => run({ worktree: false, ...args }, runId);
@@ -735,6 +734,35 @@ forgeTest("after a cancel the tree is the run's own: a file the user adds before
   assert.equal(res(refused).status, "dirty-tree", JSON.stringify(res(refused)));
   assert.deepEqual(res(refused).files.map((line: string) => line.slice(3)), ["notes.txt"]);
   assert.equal(readFileSync(join(fx.repo, "notes.txt"), "utf8"), "mine\n", "the user's file was not cleaned away by the step's undo");
+
+  rmSync(join(fx.repo, "notes.txt"));
+  const resumed = await mainTreeRun({}, cancelled.runId);
+  assert.equal(res(resumed).status, "done", JSON.stringify(res(resumed)));
+});
+
+forgeTest("a cancel between two steps leaves the tree as the last finished step made it: a file the user adds before the resume is refused, and the run's own work is not listed", async () => {
+  issue(["complexity:low"]);
+  const controller = new AbortController();
+  fx.handlers["review:standards"] = () => {
+    controller.abort();
+    return { hang: true };
+  };
+  const cancelled = await runWorkflow(implementIssue, { issue: 7, testCommand: "node --test", openPr: false, worktree: false } as any, {
+    cwd: fx.repo,
+    runId: "implement-issue-cancelreview",
+    signal: controller.signal,
+  });
+  assert.equal(cancelled.status, "cancelled", JSON.stringify(cancelled.result));
+  await bodyUnwound();
+  const ownWork = treeStatus();
+  assert.match(ownWork, /src\/math\.js/);
+  assert.match(ownWork, /test\/sub\.test\.js/);
+
+  writeFileSync(join(fx.repo, "notes.txt"), "mine\n");
+  fx.handlers["review:standards"] = (o) => submit(o, { findings: [], worst: "" });
+  const refused = await mainTreeRun({}, cancelled.runId);
+  assert.equal(res(refused).status, "dirty-tree", JSON.stringify(res(refused)));
+  assert.deepEqual(res(refused).files.map((line: string) => line.slice(3)), ["notes.txt"]);
 
   rmSync(join(fx.repo, "notes.txt"));
   const resumed = await mainTreeRun({}, cancelled.runId);

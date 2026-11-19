@@ -63,9 +63,10 @@
     anterior.
   - **O resume, o cancelar e o `wf gc` seguem as mesmas regras** (issue #126). Um resume cuja pasta saiu da branch do run, e está
     limpa, põe a branch em checkout de novo e segue; se está suja, devolve `status: "dirty-tree"` com os arquivos, sem mover nada. Com
-    a pasta na branch do run, o resume recusa só o que o run não fez: o run grava a árvore que deixou ao terminar uma execução (e ao
-    desfazer uma etapa cancelada), e o resume compara a pasta com ela, de modo que o trabalho do próprio run, ainda não commitado, não
-    é "sujo". Um run cujo processo morreu não grava essa árvore, e o resume dele não distingue o que é seu do que é do run. O cancelar
+    a pasta na branch do run, o resume recusa só o que o run não fez: o run grava a árvore que deixou ao fim de cada etapa de escrita,
+    ao desfazer uma etapa cancelada e ao terminar uma execução, e o resume compara a pasta com ela, de modo que o trabalho do próprio
+    run, ainda não commitado, não é "sujo". Um processo que morre no meio de uma etapa de escrita não gravou a árvore daquela etapa, e o
+    resume dele desfaz a etapa em andamento sem separar o que é do run do que é seu. O cancelar
     de um job que roda desfaz só a etapa de escrita em andamento na pasta do usuário e deixa a branch, os commits e o trabalho anterior
     do run. O `wf gc` de um run da árvore principal não tem worktree para remover, nunca toca nos arquivos da pasta e só apaga a
     branch que o run registrou como sua (`wf/…`): a branch em checkout na pasta fica, com o motivo no plano, até o usuário sair dela.

@@ -10,7 +10,7 @@ import { afterEach, beforeEach, test } from "node:test";
 import { cancelJob } from "../src/runtime/job-state.js";
 import { isAlive } from "../src/runtime/pid.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
-import { branchOf, fx, git, issue, run, setup, teardown } from "./implement-issue.fixture.js";
+import { branchOf, currentBranch, fx, git, issue, run, setup, teardown } from "./implement-issue.fixture.js";
 import { waitFor } from "./wait-for.js";
 
 beforeEach(setup);
@@ -103,7 +103,7 @@ test("cancelling a running main-tree job, as wf cancel does, puts the files of t
   children.push(child);
   const testFile = join(fx.repo, "test", "sub.test.js");
   await waitFor("the red step to write its test into the user's folder", () => existsSync(testFile) && progressOf(runId).inFlight);
-  assert.equal(git(fx.repo, "branch", "--show-current").trim(), branchOf(runId), "the job's branch is checked out in the user's folder while it works");
+  assert.equal(currentBranch(), branchOf(runId), "the job's branch is checked out in the user's folder while it works");
 
   const cancelled = await cancelJob(fx.repo, "main-1", 20_000);
   assert.match(cancelled!.note, /^SIGTERM sent/, JSON.stringify(cancelled));
@@ -112,7 +112,7 @@ test("cancelling a running main-tree job, as wf cancel does, puts the files of t
 
   assert.ok(!existsSync(testFile), "the step's test file is gone from the user's folder");
   assert.equal(git(fx.repo, "status", "--porcelain").trim(), "", "nothing of the cancelled step is left");
-  assert.equal(git(fx.repo, "branch", "--show-current").trim(), branchOf(runId), "the folder stays on the run's branch");
+  assert.equal(currentBranch(), branchOf(runId), "the folder stays on the run's branch");
 
   const resumed = await run({ worktree: false }, runId);
   assert.equal(res(resumed).status, "done", JSON.stringify(res(resumed)));

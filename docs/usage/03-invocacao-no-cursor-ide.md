@@ -102,9 +102,10 @@ roda a pasta é do workflow: um arquivo que você salva ali pode ser desfeito po
 - O resultado do run traz `branch` e `mainTree: true`, e não traz `worktree`.
 - **O resume segue as mesmas regras do início.** Com a pasta em outra branch e limpa, ele põe a branch do run em checkout de novo e
   segue. Com a pasta em outra branch e suja, ou na branch do run com arquivos que o run não fez (ele compara a pasta com a árvore que
-  deixou ao terminar), ele devolve `status: "dirty-tree"` com a lista, sem mover nada: guarde ou descarte os arquivos e retome de novo.
-  O trabalho do próprio run, ainda não commitado, não conta como sujo. Se o processo do run morreu, o run não gravou o que deixou, e o
-  resume desfaz a etapa em andamento sem separar o seu do dele.
+  deixou ao fim de cada etapa de escrita e ao terminar), ele devolve `status: "dirty-tree"` com a lista, sem mover nada: guarde ou
+  descarte os arquivos e retome de novo. O trabalho do próprio run, ainda não commitado, não conta como sujo. Se o processo do run
+  morreu no meio de uma etapa de escrita, o run não gravou a árvore dessa etapa, e o resume desfaz a etapa em andamento sem separar
+  o que é dela do que é seu.
 - **O cancelar desfaz só a etapa de escrita em andamento**, na pasta do usuário, como num worktree: a branch, os commits e o trabalho
   das etapas anteriores do run ficam. Um cancelar que chega com o agente da etapa trabalhando desfaz a etapa na hora; um que chega
   enquanto o código confere o resultado (a suíte) deixa os arquivos da etapa até o resume desfazê-la.

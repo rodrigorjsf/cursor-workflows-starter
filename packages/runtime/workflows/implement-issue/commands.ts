@@ -105,11 +105,15 @@ export class Commands {
     return this.succeedRead("git", args, cwd, this.timeouts.localMs);
   }
 
-  async gitWith(cwd: string, env: Record<string, string | undefined>, ...args: string[]): Promise<void> {
+  async currentBranch(cwd: string): Promise<string> {
+    return (await this.gitRead(cwd, "branch", "--show-current")).trim();
+  }
+
+  async gitWithEnv(cwd: string, env: Record<string, string | undefined>, ...args: string[]): Promise<void> {
     await this.succeed("git", args, cwd, this.timeouts.localMs, env);
   }
 
-  async gitReadWith(cwd: string, env: Record<string, string | undefined>, ...args: string[]): Promise<string> {
+  async gitReadWithEnv(cwd: string, env: Record<string, string | undefined>, ...args: string[]): Promise<string> {
     return this.succeedRead("git", args, cwd, this.timeouts.localMs, undefined, env);
   }
 

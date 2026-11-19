@@ -17,7 +17,7 @@ import { tryAcquireRunLock } from "../src/runtime/run-store.js";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import implementIssue from "../workflows/implement-issue.js";
 import { applyGc, directCommands, planGc } from "../workflows/implement-issue/gc.js";
-import { SUB_CODE, branchOf, failForge, fx, forgeState, git, issue, originBranches, run, setPrState, setup, teardown, worktreeOf } from "./implement-issue.fixture.js";
+import { SUB_CODE, branchOf, currentBranch, failForge, fx, forgeState, git, issue, originBranches, run, setPrState, setup, teardown, worktreeOf } from "./implement-issue.fixture.js";
 import { type GcOutput, age, delivered, editRecord, failedRun, gc, localBranches, mainTreeDelivered, mainTreeFailed, stillThere } from "./implement-issue.gc.fixture.js";
 
 beforeEach(() => {
@@ -700,7 +700,6 @@ test("the plan says what a failed run's removal loses: uncommitted files in its 
   assert.ok(existsSync(join(failed.worktree, "scratch.txt")), "a dry run loses nothing");
 });
 
-const currentBranch = () => git(fx.repo, "branch", "--show-current").trim();
 const folderFiles = () => ({
   head: git(fx.repo, "rev-parse", "HEAD").trim(),
   status: git(fx.repo, "status", "--porcelain"),
