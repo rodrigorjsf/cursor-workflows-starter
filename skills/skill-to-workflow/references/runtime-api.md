@@ -160,7 +160,7 @@ const names = JSON.parse(tables.text);
   supported. The server starts in the run's cwd, with `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER` of the
   process plus `env`: no other variable of the workflow's environment reaches it. It runs outside the SDK sandbox, with the
   trust of a `ctx.exec` command.
-- `opts`: `label` (name in progress and in the event log; default `mcp <command> <tool>`), `phase` (like `agent()`'s) and
+- `opts`: `label` (name in progress and in the event log; replaces the default `mcp <command> <first argument that is not a flag> <tool>`, such as `mcp node server.mjs echo`), `phase` (like `agent()`'s) and
   `timeoutMs` (the whole call, start of the server included; default 10 minutes).
 - The result is `{ ok, text, content, structuredContent?, timedOut, error? }`. `content` is the tool's content blocks and
   `text` its text blocks joined by a newline. A tool error, an unknown tool, a server that cannot start or that dies, and

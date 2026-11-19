@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MIT
+import { basename } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { readKitPackage } from "../kit-version.js";
 import { errorText } from "./error-text.js";
 import type { ExecOutcome } from "./events.js";
-import { isSecretName } from "./redaction.js";
 import type { McpResult, McpStdioServer } from "./workflow.js";
+
+export const MCP_COMMAND = "mcp";
 
 export const MCP_CALL_TIMEOUT_MS = 600_000;
 
@@ -52,20 +54,19 @@ export function textOf(content: readonly unknown[]): string {
   return texts.join("\n");
 }
 
-export function secretValuesOf(value: unknown, named = false): string[] {
-  if (typeof value === "string") return named ? [value] : [];
-  if (typeof value !== "object" || value === null) return [];
-  return Object.entries(value).flatMap(([key, item]) => secretValuesOf(item, named || isSecretName(key)));
+export function serverName(server: McpStdioServer): string {
+  const entry = (server.args ?? []).find((arg) => !arg.startsWith("-"));
+  return [basename(server.command), ...(entry === undefined ? [] : [basename(entry)])].join(" ");
 }
 
-export function toMcpResult(outcome: McpCallOutcome): McpResult {
+export function toMcpResult(call: McpCallOutcome): McpResult {
   return {
-    ok: outcome.outcome === "exit" && !outcome.isError,
-    text: textOf(outcome.content),
-    content: outcome.content,
-    ...(outcome.structuredContent === undefined ? {} : { structuredContent: outcome.structuredContent }),
-    timedOut: outcome.outcome === "timeout",
-    ...(outcome.error === undefined ? {} : { error: outcome.error }),
+    ok: call.outcome === "exit" && !call.isError,
+    text: textOf(call.content),
+    content: call.content,
+    ...(call.structuredContent === undefined ? {} : { structuredContent: call.structuredContent }),
+    timedOut: call.outcome === "timeout",
+    ...(call.error === undefined ? {} : { error: call.error }),
   };
 }
 

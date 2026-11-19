@@ -131,7 +131,7 @@ if (!tabelas.ok) return { status: "failed", reason: tabelas.error };
   servidor) são **resultados** com `ok: false`, não exceções, como no `ctx.exec`. Um run cancelado fecha o cliente, termina o
   processo do servidor e lança `RunCancelledError`.
 - A chamada reaproveita os eventos do `ctx.exec`: um `exec-start` e um `exec-end` com `command: "mcp"` e o servidor e a tool
-  no `label` (padrão `mcp <comando> <tool>`), então o run a desenha como desenha um comando e o esquema de eventos não muda
+  no `label` (o `label` da chamada o substitui; o padrão é `mcp <comando> <primeiro argumento que não é flag> <tool>`, como `mcp node server.mjs echo`), então o run a desenha como desenha um comando e o esquema de eventos não muda
   ([6.1](../reference/events.md#exec-start)). A tool, os argumentos e o servidor (o comando, os argumentos e só os nomes das
   variáveis de `env`) são um `content` do tipo `tool-call`, e o resultado é `content` do tipo `command-output`, com a redação, o
   corte e a retenção do conteúdo de um agente. O valor de uma chave com nome de segredo em `args` (`apiKey`,

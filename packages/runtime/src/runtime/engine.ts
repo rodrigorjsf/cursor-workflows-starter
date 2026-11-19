@@ -26,12 +26,13 @@ import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedCo
 import { cursorEndpointRefusal } from "./cursor-endpoints.js";
 import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type OutputStream, type NewEvent, type RunStatus, type StepRef, type TurnUsage, type WorkflowEvent } from "./events.js";
 import { recordExecGroup } from "./job-children.js";
-import { MCP_CALL_TIMEOUT_MS, callMcpTool, secretValuesOf, toMcpResult } from "./mcp-call.js";
+import { MCP_CALL_TIMEOUT_MS, MCP_COMMAND, callMcpTool, serverName, toMcpResult } from "./mcp-call.js";
 import { jobsDirIn } from "./job-state.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
 import { type InterruptedCloudStep, USAGE_FAILED_PREFIX, addUsage, emptyUsage, resumeHint, subtractUsage, turnTokens, withRatio } from "./projection.js";
 import { CONTENT_MAX_CHARS, RunLockedError, RunPrunedError, RunStore } from "./run-store.js";
 import { DEFAULT_SETTING_SOURCES, loadsProjectSettings, repoCodeWarning, repoCommandsIn } from "./repo-code.js";
+import { secretValuesOf } from "./redaction.js";
 import { savedSecrets } from "./secret-guard.js";
 import type { RetentionPolicy } from "./retention.js";
 import { registerRunIfMissing } from "./runs-index.js";
@@ -1270,11 +1271,12 @@ async function executeRun<A, R>(
 
   async function runMcp(server: McpStdioServer, tool: string, args: Record<string, unknown>, timeoutMs: number, callOpts: McpCallOptions, ref: StepRef): Promise<McpResult> {
     const attemptId = randomUUID();
-    const label = callOpts.label ?? `mcp ${basename(server.command)} ${tool}`;
+    const label = callOpts.label ?? `mcp ${serverName(server)} ${tool}`;
     const phase = callOpts.phase ?? currentPhase;
     const startedAt = Date.now();
-    store.learnSecrets({ ...server.env, ...Object.fromEntries(secretValuesOf(args).map((value, index) => [`ARGUMENT_SECRET_${index}`, value])) });
-    emit({ type: "exec-start", ...ref, attemptId, label, phase, command: "mcp", timeoutMs });
+    store.learnSecrets(server.env ?? {});
+    store.learnSecretValues(secretValuesOf(args));
+    emit({ type: "exec-start", ...ref, attemptId, label, phase, command: MCP_COMMAND, timeoutMs });
     const content = attemptContent(ref, attemptId);
     content.write("tool-call", JSON.stringify({ toolName: tool, arguments: args, server: { command: server.command, args: server.args ?? [], env: Object.keys(server.env ?? {}) } }), { tool: "mcp", callId: attemptId });
     const done = await callMcpTool({ server, tool, args, cwd: opts.cwd, timeoutMs, signal });
@@ -1289,7 +1291,7 @@ async function executeRun<A, R>(
       attemptId,
       label,
       phase,
-      command: "mcp",
+      command: MCP_COMMAND,
       ok: result.ok,
       outcome: done.outcome,
       error: result.error,

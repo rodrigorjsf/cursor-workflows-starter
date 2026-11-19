@@ -679,7 +679,7 @@ test("each call is an exec-start and exec-end pair labelled with the server and 
   const events = eventsOf(r.runId);
   const [plain, named] = execStarts(events);
   assert.ok(plain && named);
-  assert.deepEqual([plain.label, plain.command, plain.phase], [`mcp ${basename(process.execPath)} echo`, "mcp", undefined]);
+  assert.deepEqual([plain.label, plain.command, plain.phase], [`mcp ${basename(process.execPath)} server.mjs echo`, "mcp", undefined]);
   assert.deepEqual([named.label, named.command, named.phase], ["the greeting", "mcp", "Ask"]);
   const stepStarts = events.filter((e) => e.type === "step-start");
   assert.equal(plain.parentId, stepStarts[0]!.stepId, "continues from the step before it");
@@ -745,6 +745,17 @@ test("the progress lines of a run show a call as ok or as an error, never as an 
   const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });
   const lines = projectLatestExecution(eventsOf(r.runId))!.recent.filter((l) => l.includes("good") || l.includes("bad"));
   assert.deepEqual(lines.map((l) => l.replace(/, [\d.]+s\)/, ")")), ["▶ good [mcp]", "✓ good (ok)", "▶ bad [mcp]", "✗ bad (error)"]);
+});
+
+test("a ctx.exec command that happens to be named mcp is still reported by its exit code in the progress lines", async () => {
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "mcp"), "#!/bin/sh\nexit 3\n", { mode: 0o755 });
+  const wf = workflow((ctx) => ctx.exec("mcp", [], { label: "real mcp binary", env: { PATH: `${bin}:${process.env.PATH}` } }));
+  const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });
+  assert.deepEqual((r.result as ExecResult).exitCode, 3);
+  const lines = projectLatestExecution(eventsOf(r.runId))!.recent.filter((l) => l.includes("real mcp binary"));
+  assert.deepEqual(lines.map((l) => l.replace(/, [\d.]+s\)/, ")")), ["▶ real mcp binary [mcp]", "✗ real mcp binary (exit 3)"]);
 });
 
 test("a call in a parallel group carries its group id, and the same call made twice is two nodes numbered alike by a resume", async () => {
