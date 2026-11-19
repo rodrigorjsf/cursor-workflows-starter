@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import "../../../../packages/runtime/test/isolate-home.js";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
@@ -221,14 +221,58 @@ test("answers are refused before the run starts unless the mode is interview, an
   assert.equal(calls.length, 0);
 });
 
+const copyOfWorkflow = async (serverSource?: string) => {
+  const folder = join(cwd, "copy");
+  mkdirSync(folder);
+  symlinkSync(join(import.meta.dirname, "..", "..", "..", "..", "node_modules"), join(folder, "node_modules"));
+  copyFileSync(join(import.meta.dirname, "explore-db.ts"), join(folder, "explore-db.mts"));
+  if (serverSource) writeFileSync(join(folder, "fake-db-server.mjs"), serverSource);
+  return (await import(pathToFileURL(join(folder, "explore-db.mts")).href)).default;
+};
+
+const serverAnswering = (answers: Record<string, unknown>) => `
+  import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+  import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+  import { z } from "zod";
+  const answers = ${JSON.stringify(answers)};
+  const server = new McpServer({ name: "stub", version: "1" }, { capabilities: { tools: {} } });
+  for (const tool of Object.keys(answers)) {
+    server.registerTool(tool, { description: tool, inputSchema: z.looseObject({}) }, async () => ({ content: [{ type: "text", text: JSON.stringify(answers[tool]) }] }));
+  }
+  await server.connect(new StdioServerTransport());
+`;
+
 test("a database server that cannot start ends the run as failed and names the call that failed, with no review of an empty schema", async () => {
-  const lonelyCopy = join(cwd, "lonely", "explore-db.mts");
-  mkdirSync(join(cwd, "lonely"));
-  copyFileSync(join(import.meta.dirname, "explore-db.ts"), lonelyCopy);
-  const { default: withoutItsServer } = await import(pathToFileURL(lonelyCopy).href);
+  const withoutItsServer = await copyOfWorkflow();
   const run = await runWorkflow(withoutItsServer, { mode: "review" }, { cwd, metricsDb: false });
 
   assert.equal(run.status, "failed");
   assert.match(run.error ?? "", /^list tables: /);
   assert.equal(calls.length, 0);
+});
+
+const VALID_ANSWERS = {
+  list_tables: ["items"],
+  describe_table: { table: "items", columns: [], indexes: [], foreignKeys: [] },
+  query: { rows: [{ rows: 4 }] },
+};
+
+for (const [tool, failedCall] of [["list_tables", "list tables"], ["describe_table", "describe items"], ["query", "count items"]]) {
+  test(`an answer of ${tool} that is not the expected shape ends the run as failed and names the call, before any agent runs`, async () => {
+    const withStubServer = await copyOfWorkflow(serverAnswering({ ...VALID_ANSWERS, [tool!]: "not what the tool promises" }));
+    const run = await runWorkflow(withStubServer, { mode: "review" }, { cwd, metricsDb: false });
+
+    assert.equal(run.status, "failed");
+    assert.equal(run.error, `${failedCall}: unexpected answer`);
+    assert.equal(calls.length, 0);
+  });
+}
+
+test("a stub server with every answer in the expected shape lets the review go on", async () => {
+  scriptReviewers();
+  const withStubServer = await copyOfWorkflow(serverAnswering(VALID_ANSWERS));
+  const run = await runWorkflow(withStubServer, { mode: "review" }, { cwd, metricsDb: false });
+
+  assert.equal(run.status, "finished", run.error);
+  assert.deepEqual((run.result as { report: { tables: unknown } }).report.tables, [{ table: "items", rows: 4 }]);
 });
