@@ -1,6 +1,6 @@
 # Changelog
 
-## Não lançado
+## 0.5.0 (pré-release, 2026-11-19)
 
 ### Adicionado
 
