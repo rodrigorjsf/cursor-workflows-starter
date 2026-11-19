@@ -18,15 +18,16 @@ runtime already depends on `@modelcontextprotocol/sdk`, so a client is available
 **`ctx.mcp(server, tool, args)` calls one tool of one MCP server from the workflow process, with no agent, and returns
 the tool's result.**
 
-- **Inline config only.** `server` is a config the workflow's code declares (a stdio command with its args and env, or
-  an HTTP URL). The call never resolves a server by name from the repository's `.cursor/mcp.json`: in an untrusted
+- **Inline config only.** `server` is a config the workflow's code declares: a stdio command with its args and env. HTTP
+  servers wait until a workflow needs one. The call never resolves a server by name from the repository's `.cursor/mcp.json`: in an untrusted
   repository that file would decide what runs, and it would bypass `caps.allowedSettingSources`, which is the only gate
   over the repository's MCP servers today.
 - **Not journaled, like `ctx.exec`.** A resume calls the tool again. When the data has not changed, the prompt of the
   next agent step is the same and that step comes back from the journal; when it has changed, the steps that depend on
   it run again on fresh data.
-- **A step node in the event log, like `ctx.exec`.** The call's arguments and result are content: same redaction, same
-  cut and same retention as an agent's. A cancelled run closes the client and throws.
+- **A command in the event log.** The call reuses the `exec-start` and `exec-end` events, with `command: "mcp"` and the
+  server and tool in the label, so the run page draws it as it draws a command and the event schema does not change. The
+  call's arguments and result are content: same redaction, same cut and same retention as an agent's. A cancelled run closes the client and throws.
 - **The choice of tool inside an exploration stays with the model** when the script does not know it. `ctx.mcp` is for
   the calls whose tool and arguments the code already decides.
 
@@ -44,6 +45,8 @@ the tool's result.**
   the gap the conversion of an MCP-heavy skill hits first.
 - **Resolve servers by name from `.cursor/mcp.json`.** Reuses the IDE's config, but lets the repository decide what the
   workflow process runs, outside the setting-sources cap.
+- **New `mcp-start` / `mcp-end` events.** Cleaner meaning (an MCP call is not a process and has no exit code), but
+  the run graph, the events reference and the dashboard would all change for the same picture.
 - **Journal the result by server, tool and arguments.** Makes resumes stable, but returns stale data and is wrong for
   tools with effects unless each call is marked read-only.
 
