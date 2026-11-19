@@ -66,7 +66,7 @@ export const groupEnd = (groupId: string, ok = true): Draft => ({ type: "group-e
 export const step = (stepId: string, label: string, r: Ref = {}): Draft[] => [stepStart(stepId, label, r), stepEnd(stepId, label, r)];
 
 export const sandboxRun = (): RunEvent[] =>
-  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "implement-issue-sandbox.events.jsonl"), "utf8")
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "implement-issue-sandbox.events.jsonl"), "utf8")
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line) as RunEvent);
