@@ -97,7 +97,7 @@
 // review que bloqueia e o alreadySatisfied só têm testes offline.
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -444,6 +444,28 @@ const startDirtyTreeReason = (files: string[]) =>
   );
 
 const ENV_FILES_SHOWN = 5;
+const SANDBOX_JSON = ".cursor/sandbox.json";
+
+async function narrowReadsToWorktree(cmd: Commands, worktree: string): Promise<boolean> {
+  const file = join(worktree, SANDBOX_JSON);
+  const current = existsSync(file) ? parsedObject(readFileSync(file, "utf8")) : {};
+  if (current.readBoundary === "workspace") return false;
+  const tracked = await cmd.gitIs(worktree, "ls-files", "--error-unmatch", "--", SANDBOX_JSON);
+  if (tracked) await cmd.git(worktree, "update-index", "--skip-worktree", "--", SANDBOX_JSON);
+  else if (!ensureExcluded(worktree, `/${SANDBOX_JSON}`)) throw new Error(`${SANDBOX_JSON} cannot be excluded from git in ${worktree}, so the run cannot narrow its steps' reads without delivering the file`);
+  mkdirSync(join(worktree, ".cursor"), { recursive: true });
+  writeFileSync(file, `${JSON.stringify({ ...current, readBoundary: "workspace" }, null, 2)}\n`);
+  return true;
+}
+
+function parsedObject(text: string): Record<string, unknown> {
+  try {
+    const value: unknown = JSON.parse(text);
+    return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
 
 async function envFilesOutsideGit(cmd: Commands, cwd: string): Promise<string[]> {
   return (await cmd.gitRead(cwd, "ls-files", "--others", "-z", "--", ":(top,glob)**/.env", ":(top,glob)**/.env.*")).split("\0").filter(Boolean);
@@ -998,6 +1020,9 @@ export default defineWorkflow<Args>({
       if (!progress.data.baseCommit) {
         progress.data.baseCommit = (await cmd.gitRead(worktree, "rev-parse", "HEAD")).trim();
         progress.save();
+      }
+      if (!mainTree && (await narrowReadsToWorktree(cmd, worktree))) {
+        ctx.log(`${SANDBOX_JSON} in ${worktree} now sets readBoundary to "workspace", so a sandboxed step reads nothing outside the worktree; the delivery leaves that change out`);
       }
       if (codeIndexWorks && !mainTree) await refreshCodeIndex(cmd, worktree, (message) => ctx.warn(message));
       const where = mainTree ? { branch, mainTree: true } : { worktree };

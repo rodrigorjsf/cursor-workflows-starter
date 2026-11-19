@@ -541,6 +541,40 @@ for (const envFile of ENV_FILES_OUTSIDE_GIT) {
   });
 }
 
+forgeTest("a worktree whose base has no .cursor/sandbox.json gets one with readBoundary workspace for its steps, and the delivery leaves it out", async () => {
+  issue(["complexity:low"]);
+  const seenByCodeStep: unknown[] = [];
+  fx.handlers["code-1"] = (o) => {
+    seenByCodeStep.push(JSON.parse(readFileSync(join(o.local!.cwd as string, ".cursor", "sandbox.json"), "utf8")));
+    write(o, "src/math.js", SUB_CODE);
+    submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
+  };
+  const r = await run({});
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  assert.deepEqual(seenByCodeStep, [{ readBoundary: "workspace" }], "the step's sandbox reads nothing outside the worktree");
+  assert.ok(!git(fx.repo, "ls-tree", "-r", "--name-only", branchOf(r.runId)).includes(".cursor/sandbox.json"), "the file is not in the delivery");
+  assert.equal(git(worktreeOf(r.runId), "status", "--porcelain").trim(), "");
+});
+
+forgeTest("a tracked .cursor/sandbox.json without readBoundary workspace gets it in the worktree, keeps its other keys, and the delivery keeps the committed file", async () => {
+  issue(["complexity:low"]);
+  const committed = `${JSON.stringify({ networkPolicy: { default: "deny", allow: ["registry.npmjs.org"] } }, null, 2)}\n`;
+  mkdirSync(join(fx.repo, ".cursor"), { recursive: true });
+  writeFileSync(join(fx.repo, ".cursor", "sandbox.json"), committed);
+  git(fx.repo, "add", ".cursor/sandbox.json");
+  git(fx.repo, "commit", "-qm", "sandbox network policy");
+  const seenByCodeStep: unknown[] = [];
+  fx.handlers["code-1"] = (o) => {
+    seenByCodeStep.push(JSON.parse(readFileSync(join(o.local!.cwd as string, ".cursor", "sandbox.json"), "utf8")));
+    write(o, "src/math.js", SUB_CODE);
+    submit(o, { summary: "subtract", filesChanged: ["src/math.js"] });
+  };
+  const r = await run({});
+  assert.equal(res(r).status, "done", JSON.stringify(res(r)));
+  assert.deepEqual(seenByCodeStep, [{ networkPolicy: { default: "deny", allow: ["registry.npmjs.org"] }, readBoundary: "workspace" }]);
+  assert.equal(git(fx.repo, "show", `${branchOf(r.runId)}:.cursor/sandbox.json`), committed, "the delivery does not change the committed file");
+});
+
 forgeTest("a tracked .env.example keeps the main-tree run in the repository's own folder: only a file outside git counts", async () => {
   issue(["complexity:low"]);
   writeFileSync(join(fx.repo, ".env.example"), "TOKEN=\n");
