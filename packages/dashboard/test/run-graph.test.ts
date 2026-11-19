@@ -281,11 +281,20 @@ test("a run with no phases has one unnamed lane", () => {
   assert.equal(laneOf(graph, "s-a"), 0);
 });
 
+test("the run's summary says whether what it spent is final: not once an attempt's cost was reported as not final", () => {
+  const ended = (stepId: string, costFinal: boolean): Draft[] => [stepStart(stepId, stepId), stepEnd(stepId, stepId, {}, { usage: { totalTokens: 1000 }, rawCents: 0, chargedCents: 0, costFinal })];
+  const summary = (drafts: Draft[]) => buildRunGraph(stamp(drafts)).run;
+
+  assert.equal(summary([runStart, ...ended("s-a", true), ...ended("s-b", true)]).costFinal, true);
+  assert.equal(summary([runStart, ...ended("s-a", true), ...ended("s-b", false)]).costFinal, false);
+  assert.equal(summary([runStart, stepStart("s-a", "plan")]).costFinal, true, "an attempt still going has not reported its cost as not final");
+});
+
 test("the run's summary: status, executions and what it spent, from its events alone", () => {
   const spent = (stepId: string): Draft[] => [stepStart(stepId, stepId), stepEnd(stepId, stepId, {}, { usage: { totalTokens: 1000 }, rawCents: 2, chargedCents: 1 })];
   const summary = (drafts: Draft[], settled = false) => buildRunGraph(stamp(drafts), { settled }).run;
 
-  assert.deepEqual(summary([runStart, ...spent("s-a"), ...spent("s-b")]), { workflow: "demo", status: "running", startedAt: new Date(T0).toISOString(), executions: 1, tokens: 2000, costCents: 4 });
+  assert.deepEqual(summary([runStart, ...spent("s-a"), ...spent("s-b")]), { workflow: "demo", status: "running", startedAt: new Date(T0).toISOString(), executions: 1, tokens: 2000, costCents: 4, costFinal: true });
   assert.equal(summary([runStart, ...spent("s-a")], true).status, "interrupted", "settled with no run-end: the process is gone");
 
   const ended = (status: string, extra: Record<string, unknown> = {}): Draft[] => [runStart, ...spent("s-a"), { type: "run-end", status, ...extra }];

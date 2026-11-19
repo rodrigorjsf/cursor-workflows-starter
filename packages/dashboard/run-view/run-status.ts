@@ -3,6 +3,7 @@
 // The status and the error are the API's (`GET /api/runs/<runId>`): the one name the Board, the Runs table and `wf status` give
 // the run. A run whose process died without ending it is `failed` there, with the runtime's error and its resume hint; the
 // events alone would only say that they stopped. The events speak during a replay, which shows the run as it stood.
+import { formatCents } from "../app/format.js";
 import { runsInCloud } from "./node-details.js";
 import type { ProgressStatus, RunGraph, RunProgress } from "./run-graph.js";
 import type { ApiStatus } from "./use-run-events.js";
@@ -76,4 +77,8 @@ export function offeredActions(status: ApiStatus | undefined, graph: RunGraph, e
 export function runElapsed(run: { startedAt?: string; endedAt?: string }, settled: boolean, now: number): number | undefined {
   if (run.startedAt === undefined || (settled && run.endedAt === undefined)) return undefined;
   return Math.max(0, (run.endedAt !== undefined ? Date.parse(run.endedAt) : now) - Date.parse(run.startedAt));
+}
+
+export function headerCost(run: Pick<RunProgress, "costCents" | "costFinal">): string {
+  return run.costCents === 0 && !run.costFinal ? "unknown" : formatCents(run.costCents);
 }

@@ -9,9 +9,9 @@ import { SeamsPanel } from "./SeamsPanel.js";
 import { argsHashOf } from "./resume-command.js";
 import { StepLogPanel } from "./StepLogPanel.js";
 import { frameOf, panTarget } from "./framing.js";
-import { formatCents, formatCount, formatDuration } from "../app/format.js";
+import { formatCount, formatDuration } from "../app/format.js";
 import { type RunGraph, buildRunGraph, isWork } from "./run-graph.js";
-import { headerStatus, offeredActions, runElapsed } from "./run-status.js";
+import { headerCost, headerStatus, offeredActions, runElapsed } from "./run-status.js";
 import { type RunLayout, layoutRunGraph } from "./run-layout.js";
 import { type Connection, useRunEvents } from "./use-run-events.js";
 import { errorText } from "../app/error-text.js";
@@ -282,7 +282,7 @@ export function RunView({ runId }: { runId: string }) {
           </div>
           <div>
             <dt>Cost</dt>
-            <dd>{formatCents(run.costCents)}</dd>
+            <dd>{headerCost(run)}</dd>
           </div>
           <div>
             <dt>Tokens</dt>

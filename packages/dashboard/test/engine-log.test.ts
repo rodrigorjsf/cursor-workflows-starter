@@ -12,7 +12,7 @@ process.env.WF_METRICS = "off";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, test } from "node:test";
-import { calls, resetCloud, script } from "../../runtime/test/fake-sdk.js";
+import { calls, costConfig, resetCloud, script } from "../../runtime/test/fake-sdk.js";
 import { runWorkflow } from "../../runtime/src/runtime/engine.js";
 import { EVENT_SCHEMA_VERSION } from "../../runtime/src/runtime/events.js";
 import { defineWorkflow } from "../../runtime/src/runtime/workflow.js";
@@ -20,6 +20,7 @@ import { repoWithRemote } from "../../runtime/test/cloud-fixtures.js";
 import { clearConfig, configWorkflow, writeGlobalConfig } from "../../runtime/test/config-fixtures.js";
 import { describeNode } from "../run-view/node-details.js";
 import { EMPTY_ARGS_HASH, argsHashOf } from "../run-view/resume-command.js";
+import { headerCost } from "../run-view/run-status.js";
 import { type GraphNode, KNOWN_EVENT_VERSION, type RunEvent, buildRunGraph, joinIdOf } from "../run-view/run-graph.js";
 import { type ContentItem, buildStepLog } from "../run-view/step-log.js";
 import { type DashboardServer, startDashboard } from "../src/server.js";
@@ -126,6 +127,34 @@ test("a resumed run keeps its nodes: the steps served from the journal show as c
   assert.deepEqual(byLabel(both.nodes, "plan").detail.cached, "journal");
   assert.equal(byLabel(both.nodes, "plan").state, "cached");
   assert.equal(byLabel(both.nodes, "plan").detail.attempts, 1, "the attempt of the first execution still counts");
+});
+
+const oneStep = defineWorkflow<unknown, string>({
+  meta: { name: "one-step", description: "one step", phases: [{ title: "Only" }] },
+  defaults: { model: { id: "m" } },
+  async run(ctx) {
+    ctx.phase("Only");
+    await ctx.agent("go", { label: "go" });
+    return "ok";
+  },
+});
+
+test("the header cost of a real run: unknown, with its tokens, when the SDK could not read the usage; the cost when it could", async () => {
+  const repo = box.repo("repo");
+  const read = await runWorkflow(oneStep, {}, { cwd: repo });
+  assert.equal(read.status, "finished", read.error);
+  const known = buildRunGraph(eventsOf(repo, read.runId)).run;
+  assert.deepEqual([headerCost(known), known.tokens], ["9¢", 110]);
+
+  costConfig.getUsageError = "403 feature_unavailable";
+  try {
+    const unread = await runWorkflow(oneStep, {}, { cwd: repo });
+    assert.equal(unread.status, "finished", unread.error);
+    const unknown = buildRunGraph(eventsOf(repo, unread.runId)).run;
+    assert.deepEqual([headerCost(unknown), unknown.tokens], ["unknown", 110], "the tokens come from the turns, and 0 cents is not the cost");
+  } finally {
+    costConfig.getUsageError = undefined;
+  }
 });
 
 test("the Run view knows the event schema version the engine writes: a version bump makes this fail until the reader learns it", () => {
