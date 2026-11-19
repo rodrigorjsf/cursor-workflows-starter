@@ -4,13 +4,14 @@
 // of those uses up `maxStepCrashes`. A process that dies on its own is a crash, also when its job is cancelled after it died.
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { cancelJob } from "../src/runtime/job-state.js";
 import { isAlive } from "../src/runtime/pid.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
-import { fx, issue, run, setup, teardown } from "./implement-issue.fixture.js";
+import { branchOf, fx, git, issue, run, setup, teardown } from "./implement-issue.fixture.js";
+import { waitFor } from "./wait-for.js";
 
 beforeEach(setup);
 afterEach(() => {
@@ -91,4 +92,28 @@ test("a process that dies in the middle of a write step is a crash, also when it
   assert.equal(res(stopped).status, "step-crash-loop", JSON.stringify(res(stopped)));
   assert.equal(res(stopped).crashes, 3);
   assert.match(res(stopped).step, /^red:/);
+});
+
+test("cancelling a running main-tree job, as wf cancel does, puts the files of the write step in progress back in the user's tree, ends the job cancelled, and leaves the run to resume on its branch", async () => {
+  issue(["complexity:low"]);
+  const runId = "implement-issue-sigtermmain";
+  const env: NodeJS.ProcessEnv = { ...process.env, TSX_TSCONFIG_PATH: join(import.meta.dirname, "..", "tsconfig.test.json") };
+  delete env.NODE_TEST_CONTEXT;
+  const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), join(import.meta.dirname, "implement-issue-job.ts"), fx.repo, "main-1", runId, "main-tree"], { env, stdio: "ignore" });
+  children.push(child);
+  const testFile = join(fx.repo, "test", "sub.test.js");
+  await waitFor("the red step to write its test into the user's folder", () => existsSync(testFile) && progressOf(runId).inFlight);
+  assert.equal(git(fx.repo, "branch", "--show-current").trim(), branchOf(runId), "the job's branch is checked out in the user's folder while it works");
+
+  const cancelled = await cancelJob(fx.repo, "main-1", 20_000);
+  assert.match(cancelled!.note, /^SIGTERM sent/, JSON.stringify(cancelled));
+  assert.equal(cancelled!.status, "cancelled", JSON.stringify(cancelled));
+  await waitFor("the job process to exit", () => child.exitCode !== null || child.signalCode !== null);
+
+  assert.ok(!existsSync(testFile), "the step's test file is gone from the user's folder");
+  assert.equal(git(fx.repo, "status", "--porcelain").trim(), "", "nothing of the cancelled step is left");
+  assert.equal(git(fx.repo, "branch", "--show-current").trim(), branchOf(runId), "the folder stays on the run's branch");
+
+  const resumed = await run({ worktree: false }, runId);
+  assert.equal(res(resumed).status, "done", JSON.stringify(res(resumed)));
 });

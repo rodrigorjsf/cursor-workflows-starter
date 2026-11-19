@@ -59,9 +59,16 @@
   - **Só um run por repositório trabalha na árvore principal.** O segundo início, ainda que numa outra issue, devolve
     `status: "main-tree-busy"` com `activeRunId` e um `reason` que manda usar `--worktree`; um início com `--worktree` ao lado dele é
     permitido. O lock é `main-tree`, em `.workflows/locks/`, e vale até o run terminar.
-  - **O resultado traz `branch` e `mainTree: true`, sem `worktree`.** Um resume numa pasta que saiu da branch do run devolve
-    `status: "branch-switched"` e não mexe na pasta. O checkout da branch no resume, a recusa de árvore suja no resume, o cancelamento
-    e o `wf gc` na árvore principal são da issue #126. `--worktree` (ou `worktree: true`) mantém o comportamento anterior.
+  - **O resultado traz `branch` e `mainTree: true`, sem `worktree`.** `--worktree` (ou `worktree: true`) mantém o comportamento
+    anterior.
+  - **O resume, o cancelar e o `wf gc` seguem as mesmas regras** (issue #126). Um resume cuja pasta saiu da branch do run, e está
+    limpa, põe a branch em checkout de novo e segue; se está suja, devolve `status: "dirty-tree"` com os arquivos, sem mover nada. Com
+    a pasta na branch do run, o resume recusa só o que o run não fez: o run grava a árvore que deixou ao terminar uma execução (e ao
+    desfazer uma etapa cancelada), e o resume compara a pasta com ela, de modo que o trabalho do próprio run, ainda não commitado, não
+    é "sujo". Um run cujo processo morreu não grava essa árvore, e o resume dele não distingue o que é seu do que é do run. O cancelar
+    de um job que roda desfaz só a etapa de escrita em andamento na pasta do usuário e deixa a branch, os commits e o trabalho anterior
+    do run. O `wf gc` de um run da árvore principal não tem worktree para remover, nunca toca nos arquivos da pasta e só apaga a
+    branch que o run registrou como sua (`wf/…`): a branch em checkout na pasta fica, com o motivo no plano, até o usuário sair dela.
 - **O dashboard aprova ou troca as seams que um run do `implement-issue` propôs** (issue #98). Um run MED ou HIGH que parou em
   `seams-proposed` (ou, com `seams` e sem `testCommand`, em `test-command-proposed`) mostra no Run view o painel **Seams
   proposed** (ou **Test command proposed**): as seams, as fatias e o comando de teste que o run executa depois da aprovação,

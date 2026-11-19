@@ -215,16 +215,26 @@ export async function planGc(options: {
     plan.errors.push(`the origin's branches cannot be listed, so no origin branch is removed: ${errorText(err)}`);
   }
 
+  const checkedOut = (await commands.gitRead(cwd, "branch", "--show-current")).trim();
   for (const { runId, progress } of runs) {
-    const { branch, worktree } = progress;
-    if (!branch || !worktree) continue; // a run that stopped before it made its worktree has nothing to clean, and an older run's are the shared ones below
-    const inside = relative(worktreesDir, resolve(worktree));
-    if (!branch.startsWith(WORKFLOW_BRANCH_PREFIX) || inside === "" || inside.startsWith("..") || isAbsolute(inside)) {
-      plan.kept.push({ runId, why: `its progress names ${branch} and ${worktree}, which are not under ${WORKFLOW_BRANCH_PREFIX} and ${worktreesDir}: not touched` });
-      continue;
+    const { branch } = progress;
+    const mainTree = progress.mainTree === true;
+    const worktree = mainTree ? undefined : progress.worktree;
+    if (!branch || (!worktree && !mainTree)) continue;
+    if (mainTree) {
+      if (!branch.startsWith(WORKFLOW_BRANCH_PREFIX)) {
+        plan.kept.push({ runId, why: `its progress names ${branch}, which is not under ${WORKFLOW_BRANCH_PREFIX}: not touched` });
+        continue;
+      }
+    } else {
+      const inside = relative(worktreesDir, resolve(worktree!));
+      if (!branch.startsWith(WORKFLOW_BRANCH_PREFIX) || inside === "" || inside.startsWith("..") || isAbsolute(inside)) {
+        plan.kept.push({ runId, why: `its progress names ${branch} and ${worktree}, which are not under ${WORKFLOW_BRANCH_PREFIX} and ${worktreesDir}: not touched` });
+        continue;
+      }
     }
 
-    const hasWorktree = existsSync(worktree) || registered.has(normal(worktree));
+    const hasWorktree = worktree !== undefined && (existsSync(worktree) || registered.has(normal(worktree)));
     const hasLocal = locals.has(branch);
     const remoteHead = remote?.get(branch);
     if (!hasWorktree && !hasLocal && !remoteHead) continue; // already clean
@@ -260,11 +270,18 @@ export async function planGc(options: {
     const actions: GcAction[] = [];
     const notes: string[] = reason === "failed" ? await unsavedWork(commands, cwd, { worktree: hasWorktree ? worktree : undefined, branch: hasLocal ? branch : undefined, baseCommit: progress.baseCommit }) : [];
     if (hasWorktree) actions.push({ kind: "worktree", target: worktree });
-    if (hasLocal) actions.push({ kind: "local-branch", target: branch });
+    const inUse = mainTree && hasLocal && branch === checkedOut;
+    const inUseNote = `local branch ${branch} kept: it is checked out in this repository's own folder; switch to another branch and run gc again`;
+    if (hasLocal && !inUse) actions.push({ kind: "local-branch", target: branch });
+    if (inUse) notes.push(inUseNote);
     if (remoteHead) {
       // A merged or closed PR is done with its branch. Otherwise the branch goes only when deleting it closes no PR and loses no commit.
       if (reason !== "failed" || (state !== "OPEN" && progress.pushed?.includes(remoteHead))) actions.push({ kind: "remote-branch", target: branch, head: remoteHead });
       else notes.push(state === "OPEN" ? `origin branch ${branch} kept: its PR is open` : `origin branch ${branch} kept: it points at ${remoteHead.slice(0, 7)}, a commit this workflow did not push`);
+    }
+    if (inUse && actions.length === 0) {
+      plan.kept.push({ runId, why: inUseNote });
+      continue;
     }
     plan.remove.push({ runId, reason, actions, notes });
   }

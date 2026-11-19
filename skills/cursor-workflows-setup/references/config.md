@@ -112,8 +112,8 @@ Under `workflows.<name>`:
   - `openPr`: `true` (default) pushes the branch and opens the PR (the MR on GitLab) when the run delivers, and returns
     the link as `prUrl`; `false` leaves the branch committed locally, with no push and no PR. The run's `openPr` argument
     (`wf start --no-pr` sets it to `false`) overrides the files.
-  - `gcFailedAfterDays`: `wf gc` removes a failed run's worktree and branches once it failed more days ago than this; a
-    cancelled run never counts as failed. A run whose PR was merged or closed goes without waiting, and the origin
+  - `gcFailedAfterDays`: `wf gc` removes a failed run's worktree (a main-tree run has none) and branches once it failed
+    more days ago than this; the branch checked out in the user's folder stays. A cancelled run never counts as failed. A run whose PR was merged or closed goes without waiting, and the origin
     branch stays while its PR is open.
   - `gcSnapshotGraceHours`: `wf gc` removes a cloud snapshot branch the step left behind once its run (of this repo)
     has no process and its last event is older than this many hours. The branch of a run cut off inside the step that

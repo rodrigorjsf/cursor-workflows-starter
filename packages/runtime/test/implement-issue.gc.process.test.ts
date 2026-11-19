@@ -17,8 +17,8 @@ import { tryAcquireRunLock } from "../src/runtime/run-store.js";
 import { Commands, type Exec } from "../workflows/implement-issue/commands.js";
 import implementIssue from "../workflows/implement-issue.js";
 import { applyGc, directCommands, planGc } from "../workflows/implement-issue/gc.js";
-import { branchOf, failForge, fx, forgeState, git, issue, originBranches, run, setPrState, setup, teardown, worktreeOf } from "./implement-issue.fixture.js";
-import { type GcOutput, age, delivered, editRecord, failedRun, gc, localBranches, stillThere } from "./implement-issue.gc.fixture.js";
+import { SUB_CODE, branchOf, failForge, fx, forgeState, git, issue, originBranches, run, setPrState, setup, teardown, worktreeOf } from "./implement-issue.fixture.js";
+import { type GcOutput, age, delivered, editRecord, failedRun, gc, localBranches, mainTreeDelivered, mainTreeFailed, stillThere } from "./implement-issue.gc.fixture.js";
 
 beforeEach(() => {
   setup();
@@ -698,4 +698,85 @@ test("the plan says what a failed run's removal loses: uncommitted files in its 
   assert.match(notes, /1 commit .*on no remote/);
   assert.match(r.stderr, /uncommitted/);
   assert.ok(existsSync(join(failed.worktree, "scratch.txt")), "a dry run loses nothing");
+});
+
+const currentBranch = () => git(fx.repo, "branch", "--show-current").trim();
+const folderFiles = () => ({
+  head: git(fx.repo, "rev-parse", "HEAD").trim(),
+  status: git(fx.repo, "status", "--porcelain"),
+  math: readFileSync(join(fx.repo, "src", "math.js"), "utf8"),
+});
+
+test("wf gc over a main-tree run whose PR was merged removes its origin branch and no file of the folder, keeps the branch the folder is on, and removes it once the user left it", async () => {
+  const d = await mainTreeDelivered();
+  setPrState(d.branch, "MERGED");
+  const before = folderFiles();
+
+  const first = gc();
+  assert.equal(first.status, 0, first.stderr);
+  const cleanup = first.out.remove.find((x) => x.runId === d.runId);
+  assert.equal(cleanup?.reason, "pr-merged");
+  assert.deepEqual(cleanup?.actions.map((a) => [a.kind, a.target, a.result]), [["remote-branch", d.branch, "removed"]]);
+  assert.match(cleanup?.notes.join("\n") ?? "", /checked out in this repository's own folder/);
+  assert.deepEqual(originBranches(), []);
+  assert.deepEqual(localBranches(), [d.branch]);
+  assert.equal(currentBranch(), d.branch, "the folder is where the user left it");
+  assert.deepEqual(folderFiles(), before, "no file, and no commit, of the folder changed");
+  assert.equal(before.math, SUB_CODE);
+  assert.ok(!existsSync(join(fx.repo, ".workflows", "worktrees")), "there was no worktree to remove, and none was made");
+
+  git(fx.repo, "checkout", "-q", "main");
+  const second = gc();
+  assert.equal(second.status, 0, second.stderr);
+  assert.deepEqual(second.out.remove.find((x) => x.runId === d.runId)?.actions.map((a) => [a.kind, a.target, a.result]), [["local-branch", d.branch, "removed"]]);
+  assert.deepEqual(localBranches(), []);
+  assert.equal(currentBranch(), "main");
+});
+
+test("a main-tree run that failed long ago is kept, with the reason, while the folder is on its branch; once the user left it, gc removes the branch and nothing else", async () => {
+  const f = await mainTreeFailed();
+  age(f.runId, 30);
+  const before = folderFiles();
+
+  const first = gc();
+  assert.equal(first.status, 0, first.stderr);
+  assert.deepEqual(first.out.remove, []);
+  assert.match(first.out.kept.find((x) => x.runId === f.runId)?.why ?? "", /checked out in this repository's own folder/);
+  assert.deepEqual(localBranches(), [f.branch]);
+  assert.deepEqual(folderFiles(), before);
+
+  git(fx.repo, "checkout", "-q", "main");
+  const second = gc();
+  assert.equal(second.status, 0, second.stderr);
+  const cleanup = second.out.remove.find((x) => x.runId === f.runId);
+  assert.equal(cleanup?.reason, "failed");
+  assert.deepEqual(cleanup?.actions.map((a) => [a.kind, a.target, a.result]), [["local-branch", f.branch, "removed"]]);
+  assert.deepEqual(localBranches(), []);
+  assert.equal(folderFiles().math, before.math);
+});
+
+test("gc deletes only the branch a main-tree run recorded as its own: a record that names a branch outside wf/ is kept, and the folder is never a worktree to remove", async () => {
+  const f = await mainTreeFailed();
+  age(f.runId, 30);
+  git(fx.repo, "branch", "feature/local");
+  git(fx.repo, "checkout", "-q", "main");
+  editRecord(f.runId, (record) => void (record.branch = "feature/local"));
+
+  const named = gc();
+  assert.equal(named.status, 0, named.stderr);
+  assert.deepEqual(named.out.remove, []);
+  assert.match(named.out.kept.find((x) => x.runId === f.runId)?.why ?? "", /not touched/);
+  assert.ok(git(fx.repo, "branch", "--list", "feature/local").includes("feature/local"));
+  assert.deepEqual(localBranches(), [f.branch], "and the run's own branch, no longer named by its record, is not guessed at");
+
+  editRecord(f.runId, (record) => {
+    record.branch = f.branch;
+    record.worktree = fx.repo;
+  });
+  const before = folderFiles();
+  const withWorktree = gc();
+  assert.equal(withWorktree.status, 0, withWorktree.stderr);
+  assert.deepEqual(withWorktree.out.remove.find((x) => x.runId === f.runId)?.actions.map((a) => a.kind), ["local-branch"], "a main-tree record's worktree is never removed");
+  assert.deepEqual(folderFiles(), before);
+  assert.equal(git(fx.repo, "rev-parse", "--is-inside-work-tree").trim(), "true");
 });
