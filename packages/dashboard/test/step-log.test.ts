@@ -233,3 +233,13 @@ test("Escape closes a panel, unless something already took it or it belongs to a
   for (const tagName of ["INPUT", "SELECT", "TEXTAREA"]) assert.equal(closesOnEscape(key({ target: { tagName } })), false, tagName);
   assert.equal(closesOnEscape(key({ target: null })), true);
 });
+
+test("a log scoped to some attempts keeps only theirs, and numbers them from 1; no attempts named keeps all", () => {
+  const items = [prompt("first try", "a1"), said("it failed", "a1"), prompt("second try", "a2"), said("it worked", "a2")];
+
+  const second = buildStepLog(items, { attempts: ["a2"] });
+  assert.deepEqual(second.attempts.map((a) => [a.attemptId, a.number]), [["a2", 1]]);
+  assert.equal(second.count, 2);
+  assert.deepEqual(buildStepLog(items, { attempts: [] }).attempts.map((a) => a.attemptId), ["a1", "a2"]);
+  assert.deepEqual(buildStepLog(items).attempts.map((a) => a.attemptId), ["a1", "a2"]);
+});

@@ -333,7 +333,7 @@ para um run em andamento e para um que já terminou):
   do tooltip diz o código; um timeout, uma interrupção ou um comando sem `probe` que falha seguem vermelhos.
 - **Passar o mouse** sobre um nó mostra o modelo (ou o programa, num comando), onde rodou (`local` ou `cloud`), as
   tentativas, os tokens, o custo, a duração e o tipo do erro (`timeout`, `rate-limit`…; num comando, `exit 2`,
-  `timeout`…). Os números somam todas as tentativas e todas as execuções do run; o custo é o que o teto de custo conta (o
+  `timeout`…). Os números somam todas as tentativas da etapa na execução mostrada; o custo é o que o teto de custo conta (o
   maior entre o bruto e o cobrado), com "(not final)" enquanto a Cursor não fechou o custo de uma tentativa.
 - **Etapas na nuvem.** Uma etapa que rodou como cloud agent da Cursor (`location: "cloud"` no `step-start`) ganha o selo
   **☁ cloud** no nó, e os detalhes ganham a linha **Cloud agent** com o id (`bc-…`) como link para o agente na Cursor
@@ -342,6 +342,12 @@ para um run em andamento e para um que já terminou):
   último. O link só é feito para um id no formato `bc-…`; qualquer outro valor aparece como texto. O tooltip de uma etapa
   na nuvem aceita o ponteiro, para o link poder ser clicado; para chegar ao link pelo teclado, abra o log da etapa (Enter no
   nó), que repete a localização, o agente e o custo.
+- **Execuções.** Um run retomado (um resume) tem mais de uma execução, cada uma aberta por um `run-start`. A tela abre na
+  última; o seletor **Execution 1 / 2** do cabeçalho troca o grafo e os logs para os de uma execução anterior, e uma nota ao
+  lado dele diz o que falhou nela (`Execution 1 failed: gh issue view (exit 1)`). O cabeçalho continua somando todas as
+  execuções (custo, tokens, etapas e comandos), qualquer que seja a mostrada. O log de uma etapa mostra só as tentativas da
+  execução mostrada; uma etapa servida do journal ou do memo não tentou nada nela, e mostra as tentativas de onde rodou. O
+  **Replay** anda pelos eventos da execução escolhida.
 - **Clicar** num nó (ou Enter nele) abre o [log da etapa](#o-log-de-uma-etapa) ao lado do grafo (abaixo de 800 px de
   largura, por cima dele).
 - **Replay.** Num run que não está em andamento, **Replay** reconstrói o grafo evento a evento, na ordem do log, com

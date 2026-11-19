@@ -3,11 +3,11 @@
 // `failed`, with the runtime's error and its resume hint. The events only speak during a replay.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildRunGraph } from "../run-view/run-graph.js";
-import { RunCost } from "../run-view/RunView.js";
-import { headerStatus, offeredActions, runElapsed } from "../run-view/run-status.js";
+import { buildRunGraph, executionsOf } from "../run-view/run-graph.js";
+import { ExecutionPicker, RunCost } from "../run-view/RunView.js";
+import { executionNote, headerStatus, offeredActions, runElapsed } from "../run-view/run-status.js";
 import { render, textOf } from "./render.js";
-import { cloudAgent, phase, runStart, stamp, step, stepEnd, stepStart, type Draft } from "./run-log.js";
+import { cloudAgent, execEnd, execStart, phase, runStart, sandboxRun, stamp, step, stepEnd, stepStart, type Draft } from "./run-log.js";
 
 const DEAD_ERROR = 'the process executing the run ended without finishing it; relaunch with resumeRunId="wf-aaaa0001"';
 /** What the API says of a run whose process is alive but stopped beating (`silentJobError`): `failed`, with this error. */
@@ -115,4 +115,46 @@ test("one attempt that did not report its cost leaves the run's 0 unknown; once 
 
 test("a log from before events said whether the cost was final reads as final", () => {
   assert.equal(costOf([runStart, ...costed("s-a", { rawCents: 0, chargedCents: 0 })]), "0¢");
+});
+
+const firstExecutionOf = (drafts: Draft[]) => {
+  const events = stamp(drafts);
+  const [first] = executionsOf(events);
+  return buildRunGraph(events.slice(first!.from, first!.to), { settled: true });
+};
+const failedCommand: Draft[] = [execStart("x-1", "gh issue view"), execEnd("x-1", "gh issue view", {}, { ok: false, exitCode: 1 })];
+
+test("an execution that failed says what failed in it, by the labels of its failed commands and steps and how each ended", () => {
+  assert.equal(executionNote(firstExecutionOf([runStart, ...failedCommand, { type: "run-end", status: "failed" }, runStart]), 1), "Execution 1 failed: gh issue view (exit 1)");
+  const sandbox = sandboxRun();
+  const [first] = executionsOf(sandbox);
+  assert.equal(executionNote(buildRunGraph(sandbox.slice(first!.from, first!.to), { settled: true }), 1), "Execution 1 failed: gh issue view (exit 1)");
+
+  const twice = [runStart, ...failedCommand, execStart("x-2", "git push"), execEnd("x-2", "git push", {}, { ok: false, outcome: "timeout", exitCode: undefined }), { type: "run-end", status: "failed" }, runStart];
+  assert.equal(executionNote(firstExecutionOf(twice), 1), "Execution 1 failed: gh issue view (exit 1), git push (timeout)");
+});
+
+test("an execution that failed with nothing failed in it gives the run's error, and one that did not fail says nothing", () => {
+  assert.equal(executionNote(firstExecutionOf([runStart, { type: "run-end", status: "failed", error: "budget exceeded" }, runStart]), 1), "Execution 1 failed: budget exceeded");
+  assert.equal(executionNote(firstExecutionOf([runStart, { type: "run-end", status: "failed" }, runStart]), 1), "Execution 1 failed");
+  assert.equal(executionNote(firstExecutionOf([runStart, ...step("s-a", "plan"), { type: "run-end", status: "finished" }, runStart]), 1), undefined);
+});
+
+test("an execution that was cancelled or stopped says so under that word", () => {
+  assert.equal(executionNote(firstExecutionOf([runStart, { type: "run-end", status: "cancelled" }, runStart]), 1), "Execution 1 cancelled");
+  assert.equal(executionNote(firstExecutionOf([runStart, ...failedCommand.slice(0, 1), runStart]), 2), "Execution 2 stopped", "no run-end: its process went away");
+});
+
+test("the execution picker is a labelled list of every execution, 'Execution 1 / 2', with the one on show chosen", () => {
+  const html = render(ExecutionPicker, { count: 2, current: 1, onPick: () => {} });
+  assert.match(html, /<select[^>]*aria-label="Execution shown"/);
+  assert.deepEqual([...html.matchAll(/<option[^>]*>([^<]*)<\/option>/g)].map((m) => m[1]), ["Execution 1 / 2", "Execution 2 / 2"]);
+  assert.match(html, /<option value="1" selected="">Execution 2 \/ 2/);
+  assert.doesNotMatch(html, /role=/, "nothing to say about it");
+});
+
+test("the execution picker carries the note of the execution on show, and is not there for a run with one execution", () => {
+  const html = render(ExecutionPicker, { count: 2, current: 0, note: "Execution 1 failed: gh issue view (exit 1)", onPick: () => {} });
+  assert.match(html, /<p[^>]*role="alert"[^>]*>Execution 1 failed: gh issue view \(exit 1\)<\/p>/);
+  assert.equal(render(ExecutionPicker, { count: 1, current: 0, onPick: () => {} }), "");
 });

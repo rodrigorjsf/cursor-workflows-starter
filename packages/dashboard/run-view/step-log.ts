@@ -102,8 +102,9 @@ function addOutput(blocks: OutputBlock[], block: OutputBlock): void {
 }
 
 /** The log of a step from its content items. `upTo` keeps the items up to that log line (a replay shows the log as it stood). */
-export function buildStepLog(items: readonly ContentItem[], options: { upTo?: number } = {}): StepLog {
-  const kept = items.filter((i) => options.upTo === undefined || i.id <= options.upTo).sort((a, b) => a.id - b.id);
+export function buildStepLog(items: readonly ContentItem[], options: { upTo?: number; attempts?: readonly string[] } = {}): StepLog {
+  const keptAttempts = options.attempts !== undefined && options.attempts.length > 0 ? new Set(options.attempts) : undefined;
+  const kept = items.filter((i) => (options.upTo === undefined || i.id <= options.upTo) && (keptAttempts === undefined || keptAttempts.has(i.attemptId))).sort((a, b) => a.id - b.id);
   const attempts = new Map<string, AttemptLog>();
   /** The tool entry and the standalone output entry of each call, per attempt. */
   const tools = new Map<string, Extract<LogEntry, { kind: "tool" }>>();

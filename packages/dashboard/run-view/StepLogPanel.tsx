@@ -90,7 +90,7 @@ export interface StepLogPanelProps {
 
 export function StepLogPanel({ runId, node, now, live, upTo, openCommandId, onOpenCommand, onClose }: StepLogPanelProps) {
   const feed = useStepLog(runId, node.id, live);
-  const log = useMemo(() => buildStepLog(feed.items, { upTo }), [feed.items, upTo]);
+  const log = useMemo(() => buildStepLog(feed.items, { upTo, attempts: node.attemptIds }), [feed.items, upTo, node.attemptIds]);
 
   // Follow the tail: after new content, go to the bottom, unless the reader scrolled up to read.
   const { scroller, onScroll } = useTail(live, log.count);

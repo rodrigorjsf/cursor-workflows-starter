@@ -4,7 +4,7 @@
 // `engine-log.test.ts` checks that against a real run).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type GraphNode, KNOWN_EVENT_VERSION, type RunEvent, buildRunGraph, joinIdOf } from "../run-view/run-graph.js";
+import { type GraphNode, KNOWN_EVENT_VERSION, type RunEvent, buildRunGraph, currentExecution, executionsOf, failedWork, joinIdOf, shownEvents } from "../run-view/run-graph.js";
 import { type Draft, cloudAgent, execEnd, execStart, groupEnd, groupStart, phase, ref, RUN, runStart, sandboxRun, stamp, step, stepEnd, stepStart, T0 } from "./run-log.js";
 
 const idsOf = (nodes: GraphNode[]) => nodes.map((n) => n.id);
@@ -566,4 +566,91 @@ test("a resume runs its groups again: the fork and the join show the latest exec
   const resumed = buildRunGraph(stamp([...firstExecution, runStart, groupStart("g1", "parallel", 2, null), ...step("s-b", "left", { parentId: "g1", ...inG1 }), groupEnd("g1")]));
   assert.deepEqual(["g1", joinIdOf("g1")].map((id) => stateOf(resumed, id)), ["ok", "ok"], "the aborted group finished well the second time");
   assert.equal(resumed.nodes.filter((n) => n.kind === "fork").length, 1, "one fork, not one per execution");
+});
+
+const spentBy = (stepId: string, tokens: number, cents: number, extra: Record<string, unknown> = {}): Draft[] => [
+  stepStart(stepId, stepId, {}, extra),
+  stepEnd(stepId, stepId, {}, { usage: { totalTokens: tokens }, rawCents: cents, chargedCents: cents, ...extra }),
+];
+const failedThenResumed = (): RunEvent[] =>
+  stamp([
+    runStart,
+    ...spentBy("s-a", 1000, 2),
+    { type: "run-end", status: "failed" },
+    runStart,
+    ...spentBy("s-a", 2000, 3, { attemptId: "s-a#2", attempt: 2 }),
+    ...spentBy("s-b", 500, 1),
+    { type: "run-end", status: "finished" },
+  ]);
+
+test("each run-start opens an execution that lasts to the next one, and the page opens on the latest unless another was picked", () => {
+  const sandbox = sandboxRun();
+  const executions = executionsOf(sandbox);
+
+  assert.deepEqual(executions, [{ from: 0, to: 7 }, { from: 7, to: sandbox.length }]);
+  assert.deepEqual([currentExecution(executions, undefined), currentExecution(executions, 0), currentExecution(executions, 1)], [1, 0, 1]);
+  assert.equal(currentExecution(executions, 5), 1, "a pick beyond the executions there are stays on the latest");
+  assert.deepEqual(executionsOf([]), [{ from: 0, to: 0 }], "a run with no event yet has the one execution it is about to have");
+  const ahead = stamp([runStart, ...step("s-a", "plan")]);
+  assert.deepEqual(executionsOf([...ahead, { ...stamp([runStart])[0]!, v: KNOWN_EVENT_VERSION + 1 }]), [{ from: 0, to: 4 }], "a run-start of a newer schema opens nothing");
+});
+
+test("the sandbox run's first execution draws its start and its failed command, and its second draws the run without that failure", () => {
+  const sandbox = sandboxRun();
+  const [first, second] = executionsOf(sandbox).map(({ from, to }) => buildRunGraph(sandbox.slice(from, to), { settled: true }));
+
+  assert.deepEqual(idsOf(first!.nodes), ["start"]);
+  assert.equal(first!.run.status, "failed");
+  assert.deepEqual(failedWork(first!).map((n) => [n.label, n.detail.errorKind]), [["gh issue view", "exit 1"]]);
+  assert.equal(second!.run.status, "finished");
+  assert.ok(!failedWork(second!).some((n) => n.label === "gh issue view"), "the failed attempt belongs to the first execution only");
+  assert.equal(stateOf(second!, SUITE(1)), "failed", "what the second execution draws is its own: the red test suite");
+});
+
+test("the totals of a resumed run sum its executions, whichever execution is on show", () => {
+  const events = failedThenResumed();
+  const executions = executionsOf(events);
+  const spent = (shown: RunEvent[]) => {
+    const { run } = buildRunGraph(shown, { settled: true });
+    return [run.tokens, run.costCents];
+  };
+  const each = executions.map(({ from, to }) => spent(events.slice(from, to)));
+  assert.deepEqual(each, [[1000, 2], [2500, 4]], "an execution alone knows only what it spent");
+
+  for (const picked of [0, 1]) {
+    const { run } = shownEvents(events, executions[picked]!, null);
+    assert.deepEqual(spent(run), [3500, 6], `execution ${picked + 1} on show: the header still has the sum of both`);
+  }
+});
+
+test("a replay of an execution shows that execution up to its position, after the executions before it", () => {
+  const events = failedThenResumed();
+  const [first, second] = executionsOf(events);
+
+  const early = shownEvents(events, first!, 2);
+  assert.deepEqual([early.execution.length, early.run.length], [2, 2]);
+
+  const part = shownEvents(events, second!, 3);
+  assert.deepEqual(part.execution, events.slice(second!.from, second!.from + 3));
+  assert.deepEqual(part.run, events.slice(0, second!.from + 3), "the run as it stood: the first execution whole, the second so far");
+  assert.deepEqual(idsOf(buildRunGraph(part.execution).nodes), ["start", "s-a"], "the second execution so far has its start and its first step only");
+  assert.deepEqual(shownEvents(events, first!, 0).execution, []);
+});
+
+test("a step names the attempts that ran in the execution on show: the ones of a resume are not in the execution before it, and one served from the journal ran none", () => {
+  const events = stamp([
+    runStart,
+    ...spentBy("s-a", 1000, 2),
+    { type: "run-end", status: "failed" },
+    runStart,
+    ...spentBy("s-a", 2000, 3, { attemptId: "s-a#2", attempt: 2 }),
+    stepStart("s-b", "cached-step", {}, { cached: "journal", attemptId: "s-b#j" }),
+    stepEnd("s-b", "cached-step", {}, { cached: "journal", attemptId: "s-b#j" }),
+  ]);
+  const [first, second] = executionsOf(events).map(({ from, to }) => buildRunGraph(events.slice(from, to), { settled: true }));
+
+  assert.deepEqual(nodeOf(first!, "s-a").attemptIds, ["s-a#1"]);
+  assert.deepEqual(nodeOf(second!, "s-a").attemptIds, ["s-a#2"]);
+  assert.deepEqual(nodeOf(second!, "s-b").attemptIds, [], "nothing ran now: its log is the one of the execution that ran it");
+  assert.deepEqual(nodeOf(buildRunGraph(events, { settled: true }), "s-a").attemptIds, ["s-a#1", "s-a#2"]);
 });
