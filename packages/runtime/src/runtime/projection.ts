@@ -143,7 +143,8 @@ function oneLine(text: string): string {
 
 /** How a command ended, in a few words: `exit 0, 1.2s`, `timeout, 600.0s`. Never the command's output. */
 function execEndText(e: ExecEndEvent): string {
-  const what = e.outcome === "exit" ? `exit ${e.exitCode ?? e.signal ?? "?"}` : e.outcome === "spawn-error" ? "could not start" : e.outcome;
+  const answered = e.command === "mcp" ? (e.ok ? "ok" : "error") : `exit ${e.exitCode ?? e.signal ?? "?"}`;
+  const what = e.outcome === "exit" ? answered : e.outcome === "spawn-error" ? "could not start" : e.outcome;
   return `${what}, ${(e.durationMs / 1000).toFixed(1)}s`;
 }
 

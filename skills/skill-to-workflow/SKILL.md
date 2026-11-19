@@ -84,6 +84,7 @@ The recipes cited are in [recipes.md](references/recipes.md).
 | Several independent subagents, or sub-agents the skill itself fires in parallel | `ctx.parallel` (barrier) or `ctx.pipeline` (per item); the code checks the minimum number of results, and the skill's aggregation becomes code or a judge step |
 | Another skill cited by the skill ("call skill X") | Section "Another skill cited and reference files" of [origin-cases.md](references/origin-cases.md) |
 | Script called by the skill (lint, tests, build) | `ctx.exec` in the workflow (never a synchronous call); the result decides the next step |
+| Known MCP tool call with known arguments (the skill fixes both the tool and its arguments) | `ctx.mcp(server, tool, args)`: the script makes the call with no agent turn, and the result decides the next step. The server's stdio config (`command`, `args`, `env`) is copied into the workflow's code, because a server set up only in the IDE is not read from `.cursor/mcp.json`. A tool the model must choose stays in an agent step, with `mcpServers` on the step |
 | Imperative process rule | Recipe "Invariants between steps" |
 | Human approval of an intermediate result | Recipe "Checkpoint across two runs" |
 | Loop with no cap | `for (let round = 1; round <= N && !ok; round++)` |

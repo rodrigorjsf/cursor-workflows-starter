@@ -26,6 +26,7 @@ import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedCo
 import { cursorEndpointRefusal } from "./cursor-endpoints.js";
 import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type OutputStream, type NewEvent, type RunStatus, type StepRef, type TurnUsage, type WorkflowEvent } from "./events.js";
 import { recordExecGroup } from "./job-children.js";
+import { MCP_CALL_TIMEOUT_MS, callMcpTool, secretValuesOf, toMcpResult } from "./mcp-call.js";
 import { jobsDirIn } from "./job-state.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
 import { type InterruptedCloudStep, USAGE_FAILED_PREFIX, addUsage, emptyUsage, resumeHint, subtractUsage, turnTokens, withRatio } from "./projection.js";
@@ -36,7 +37,7 @@ import type { RetentionPolicy } from "./retention.js";
 import { registerRunIfMissing } from "./runs-index.js";
 import { INSIDE_WORKFLOW_ENV } from "./inside-workflow.js";
 import { newRunId, stateDir as runtimeStateDir } from "./state.js";
-import type { AgentCallOptions, Budget, ExecOptions, ExecResult, UsageTotals, WorkflowContext, WorkflowDefinition } from "./workflow.js";
+import type { AgentCallOptions, Budget, ExecOptions, ExecResult, McpCallOptions, McpResult, McpStdioServer, UsageTotals, WorkflowContext, WorkflowDefinition } from "./workflow.js";
 import { workflowSourceHash } from "./workflow-source.js";
 import { type Snapshot, revertToSnapshot, takeSnapshot } from "./worktree-snapshot.js";
 
@@ -1201,10 +1202,7 @@ async function executeRun<A, R>(
     }
     // The node's id comes from the call's shape and its branch (`flow.prefix`: where it sits in the groups), computed before
     // any await: the numbering does not depend on which parallel branch gets there first.
-    const shape = sha(JSON.stringify([flow.prefix, command, args, cwd]));
-    const occurrence = execOccurrences.get(shape) ?? 0;
-    execOccurrences.set(shape, occurrence + 1);
-    const ref: StepRef = { stepId: `x-${shape.slice(0, 12)}.${occurrence}`, parentId: flow.last, groupId: flow.groupId };
+    const ref = execNodeRef(flow, [command, args, cwd]);
     return inNode(runExec(command, args, cwd, timeoutMs, callOpts, ref), flow, ref, () => true); // runExec opens the node at once
   }
 
@@ -1251,6 +1249,58 @@ async function executeRun<A, R>(
     return result;
   }
 
+  function execNodeRef(flow: Flow, call: unknown[]): StepRef {
+    const shape = sha(JSON.stringify([flow.prefix, ...call]));
+    const occurrence = execOccurrences.get(shape) ?? 0;
+    execOccurrences.set(shape, occurrence + 1);
+    return { stepId: `x-${shape.slice(0, 12)}.${occurrence}`, parentId: flow.last, groupId: flow.groupId };
+  }
+
+  async function mcpCall(server: McpStdioServer, tool: string, args: Record<string, unknown> = {}, callOpts: McpCallOptions = {}): Promise<McpResult> {
+    const flow = currentFlow();
+    const timeoutMs = callOpts.timeoutMs ?? MCP_CALL_TIMEOUT_MS;
+    if (!(timeoutMs > 0) || !Number.isFinite(timeoutMs)) throw new StepFailedError(`ctx.mcp: timeoutMs must be a positive number of milliseconds, got ${timeoutMs}`);
+    if (signal?.aborted) {
+      interrupted = true;
+      throw new RunCancelledError(cancelMessage);
+    }
+    const ref = execNodeRef(flow, ["mcp", server.command, server.args ?? [], tool, args]);
+    return inNode(runMcp(server, tool, args, timeoutMs, callOpts, ref), flow, ref, () => true);
+  }
+
+  async function runMcp(server: McpStdioServer, tool: string, args: Record<string, unknown>, timeoutMs: number, callOpts: McpCallOptions, ref: StepRef): Promise<McpResult> {
+    const attemptId = randomUUID();
+    const label = callOpts.label ?? `mcp ${basename(server.command)} ${tool}`;
+    const phase = callOpts.phase ?? currentPhase;
+    const startedAt = Date.now();
+    store.learnSecrets({ ...server.env, ...Object.fromEntries(secretValuesOf(args).map((value, index) => [`ARGUMENT_SECRET_${index}`, value])) });
+    emit({ type: "exec-start", ...ref, attemptId, label, phase, command: "mcp", timeoutMs });
+    const content = attemptContent(ref, attemptId);
+    content.write("tool-call", JSON.stringify({ toolName: tool, arguments: args, server: { command: server.command, args: server.args ?? [], env: Object.keys(server.env ?? {}) } }), { tool: "mcp", callId: attemptId });
+    const done = await callMcpTool({ server, tool, args, cwd: opts.cwd, timeoutMs, signal });
+    const result = toMcpResult(done);
+    const log = outputLog((stream, text) => content.write("command-output", text, { tool: "mcp", callId: attemptId, stream }), { pieceMax: CONTENT_MAX_CHARS, logMax: EXEC_LOG_MAX_CHARS });
+    const output = result.ok ? result.text : (result.error ?? result.text);
+    log.push(result.ok ? "stdout" : "stderr", output);
+    log.end();
+    emit({
+      type: "exec-end",
+      ...ref,
+      attemptId,
+      label,
+      phase,
+      command: "mcp",
+      ok: result.ok,
+      outcome: done.outcome,
+      error: result.error,
+      durationMs: Date.now() - startedAt,
+      outputChars: output.length,
+      outputTruncated: log.truncated || undefined,
+    });
+    if (done.outcome === "cancelled") throw new RunCancelledError(cancelMessage);
+    return result;
+  }
+
   const ctx: WorkflowContext<A> = {
     args,
     runId,
@@ -1260,6 +1310,7 @@ async function executeRun<A, R>(
     forges: structuredClone(resolved.config.forges ?? {}),
     agent: agentCall,
     exec: execCall,
+    mcp: mcpCall,
     parallel: (thunks) =>
       runGroup("parallel", thunks, (thunk) =>
         thunk().catch((err: unknown) => {

@@ -1,5 +1,19 @@
 # Changelog
 
+## Não lançado
+
+### Adicionado
+
+- **O workflow chama uma tool conhecida de um servidor MCP sem agente, com `ctx.mcp`** (issue #141, spec #137,
+  [ADR-0013](docs/adr/0013-script-side-mcp-calls.md)). `ctx.mcp(servidor, tool, args, { label, phase, timeoutMs })` sobe um servidor
+  MCP stdio descrito no código do workflow (`command`, `args`, `env`; nunca o `.cursor/mcp.json` do repositório), chama a tool e
+  devolve `{ ok, text, content, structuredContent?, timedOut, error? }`. Tool com erro, tool desconhecida, servidor que não
+  sobe e tempo estourado voltam como resultado com `ok: false`, como no `ctx.exec`; o cancelamento do run fecha o cliente,
+  termina o servidor e lança. A chamada reaproveita os eventos `exec-start` e `exec-end` com `command: "mcp"`, então o run a lista
+  como um comando, e os argumentos e o resultado são conteúdo, com a mesma redação, corte e retenção. Não entra no journal: o
+  resume chama a tool de novo. A skill `skill-to-workflow` mapeia "chamada de tool MCP conhecida, com argumentos conhecidos"
+  para `ctx.mcp`, e a referência da API do runtime e o capítulo 4.1 a documentam.
+
 ## 0.5.0 (pré-release, 2026-11-19)
 
 ### Adicionado

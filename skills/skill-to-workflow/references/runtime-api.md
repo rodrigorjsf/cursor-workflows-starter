@@ -52,6 +52,7 @@ export default defineWorkflow<{ target: string }>({
 | `ctx.parallel(thunks)` | Barrier: runs in parallel and waits for all. An item that fails becomes `null`. |
 | `ctx.pipeline(items, ...stages)` | No barrier: each item goes through the stages independently. A stage that fails drops the item (`null`) and skips its later stages. A stage receives `(previousResult, item, index)`. |
 | `ctx.exec(command, args, opts)` | Runs a command (tests, `git`, `gh` or `glab`) and returns `{ ok, exitCode, timedOut, tail, error? }`. Asynchronous, killed at its timeout, logged. See "`exec()` options" below. |
+| `ctx.mcp(server, tool, args, opts)` | Calls one tool of one stdio MCP server, with no agent, and returns `{ ok, text, content, structuredContent?, timedOut, error? }`. Logged like a command. See "`mcp()`" below. |
 | `ctx.phase(title)` / `ctx.log(message)` | Progress, shown by `wait_workflow` and on the CLI. |
 | `ctx.warn(message)` | A `warning` event in the run's log, for a failure that must not end the run. Name what was not done and why: `could not <action>: <reason>`. |
 | `ctx.metric(name, value)` | An outcome or difficulty signal of the run, written to the `metrics` table (observability.md). |
@@ -139,6 +140,39 @@ own commands take `--repo <path>`; `glab api` takes `--hostname <host>` and the 
 - `glab mr view <branch>` fails when the branch has several MRs; `gh pr view <branch>` takes the latest. Ask `glab api`
   for the list (every page), take the newest open one, else the newest. GitLab's MR states are `opened`, `locked` (being merged),
   `merged` and `closed`: `opened` and `locked` are both open.
+
+## `mcp()`: a known MCP tool call, with no agent
+
+`ctx.mcp(server, tool, args?, opts?)` calls one tool of one MCP server from the workflow's process and returns the tool's
+result. Use it when the code already decides the tool and its arguments (list the tables, describe a schema, run a fixed
+query): the call costs no agent turn and has no variance. A tool the model must choose stays in an agent step, with
+`mcpServers` on the step.
+
+```ts
+const server = { command: "node", args: ["db-server.mjs"], env: { DB_PATH: "app.sqlite" } };
+const tables = await ctx.mcp(server, "list_tables", {}, { label: "tables" });
+if (!tables.ok) return { status: "failed", reason: tables.error };
+const names = JSON.parse(tables.text);
+```
+
+- `server` is a stdio config written in the workflow's code: `command`, `args?` and `env?`. It is never resolved by name
+  from `.cursor/mcp.json` (an untrusted repository would decide what the workflow runs), and HTTP servers are not
+  supported. The server starts in the run's cwd, with `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER` of the
+  process plus `env`: no other variable of the workflow's environment reaches it. It runs outside the SDK sandbox, with the
+  trust of a `ctx.exec` command.
+- `opts`: `label` (name in progress and in the event log; default `mcp <command> <tool>`), `phase` (like `agent()`'s) and
+  `timeoutMs` (the whole call, start of the server included; default 10 minutes).
+- The result is `{ ok, text, content, structuredContent?, timedOut, error? }`. `content` is the tool's content blocks and
+  `text` its text blocks joined by a newline. A tool error, an unknown tool, a server that cannot start or that dies, and
+  a timeout (`timedOut: true`) are **results** with `ok: false` and `error` saying why, never exceptions: the code decides
+  what they mean. A cancelled run closes the client, ends the server process and throws, so the workflow does not go on.
+- The call reuses the events of `ctx.exec`: an `exec-start` and an `exec-end` with `command: "mcp"`, so the run page lists
+  it as it lists a command. The tool, its arguments and the server's command and env names are one `tool-call` content and
+  the result is `command-output` content, with the redaction, size cut and retention of an agent's content. A value
+  under a secret-named key of `args` (`apiKey`, `db_password`) and the values of a secret-named variable of `server.env`
+  are redacted too, wherever they show up.
+- A resume calls the tool again: `mcp` is not journaled, and a tool with effects runs twice (rules.md, rule 8). The agent
+  step after it still comes back from the journal when its prompt did not change.
 
 ## Definition fields
 

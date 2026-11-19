@@ -4,16 +4,17 @@
 import assert from "node:assert/strict";
 import "./isolate-home.js";
 import { spawn } from "node:child_process";
-import { existsSync as existsSyncSafe, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync as existsSyncSafe, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { calls, costConfig, script, stats } from "./fake-sdk.js";
 import { runWorkflow } from "../src/runtime/engine.js";
+import { projectLatestExecution } from "../src/runtime/projection.js";
 import type { ContentEvent, ExecEndEvent, ExecStartEvent, WorkflowEvent } from "../src/runtime/events.js";
 import { eventLogPath, readEventLog } from "../src/runtime/run-store.js";
 import { runStartOf, writeRepoConfig } from "./config-fixtures.js";
-import { type ExecResult, type WorkflowContext, defineWorkflow } from "../src/runtime/workflow.js";
+import { type ExecResult, type McpResult, type McpStdioServer, type WorkflowContext, defineWorkflow } from "../src/runtime/workflow.js";
 
 let dir: string;
 let cwd: string;
@@ -588,3 +589,227 @@ async function until<T>(what: string, read: () => T | undefined, ms = 30_000): P
     if (performance.now() > stop) throw new Error(`timed out waiting for ${what}`);
   }
 }
+
+const fixtureServer: McpStdioServer = { command: process.execPath, args: [join(import.meta.dirname, "fixtures", "mcp-stdio", "server.mjs")] };
+
+test("ctx.mcp calls one tool of a stdio MCP server and returns its result, with no agent call", async () => {
+  const wf = workflow((ctx) => ctx.mcp(fixtureServer, "echo", { text: "hello" }));
+  const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });
+  assert.equal(r.status, "finished", r.error);
+  assert.deepEqual(r.result, { ok: true, text: "echo: hello", content: [{ type: "text", text: "echo: hello" }], timedOut: false });
+  assert.equal(calls.length, 0);
+});
+
+const mcpTool = (tool: string, args: Record<string, unknown> = {}) => workflow((ctx) => ctx.mcp(fixtureServer, tool, args));
+
+test("a tool error, an unknown tool and a server that cannot start are failure results, not exceptions: the workflow goes on", async () => {
+  const wf = workflow(async (ctx) => {
+    const toolError = await ctx.mcp(fixtureServer, "fail");
+    const unknownTool = await ctx.mcp(fixtureServer, "no_such_tool");
+    const noServer = await ctx.mcp({ command: "definitely-not-a-server-wf" }, "echo", { text: "x" });
+    const after = await ctx.exec(...node("0"), { label: "after the failures" });
+    return { toolError, unknownTool, noServer, afterOk: after.ok };
+  });
+  const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });
+  assert.equal(r.status, "finished", r.error);
+  const { toolError, unknownTool, noServer, afterOk } = r.result as { toolError: McpResult; unknownTool: McpResult; noServer: McpResult; afterOk: boolean };
+  assert.deepEqual([toolError.ok, toolError.text, toolError.error, toolError.timedOut], [false, "the tool failed on purpose", "the tool failed on purpose", false]);
+  assert.deepEqual([unknownTool.ok, unknownTool.timedOut], [false, false]);
+  assert.match(unknownTool.error!, /no_such_tool/);
+  assert.deepEqual([noServer.ok, noServer.content, noServer.timedOut], [false, [], false]);
+  assert.match(noServer.error!, /ENOENT/);
+  assert.equal(afterOk, true, "the run went on after three failed calls");
+
+  const ends = execEnds(eventsOf(r.runId)).filter((e) => e.command === "mcp");
+  assert.deepEqual(ends.map((e) => [e.ok, e.outcome]), [[false, "exit"], [false, "exit"], [false, "spawn-error"]]);
+});
+
+test("a call that outlasts its timeout returns a failure result with timedOut, and the server process is gone", { timeout: 30_000 }, async () => {
+  const marker = join(cwd, "hang-pid");
+  const wf = workflow((ctx) => ctx.mcp(fixtureServer, "hang", { marker }, { timeoutMs: 1_500 }));
+  const timed = await runWorkflow(wf, {}, { cwd, metricsDb: false });
+  assert.equal(timed.status, "finished", timed.error);
+  const result = timed.result as McpResult;
+  assert.deepEqual([result.ok, result.timedOut], [false, true]);
+  assert.equal(execEnds(eventsOf(timed.runId)).at(-1)!.outcome, "timeout");
+  await expectGone(Number(readFileSync(marker, "utf8")), "the timed out call");
+});
+
+test("a timeout that is not a positive number is a bug in the workflow, and fails it", async () => {
+  for (const timeoutMs of [0, -1, Number.NaN]) {
+    const r = await runWorkflow(workflow((ctx) => ctx.mcp(fixtureServer, "echo", { text: "x" }, { timeoutMs })), {}, { cwd, metricsDb: false });
+    assert.equal(r.status, "failed", `timeoutMs ${timeoutMs}`);
+    assert.match(r.error!, /ctx\.mcp: timeoutMs must be a positive number/);
+  }
+});
+
+test("the server process ends with the call: nothing outlives it", async () => {
+  const r = await runWorkflow(mcpTool("pid"), {}, { cwd, metricsDb: false });
+  assert.equal(r.status, "finished", r.error);
+  await expectGone(Number((r.result as McpResult).text), "the call");
+});
+
+test("the server starts in the run's cwd with the environment the config names and no secret of this process", async () => {
+  process.env.EXEC_TEST_MCP_LEAK_TOKEN = "leaks-into-the-server-if-inherited";
+  try {
+    const wf = workflow(async (ctx) => {
+      const server = { ...fixtureServer, env: { MCP_TEST_GIVEN: "given" } };
+      return [
+        (await ctx.mcp(server, "cwd")).text,
+        (await ctx.mcp(server, "env", { name: "MCP_TEST_GIVEN" })).text,
+        (await ctx.mcp(server, "env", { name: "EXEC_TEST_MCP_LEAK_TOKEN" })).text,
+      ];
+    });
+    const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });
+    assert.deepEqual(r.result, [realpathSync(cwd), "given", "unset"]);
+  } finally {
+    delete process.env.EXEC_TEST_MCP_LEAK_TOKEN;
+  }
+});
+
+test("each call is an exec-start and exec-end pair labelled with the server and the tool, with its arguments and result as content", async () => {
+  const wf = workflow(async (ctx) => {
+    await ctx.agent("first", { label: "first" });
+    await ctx.mcp(fixtureServer, "echo", { text: "hello" });
+    await ctx.mcp(fixtureServer, "echo", { text: "named" }, { label: "the greeting", phase: "Ask" });
+    await ctx.agent("second", { label: "second" });
+  });
+  const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });
+  assert.equal(r.status, "finished", r.error);
+  const events = eventsOf(r.runId);
+  const [plain, named] = execStarts(events);
+  assert.ok(plain && named);
+  assert.deepEqual([plain.label, plain.command, plain.phase], [`mcp ${basename(process.execPath)} echo`, "mcp", undefined]);
+  assert.deepEqual([named.label, named.command, named.phase], ["the greeting", "mcp", "Ask"]);
+  const stepStarts = events.filter((e) => e.type === "step-start");
+  assert.equal(plain.parentId, stepStarts[0]!.stepId, "continues from the step before it");
+  assert.equal(named.parentId, plain.stepId);
+  assert.equal(stepStarts[1]!.parentId, named.stepId, "the step after continues from the call");
+  const [plainEnd, namedEnd] = execEnds(events);
+  assert.deepEqual([plainEnd!.attemptId, plainEnd!.ok, plainEnd!.outcome, plainEnd!.command, plainEnd!.stepId], [plain.attemptId, true, "exit", "mcp", plain.stepId]);
+  assert.equal(namedEnd!.attemptId, named.attemptId);
+
+  const content = contentOf(events).filter((c) => c.attemptId === plain.attemptId);
+  assert.deepEqual(content.map((c) => [c.kind, c.tool, c.callId, c.stream]), [["tool-call", "mcp", plain.attemptId, undefined], ["command-output", "mcp", plain.attemptId, "stdout"]]);
+  assert.deepEqual(JSON.parse(content[0]!.text!), { toolName: "echo", arguments: { text: "hello" }, server: { command: process.execPath, args: fixtureServer.args, env: [] } });
+  assert.equal(content[1]!.text, "echo: hello");
+  assert.equal(plainEnd!.outputChars, "echo: hello".length);
+});
+
+test("secrets in a call's arguments, its server env or its result are redacted in the log; the workflow still gets the real result", async () => {
+  const token = `ghp_${"a1B2".repeat(9)}`;
+  const named = "plain-value-under-a-secret-name";
+  const inEnv = "value-of-a-secret-named-env-var";
+  const wf = workflow(async (ctx) => {
+    const echoed = await ctx.mcp(fixtureServer, "echo", { text: token });
+    const byName = await ctx.mcp(fixtureServer, "args", { apiKey: named, nested: { db_password: `${named}-2` } });
+    const fromEnv = await ctx.mcp({ ...fixtureServer, env: { MCP_TEST_DB_PASSWORD: inEnv } }, "env", { name: "MCP_TEST_DB_PASSWORD" });
+    return [echoed.text, byName.text, fromEnv.text];
+  });
+  const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });
+  assert.equal(r.status, "finished", r.error);
+  assert.deepEqual(r.result, [`echo: ${token}`, JSON.stringify({ apiKey: named, nested: { db_password: `${named}-2` } }), inEnv]);
+
+  const log = readFileSync(eventLogPath(cwd, r.runId), "utf8");
+  for (const secret of [token, named, `${named}-2`, inEnv]) assert.ok(!log.includes(secret), `${secret} is in no event`);
+  const texts = contentOf(eventsOf(r.runId)).map((c) => c.text!);
+  assert.ok(texts.some((t) => t === "echo: [REDACTED]"));
+  assert.ok(texts.some((t) => t.includes('"apiKey":"[REDACTED]"')));
+  assert.ok(texts.some((t) => t.includes('"MCP_TEST_DB_PASSWORD"') && !t.includes(inEnv)), "the server env is named in the log, never valued");
+});
+
+test("a result longer than an event holds is cut like a command's output, in pieces, and the workflow gets it whole", async () => {
+  const long = "y".repeat(70_000);
+  const r = await runWorkflow(mcpTool("echo", { text: long }), {}, { cwd, metricsDb: false });
+  assert.equal((r.result as McpResult).text, `echo: ${long}`);
+  const pieces = contentOf(eventsOf(r.runId)).filter((c) => c.kind === "command-output");
+  assert.ok(pieces.length >= 3);
+  assert.equal(pieces.map((c) => c.text).join(""), `echo: ${long}`);
+  assert.equal(execEnds(eventsOf(r.runId))[0]!.outputTruncated, undefined);
+});
+
+test("listeners see the call's start and end, never its arguments or result", async () => {
+  const seen: WorkflowEvent[] = [];
+  const wf = workflow(async (ctx) => (await ctx.mcp(fixtureServer, "echo", { text: "ARGUMENT-MARKER" })).ok);
+  const r = await runWorkflow(wf, {}, { cwd, metricsDb: false, onEvent: (e) => seen.push(e) });
+  assert.equal(r.status, "finished", r.error);
+  assert.deepEqual(seen.map((e) => e.type).filter((t) => t.startsWith("exec") || t === "content"), ["exec-start", "exec-end"]);
+  assert.ok(!JSON.stringify(seen).includes("ARGUMENT-MARKER"));
+});
+
+test("the progress lines of a run show a call as ok or as an error, never as an exit code", async () => {
+  const wf = workflow(async (ctx) => {
+    await ctx.mcp(fixtureServer, "echo", { text: "x" }, { label: "good" });
+    await ctx.mcp(fixtureServer, "fail", {}, { label: "bad" });
+  });
+  const r = await runWorkflow(wf, {}, { cwd, metricsDb: false });
+  const lines = projectLatestExecution(eventsOf(r.runId))!.recent.filter((l) => l.includes("good") || l.includes("bad"));
+  assert.deepEqual(lines.map((l) => l.replace(/, [\d.]+s\)/, ")")), ["▶ good [mcp]", "✓ good (ok)", "▶ bad [mcp]", "✗ bad (error)"]);
+});
+
+test("a call in a parallel group carries its group id, and the same call made twice is two nodes numbered alike by a resume", async () => {
+  const wf = workflow(async (ctx) => {
+    await ctx.parallel([() => ctx.mcp(fixtureServer, "echo", { text: "a" }, { label: "a" }), () => ctx.mcp(fixtureServer, "echo", { text: "b" }, { label: "b" })]);
+    await ctx.mcp(fixtureServer, "echo", { text: "again" });
+    await ctx.mcp(fixtureServer, "echo", { text: "again" });
+  });
+  const first = await runWorkflow(wf, {}, { cwd, metricsDb: false });
+  const second = await runWorkflow(wf, {}, { cwd, metricsDb: false, runId: first.runId });
+  assert.equal(second.status, "finished", second.error);
+  const starts = execStarts(eventsOf(first.runId));
+  assert.equal(starts.length, 8);
+  const [a, b] = starts;
+  assert.ok(a!.groupId !== null && a!.groupId === b!.groupId);
+  assert.notEqual(starts[2]!.stepId, starts[3]!.stepId);
+  assert.deepEqual(starts.slice(4).map((e) => e.stepId), starts.slice(0, 4).map((e) => e.stepId));
+});
+
+test("a resume calls the tool again, and the agent step after it, whose prompt did not change, still comes back from the journal", async () => {
+  const wf = workflow(async (ctx) => {
+    const pid = await ctx.mcp(fixtureServer, "pid", {}, { label: "who" });
+    await ctx.agent("summarize", { label: "summary" });
+    return pid.text;
+  });
+  const first = await runWorkflow(wf, {}, { cwd, metricsDb: false });
+  const agentCalls = calls.length;
+  const second = await runWorkflow(wf, {}, { cwd, metricsDb: false, runId: first.runId });
+  assert.equal(second.status, "finished", second.error);
+  assert.equal(execStarts(eventsOf(first.runId)).length, 2, "the call ran again in the second execution");
+  assert.notEqual(second.result, first.result, "a new server process answered");
+  assert.equal(calls.length, agentCalls, "the agent step was served from the journal");
+});
+
+test("cancelling the run during a call stops the server process, ends the node as cancelled, and stops the workflow where it is", { timeout: 60_000 }, async () => {
+  const marker = join(cwd, "hang-pid");
+  const after = join(cwd, "after-the-call");
+  const controller = new AbortController();
+  const wf = workflow(async (ctx) => {
+    await ctx.mcp(fixtureServer, "hang", { marker }, { label: "stuck", timeoutMs: 120_000 });
+    writeFileSync(after, "the workflow went on");
+  });
+  const seen: WorkflowEvent[] = [];
+  const running = runWorkflow(wf, {}, { cwd, metricsDb: false, signal: controller.signal, onEvent: (e) => seen.push(e) });
+  const pid = await until("the tool to start", () => (existsSyncSafe(marker) && readFileSync(marker, "utf8")) || undefined).then(Number);
+  assert.equal(alive(pid), true, "the server is running while the call waits");
+  controller.abort();
+  const r = await running;
+
+  assert.equal(r.status, "cancelled");
+  assert.match(r.error!, new RegExp(`resumeRunId="${r.runId}"`));
+  assert.equal(existsSyncSafe(after), false, "the workflow did not go on");
+  const events = eventsOf(r.runId);
+  assert.deepEqual(execEnds(events).map((e) => [e.label, e.ok, e.outcome]), [["stuck", false, "cancelled"]]);
+  assert.equal(events.at(-1)!.type, "run-end", "no node event trails the run's end");
+  await expectGone(pid, "the cancelled run");
+});
+
+test("a call made after the run was cancelled never starts: no node, the run ends cancelled", async () => {
+  const controller = new AbortController();
+  const wf = workflow(async (ctx) => {
+    await ctx.mcp(fixtureServer, "echo", { text: "before" }, { label: "before" });
+    await ctx.mcp(fixtureServer, "echo", { text: "after" }, { label: "after" });
+  });
+  const r = await runWorkflow(wf, {}, { cwd, metricsDb: false, signal: controller.signal, onEvent: (e) => e.type === "exec-end" && controller.abort() });
+  assert.equal(r.status, "cancelled");
+  assert.deepEqual(execStarts(eventsOf(r.runId)).map((e) => e.label), ["before"]);
+});

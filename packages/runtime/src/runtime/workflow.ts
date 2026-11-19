@@ -180,6 +180,27 @@ export interface ExecResult {
   error?: string;
 }
 
+export interface McpStdioServer {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
+export interface McpCallOptions {
+  label?: string;
+  phase?: string;
+  timeoutMs?: number;
+}
+
+export interface McpResult {
+  ok: boolean;
+  text: string;
+  content: unknown[];
+  structuredContent?: unknown;
+  timedOut: boolean;
+  error?: string;
+}
+
 /** Uso de tokens somado (por etapa ou por run). `cacheRead`/`cacheWrite` vêm do provedor via Cursor. */
 export interface UsageTotals {
   inputTokens: number;
@@ -260,6 +281,7 @@ export interface WorkflowContext<A = unknown> {
    * run kills the command and throws. A resume runs the command again: `exec` is not journaled.
    */
   exec(command: string, args?: string[], opts?: ExecOptions): Promise<ExecResult>;
+  mcp(server: McpStdioServer, tool: string, args?: Record<string, unknown>, opts?: McpCallOptions): Promise<McpResult>;
   phase(title: string): void;
   log(message: string): void;
   warn(message: string): void;
