@@ -417,6 +417,7 @@ export interface ExecStartEvent extends EventBase, StepRef {
   command: string;
   /** O tempo máximo do comando, em milissegundos. Passado esse tempo, o comando é morto. */
   timeoutMs: number;
+  node?: true;
 }
 
 /** Como um comando de `ctx.exec` terminou: `exit` (o processo terminou sozinho, com qualquer código), `timeout` (morto ao passar do tempo), `cancelled` (o run foi cancelado e o comando morto) ou `spawn-error` (o processo não chegou a rodar). */
@@ -449,6 +450,7 @@ export interface ExecEndEvent extends EventBase, StepRef {
   outputChars: number;
   /** true quando a saída passou do que o log guarda por comando (262144 caracteres): os `content` têm só o começo dela. O `ctx.exec` devolve ao workflow o fim, em `tail`. */
   outputTruncated?: true;
+  probe?: true;
 }
 
 /** De qual saída de um comando vem um texto: `stdout` ou `stderr`. */

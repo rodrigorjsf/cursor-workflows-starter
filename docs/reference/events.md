@@ -237,6 +237,7 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 | `phase` | `string` | não | A fase em que o comando começou (`phase` da chamada ou o último `ctx.phase`). |
 | `command` | `string` | sim | O programa, sem os argumentos (`git`, `npm`…). Os argumentos e o cwd ficam num `content` do tipo `tool-call`: podem carregar dados. |
 | `timeoutMs` | `number` | sim | O tempo máximo do comando, em milissegundos. Passado esse tempo, o comando é morto. |
+| `node` | `true` | não |  |
 
 ### `exec-end`
 
@@ -258,6 +259,7 @@ Inclui os campos de [`EventBase`](#eventbase) e de [`StepRef`](#stepref).
 | `durationMs` | `number` | sim | Duração do comando em milissegundos. |
 | `outputChars` | `number` | sim | Tamanho da saída do comando (stdout e stderr) em caracteres, antes de qualquer corte. |
 | `outputTruncated` | `true` | não | true quando a saída passou do que o log guarda por comando (262144 caracteres): os `content` têm só o começo dela. O `ctx.exec` devolve ao workflow o fim, em `tail`. |
+| `probe` | `true` | não |  |
 
 ### `metric`
 

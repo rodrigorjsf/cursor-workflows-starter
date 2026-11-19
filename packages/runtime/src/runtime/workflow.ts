@@ -162,6 +162,8 @@ export interface ExecOptions {
    * just wrote inherits nothing it could send away. What `env` sets stays, and the log's redaction is unchanged. Default: false.
    */
   scrubSecrets?: boolean;
+  probe?: boolean;
+  node?: boolean;
 }
 
 /** What a `ctx.exec` call hands back. A command that fails, times out or cannot start is a result: the workflow decides what it means. */

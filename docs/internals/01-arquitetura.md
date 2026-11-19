@@ -150,7 +150,9 @@ poderia estourar o tempo dela e a saída dela ficaria invisível.
 1. **Nó do run.** A chamada vira um nó, com `stepId`, `parentId` e `groupId` como uma etapa de agente: o `exec-start` abre,
    o `exec-end` fecha ([6.1](../reference/events.md#exec-start)). O `stepId` (`x-…`) deriva do comando, dos argumentos e do
    cwd, mais o número da ocorrência, então um resume numera os comandos do mesmo jeito. O comando **não** entra no
-   journal: o resume o roda de novo.
+   journal: o resume o roda de novo. A chamada pode marcar o comando: `node: true` vai no `exec-start` (o run desenha o
+   comando como nó) e `probe: true` vai no `exec-end` (um código de saída diferente de zero é uma resposta esperada, não
+   uma falha). O resultado que o workflow recebe não muda.
 2. **Processo assíncrono, num grupo de processos próprio.** Sem shell e sem stdin. A saída chega em pedaços, e o motor a
    grava no log como eventos `content` (`command-output`, com `stream` `stdout` ou `stderr`) enquanto o comando roda,
    em linhas inteiras: o motor redige cada pedaço sozinho, e um segredo partido entre duas leituras do pipe escaparia
