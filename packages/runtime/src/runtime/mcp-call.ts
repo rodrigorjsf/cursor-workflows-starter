@@ -22,7 +22,7 @@ export interface McpCallSpec {
   signal?: AbortSignal;
 }
 
-export interface McpCallOutcome {
+interface McpCallOutcome {
   outcome: ExecOutcome;
   isError: boolean;
   content: unknown[];
@@ -44,7 +44,7 @@ function killLiveServers(): void {
   }
 }
 
-export function textOf(content: readonly unknown[]): string {
+function textOf(content: readonly unknown[]): string {
   const texts: string[] = [];
   for (const block of content) {
     if (typeof block !== "object" || block === null) continue;
@@ -59,7 +59,7 @@ export function serverName(server: McpStdioServer): string {
   return [basename(server.command), ...(entry === undefined ? [] : [basename(entry)])].join(" ");
 }
 
-export function toMcpResult(call: McpCallOutcome): McpResult {
+function toMcpResult(call: McpCallOutcome): McpResult {
   return {
     ok: call.outcome === "exit" && !call.isError,
     text: textOf(call.content),
@@ -70,7 +70,12 @@ export function toMcpResult(call: McpCallOutcome): McpResult {
   };
 }
 
-export async function callMcpTool(spec: McpCallSpec): Promise<McpCallOutcome> {
+export async function callMcpTool(spec: McpCallSpec): Promise<{ outcome: ExecOutcome; result: McpResult }> {
+  const call = await runTool(spec);
+  return { outcome: call.outcome, result: toMcpResult(call) };
+}
+
+async function runTool(spec: McpCallSpec): Promise<McpCallOutcome> {
   if (spec.signal?.aborted) return { outcome: "cancelled", isError: true, content: [] };
   if (!exitHookInstalled) {
     exitHookInstalled = true;

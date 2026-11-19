@@ -26,7 +26,7 @@ import { ConfigError, STEP_OVERRIDE_FIELDS, type LimitOverrides, type ResolvedCo
 import { cursorEndpointRefusal } from "./cursor-endpoints.js";
 import { type ContentKind, EVENT_SCHEMA_VERSION, type ErrorKind, type OutputStream, type NewEvent, type RunStatus, type StepRef, type TurnUsage, type WorkflowEvent } from "./events.js";
 import { recordExecGroup } from "./job-children.js";
-import { MCP_CALL_TIMEOUT_MS, MCP_COMMAND, callMcpTool, serverName, toMcpResult } from "./mcp-call.js";
+import { MCP_CALL_TIMEOUT_MS, MCP_COMMAND, callMcpTool, serverName } from "./mcp-call.js";
 import { jobsDirIn } from "./job-state.js";
 import { MemoStore, isReadOnly, repoState } from "./memo.js";
 import { type InterruptedCloudStep, USAGE_FAILED_PREFIX, addUsage, emptyUsage, resumeHint, subtractUsage, turnTokens, withRatio } from "./projection.js";
@@ -1277,8 +1277,7 @@ async function executeRun<A, R>(
     emit({ type: "exec-start", ...ref, attemptId, label, phase, command: MCP_COMMAND, timeoutMs });
     const content = attemptContent(ref, attemptId);
     content.write("tool-call", JSON.stringify({ toolName: tool, arguments: args, server: { command: server.command, args: server.args ?? [], env: Object.keys(server.env ?? {}) } }), { tool: "mcp", callId: attemptId });
-    const done = await callMcpTool({ server, tool, args, cwd: opts.cwd, timeoutMs, signal });
-    const result = toMcpResult(done);
+    const { outcome, result } = await callMcpTool({ server, tool, args, cwd: opts.cwd, timeoutMs, signal });
     const log = outputLog((stream, text) => content.write("command-output", text, { tool: "mcp", callId: attemptId, stream }), { pieceMax: CONTENT_MAX_CHARS, logMax: EXEC_LOG_MAX_CHARS });
     const output = result.ok ? result.text : (result.error ?? result.text);
     log.push(result.ok ? "stdout" : "stderr", output);
@@ -1291,13 +1290,13 @@ async function executeRun<A, R>(
       phase,
       command: MCP_COMMAND,
       ok: result.ok,
-      outcome: done.outcome,
+      outcome,
       error: result.error,
       durationMs: Date.now() - startedAt,
       outputChars: output.length,
       outputTruncated: log.truncated || undefined,
     });
-    if (done.outcome === "cancelled") throw new RunCancelledError(cancelMessage);
+    if (outcome === "cancelled") throw new RunCancelledError(cancelMessage);
     return result;
   }
 
