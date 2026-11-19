@@ -246,19 +246,19 @@ export class Commands {
   private async read(command: string, args: string[], cwd: string, timeoutMs: number | undefined, options: ReadOptions = {}): Promise<ExecResult & { stdout: string }> {
     const { labelWords, env = {}, probe } = options;
     const dir = mkdtempSync(join(tmpdir(), "wf-stdout-"));
-    const file = join(dir, "stdout");
-    const errors = join(dir, "stderr");
+    const stdoutFile = join(dir, "stdout");
+    const stderrFile = join(dir, "stderr");
     try {
       // The path goes in the environment, not in the arguments: the node's id in the log is derived from the arguments, and
       // a temp path would give the same call another id every time.
       const result = await this.exec("bash", ["-c", READ_SCRIPT, "read", command, ...args], {
         ...this.options(command, args, cwd, timeoutMs, labelWords),
         ...(probe ? { probe: true } : {}),
-        env: { ...env, WF_STDOUT: file, WF_STDERR: errors },
+        env: { ...env, WF_STDOUT: stdoutFile, WF_STDERR: stderrFile },
       });
-      if (existsSync(file) && statSync(file).size > MAX_STDOUT_BYTES) throw new Error(`${command} ${args[0] ?? ""}: the output is larger than ${MAX_STDOUT_BYTES / 1024 / 1024} MiB`);
-      const tail = existsSync(errors) ? readFileSync(errors, "utf8").slice(-TAIL_MAX_CHARS) : result.tail;
-      return { ...result, tail, stdout: existsSync(file) ? readFileSync(file, "utf8") : "" };
+      if (existsSync(stdoutFile) && statSync(stdoutFile).size > MAX_STDOUT_BYTES) throw new Error(`${command} ${args[0] ?? ""}: the output is larger than ${MAX_STDOUT_BYTES / 1024 / 1024} MiB`);
+      const tail = existsSync(stderrFile) ? readFileSync(stderrFile, "utf8").slice(-TAIL_MAX_CHARS) : result.tail;
+      return { ...result, tail, stdout: existsSync(stdoutFile) ? readFileSync(stdoutFile, "utf8") : "" };
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
