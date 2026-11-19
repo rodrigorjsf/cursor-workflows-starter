@@ -56,8 +56,8 @@
   `wf config set dashboard.autoStart true`), nunca o código do kit. O `argument-hint` passou a ser
   `<workflow> <args> [--worktree] [--no-pr]`, e a seção nova "Delivery" diz o que o agente faz em cada modo: avisa que a árvore é do
   workflow enquanto o job roda (árvore principal), abre a pasta do worktree numa janela nova do Cursor com o CLI `cursor` (onde o
-  hospedeiro não abre janela, dá o caminho) e entrega o link do PR ou MR (`prUrl`). Os resultados `dirty-tree`, `main-tree-busy` e
-  `branch-switched` são repassados com o `reason` e os `files`. O `test/repo-layout.test.ts` prende cada um desses pontos.
+  hospedeiro não abre janela, dá o caminho) e entrega o link do PR ou MR (`prUrl`). Os resultados `dirty-tree` e `main-tree-busy`
+  são repassados com o `reason` e os `files`. O `test/repo-layout.test.ts` prende cada um desses pontos.
 - **O `implement-issue` trabalha por padrão na árvore principal: a branch do run fica em checkout na pasta do usuário** (issue #123,
   spec #114, [ADR-0012](docs/adr/0012-delivery-modes.md)). Com `worktree` falso (o padrão), o run cria a branch dele
   (`wf/issue-<n>-<run>`) a partir do HEAD que a pasta tem em checkout, commits locais ainda não enviados inclusive, e a põe em

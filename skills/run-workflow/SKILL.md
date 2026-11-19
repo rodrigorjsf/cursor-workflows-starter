@@ -119,7 +119,7 @@ repo, and `wf config show implement-issue` names the layer each came from.
      change to the user, so the secret stays out of the chat. The change is in the result's `worktree`; a result with
      `mainTree: true` has no `worktree`, and its change is on its `branch`, in the user's own folder. The block at a seams
      comment brings none of them.
-   - `dirty-tree`, `main-tree-busy` or `branch-switched` (`implement-issue`, main tree): the run stopped to protect the
+   - `dirty-tree` or `main-tree-busy` (`implement-issue`, main tree): the run stopped to protect the
      user's tree. Relay the `reason`, and the `files` of `dirty-tree`. The user decides how to go on: commit, stash or
      discard those files, wait for the other run, or start again with `--worktree`.
    - Anything else: the workflow ended **without delivering**. Relay the status and whatever the result brings
