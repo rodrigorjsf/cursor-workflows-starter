@@ -419,7 +419,7 @@ async function defaultBranchHead(cmd: Commands, cwd: string): Promise<string> {
 }
 
 const MAIN_TREE_LOCK = "main-tree";
-const LISTED_FILES = 20;
+const MAX_LISTED_FILES = 20;
 const WORKTREE_WAY_OUT = "start with --worktree (worktree: true in the args, or the worktree setting) to work in a folder of the run's own";
 
 function excludeCodeIndex(cwd: string): void {
@@ -427,7 +427,7 @@ function excludeCodeIndex(cwd: string): void {
 }
 
 function dirtyTreeReason(files: string[]): string {
-  const listed = files.slice(0, LISTED_FILES);
+  const listed = files.slice(0, MAX_LISTED_FILES);
   const unlisted = files.length - listed.length;
   return [
     "this tree has uncommitted changes, and the run works in it: a write step would revert them, or the delivery would commit them into the PR. The files:",
@@ -443,8 +443,28 @@ async function dirtyTreeRefusal(cmd: Commands, cwd: string): Promise<{ status: "
   return files.length ? { status: "dirty-tree", files, reason: dirtyTreeReason(files) } : undefined;
 }
 
+const runBranchIsThere = async (cmd: Commands, progress: ProgressStore, cwd: string) =>
+  progress.data.branch !== undefined && (await branchExists(cmd, cwd, progress.data.branch));
+
+function claimMainTree(cwd: string, runId: string, issue: number) {
+  try {
+    return { release: acquireNamedLock(cwd, MAIN_TREE_LOCK, runId) };
+  } catch (err) {
+    if (!(err instanceof NamedLockedError)) throw err;
+    return {
+      refusal: {
+        issue,
+        status: "main-tree-busy",
+        activeRunId: err.holderRunId,
+        reason: `run ${err.holderRunId ?? "unknown"} is working in this repository's own tree, and a second run would fight it for the files: wait for it to end, or cancel it, or ${WORKTREE_WAY_OUT}`,
+        lock: err.message,
+      },
+    };
+  }
+}
+
 async function enterMainTree(cmd: Commands, progress: ProgressStore, cwd: string, branch: string, log: (message: string) => void) {
-  if (progress.data.branch && (await branchExists(cmd, cwd, branch))) {
+  if (await runBranchIsThere(cmd, progress, cwd)) {
     const checkedOut = (await cmd.gitRead(cwd, "branch", "--show-current")).trim();
     if (checkedOut === branch) return undefined;
     return {
@@ -630,20 +650,10 @@ export default defineWorkflow<Args>({
       progress.save();
       const mainTree = progress.data.mainTree ?? (progress.data.worktree === undefined && progress.data.baseCommit === undefined && !(ctx.args.worktree ?? settings.worktree));
       if (mainTree) {
-        try {
-          releaseMainTree = acquireNamedLock(ctx.cwd, MAIN_TREE_LOCK, ctx.runId);
-        } catch (err) {
-          if (!(err instanceof NamedLockedError)) throw err;
-          return {
-            issue: ctx.args.issue,
-            status: "main-tree-busy",
-            activeRunId: err.holderRunId,
-            reason: `run ${err.holderRunId ?? "unknown"} is working in this repository's own tree, and a second run would fight it for the files: wait for it to end, or cancel it, or ${WORKTREE_WAY_OUT}`,
-            lock: err.message,
-          };
-        }
-        const branchIsThere = progress.data.branch !== undefined && (await branchExists(cmd, ctx.cwd, progress.data.branch));
-        const refusal = branchIsThere ? undefined : await dirtyTreeRefusal(cmd, ctx.cwd);
+        const claim = claimMainTree(ctx.cwd, ctx.runId, ctx.args.issue);
+        if ("refusal" in claim) return claim.refusal;
+        releaseMainTree = claim.release;
+        const refusal = (await runBranchIsThere(cmd, progress, ctx.cwd)) ? undefined : await dirtyTreeRefusal(cmd, ctx.cwd);
         if (refusal) return { issue: ctx.args.issue, ...refusal };
       }
       const { issue: number, repo } = ctx.args;
