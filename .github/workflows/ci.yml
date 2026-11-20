@@ -35,17 +35,20 @@ jobs:
         id: scope
         if: github.event_name == 'pull_request'
         run: git diff --name-only HEAD^1 HEAD | scripts/ci-scope.sh >> "$GITHUB_OUTPUT"
+      # A change to the book or the root guides alone: no package reads them, so only the repo-level tests run (links,
+      # index, ADRs, guides), and only on 22.x, because Markdown does not change with the Node version. The other
+      # versions skip every step and still report, so each required check `test (<version>)` passes.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.scope.outputs.docs_only != 'true' || matrix.node-version == '22.x'
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-      - run: npm ci --ignore-scripts
+      - if: steps.scope.outputs.docs_only != 'true' || matrix.node-version == '22.x'
+        run: npm ci --ignore-scripts
       # Typecheck e testes offline: SDK falso, sem rede, sem conta Cursor e sem segredos.
       - if: steps.scope.outputs.docs_only != 'true'
         run: npm run check
-      # A change to the book or the root guides alone: no package reads them, so only the repo-level tests run (links,
-      # index, ADRs, guides). The job still reports, so the required check `test (<version>)` passes.
-      - if: steps.scope.outputs.docs_only == 'true'
+      - if: steps.scope.outputs.docs_only == 'true' && matrix.node-version == '22.x'
         run: npm run test:repo
 
   # Renderiza todo bloco Mermaid do repositório e falha em erro de sintaxe. Só aqui: o mermaid-cli usa um Chromium
