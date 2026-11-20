@@ -570,6 +570,49 @@ isoladas, como na §7. Os runs das §7, §9 e §16 acima foram feitos com o defa
 gerenciadas, Team Rules ou um hook do dashboard; a leitura estática do bundle diz que são só as skills, e a pendência de hooks do §12
 (conta de time) segue aberta.
 
+## 19. Spike: o kit no Bun 1.4 (2026-11-20)
+
+O [#144](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/144) mede se o kit roda no Bun 1.4, o primeiro release
+estável do port do Bun para Rust, e se `bun build --compile` serve como distribuição em binário único, sem Node
+([#8](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/8)). Nenhum código do runtime mudou: cada incompatibilidade
+abaixo é um achado para o #8.
+
+**Ambiente (2026-11-20):** Bun `1.4.5+a7733435c`, instalado à parte numa pasta descartável (`npm i bun@1.4.5`; o Bun global da
+máquina segue 1.3.14) · Node 22.23.4 + tsx pelo `mise` · `@cursor/sdk@1.3.1` · Premium da The X Subscription · `composer-2.5` ·
+Linux x64 (WSL2). Os runs reais usaram um repositório git vazio fora do kit (`--cwd`), `WF_METRICS_DB` num banco descartável e
+`--max-tokens 50000 --max-cents 10`.
+
+**Tempo de partida** (10 execuções de cada, mediana e faixa; o `--version` do pedido não existe no CLI, então a medida do CLI é
+`wf list`, que carrega os workflows embutidos; a do MCP server vai do spawn à resposta do `initialize` pelo stdio):
+
+| Comando | Node 22.23.4 + tsx | Bun 1.4.5 |
+|---|---|---|
+| `wf list` | 1.862 ms (1.715 a 1.938) | 505 ms (464 a 542) |
+| MCP server até o `initialize` | 1.574 ms (1.489 a 1.836) | 504 ms (474 a 540) |
+
+| Item | Método | Resultado | Evidência | Ação tomada |
+|---|---|---|---|---|
+| `wf run smoke` real no Bun, do fonte | `bun packages/runtime/src/cli.ts run smoke --args '{}' --max-tokens 50000 --max-cents 10` | ✅ | `status: "finished"`, `answer: "pong"`, 34.866 tokens (26.240 lidos do cache), 14 s; 0 linhas com `NGHTTP2`, `FRAME_SIZE` ou `http2` no stderr; o banco de métricas recebeu o run (`wf stats`: 1 run, 1,03 centavo no preço de lista, 0 cobrado) | — |
+| Erro HTTP/2 relatado por terceiro (`NGHTTP2_FRAME_SIZE_ERROR`) | o stderr dos dois runs reais (`run` e `start`, do fonte) | ❌ não reproduziu | nenhum erro de transporte; os dois runs terminaram `ok` | — |
+| Job destacado no Bun (`wf start`, o caminho do MCP server) | `bun … start smoke …` e `wf wait` | ✅ | `job-spawn.ts:86` respawna `process.execPath` (o `bun`) com `cli.ts`, e o Bun roda o `.ts` direto: `pong`, 34.953 tokens. O `start` subiu também o dashboard sob Bun (`dashboard-instance.ts:221`), e `/api/runs` listou o run | — |
+| `node:sqlite` no Bun | sonda com `DatabaseSync` (`exec`, `prepare().get/all/run`) nos dois runtimes | ✅ | o Bun 1.4.5 tem `node:sqlite` nativo (`DatabaseSync`, `StatementSync`, `backup`…), e as respostas batem com as do Node. O stub do `node:sqlite` no bundle `bun` do SDK não atinge o `observability/db.ts`, que importa o módulo por conta própria | A fricção "métricas usam `node:sqlite`" do #144 não se confirma no 1.4 |
+| Suíte offline do runtime no Bun | `bun test --tsconfig-override=tsconfig.test.json --timeout 60000 ./test/ ../../skills/cursor-workflow-authoring/examples/` em `packages/runtime`, com `HOME` descartável | ❌ 1.245 passam, 108 falham (1.353 testes, 80 arquivos, 1.383 s); no Node + tsx (`npm run check`), os mesmos 1.353 passam | causas das primeiras falhas: (1) os testes de processo respawnam `process.execPath` com o `execArgv` do tsx (`--import …/tsx/dist/loader.mjs`), que sob o Bun é o próprio `bun`: falhas e, com timeout longo, um filho que nunca termina; (2) o SDK falso entra por `TSX_TSCONFIG_PATH`, que o Bun ignora: os filhos carregam o SDK real (`API key is required for cloud operations`, 3); (3) testes que procuram `node` no PATH acham o `/usr/bin/node` 18.19.1 (`Node 18.19.1 … is too old`, 7); (4) testes de métricas que leem uma linha que o run do filho não gravou (`undefined is not an object (evaluating 'row.prompt_text')` e afins, 7); (5) `JSON Parse error` na saída de filhos (6) | Para o #8: a suíte só roda no Bun depois de trocar a injeção do SDK falso e os respawns por algo que não dependa do tsx |
+| Suíte offline do repositório e do dashboard no Bun | `bun test --timeout 60000 ./test/ ./packages/dashboard/test/` na raiz | ❌ 771 passam, 26 falham (797 testes, 79 arquivos, 206 s); no Node + tsx, os mesmos 797 passam (395 do dashboard e 402 do repositório) | `E.toReversed is not a function` no bundle do app (7), `location is not defined` (2), timeouts de jobs, e os mesmos respawns via tsx | — |
+| ⚠ Testes "offline" contra a API real | a primeira rodada da suíte no Bun, com o `HOME` real | ❌ | sem o `TSX_TSCONFIG_PATH`, filhos carregaram o SDK real com a chave da conta: `Cannot use this model: m. Available models: …` e `[usage_limit_exceeded] Your prepaid balance is used up`. As chamadas falharam na validação do modelo ou no limite de uso; o banco de métricas real não recebeu run. A rodada seguinte usou `HOME` descartável, sem `auth.json` | Quem rodar a suíte num runtime que não seja o Node + tsx deve isolar o `HOME` (ou tirar a chave) antes |
+| `bun build --compile` do CLI | `bun build --compile packages/runtime/src/cli.ts` | ◐ compila, não roda | 455 módulos, binário de 118.388.912 bytes (113 MiB; o próprio Bun tem 107 MB). Fora do repositório e sem Node no PATH, `wf list` responde `[]` e `wf run smoke` para em `ENOENT: no such file or directory, open '/$bunfs/package.json'` (`kit-version.ts:12`). Uma segunda tentativa, com `package.json`, o schema, `smoke.ts` e os dois `.mjs` como entrypoints extras, também listou `[]` | O binário não chegou a rodar o `smoke`, então o HTTP/2 a partir dele não foi medido |
+| O que o binário precisa (leitura do código) | `grep import.meta packages/runtime/src` | — | nove arquivos acham assets por caminho relativo ao módulo, que no binário vira `/$bunfs/root`: `kit-version.ts:12` (`package.json`), `config/file.ts:125` (schema), `registry.ts:17` (workflows embutidos, carregados por `import()` dinâmico que o bundler não segue), `engine.ts:118` (`nested-mcp-guard.mjs`, rodado por `process.execPath`), `jobs.ts:62` (`heartbeat-worker.mjs`, um `Worker`), `job-spawn.ts:78` e `dashboard-instance.ts:190` (o `cli.ts` e o `main.ts` do dashboard, respawnados), `init.ts:63` e `upgrade.ts:20` (templates e o kit instalado) | Lista de trabalho do #8 |
+
+**Recomendação (#8):** o Bun 1.4 roda o kit do fonte: o `smoke` real, o job destacado e o dashboard funcionaram, sem erro HTTP/2, e a
+partida cai a cerca de um terço (505 ms contra 1.862 ms no CLI, 504 ms contra 1.574 ms no MCP server). O binário único não está ao
+alcance de um ajuste de build: exige embutir os workflows (registro estático em vez de `import()` de pasta), os assets lidos por
+`import.meta.dirname` e os scripts respawnados (`nested-mcp-guard.mjs`, `heartbeat-worker.mjs`, o próprio CLI no `wf start`), e trocar
+a injeção do SDK falso na suíte, que hoje depende do tsx. Os workflows de cada repositório (`.agents/workflows/*.ts`) continuariam
+carregados do disco, então um binário sem um carregador de TypeScript embutido não os roda. Para o #8, o caminho barato é o pacote npm
+sobre Node (ADR-0011), com o Bun como runtime alternativo do fonte; o binário fica como fatia própria, depois desse trabalho.
+
+**Não medido:** o `smoke` a partir do binário (parou antes, em `kit-version.ts`); o MCP server sob Bun dentro do Cursor IDE; macOS e
+Windows; o tree-sitter N-API do SDK dentro do binário compilado.
+
 
 ---
 
