@@ -29,7 +29,7 @@ runs of every repo through the global runs index (ADR-0008), reads their logs, c
 repo the index names, and asks that repo's forge for its ready issues (the Backlog).
 
 Workflows live in `packages/runtime/workflows/*.ts` (built in) and `.agents/workflows/*.ts` (per repo). The MCP server
-`workflows` or the CLI (`npm run wf -- ...`) runs them. Step agents read this file too (`settingSources: ["project"]`).
+`workflows` or the CLI (`npm run wf -- ...`) runs them. Step agents read this file too (default `settingSources: ["project","mdm"]`).
 
 ## Working on the code
 
