@@ -2,6 +2,7 @@
 // says what it does (WHAT), why it exists (WHY), when to run it (WHEN) and how (HOW) in a header, and the maintainer
 // scripts chapter of the book lists it in a table. Both are read from the files, the way an agent would find them.
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, posix, resolve } from "node:path";
 import { test } from "node:test";
@@ -59,4 +60,15 @@ test("every script except the shared modules in scripts/lib is listed in the mai
       `${SCRIPTS_CHAPTER} has no table row for \`${file}\``,
     );
   }
+});
+
+test("ci-scope renders Mermaid only for a changed Markdown file that holds a block, and runs the suite for code", () => {
+  const scope = (...paths: string[]) =>
+    execFileSync("scripts/ci-scope.sh", { cwd: ROOT, input: paths.map((p) => `${p}\n`).join(""), encoding: "utf8" }).trim().split("\n");
+  assert.deepEqual(scope("CLAUDE.md"), ["docs_only=true", "markdown=false"]);
+  assert.deepEqual(scope("docs/vision/03-conceitos.md"), ["docs_only=true", "markdown=true"]);
+  assert.deepEqual(scope("docs/no-such-file.md"), ["docs_only=true", "markdown=false"]);
+  assert.deepEqual(scope("packages/runtime/src/cli.ts"), ["docs_only=false", "markdown=false"]);
+  assert.deepEqual(scope("scripts/lib/markdown.ts"), ["docs_only=false", "markdown=true"]);
+  assert.deepEqual(scope(), ["docs_only=false", "markdown=true"]);
 });
