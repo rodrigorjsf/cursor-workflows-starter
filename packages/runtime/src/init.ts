@@ -103,8 +103,8 @@ function withWorkflowsServer(file: string, existing: string | undefined, server:
 
 /** The command and arguments that start the kit's MCP server from `home`, the variable the client resolves to the user's home. */
 const kitServer = (home: string) => ({
-  command: `${home}/${KIT_FROM_HOME}/node_modules/.bin/tsx`,
-  args: [`${home}/${KIT_FROM_HOME}/packages/runtime/src/mcp-server.ts`],
+  command: "node",
+  args: ["--import", `${home}/${KIT_FROM_HOME}/node_modules/tsx/dist/loader.mjs`, `${home}/${KIT_FROM_HOME}/packages/runtime/src/mcp-server.ts`],
 });
 
 function parseObject(file: string, text: string | undefined): Json {

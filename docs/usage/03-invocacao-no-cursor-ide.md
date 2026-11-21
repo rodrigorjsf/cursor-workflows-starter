@@ -217,8 +217,8 @@ alvo (abaixo). Escrito à mão, o `.cursor/mcp.json` é:
 {
   "mcpServers": {
     "workflows": {
-      "command": "${userHome}/.cursor-workflows/kit/node_modules/.bin/tsx",
-      "args": ["${userHome}/.cursor-workflows/kit/packages/runtime/src/mcp-server.ts"],
+      "command": "node",
+      "args": ["--import", "${userHome}/.cursor-workflows/kit/node_modules/tsx/dist/loader.mjs", "${userHome}/.cursor-workflows/kit/packages/runtime/src/mcp-server.ts"],
       "env": { "WF_CWD": "${workspaceFolder}", "WF_MAX_CENTS": "500", "WF_MAX_TOKENS": "2000000" }
     }
   }
@@ -266,8 +266,8 @@ que outros usuários da máquina alcançam e a interoperabilidade do WSL ligada 
 
 | `id` | O que confere | Falha típica |
 |---|---|---|
-| `node` | O `node` do PATH, que é quem o IDE usa: o comando do `mcp.json` é o `tsx` do kit, cujo shebang é `env node`. Se a entrada do `mcp.json` define `env.PATH`, vale esse PATH. Mínimo: o `engines.node` do kit (22.13) | O Node do IDE é o 22.11 |
-| `dependencies` | O comando e o script que o `.cursor/mcp.json` e o `.mcp.json` mandam rodar existem | `node_modules/.bin/tsx` não existe (`ENOENT`): rode `npm ci` na pasta do kit |
+| `node` | O `node` do PATH, que é quem o IDE usa: o `command` do `mcp.json` é o próprio `node`. Se a entrada do `mcp.json` define `env.PATH`, vale esse PATH. Mínimo: o `engines.node` do kit (22.13) | O Node do IDE é o 22.11 |
+| `dependencies` | O `node`, o loader do `tsx` e o script que o `.cursor/mcp.json` e o `.mcp.json` mandam rodar existem | `node_modules/tsx/dist/loader.mjs` não existe (`ENOENT`): rode `npm ci` na pasta do kit |
 | `endpoints` | Para onde o SDK mandaria a chave: `CURSOR_BACKEND_URL` (a API e a troca de token) e `CURSOR_WEBSITE_URL` (o login), que o SDK lê do ambiente e usa sem conferir. Cada uma tem de estar desligada ou ser uma URL `https` em `cursor.sh` ou `cursor.com` (ou um subdomínio). Vale o ambiente do terminal e o `env` de cada entrada `workflows` do `mcp.json`, que é o que o servidor que o IDE inicia recebe. A mensagem mostra só o esquema e o host do valor, nunca o resto. Enquanto falha, `login` e `models` dizem `not run` e o SDK não é chamado, porque chamá-lo é o que mandaria a chave; o `wf run` e o `wf start` recusam o mesmo valor | Uma `CURSOR_BACKEND_URL` de um proxy de teste, `http://` ou de outro host: desligue-a no ambiente que abre o IDE |
 | `login` | Uma chamada autenticada ao Cursor (`Cursor.me()`); o relatório mostra o nome da chave, nunca a chave nem o e-mail, e, quando passa, lembra que o Privacy Mode não pode ser lido pelo SDK e deve ser confirmado em *Cursor Settings → General* ([5.1](../operating/01-governanca-e-custos.md#políticas-de-admin-que-se-aplicam)) | Sem login: `wf login` ou `CURSOR_API_KEY` |
 | `models` | Cada modelo que a configuração faz os workflows usarem (papéis, rótulos e o `defaults` do workflow) está no catálogo da conta, por id ou alias | O modelo de um papel não existe na conta: `wf models` |

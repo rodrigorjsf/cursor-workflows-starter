@@ -2,10 +2,10 @@
 // the tests read what it prints and the files it leaves. Covers the MCP configs of both clients, the repo config, the
 // `.gitignore` entry, the `AGENTS.md` block (`--no-agents-md`, `--remove`), idempotence, the diff and the absence of a commit.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { after, before, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -69,8 +69,8 @@ test("wf init writes the Cursor MCP config pointing at the per-user kit through 
   assert.equal(r.status, 0, r.stderr);
 
   const server = readJson(repo, ".cursor", "mcp.json").mcpServers.workflows;
-  assert.equal(server.command, "${userHome}/.cursor-workflows/kit/node_modules/.bin/tsx");
-  assert.deepEqual(server.args, ["${userHome}/.cursor-workflows/kit/packages/runtime/src/mcp-server.ts"]);
+  assert.equal(server.command, "node");
+  assert.deepEqual(server.args, ["--import", "${userHome}/.cursor-workflows/kit/node_modules/tsx/dist/loader.mjs", "${userHome}/.cursor-workflows/kit/packages/runtime/src/mcp-server.ts"]);
   assert.deepEqual(server.env, { WF_CWD: "${workspaceFolder}" });
   assert.doesNotMatch(read(repo, ".cursor", "mcp.json"), /WF_MAX_/);
 });
@@ -80,28 +80,43 @@ test("wf init writes the Claude Code MCP config for the same per-user kit", () =
   assert.equal(init(repo).status, 0);
 
   const server = readJson(repo, ".mcp.json").mcpServers.workflows;
-  assert.equal(server.command, "${HOME}/.cursor-workflows/kit/node_modules/.bin/tsx");
-  assert.deepEqual(server.args, ["${HOME}/.cursor-workflows/kit/packages/runtime/src/mcp-server.ts"]);
+  assert.equal(server.command, "node");
+  assert.deepEqual(server.args, ["--import", "${HOME}/.cursor-workflows/kit/node_modules/tsx/dist/loader.mjs", "${HOME}/.cursor-workflows/kit/packages/runtime/src/mcp-server.ts"]);
   assert.doesNotMatch(read(repo, ".mcp.json"), /WF_MAX_/);
 });
 
-/** What the IDE does with a server entry: substitute its variables, then start the command in `cwd`. */
-async function toolsOfServer(server: { command: string; args: string[]; env?: Record<string, string> }, vars: Record<string, string>, cwd: string) {
+interface McpEntry {
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+}
+
+function launchOf(server: McpEntry, vars: Record<string, string>, cwd: string) {
   const resolveVars = (s: string) => Object.entries(vars).reduce((acc, [name, value]) => acc.replaceAll("${" + name + "}", value), s);
+  return {
+    command: resolveVars(server.command),
+    args: server.args.map(resolveVars),
+    cwd,
+    env: { ...childEnv(join(PACKAGE, "tsconfig.test.json")), ...Object.fromEntries(Object.entries(server.env ?? {}).map(([k, v]) => [k, resolveVars(v)])) },
+  };
+}
+
+function nodeChildrenOf(pid: number): string[] {
+  const table = spawnSync("ps", ["-A", "-o", "pid=,ppid=,args="], { encoding: "utf8" }).stdout.trim().split("\n");
+  return table.map((line) => /^\s*(\d+)\s+(\d+)\s+(\S+)(.*)$/.exec(line)).flatMap((m) => (m && Number(m[2]) === pid && basename(m[3]!) === "node" ? [`${m[3]}${m[4]}`] : []));
+}
+
+/** What the IDE does with a server entry: substitute its variables, then start the command in `cwd`. */
+async function toolsOfServer(server: McpEntry, vars: Record<string, string>, cwd: string) {
   const client = new Client({ name: "init-test", version: "0.0.0" });
   try {
-    await client.connect(
-      new StdioClientTransport({
-        command: resolveVars(server.command),
-        args: server.args.map(resolveVars),
-        cwd,
-        env: { ...childEnv(join(PACKAGE, "tsconfig.test.json")), ...Object.fromEntries(Object.entries(server.env ?? {}).map(([k, v]) => [k, resolveVars(v)])) },
-      }),
-    );
+    const transport = new StdioClientTransport(launchOf(server, vars, cwd));
+    await client.connect(transport);
     const listed = await client.callTool({ name: "list_workflows", arguments: {} });
     return {
       tools: (await client.listTools()).tools.map((t) => t.name),
       workflows: (JSON.parse((listed.content as Array<{ text: string }>)[0]!.text) as Array<{ name: string }>).map((w) => w.name),
+      nodeChildren: nodeChildrenOf(transport.pid!),
     };
   } finally {
     await client.close();
@@ -123,6 +138,56 @@ test("both generated MCP configs start the kit's MCP server on the target repo, 
   for (const seen of [cursor, claude]) {
     assert.ok(seen.tools.includes("start_workflow"), seen.tools.join());
     assert.ok(seen.workflows.includes("repo-local") && seen.workflows.includes("implement-issue"), seen.workflows.join());
+    assert.deepEqual(seen.nodeChildren, [], "the server the config starts is the only Node process: no wrapper keeps a second one beside it");
+  }
+});
+
+function ideHome(): string {
+  const userHome = join(sandbox, `ide-home-${++counter}`);
+  mkdirSync(join(userHome, ".cursor-workflows"), { recursive: true });
+  symlinkSync(KIT_ROOT, join(userHome, ".cursor-workflows", "kit"));
+  return userHome;
+}
+
+const INITIALIZE = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "init-test", version: "0.0.0" } } });
+
+function replyToInitialize(child: ChildProcess): Promise<void> {
+  return new Promise((resolve, reject) => {
+    child.stdout!.once("data", () => resolve());
+    child.once("exit", () => reject(new Error("the server exited before it answered initialize")));
+    child.stdin!.write(`${INITIALIZE}\n`);
+  });
+}
+
+function exitsWithin(child: ChildProcess, ms: number): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), ms);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve(true);
+    });
+  });
+}
+
+test("the server a generated MCP config starts exits within 5 seconds when its stdin closes and when it gets SIGTERM", async () => {
+  const repo = emptyRepo();
+  assert.equal(init(repo).status, 0);
+  const launch = launchOf(readJson(repo, ".mcp.json").mcpServers.workflows, { HOME: ideHome() }, repo);
+  const stops: Array<[string, (child: ChildProcess) => void]> = [
+    ["stdin closes", (child) => child.stdin!.end()],
+    ["SIGTERM", (child) => child.kill("SIGTERM")],
+  ];
+  for (const [name, stop] of stops) {
+    const child = spawn(launch.command, launch.args, { cwd: launch.cwd, env: launch.env, stdio: ["pipe", "pipe", "ignore"] });
+    try {
+      await replyToInitialize(child);
+      assert.deepEqual(nodeChildrenOf(child.pid!), []);
+      stop(child);
+      assert.ok(await exitsWithin(child, 5000), `the server still runs 5 seconds after ${name}`);
+    } finally {
+      child.kill("SIGKILL");
+    }
   }
 });
 
@@ -445,7 +510,7 @@ test("wf init keeps the other MCP servers and the extra settings of an existing 
   assert.equal(init(repo).status, 0);
   const { other, workflows } = readJson(repo, ".cursor", "mcp.json").mcpServers;
   assert.deepEqual(other, { command: "other-server" });
-  assert.equal(workflows.command, "${userHome}/.cursor-workflows/kit/node_modules/.bin/tsx");
+  assert.equal(workflows.command, "node");
   assert.deepEqual(workflows.env, { WF_MAX_CENTS: "100", WF_CWD: "${workspaceFolder}" });
   assert.equal(workflows.disabled, false);
 });
@@ -468,7 +533,7 @@ test("wf init prints the diff of everything it changed, as a unified diff", () =
   for (const file of [".cursor/mcp.json", ".cursor/sandbox.json", ".mcp.json", ".agents/workflows/config.json", "AGENTS.md"]) {
     assert.ok(r.stdout.includes(`--- /dev/null\n+++ b/${file}\n`), `${file} is a new file in the diff`);
   }
-  assert.ok(r.stdout.includes('+      "command": "${userHome}/.cursor-workflows/kit/node_modules/.bin/tsx",\n'));
+  assert.ok(r.stdout.includes('+      "command": "node",\n'));
   // A changed file shows the hunk with its context lines.
   assert.ok(r.stdout.includes("--- a/.gitignore\n+++ b/.gitignore\n@@ -1,2 +1,3 @@\n node_modules/\n dist/\n+.workflows/\n"), r.stdout);
 });

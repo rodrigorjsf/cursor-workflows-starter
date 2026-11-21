@@ -380,7 +380,7 @@ test("the dependencies check looks for the command the IDE would run, and a miss
   const missing = checkOf(reportOf(doctor(repo, { home: bare })), "dependencies");
   assert.equal(missing.status, "fail");
   const kit = join(bare, ".cursor-workflows", "kit");
-  assert.ok(missing.message.includes(join(kit, "node_modules", ".bin", "tsx")), missing.message);
+  assert.ok(missing.message.includes(join(kit, "node_modules", "tsx", "dist", "loader.mjs")), missing.message);
   assert.ok(missing.message.includes(".cursor/mcp.json"), missing.message);
   assert.match(missing.hint ?? "", /npm ci/);
   assert.ok(missing.hint?.includes(kit), missing.hint);

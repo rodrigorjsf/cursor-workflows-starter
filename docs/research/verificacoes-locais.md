@@ -741,6 +741,32 @@ a medida com ele e o JS compilado; na forma do kit, o RSS do tsx inclui o proces
    estado do job, a espera e o cancelamento enquanto o processo do run segue Node mais SDK. Reabrir só se, feito o #156, o servidor
    parado de cerca de 96 MB ainda pesar para quem mantém várias janelas abertas.
 
+**Depois do #156 (2026-11-21).** O [#156](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/156) trocou o CLI do tsx por
+`node --import <caminho absoluto de node_modules/tsx/dist/loader.mjs>` no shim do `wf` (`scripts/install.sh`), no `.cursor/mcp.json` e no
+`.mcp.json` que o `wf init` grava (`init.ts`) e nos dois `mcp.json` do próprio repositório. Mesmo método da tabela acima, numa sessão só
+(Node 22.23.4 pelo `mise`, carga de 0,54 no início), 10 rodadas intercaladas depois de uma execução de aquecimento descartada. O `wf list`
+rodou de uma pasta fora do kit, com `--cwd` apontando para ele. A sonda não está no repositório; os comandos são estes:
+
+```bash
+node_modules/.bin/tsx packages/runtime/src/mcp-server.ts
+node --import "$PWD/node_modules/tsx/dist/loader.mjs" packages/runtime/src/mcp-server.ts
+node_modules/.bin/tsx packages/runtime/src/cli.ts list --cwd "$PWD"
+node --import "$PWD/node_modules/tsx/dist/loader.mjs" packages/runtime/src/cli.ts list --cwd "$PWD"
+```
+
+| Medida | `node_modules/.bin/tsx` (antes do #156) | `node --import <loader absoluto>` (depois) | Mudança |
+|---|---|---|---|
+| MCP server parado, processos | 2 | 1 | -1 |
+| MCP server até o `initialize` | 372 ms (363 a 376) | 329 ms (321 a 332) | -12% |
+| MCP server parado, RSS do processo do servidor | 97,3 MB (90,3 a 100,6) | 97,6 MB (94,6 a 99,1) | igual |
+| MCP server parado, RSS da árvore | 156,2 MB (149,2 a 159,4) | 97,6 MB (94,6 a 99,1) | -38% |
+| `wf list`, tempo | 456 ms (445 a 475) | 404 ms (396 a 414) | -11% |
+
+A árvore parada ficou em 26% dos 372,7 MB de antes do #152 e do #153. A saída do `wf list` é a mesma nas duas formas (457 bytes). O servidor
+parado sai com o stdin fechado (código 0, em 0,1 s) e com `SIGTERM` (em 4 ms) sem o pai do tsx para repassar o sinal; um teste de processo
+cobre os dois com o limite de 5 s. Com o cache de transformações do tsx frio, o servidor tem um filho, o `esbuild --service` que o
+próprio tsx sobe para compilar, nas duas formas; o teste procura um filho que seja um processo Node, não um filho qualquer.
+
 **Não medido:** um processo nativo (nenhum front em Go ou Rust foi construído, então a diferença para ele é um teto); macOS e Windows; o
 MCP server dentro do Cursor IDE, que sobe o servidor com o Node do PATH dele e não com o do `mise.toml`; `wf status`, `wf wait`,
 `wf cancel`, `wf jobs` e `wf start` (o teste de processo do #153 prova que não carregam o SDK, sem tempo nem RSS); o primeiro `wf list`

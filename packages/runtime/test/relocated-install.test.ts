@@ -49,8 +49,8 @@ after(() => rmSync(sandbox, { recursive: true, force: true }));
 test("a relocated install serves its own built-in workflows and version, plus those of the target repo cwd", async () => {
   const client = new Client({ name: "relocated-test", version: "0.0.0" });
   const transport = new StdioClientTransport({
-    command: join(kit, "node_modules", ".bin", "tsx"),
-    args: [join(kit, "src", "mcp-server.ts")],
+    command: process.execPath,
+    args: ["--import", join(kit, "node_modules", "tsx", "dist", "loader.mjs"), join(kit, "src", "mcp-server.ts")],
     cwd: targetRepo,
     env: { ...getDefaultEnvironment(), TSX_TSCONFIG_PATH: join(kit, "tsconfig.test.json"), WF_METRICS: "off", WF_DASH_AUTOSTART: "off" },
   });
@@ -75,8 +75,8 @@ test("a relocated install validates the config with the JSON Schema of its own i
   writeFileSync(join(targetRepo, ".agents", "workflows", "config.json"), JSON.stringify({ workflows: { "repo-runner": { maxTokens: 1000 } } }));
   const client = new Client({ name: "relocated-test", version: "0.0.0" });
   const transport = new StdioClientTransport({
-    command: join(kit, "node_modules", ".bin", "tsx"),
-    args: [join(kit, "src", "mcp-server.ts")],
+    command: process.execPath,
+    args: ["--import", join(kit, "node_modules", "tsx", "dist", "loader.mjs"), join(kit, "src", "mcp-server.ts")],
     cwd: targetRepo,
     env: { ...getDefaultEnvironment(), TSX_TSCONFIG_PATH: join(kit, "tsconfig.test.json"), WF_METRICS: "off", WF_DASH_AUTOSTART: "off", WF_HOME: join(sandbox, "home") },
   });

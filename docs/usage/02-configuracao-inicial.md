@@ -32,7 +32,7 @@ Para passar a chave ao MCP server sem gravar em arquivo, use interpolação no `
 `args`, `env`, `url` e `headers` ([DOC](https://cursor.com/docs/mcp)):
 
 ```json
-{ "mcpServers": { "workflows": { "command": "${workspaceFolder}/node_modules/.bin/tsx", "args": ["${workspaceFolder}/packages/runtime/src/mcp-server.ts"],
+{ "mcpServers": { "workflows": { "command": "node", "args": ["--import", "${workspaceFolder}/node_modules/tsx/dist/loader.mjs", "${workspaceFolder}/packages/runtime/src/mcp-server.ts"],
   "env": { "CURSOR_API_KEY": "${env:CURSOR_API_KEY}", "WF_CWD": "${workspaceFolder}" } } } }
 ```
 

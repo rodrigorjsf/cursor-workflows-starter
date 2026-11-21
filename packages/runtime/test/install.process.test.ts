@@ -137,6 +137,24 @@ test("the installer clones the kit at the tag, installs its dependencies and wri
   assert.ok((JSON.parse(listed.stdout) as Array<{ name: string }>).some((w) => w.name === "implement-issue"), listed.stdout);
 });
 
+test("the wf shim starts the CLI as one Node process with the tsx loader at an absolute path, so it runs from any directory", () => {
+  const home = newHome();
+  assert.equal(install(home, ["--tag", "v0.3.0", "--repo", origin]).status, 0);
+  const kit = kitOf(home);
+  const quoted = (path: string) => `'${path.replaceAll("'", `'\\''`)}'`;
+  const shim = readFileSync(shimOf(home), "utf8");
+  assert.ok(shim.includes(`\nexec node --import ${quoted(join(kit, "node_modules", "tsx", "dist", "loader.mjs"))} ${quoted(join(kit, "packages", "runtime", "src", "cli.ts"))} "$@"\n`), shim);
+  assert.ok(!shim.includes(".bin/tsx"), shim);
+
+  const elsewhere = join(home, "elsewhere");
+  mkdirSync(elsewhere);
+  const repo = join(home, "repo");
+  mkdirSync(repo);
+  const listed = spawnSync(shimOf(home), ["list", "--cwd", repo], { cwd: elsewhere, env: env(home), encoding: "utf8" });
+  assert.equal(listed.status, 0, listed.stderr);
+  assert.ok(listed.stdout.includes("implement-issue"), listed.stdout);
+});
+
 /** The directory names under a skills folder. */
 const skillNames = (dir: string) => readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
 

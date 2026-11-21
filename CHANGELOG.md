@@ -32,6 +32,14 @@
 
 ### Mudado
 
+- **O kit inicia o CLI e o MCP server com `node --import <loader do tsx>`, em um processo só** (issue #156, spec #151). O shim do `wf`
+  (`scripts/install.sh`), o `.cursor/mcp.json` e o `.mcp.json` que o `wf init` grava e os dois `mcp.json` do próprio repositório deixam de
+  rodar o `node_modules/.bin/tsx`, que mantinha um segundo processo Node vivo ao lado do servidor. O loader entra por caminho absoluto, porque
+  o `--import tsx` solto não resolve fora da pasta do kit e o job destacado herda o `process.execArgv` no diretório do repositório alvo. Medido
+  em 2026-11-21 no Node 22.23.4 (mediana de 10 execuções, [8.2 §20](docs/research/verificacoes-locais.md)): a árvore do MCP server parado passou
+  de 156,2 para 97,6 MB de RSS (2 processos para 1) e o `initialize` de 372 para 329 ms; o `wf list` passou de 456 para 404 ms. Quem já tem um
+  repositório com o `.mcp.json` ou o `.cursor/mcp.json` antigo roda `wf init` de novo para trocar a entrada; a antiga segue funcionando.
+
 - **O MCP server e o CLI carregam o SDK da Cursor só nos caminhos que chegam à API ou rodam um agente** (issues #152, #153 e #154, spec
   #151). O MCP server responde `initialize`, `list_workflows`, `start_workflow`, `get_workflow_status`, `wait_workflow` e
   `cancel_workflow` sem o SDK, e o `wf` carrega o SDK, o motor e o `doctor` dentro de `login`, `models`, `whoami`, `doctor` e `run`, não
