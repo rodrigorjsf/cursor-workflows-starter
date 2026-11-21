@@ -5,11 +5,12 @@ import assert from "node:assert/strict";
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { after, before, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { copyKit } from "./kit-copy.js";
+import { nodeChildrenOf } from "./wait-for.js";
 
 const PACKAGE = join(import.meta.dirname, "..");
 const KIT_ROOT = join(PACKAGE, "..", "..");
@@ -99,11 +100,6 @@ function launchOf(server: McpEntry, vars: Record<string, string>, cwd: string) {
     cwd,
     env: { ...childEnv(join(PACKAGE, "tsconfig.test.json")), ...Object.fromEntries(Object.entries(server.env ?? {}).map(([k, v]) => [k, resolveVars(v)])) },
   };
-}
-
-function nodeChildrenOf(pid: number): string[] {
-  const table = spawnSync("ps", ["-A", "-o", "pid=,ppid=,args="], { encoding: "utf8" }).stdout.trim().split("\n");
-  return table.map((line) => /^\s*(\d+)\s+(\d+)\s+(\S+)(.*)$/.exec(line)).flatMap((m) => (m && Number(m[2]) === pid && basename(m[3]!) === "node" ? [`${m[3]}${m[4]}`] : []));
 }
 
 async function toolsOfServer(server: McpEntry, vars: Record<string, string>, cwd: string) {

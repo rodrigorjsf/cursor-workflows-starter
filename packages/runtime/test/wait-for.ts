@@ -1,6 +1,8 @@
 // Shared by the tests that wait for something a run, a process or a server does in the background. A fixed sleep before an
 // assertion passes on an idle machine and fails on a loaded one; polling the condition with a deadline does not
 // (test/fixed-waits.test.ts keeps it that way).
+import { spawnSync } from "node:child_process";
+import { basename } from "node:path";
 
 export interface WaitForOptions {
   /** How long to keep polling before failing. Generous by default: a loaded CI machine is slow, and a pass returns at once. */
@@ -21,4 +23,9 @@ export async function waitFor<T>(what: string, read: () => T | Promise<T>, { tim
     if (performance.now() > deadline) throw new Error(`timed out after ${timeoutMs} ms waiting for ${what}`);
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
+}
+
+export function nodeChildrenOf(pid: number): string[] {
+  const table = spawnSync("ps", ["-A", "-o", "pid=,ppid=,args="], { encoding: "utf8" }).stdout.trim().split("\n");
+  return table.map((line) => /^\s*(\d+)\s+(\d+)\s+(\S+)(.*)$/.exec(line)).flatMap((m) => (m && Number(m[2]) === pid && basename(m[3]!) === "node" ? [`${m[3]}${m[4]}`] : []));
 }

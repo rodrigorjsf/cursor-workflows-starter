@@ -6,7 +6,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { FAKE_SDK_TSCONFIG, MCP_TOOLS, ROOT, nodeChildrenOf, withMcpServer } from "./mcp-support.js";
+import { nodeChildrenOf } from "../packages/runtime/test/wait-for.js";
+import { FAKE_SDK_TSCONFIG, MCP_TOOLS, ROOT, withMcpServer } from "./mcp-support.js";
 
 const RUNTIME_PACKAGE = "@cursor-workflows/runtime";
 

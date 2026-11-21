@@ -1,6 +1,5 @@
 // Shared by the process-seam tests of this folder: start an MCP server over stdio and talk to it with a real client.
-import { spawnSync } from "node:child_process";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { type StdioServerParameters, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
@@ -21,9 +20,4 @@ export async function withMcpServer<T>(params: StdioServerParameters, use: (clie
   } finally {
     await client.close();
   }
-}
-
-export function nodeChildrenOf(pid: number): string[] {
-  const table = spawnSync("ps", ["-A", "-o", "pid=,ppid=,args="], { encoding: "utf8" }).stdout.trim().split("\n");
-  return table.map((line) => /^\s*(\d+)\s+(\d+)\s+(\S+)(.*)$/.exec(line)).flatMap((m) => (m && Number(m[2]) === pid && basename(m[3]!) === "node" ? [`${m[3]}${m[4]}`] : []));
 }
