@@ -44,6 +44,7 @@
 
 import "./console-to-stderr.js"; // stdout is the JSON-RPC channel: the SDK and workflow console goes to stderr
 import "./node-check.js"; // before anything else: @cursor/sdk requires Node 22.13+
+import "./fake-sdk-check.js"; // a test process on the real SDK stops here, before it can reach the Cursor API
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";

@@ -33,6 +33,7 @@
 
 import "./console-to-stderr.js"; // o stdout leva o JSON do resultado: o console do SDK vai para o stderr
 import "./node-check.js"; // antes de tudo: o @cursor/sdk exige Node 22.13+
+import "./fake-sdk-check.js"; // a test process on the real SDK stops here, before it can reach the Cursor API
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";

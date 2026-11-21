@@ -39,7 +39,8 @@ before(() => {
 });
 afterEach(() => {
   for (const jobId of jobIds()) wf("cancel", jobId, "--timeout", "20");
-  rmSync(join(repo, ".workflows"), { recursive: true, force: true });
+  // a cancelled job can still be flushing its last files when cancel returns: retry ENOTEMPTY instead of failing the hook
+  rmSync(join(repo, ".workflows"), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   rmSync(join(sandbox, "home", "config.json"), { force: true });
 });
 after(() => rmSync(sandbox, { recursive: true, force: true }));
