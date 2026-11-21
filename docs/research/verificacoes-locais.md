@@ -616,7 +616,7 @@ e não há demanda que pague um segundo runtime. O ADR-0011 continua valendo, e 
 ([#150](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/150)). Reescrever o MCP server e o CLI em Go ou Rust não tira o
 Node: o runtime de agente do Cursor só existe como o bundle TypeScript do `@cursor/sdk`, e o processo de cada run continua Node + SDK.
 O que pesa hoje é o grafo de imports, medido abaixo: a fachada fica enxuta em TypeScript primeiro
-([#149](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/149)), e uma fachada nativa só volta à mesa com esses números.
+([#151](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/151)), e uma fachada nativa só volta à mesa com esses números.
 
 **Peso do CLI e do MCP server no Node (2026-11-21):** Node 22.23.4 pelo `mise`, Linux x64 (WSL2). Tempo pelo relógio do shell
 (`date +%s%N`, duas a três execuções), memória pelo pico de RSS do `/usr/bin/time -f %M`, e o MCP server pelo RSS do `ps` três segundos
