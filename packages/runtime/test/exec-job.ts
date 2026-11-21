@@ -7,7 +7,8 @@
 process.env.WF_METRICS = "off";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
-import { createJob, installCrashHandlers, startJob } from "../src/runtime/jobs.js";
+import { createJob, startJob } from "../src/runtime/jobs.js";
+import { installCrashHandlers } from "../src/runtime/run-store.js";
 import { defineWorkflow } from "../src/runtime/workflow.js";
 import { sleepArgs } from "./sleeper.js";
 

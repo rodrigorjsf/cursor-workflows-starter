@@ -3,7 +3,8 @@
 process.env.WF_METRICS = "off";
 import { script } from "./fake-sdk.js";
 import { defineWorkflow } from "../src/runtime/workflow.js";
-import { createJob, installCrashHandlers, startJob } from "../src/runtime/jobs.js";
+import { createJob, startJob } from "../src/runtime/jobs.js";
+import { installCrashHandlers } from "../src/runtime/run-store.js";
 
 const [cwd, jobId, runId] = process.argv.slice(2) as [string, string, string];
 installCrashHandlers();
