@@ -5,7 +5,8 @@
 // Usage: implement-issue-job.ts <repo> <jobId> <runId>
 process.env.WF_METRICS = "off";
 import { script } from "./fake-sdk.js";
-import { cancelOnSignals, createJob, installCrashHandlers, startJob } from "../src/runtime/jobs.js";
+import { cancelOnSignals, createJob, startJob } from "../src/runtime/jobs.js";
+import { installCrashHandlers } from "../src/runtime/run-store.js";
 import implementIssue from "../workflows/implement-issue.js";
 import { PLAN, labelOf, submit, write } from "./implement-issue.fixture.js";
 

@@ -217,8 +217,8 @@ alvo (abaixo). Escrito à mão, o `.cursor/mcp.json` é:
 {
   "mcpServers": {
     "workflows": {
-      "command": "${userHome}/.cursor-workflows/kit/node_modules/.bin/tsx",
-      "args": ["${userHome}/.cursor-workflows/kit/packages/runtime/src/mcp-server.ts"],
+      "command": "node",
+      "args": ["--import", "${userHome}/.cursor-workflows/kit/node_modules/tsx/dist/loader.mjs", "${userHome}/.cursor-workflows/kit/packages/runtime/src/mcp-server.ts"],
       "env": { "WF_CWD": "${workspaceFolder}", "WF_MAX_CENTS": "500", "WF_MAX_TOKENS": "2000000" }
     }
   }
@@ -266,8 +266,8 @@ que outros usuários da máquina alcançam e a interoperabilidade do WSL ligada 
 
 | `id` | O que confere | Falha típica |
 |---|---|---|
-| `node` | O `node` do PATH, que é quem o IDE usa: o comando do `mcp.json` é o `tsx` do kit, cujo shebang é `env node`. Se a entrada do `mcp.json` define `env.PATH`, vale esse PATH. Mínimo: o `engines.node` do kit (22.13) | O Node do IDE é o 22.11 |
-| `dependencies` | O comando e o script que o `.cursor/mcp.json` e o `.mcp.json` mandam rodar existem | `node_modules/.bin/tsx` não existe (`ENOENT`): rode `npm ci` na pasta do kit |
+| `node` | O `node` do PATH, que é quem o IDE usa: o `command` do `mcp.json` é o próprio `node`. Se a entrada do `mcp.json` define `env.PATH`, vale esse PATH. Mínimo: o `engines.node` do kit (22.13) | O Node do IDE é o 22.11 |
+| `dependencies` | O `node`, o loader do `tsx` e o script que o `.cursor/mcp.json` e o `.mcp.json` mandam rodar existem | `node_modules/tsx/dist/loader.mjs` não existe (`ENOENT`): rode `npm ci` na pasta do kit |
 | `endpoints` | Para onde o SDK mandaria a chave: `CURSOR_BACKEND_URL` (a API e a troca de token) e `CURSOR_WEBSITE_URL` (o login), que o SDK lê do ambiente e usa sem conferir. Cada uma tem de estar desligada ou ser uma URL `https` em `cursor.sh` ou `cursor.com` (ou um subdomínio). Vale o ambiente do terminal e o `env` de cada entrada `workflows` do `mcp.json`, que é o que o servidor que o IDE inicia recebe. A mensagem mostra só o esquema e o host do valor, nunca o resto. Enquanto falha, `login` e `models` dizem `not run` e o SDK não é chamado, porque chamá-lo é o que mandaria a chave; o `wf run` e o `wf start` recusam o mesmo valor | Uma `CURSOR_BACKEND_URL` de um proxy de teste, `http://` ou de outro host: desligue-a no ambiente que abre o IDE |
 | `login` | Uma chamada autenticada ao Cursor (`Cursor.me()`); o relatório mostra o nome da chave, nunca a chave nem o e-mail, e, quando passa, lembra que o Privacy Mode não pode ser lido pelo SDK e deve ser confirmado em *Cursor Settings → General* ([5.1](../operating/01-governanca-e-custos.md#políticas-de-admin-que-se-aplicam)) | Sem login: `wf login` ou `CURSOR_API_KEY` |
 | `models` | Cada modelo que a configuração faz os workflows usarem (papéis, rótulos e o `defaults` do workflow) está no catálogo da conta, por id ou alias | O modelo de um papel não existe na conta: `wf models` |
@@ -360,7 +360,7 @@ formatos conhecidos de segredo viram `[REDACTED]`. O critério de release (`rele
 
 | Eixo | Cursor | Claude Code |
 |---|---|---|
-| Onde registrar o MCP server | `.cursor/mcp.json` (projeto) ou `~/.cursor/mcp.json` | `.mcp.json` (projeto) ou `claude mcp add`. Em sessão interativa, o servidor do `.mcp.json` pede aprovação: até lá, `claude mcp list` mostra `workflows: node_modules/.bin/tsx packages/runtime/src/mcp-server.ts - ⏸ Pending approval` (verificado em 2026-11-11). Em `claude -p`, no Agent SDK e em sessões na nuvem fora de um projeto, ele é carregado sem perguntar ([DOC](https://code.claude.com/docs/en/mcp)) |
+| Onde registrar o MCP server | `.cursor/mcp.json` (projeto) ou `~/.cursor/mcp.json` | `.mcp.json` (projeto) ou `claude mcp add`. Em sessão interativa, o servidor do `.mcp.json` pede aprovação: até lá, `claude mcp list` mostra `workflows: <comando> - ⏸ Pending approval` (verificado em 2026-11-11, com o `node_modules/.bin/tsx` como comando). Depois dela, mostra `workflows: node --import ./node_modules/tsx/dist/loader.mjs packages/runtime/src/mcp-server.ts - ✔ Connected` (verificado em 2026-11-21). Em `claude -p`, no Agent SDK e em sessões na nuvem fora de um projeto, ele é carregado sem perguntar ([DOC](https://code.claude.com/docs/en/mcp)) |
 | Trava de disparo | Aprovação de `start_workflow` pelo Run Mode (fora da allowlist) [DOC](https://cursor.com/docs/agent/security/run-modes); a skill `run-workflow` guia o agente | Prompt de permissão de `mcp__workflows__start_workflow` (fora de `permissions.allow`) [DOC](https://code.claude.com/docs/en/permissions); a skill chega via `.claude/skills/` |
 | Workflow nativo | **Não existe**. Este kit preenche a lacuna | Ferramenta `Workflow`, `/deep-research`, `ultracode`, `.claude/workflows/` ([DOC](https://code.claude.com/docs/en/workflows)) |
 | Como o contexto chega aos agentes das etapas | `settingSources: ["project","mdm"]` carrega `AGENTS.md`, `.cursor/rules`, skills, hooks e MCP do projeto. Medido em 2026-11-11: o `AGENTS.md` só chega com `"project"`, e é opt-in ([2.2 §5](02-configuracao-inicial.md#5-contexto-do-projeto-nos-agentes)) | Os agentes das etapas são do Cursor mesmo quando o Claude Code dispara. A doc não diz se as runs locais do SDK leem o `CLAUDE.md` (o agente do Cursor IDE e os cloud agents leem, segundo as release notes: [DOC](https://cursor.com/docs/release-notes)); por isso as regras ficam em `AGENTS.md` |

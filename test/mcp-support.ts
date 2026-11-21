@@ -11,12 +11,12 @@ export const FAKE_SDK_TSCONFIG = join(ROOT, "packages", "runtime", "tsconfig.tes
 /** The tools the `workflows` MCP server exposes. */
 export const MCP_TOOLS = ["cancel_workflow", "get_workflow_status", "list_workflows", "start_workflow", "wait_workflow"];
 
-/** Connects a client to the server described by `params`, runs `use`, and always closes the connection. */
-export async function withMcpServer<T>(params: StdioServerParameters, use: (client: Client) => Promise<T>): Promise<T> {
+export async function withMcpServer<T>(params: StdioServerParameters, use: (client: Client, serverPid: number) => Promise<T>): Promise<T> {
   const client = new Client({ name: "repo-test", version: "0.0.0" });
   try {
-    await client.connect(new StdioClientTransport(params));
-    return await use(client);
+    const transport = new StdioClientTransport(params);
+    await client.connect(transport);
+    return await use(client, transport.pid!);
   } finally {
     await client.close();
   }

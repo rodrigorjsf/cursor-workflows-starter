@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "workflows": {
-      "command": "${workspaceFolder}/node_modules/.bin/tsx",
-      "args": ["${workspaceFolder}/packages/runtime/src/mcp-server.ts"],
+      "command": "node",
+      "args": ["--import", "${workspaceFolder}/node_modules/tsx/dist/loader.mjs", "${workspaceFolder}/packages/runtime/src/mcp-server.ts"],
       "env": {
         "WF_CWD": "${workspaceFolder}",
         "WF_MAX_CENTS": "500",

@@ -67,12 +67,6 @@ function probeNode(path: string | undefined, nodeRange: string): { ok: boolean; 
   return { ok: false, line: `${version} at ${node}; @cursor/sdk needs Node ${nodeRange.replace(/^>=/, "")} or newer` };
 }
 
-/**
- * The `node` on the PATH the server gets, because that is what starts it: the IDE runs the `tsx` command of `mcp.json`,
- * whose shebang is `env node`, with the PATH of its own environment plus the entry's `env`. The doctor sees the PATH of the
- * terminal it runs in, and a version manager's shell hook can make a terminal see another node than the IDE does: run
- * `wf doctor` from a terminal the IDE opened.
- */
 function checkNode(mcp: McpLaunches): CheckResult {
   const { nodeRange } = readKitPackage();
   const minimum = semver.minVersion(nodeRange);
@@ -99,13 +93,11 @@ function mcpConfigFailure({ launches, problems }: McpLaunches): { message: strin
   return { message: [...problems, ...missing].join("\n"), hint: "Run `wf init` in this repository: it writes both MCP server configs (or fix the file named above)." };
 }
 
-/** The kit folder a `<kit>/node_modules/.bin/<command>` path belongs to; undefined for any other path. */
 function kitRootOf(file: string): string | undefined {
-  const at = file.indexOf("/node_modules/.bin/");
+  const at = file.indexOf("/node_modules/");
   return at === -1 ? undefined : file.slice(0, at);
 }
 
-/** The files the IDE needs to start the server: its command (`node_modules/.bin/tsx` of the kit) and the script it runs, found as the IDE finds them (from the repo). */
 function checkDependencies(mcp: McpLaunches): CheckResult {
   const broken = mcpConfigFailure(mcp);
   if (broken) return fail("dependencies", broken.message, broken.hint);

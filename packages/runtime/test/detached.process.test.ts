@@ -3,7 +3,7 @@
 // agent run hang until it is cancelled.
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, before, test } from "node:test";
@@ -84,9 +84,9 @@ const eventsOf = (runId: string) => readEventLog(eventLogPath(repo, runId)).even
 const stepStarted = (runId: string) => eventsOf(runId).some((e) => e.type === "step-start" && !e.cached && e.label === "hold");
 
 /** Starts an MCP server, hands `use` a way to call its tools and the server's pid, and closes it (which kills it) afterwards. */
-async function withServer<T>(use: (call: (name: string, args: Record<string, unknown>) => Promise<Record<string, any>>, serverPid: number) => Promise<T>): Promise<T> {
+async function withServer<T>(use: (call: (name: string, args: Record<string, unknown>) => Promise<Record<string, any>>, serverPid: number) => Promise<T>, serverEnv = env): Promise<T> {
   const client = new Client({ name: "detached-test", version: "0.0.0" });
-  const transport = new StdioClientTransport({ command: process.execPath, args: tsx("mcp-server.ts"), cwd: repo, env });
+  const transport = new StdioClientTransport({ command: process.execPath, args: tsx("mcp-server.ts"), cwd: repo, env: serverEnv });
   try {
     await client.connect(transport);
     const call = async (name: string, args: Record<string, unknown>) =>
@@ -264,4 +264,104 @@ test("a --timeout that is not a number of seconds is an error, not a wait that r
     assert.equal(r.status, 2, `${command}: a usage error`);
     assert.match(r.stderr, /--timeout must be a number of seconds/, command);
   }
+});
+
+const sdkLoadMarker = (name: string, extra: Record<string, string> = {}) => {
+  const marker = join(sandbox, `sdk-loaded-${name}`);
+  return { marker, env: { ...env, FAKE_SDK_LOADED_MARKER: marker, ...extra } };
+};
+const processesThatLoadedTheSdk = (marker: string): number[] => (existsSync(marker) ? readFileSync(marker, "utf8").split("\n").filter(Boolean).map(Number) : []);
+
+test("the MCP server answers initialize and every tool without loading the Cursor SDK: only the job processes it starts load it", { timeout: 120_000 }, async () => {
+  const { marker, env: serverEnv } = sdkLoadMarker("server");
+  await withServer(async (call, serverPid) => {
+    for (const tool of ["get_workflow_status", "wait_workflow", "cancel_workflow"]) assert.deepEqual(await call(tool, { jobId: "nope", ...(tool === "wait_workflow" ? { timeoutSec: 1 } : {}) }), { error: "job not found" }, tool);
+    assert.ok(((await call("list_workflows", {})) as unknown as Array<{ name: string }>).some((w) => w.name === "hold"));
+    assert.equal(existsSync(marker), false, "initialize, list_workflows and the tools on a job that is not there load no SDK");
+
+    const held = await call("start_workflow", { name: "hold" });
+    await until("the held step to start", () => stepStarted(held.runId));
+    assert.equal((await call("get_workflow_status", { jobId: held.jobId })).status, "running");
+    assert.equal((await call("wait_workflow", { jobId: held.jobId, timeoutSec: 1 })).status, "running");
+    assert.equal((await call("cancel_workflow", { jobId: held.jobId })).status, "cancelled");
+
+    const quick = await call("start_workflow", { name: "twostep" });
+    let state = await call("wait_workflow", { jobId: quick.jobId, timeoutSec: 5 });
+    for (const stop = performance.now() + 60_000; state.status === "running" && performance.now() < stop; ) state = await call("wait_workflow", { jobId: quick.jobId, timeoutSec: 5 });
+    assert.equal(state.status, "finished", JSON.stringify(state));
+    assert.match((await call("cancel_workflow", { jobId: quick.jobId })).note, /already ended/);
+
+    const loaders = processesThatLoadedTheSdk(marker);
+    assert.ok(!loaders.includes(serverPid), "the MCP server process never loaded the SDK");
+    assert.ok(loaders.includes(jobRecord(held.jobId).pid) && loaders.includes(jobRecord(quick.jobId).pid), `the detached job processes did: ${loaders}`);
+  }, serverEnv);
+});
+
+test("the nested MCP server a workflow step sees answers without loading the Cursor SDK", { timeout: 60_000 }, async () => {
+  const nested = sdkLoadMarker("nested", { WF_INSIDE_WORKFLOW: "1" });
+  await withServer(async (call) => {
+    assert.deepEqual(await call("start_workflow", { name: "hold" }), { error: "workflows cannot be started from inside a workflow step" });
+  }, nested.env);
+  assert.equal(existsSync(nested.marker), false, "the server that runs inside a step loads no SDK");
+
+  const guard = sdkLoadMarker("guard");
+  const client = new Client({ name: "detached-test", version: "0.0.0" });
+  try {
+    await client.connect(new StdioClientTransport({ command: process.execPath, args: [join(PACKAGE, "src", "runtime", "nested-mcp-guard.mjs")], cwd: repo, env: guard.env }));
+    assert.deepEqual((await client.listTools()).tools, []);
+  } finally {
+    await client.close();
+  }
+  assert.equal(existsSync(guard.marker), false, "the guard server that replaces `workflows` in a step loads no SDK");
+});
+
+test("control: wf run of a workflow with one agent step leaves the marker, so the assertions above are not vacuous", { timeout: 60_000 }, () => {
+  const { marker, env: runEnv } = sdkLoadMarker("control");
+  const run = spawnSync(process.execPath, [...tsx("cli.ts"), "run", "delayed", "--args", "{}", "--cwd", repo], { env: runEnv, encoding: "utf8" });
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(processesThatLoadedTheSdk(marker), [run.pid], "the CLI process that ran the step loaded the SDK");
+});
+
+test("the light wf commands run without loading the Cursor SDK: only the job process that `wf start` detaches does", { timeout: 240_000 }, async () => {
+  const { marker, env: markedEnv } = sdkLoadMarker("cli");
+  const wfThatLoadsNoSdk = (args: string[], cwd = repo) => {
+    const r = spawnSync(process.execPath, [...tsx("cli.ts"), ...args, "--cwd", cwd], { env: markedEnv, encoding: "utf8" });
+    assert.ok(!processesThatLoadedTheSdk(marker).includes(r.pid), `wf ${args.join(" ")} loaded the SDK`);
+    return r;
+  };
+
+  const list = wfThatLoadsNoSdk(["list"]);
+  assert.equal(list.status, 0, list.stderr);
+  assert.ok((JSON.parse(list.stdout) as Array<{ name: string }>).some((w) => w.name === "hold"));
+
+  const started = wfThatLoadsNoSdk(["start", "hold"]);
+  assert.equal(started.status, 0, started.stderr);
+  const { jobId, runId } = JSON.parse(started.stdout) as { jobId: string; runId: string };
+  await until("the held step to start", () => stepStarted(runId));
+  assert.ok(processesThatLoadedTheSdk(marker).includes(jobRecord(jobId).pid), "the detached job process loads the SDK");
+
+  assert.equal(JSON.parse(wfThatLoadsNoSdk(["status", jobId]).stdout).status, "running");
+  assert.equal(JSON.parse(wfThatLoadsNoSdk(["wait", jobId, "--timeout", "1"]).stdout).status, "running");
+  assert.ok((JSON.parse(wfThatLoadsNoSdk(["jobs"]).stdout) as Array<{ jobId: string }>).some((j) => j.jobId === jobId));
+  assert.equal(JSON.parse(wfThatLoadsNoSdk(["cancel", jobId]).stdout).status, "cancelled");
+
+  assert.ok("workflows" in JSON.parse(wfThatLoadsNoSdk(["config", "show"]).stdout));
+  const gitRepo = join(sandbox, "git-repo");
+  mkdirSync(gitRepo);
+  assert.equal(spawnSync("git", ["init", "--quiet"], { cwd: gitRepo }).status, 0);
+  const gc = wfThatLoadsNoSdk(["gc", "--dry-run"], gitRepo);
+  assert.equal(gc.status, 0, gc.stderr);
+  const stats = wfThatLoadsNoSdk(["stats"]);
+  assert.equal(stats.status, 0, stats.stderr);
+  const exported = wfThatLoadsNoSdk(["metrics", "export", "--out", join(sandbox, "metrics-export")]);
+  assert.equal(exported.status, 0, exported.stderr);
+  assert.deepEqual(JSON.parse(wfThatLoadsNoSdk(["metrics", "reconcile"]).stdout), { updated: 0, failed: 0 });
+
+  const emptyRepo = join(sandbox, "init-repo");
+  mkdirSync(emptyRepo);
+  const init = wfThatLoadsNoSdk(["init"], emptyRepo);
+  assert.equal(init.status, 0, init.stderr);
+  const upgrade = wfThatLoadsNoSdk(["upgrade"]);
+  assert.equal(upgrade.status, 1);
+  assert.match(upgrade.stderr, /no kit is installed/);
 });

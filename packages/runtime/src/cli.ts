@@ -37,20 +37,19 @@ import "./fake-sdk-check.js"; // a test process on the real SDK stops here, befo
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { Cursor } from "@cursor/sdk";
 import { globalConfigPath, loadEffectiveConfig, parseLimitOverrides, repoConfigPath, setConfigValue } from "./config/index.js";
-import { formatReport, runDoctor } from "./doctor.js";
 import { initRepo } from "./init.js";
 import { assertKitCompatible } from "./kit-version.js";
 import { unifiedDiff } from "./unified-diff.js";
 import { upgradeKit } from "./upgrade.js";
 import { assertCursorEndpoints } from "./runtime/cursor-endpoints.js";
 import { dashboardFields, ensureDashboard } from "./runtime/dashboard-instance.js";
-import { type RunStatus, runWorkflow } from "./runtime/engine.js";
+import type { RunStatus } from "./runtime/engine.js";
 import { insideWorkflow } from "./runtime/inside-workflow.js";
-import { cancelOnSignals, installCrashHandlers, spawnJob, startJob } from "./runtime/jobs.js";
+import { spawnJob } from "./runtime/job-spawn.js";
 import { cancelJob, listJobs, readJob, readJobRecord, waitJob } from "./runtime/job-state.js";
 import { loadWorkflows } from "./runtime/registry.js";
+import { installCrashHandlers } from "./runtime/run-store.js";
 import { applyGc, directCommands, formatPlan, planGc } from "../workflows/implement-issue/gc.js";
 import { errorText } from "./runtime/error-text.js";
 
@@ -187,6 +186,7 @@ async function main(): Promise<number> {
   if (command === "login" || command === "models" || command === "whoami") assertCursorEndpoints();
   switch (command) {
     case "login": {
+      const { Cursor } = await import("@cursor/sdk");
       const r = await Cursor.auth.login();
       // Nunca imprimir r.apiKey: a saída pode acabar no transcript do chat.
       out({ loggedIn: true, email: r.email, expiresAt: new Date(r.apiKeyExpiresAtMs).toISOString() });
@@ -194,11 +194,13 @@ async function main(): Promise<number> {
     }
     case "models": {
       // IDs liberados para a chave em uso (plano + restrições do admin), com aliases e parâmetros.
+      const { Cursor } = await import("@cursor/sdk");
       const models = await Cursor.models.list();
       out(models.map((m) => ({ id: m.id, displayName: m.displayName, aliases: m.aliases, params: m.parameters?.map((p) => `${p.id}=${p.values.map((v) => v.value).join("|")}`) })));
       return 0;
     }
     case "whoami": {
+      const { Cursor } = await import("@cursor/sdk");
       const me = await Cursor.me();
       out({ apiKeyName: me.apiKeyName, userEmail: me.userEmail });
       return 0;
@@ -216,6 +218,7 @@ async function main(): Promise<number> {
       return 0;
     }
     case "doctor": {
+      const { formatReport, runDoctor } = await import("./doctor.js");
       const report = await runDoctor({ cwd });
       if (values.json) out(report);
       else process.stdout.write(formatReport(report));
@@ -253,6 +256,8 @@ async function main(): Promise<number> {
     case "run": {
       const def = await resolveWorkflow();
       const args = withDeliveryShortcuts(jsonFlag("args", values.args!));
+      const { cancelOnSignals, startJob } = await import("./runtime/jobs.js");
+      const { runWorkflow } = await import("./runtime/engine.js");
       const opts = { ...runOpts(), signal: cancelOnSignals() }; // SIGINT and SIGTERM cancel the run, the same as `wf cancel`
       if (values.job) {
         // Child mode of `wf start` and `start_workflow`: the parent already created the job.

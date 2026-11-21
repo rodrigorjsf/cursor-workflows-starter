@@ -11,13 +11,15 @@ flowchart TB
   end
   CREG -->|MCP stdio| MCP[packages/runtime/src/mcp-server.ts]
   CCREG -->|MCP stdio| MCP
-  MCP --> JOBS[jobs.ts<br/>.workflows/jobs/*.json<br/>identidade do job]
-  CLI --> JOBS
-  CLI --> ENG
+  MCP --> SPAWN[job-spawn.ts · job-state.ts<br/>.workflows/jobs/*.json<br/>identidade do job, sem o engine]
+  CLI --> SPAWN
+  CLI -->|"run, que carrega o SDK"| JOBS[jobs.ts<br/>.workflows/jobs/*.json<br/>identidade do job]
+  CLI -->|"run, que carrega o SDK"| ENG
   JOBS --> ENG[engine.ts<br/>agent · parallel · pipeline · phase]
   REG[registry.ts<br/>workflows/ + .agents/workflows/] --> ENG
   ENG --> JR[run-store.ts<br/>.workflows/runs/&lt;runId&gt;/<br/>events.jsonl · journal.jsonl · run.lock]
   JOBS -.->|"estado do job: projeção do log"| JR
+  SPAWN -.->|"estado do job: projeção do log"| JR
   ENG -->|1 linha por run| IDX[("~/.cursor-workflows/runs.jsonl")]
   ENG -->|"1 tentativa: prompt, opções, sinal"| BE[backend.ts<br/>AgentBackend · backend local]
   BE --> ST[structured.ts<br/>submit_result + Ajv]

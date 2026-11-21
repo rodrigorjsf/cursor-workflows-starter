@@ -635,8 +635,142 @@ O SDK entra em comandos que não o usam: `cli.ts:39` importa `Cursor` de forma e
 falha hoje (`ERR_MODULE_NOT_FOUND`): os imports usam `.js`, e `workflows/implement-issue/forge.ts:288,505` usa parameter properties, que
 o stripping não remove.
 
+> **Nota (2026-11-21, [#154](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/154)):** o #152 e o #153 tiraram o SDK do MCP server e do CLI, nos caminhos que não rodam um agente. As linhas acima ficam como foram medidas, no `4f0dfc5`; a §20 mede o depois, na mesma sessão, e responde às perguntas que a §19 deixou (tirar o tsx; reabrir uma fachada nativa). O `forge.ts` não é o único arquivo com parameter property: são 15 pontos em 9 arquivos (§20).
+
 **Não medido:** o `smoke` a partir do binário (parou antes, em `kit-version.ts`); o MCP server sob Bun dentro do Cursor IDE; macOS e
 Windows; o tree-sitter N-API do SDK dentro do binário compilado.
+
+## 20. O front enxuto: o CLI e o MCP server sem o SDK (2026-11-21)
+
+O [#154](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/154) fecha a spec [#151](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/151).
+O [#152](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/152) tirou o SDK do MCP server e o
+[#153](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/153) tirou o SDK do CLI, nos caminhos que não rodam um agente.
+Esta seção mede o que isso devolveu, do mesmo modo da §19, e decide o que vem depois: tirar o tsx, ou reabrir a fachada nativa.
+
+**Ambiente e método (2026-11-21):** Node 22.23.4 pelo `mise` · tsx 4.23.15 · `@cursor/sdk@1.3.1` · Linux x64 (WSL2, 12 núcleos, carga de 1
+minuto em 0,6 no início e 0,4 no fim). *Antes* é o `4f0dfc5` (o `main` com o spike #144, sem o #152 nem o #153), extraído com
+`git archive` numa pasta descartável, com o próprio `npm ci`. *Depois* é o `c346b57` (o #152 e o #153). Cada configuração rodou 10
+vezes, intercaladas (dez rodadas, cada uma com todas as configurações), depois de uma execução de aquecimento descartada, com o cache de
+transformações do tsx aquecido (o padrão) e um `WF_HOME` descartável. O tempo é o do processo que lança, do `spawn` até a saída
+(`process.hrtime`). O pico de RSS vem do `/usr/bin/time -f %M` (o do maior processo da árvore). O MCP server é medido do `spawn` até a
+resposta do `initialize` pelo stdio, e o RSS dele vem do `ps -o rss` três segundos depois. Cada número é a mediana, com a faixa entre
+parênteses, e MB são 1.000 KB. A sonda que roda as dez rodadas não está no repositório; os comandos são estes:
+
+```bash
+/usr/bin/time -f %M npx --no tsx packages/runtime/src/cli.ts list
+/usr/bin/time -f %M node_modules/.bin/tsx packages/runtime/src/cli.ts list
+node --import tsx packages/runtime/src/mcp-server.ts
+node_modules/.bin/tsx packages/runtime/src/mcp-server.ts
+```
+
+A *forma do #144* é a do `npx --no tsx` e do `node --import tsx`, como a §19 mediu o RSS. A *forma do kit* é a que o usuário paga: o shim do
+`wf` (`scripts/install.sh`) e o `.cursor/mcp.json` que o `wf init` grava (`init.ts`) rodam o `node_modules/.bin/tsx`, que é um processo
+Node a mais, pai do que roda o servidor.
+
+| Medida | #144 (§19) | Antes (`4f0dfc5`) | Depois (`c346b57`) | Mudança |
+|---|---|---|---|---|
+| `wf list`, tempo, forma do #144 | 1.862 ms (1.715 a 1.938) | 1.248 ms (1.226 a 1.273) | 608 ms (602 a 616) | -51% |
+| `wf list`, tempo, forma do kit | — | 1.038 ms (1.018 a 1.057) | 396 ms (390 a 403) | -62% |
+| `wf list`, pico de RSS, forma do #144 | 335 MB | 333,6 MB (332,4 a 335,9) | 104,4 MB (98,5 a 106,2) | -69% |
+| `wf list`, pico de RSS, forma do kit | — | 334,8 MB (331,0 a 335,5) | 104,8 MB (98,7 a 106,8) | -69% |
+| MCP server até o `initialize`, forma do #144 | 1.574 ms (1.489 a 1.836) | 917 ms (900 a 956) | 328 ms (320 a 341) | -64% |
+| MCP server até o `initialize`, forma do kit | — | 954 ms (945 a 979) | 372 ms (368 a 378) | -61% |
+| MCP server parado, RSS, forma do #144 | 314 MB | 313,9 MB (312,1 a 317,4) | 95,8 MB (94,6 a 99,2) | -69% |
+| MCP server parado, RSS do processo do servidor, forma do kit | — | 313,6 MB (312,5 a 317,0) | 94,8 MB (90,7 a 99,9) | -70% |
+| MCP server parado, RSS da árvore, forma do kit (2 processos) | — | 372,7 MB (371,5 a 376,1) | 153,6 MB (149,5 a 158,7) | -59% |
+
+A §19 não anotou o comando do tempo do `wf list`, e os tempos dela saíram 49% (`wf list`) e 72% (MCP server) acima dos de "antes" na forma do #144 desta
+sessão (o piso também: `node -e 0` fez 26 a 34 ms lá e 21 ms aqui), então o estado da máquina era outro; por isso o antes e o depois vêm da mesma sessão. O
+RSS de "antes" reproduz o da §19 (335 e 314 MB). A saída do `wf list` é a mesma nas dez configurações (457 bytes, o mesmo hash).
+
+**O que sobrou, na mesma sessão.** O piso é o Node sozinho. O "JS compilado" é a cópia do `c346b57` com os 86 `.ts` de
+`packages/runtime/src` e `packages/runtime/workflows` passados pelo `esbuild` para `.js` (`--format=esm --platform=node`), rodada pelo
+`node` sem loader: o que o código custa sem o tsx. O "type stripping nativo" é a mesma cópia com os 342 especificadores relativos `.js`
+trocados por `.ts` e os 9 arquivos com parameter properties passados pelo `esbuild` (os 15 pontos não foram reescritos à mão), rodada por
+`node packages/runtime/src/cli.ts list` no Node 22.23.4.
+
+| Medida | Tempo | RSS |
+|---|---|---|
+| `node -e 0` (o piso) | 21 ms (19 a 26) | 43,9 MB |
+| `node --import tsx -e 0` | 70 ms (67 a 77) | 68,8 MB (66,0 a 69,0) |
+| `import("@cursor/sdk")`, sem tsx (o que saiu dos caminhos leves) | 265 ms (260 a 269) | 105,8 MB (105,5 a 106,1) |
+| `wf list` depois, JS compilado, sem tsx | 135 ms (133 a 142) | 72,5 MB (71,8 a 73,1) |
+| `wf list` depois, type stripping nativo | 199 ms (195 a 209) | 110,8 MB (108,3 a 113,5) |
+| `wf list` depois, forma do kit, cache do tsx frio (`TSX_DISABLE_CACHE=1`) | 473 ms (469 a 481) | 107,6 MB (102,3 a 111,1) |
+| `wf list` antes, forma do kit, cache do tsx frio | 1.159 ms (1.139 a 1.176) | 339,1 MB (337,7 a 340,7) |
+| MCP server, JS compilado, sem tsx | 181 ms (174 a 184) | 80,3 MB (78,7 a 80,7) |
+| MCP server, type stripping nativo | 238 ms (235 a 242) | 117,1 MB (110,1 a 117,8) |
+
+Subtraindo as medianas, o que o `wf list` e o MCP server depois do #152 e do #153 ainda pagam se divide assim. O tsx é a diferença entre
+a medida com ele e o JS compilado; na forma do kit, o RSS do tsx inclui o processo pai (58,8 MB).
+
+| Parcela | `wf list` (forma do kit) | MCP server (forma do #144) | MCP server (forma do kit) |
+|---|---|---|---|
+| Piso do Node | 21 ms · 43,9 MB | 21 ms · 43,9 MB | 21 ms · 43,9 MB |
+| Grafo de módulos, sem tsx | 114 ms · 28,6 MB | 160 ms · 36,4 MB | 160 ms · 36,4 MB |
+| tsx | 261 ms · 32,3 MB | 147 ms · 15,5 MB | 191 ms · 73,3 MB |
+| Total medido | 396 ms · 104,8 MB | 328 ms · 95,8 MB | 372 ms · 153,6 MB |
+| Parte do tsx | 66% do tempo · 31% do RSS | 45% do tempo · 16% do RSS | 51% do tempo · 48% do RSS |
+
+| Item | Método | Resultado | Evidência | Ação tomada |
+|---|---|---|---|---|
+| O kit roda sem o tsx, pelo type stripping do Node 22.23.4? | cópia descartável do `c346b57` com os especificadores `.ts` e os 9 arquivos com parameter property pelo `esbuild`; `node packages/runtime/src/cli.ts list` e o `initialize` de `node packages/runtime/src/mcp-server.ts` | ◐ roda, depois dessa reescrita | o `wf list` imprime os mesmos 457 bytes da forma com tsx; o `initialize` responde `"protocolVersion":"2025-06-18"`; sem aviso no stderr. Sem a reescrita, falha: `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX: TypeScript parameter property is not supported in strip-only mode` | A reescrita só existe na cópia medida |
+| Que sintaxe o stripping não apaga? | `node_modules/typescript/bin/tsc --noEmit --erasableSyntaxOnly -p packages/runtime` | ❌ 15 pontos em 9 arquivos, todos parameter properties (nenhum enum nem namespace) | `config/file.ts:119`, `runtime/backend.ts:302`, `runtime/cloud-snapshot.ts:243`, `runtime/engine.ts:469`, `runtime/journal.ts:59`, `runtime/run-store.ts:45`, `runtime/run-tail.ts:61` a `64`, `workflows/implement-issue/commands.ts:40,103,104` e `forge.ts:288,505` | A §19 citou só o `forge.ts`; a lista inteira vai para quem for tirar o tsx |
+| O Node mínimo declarado (`>=22.13`) roda `.ts`? | `mise exec node@22.13.0 -- node packages/runtime/src/cli.ts list` na cópia do type stripping | ❌ sem flag: `ERR_UNKNOWN_FILE_EXTENSION`; ◐ com `--experimental-strip-types` roda e avisa `ExperimentalWarning: Type Stripping is an experimental feature` | no 22.23.4, `process.features.typescript` é `strip` e não há aviso | — |
+| O stripping lê `.ts` dentro de `node_modules`? | pacote descartável `pkg` com `index.ts`, importado por um `main.mjs` | ❌ `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` | — | Não pesa na instalação atual, que roda de um clone fora de `node_modules` ([ADR-0011](../adr/0011-npm-bootstrapper.md)); pesaria em publicar o runtime como pacote npm |
+| `node --import tsx` serve de outro diretório? | `cd <outra pasta> && node --import tsx <kit>/packages/runtime/src/cli.ts list` | ❌ `ERR_MODULE_NOT_FOUND: Cannot find package 'tsx'`; ✅ com `--import <kit>/node_modules/tsx/dist/loader.mjs` | `job-spawn.ts:86` respawna o job com o `process.execArgv` do pai, no `cwd` do repositório alvo | Entra na issue [#156](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/156) |
+
+**Decisão (#154), três perguntas:**
+
+1. **Tirar o tsx pelo type stripping do Node: não agora, e sem issue.** O tsx é a maior parcela do que sobrou no tempo (66% do
+   `wf list`, 51% do `initialize` na forma do kit), e o stripping nativo corta o `wf list` à metade (396 para 199 ms) e o `initialize` de
+   372 para 238 ms. Mas não corta a memória, que é a motivação da spec: o servidor parado fica em 117,1 MB, contra 95,8 MB com o tsx em
+   um processo só, porque o stripper do Node custa 36,8 MB acima do JS compilado (117,1 contra 80,3), e o tsx custa 15,5. O trabalho é
+   largo: 342 especificadores `.js` viram `.ts` (e o `tsconfig` precisa ligar `allowImportingTsExtensions`), 15 parameter properties
+   viram campos, o Node mínimo declarado (22.13) deixa de rodar `.ts` sem uma flag, os workflows dos repositórios alvo
+   (`.agents/workflows/*.ts`) precisam seguir a mesma forma, e a suíte perde o `paths` do tsx que troca o SDK pelo fake (a pendência da
+   §19). Reabrir quando o Node mínimo do kit tiver o stripping ligado por padrão e a suíte trocar o SDK sem o tsx.
+2. **Iniciar o kit sem o CLI do tsx: sim, na issue [#156](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/156).** Na forma
+   do kit o tsx é um processo Node a mais: 58,8 MB e 44 ms (372 contra 328 ms) por MCP server parado. Rodar o servidor com
+   `node --import <caminho absoluto do loader do tsx>` leva a árvore de 153,6 para 95,8 MB, 26% dos 372,7 MB de antes do #152 e do #153
+   (41% hoje). Um caminho absoluto, porque o `--import tsx` solto não resolve fora da pasta do kit (tabela acima).
+3. **Fachada nativa: não reabrir.** O que sobra depois do #152 e do #153, na forma do #144, é um processo Node (piso de 21 ms e
+   43,9 MB), o grafo de módulos (160 ms e 36,4 MB) e o tsx (147 ms e 15,5 MB). Os dois passos baratos ainda estão em TypeScript: o #156
+   tira 58,8 MB por janela, e rodar JS compilado tiraria mais 15,5 MB e 147 ms. Uma fachada nativa só ganharia o que sobrar depois
+   deles, no máximo os 95,8 MB e os 328 ms de hoje (o custo de um processo nativo não foi medido), e reescreveria em outra linguagem o
+   estado do job, a espera e o cancelamento enquanto o processo do run segue Node mais SDK. Reabrir só se, feito o #156, o servidor
+   parado de cerca de 96 MB ainda pesar para quem mantém várias janelas abertas.
+
+**Depois do #156 (2026-11-21).** O [#156](https://github.com/rodrigorjsf/cursor-workflows-starter/issues/156) trocou o CLI do tsx por
+`node --import <caminho absoluto de node_modules/tsx/dist/loader.mjs>` no shim do `wf` (`scripts/install.sh`), no `.cursor/mcp.json` e no
+`.mcp.json` que o `wf init` grava (`init.ts`) e nos dois `mcp.json` do próprio repositório. Mesmo método da tabela acima, numa sessão só
+(Node 22.23.4 pelo `mise`, carga de 0,54 no início), 10 rodadas intercaladas depois de uma execução de aquecimento descartada. O `wf list`
+rodou de uma pasta fora do kit, com `--cwd` apontando para ele. A sonda não está no repositório; os comandos são estes:
+
+```bash
+node_modules/.bin/tsx packages/runtime/src/mcp-server.ts
+node --import "$PWD/node_modules/tsx/dist/loader.mjs" packages/runtime/src/mcp-server.ts
+node_modules/.bin/tsx packages/runtime/src/cli.ts list --cwd "$PWD"
+node --import "$PWD/node_modules/tsx/dist/loader.mjs" packages/runtime/src/cli.ts list --cwd "$PWD"
+```
+
+| Medida | `node_modules/.bin/tsx` (antes do #156) | `node --import <loader absoluto>` (depois) | Mudança |
+|---|---|---|---|
+| MCP server parado, processos | 2 | 1 | -1 |
+| MCP server até o `initialize` | 372 ms (363 a 376) | 329 ms (321 a 332) | -12% |
+| MCP server parado, RSS do processo do servidor | 97,3 MB (90,3 a 100,6) | 97,6 MB (94,6 a 99,1) | igual |
+| MCP server parado, RSS da árvore | 156,2 MB (149,2 a 159,4) | 97,6 MB (94,6 a 99,1) | -38% |
+| `wf list`, tempo | 456 ms (445 a 475) | 404 ms (396 a 414) | -11% |
+
+A árvore parada ficou em 26% dos 372,7 MB de antes do #152 e do #153. A saída do `wf list` é a mesma nas duas formas (457 bytes). O servidor
+parado sai com o stdin fechado (código 0, em 0,1 s) e com `SIGTERM` (em 4 ms) sem o pai do tsx para repassar o sinal; um teste de processo
+cobre os dois com o limite de 5 s. Com o cache de transformações do tsx frio, o servidor tem um filho, o `esbuild --service` que o
+próprio tsx sobe para compilar, nas duas formas; o teste procura um filho que seja um processo Node, não um filho qualquer.
+
+**Não medido:** um processo nativo (nenhum front em Go ou Rust foi construído, então a diferença para ele é um teto); macOS e Windows; o
+MCP server dentro do Cursor IDE, que sobe o servidor com o Node do PATH dele e não com o do `mise.toml`; `wf status`, `wf wait`,
+`wf cancel`, `wf jobs` e `wf start` (o teste de processo do #153 prova que não carregam o SDK, sem tempo nem RSS); o primeiro `wf list`
+depois de uma instalação limpa, além do cache do tsx frio acima.
 
 
 ---

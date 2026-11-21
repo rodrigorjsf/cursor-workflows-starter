@@ -21,7 +21,7 @@
 | `@cursor/sdk` (fixado em `1.3.1`) | Criar agentes, enviar prompts, consultar custo. **Fixe a versão** e atualize de forma deliberada. O npm publica `1.3.1` (2026-11-03; ver [8.2](../research/verificacoes-locais.md)), mas as notas de versão do SDK listam `1.0.40` como a mais recente, sem data ([DOC](https://cursor.com/docs/release-notes/sdk)). Nenhuma página da doc chama o SDK de beta ou de GA |
 | `@modelcontextprotocol/sdk` (`^1.32.2`) | MCP server (stdio) para o Cursor IDE, pelo `McpServer` e `registerTool` |
 | `ajv` | Validação de JSON Schema da saída estruturada |
-| `tsx` | Roda os `.ts` direto, sem build. O `mcp.json` aponta para `node_modules/.bin/tsx` (sem `npx`, para não baixar nada na hora) |
+| `tsx` | Roda os `.ts` direto, sem build. O `mcp.json` e o shim do `wf` rodam `node --import <pasta do kit>/node_modules/tsx/dist/loader.mjs` (caminho absoluto, sem `npx`, para não baixar nada na hora, e sem o segundo processo Node que o CLI do `tsx` mantém) |
 | `zod` | Peer dependency do `@cursor/sdk` e do SDK MCP; o servidor MCP declara com ele o schema de entrada de cada tool |
 | `typescript`, `@types/node` (dev) | Typecheck |
 
@@ -241,8 +241,8 @@ são os candidatos mais prováveis.
    modelos, o CLI do forge do repositório (`gh` ou `glab`), o servidor MCP, a configuração e o sandbox, que a configuração
    global do instalador exige em toda etapa (no Linux, com o `bubblewrap`)
    ([2.3](03-invocacao-no-cursor-ide.md#conferindo-o-ambiente-wf-doctor)).
-   Sobre o Node: confira o que a IDE usa. O Cursor sobe o servidor com o `node` do PATH do próprio processo (o `tsx` do
-   `mcp.json` começa com `#!/usr/bin/env node`), e um gerenciador de versões (mise, nvm) ativado pelo perfil do
+   Sobre o Node: confira o que a IDE usa. O Cursor sobe o servidor com o `node` do PATH do próprio processo (o `command` do
+   `mcp.json` é o próprio `node`), e um gerenciador de versões (mise, nvm) ativado pelo perfil do
    shell pode não valer ali. Rode `node -v` nesse ambiente. Abaixo do Node 22.13, o CLI e o MCP server saem com uma
    mensagem clara, com a versão encontrada; no Cursor, ela aparece em **Output → MCP Logs**
    ([DOC](https://cursor.com/docs/mcp)).
@@ -256,8 +256,9 @@ são os candidatos mais prováveis.
 ## 7. Habilitar no Claude Code (opcional)
 
 1. `.mcp.json` na raiz já registra o mesmo servidor `workflows`. Aprove-o quando o Claude Code perguntar. Antes da
-   aprovação, `claude mcp list` mostra `workflows: node_modules/.bin/tsx packages/runtime/src/mcp-server.ts - ⏸ Pending approval`
-   (verificado em 2026-11-11). Em `claude -p`, no Agent SDK e em sessões na nuvem fora de um projeto, o Claude Code carrega os
+   aprovação, `claude mcp list` mostra `workflows: <comando> - ⏸ Pending approval` (verificado em 2026-11-11, com o `node_modules/.bin/tsx`
+   como comando). Depois dela, mostra `workflows: node --import ./node_modules/tsx/dist/loader.mjs packages/runtime/src/mcp-server.ts - ✔ Connected`
+   (verificado em 2026-11-21). Em `claude -p`, no Agent SDK e em sessões na nuvem fora de um projeto, o Claude Code carrega os
    servidores do `.mcp.json` sem perguntar ([DOC](https://code.claude.com/docs/en/mcp)); num `claude -p` em 2026-11-11 as
    quatro tools apareceram como `mcp__workflows__*` e o `CLAUDE.md` (na época, só `@AGENTS.md`) foi lido
    ([8.2 §10](../research/verificacoes-locais.md)).

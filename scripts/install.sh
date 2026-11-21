@@ -182,7 +182,7 @@ check_node() {
 install_dependencies() {
   local kit="$1"
   if [ -L "$kit" ]; then
-    [ -x "$kit/node_modules/.bin/tsx" ] || (cd "$kit" && npm install --ignore-scripts --no-audit --no-fund)
+    [ -f "$kit/node_modules/tsx/dist/loader.mjs" ] || (cd "$kit" && npm install --ignore-scripts --no-audit --no-fund)
   else
     (cd "$kit" && npm ci --ignore-scripts --no-audit --no-fund)
   fi
@@ -203,7 +203,7 @@ write_shim() {
     return 0
   fi
   mkdir -p "$bin_dir"
-  printf '#!/bin/sh\n# cursor-workflows shim, written by install.sh.\nexec %s %s "$@"\n' "$(sh_quote "$kit/node_modules/.bin/tsx")" "$(sh_quote "$kit/packages/runtime/src/cli.ts")" > "$shim.tmp"
+  printf '#!/bin/sh\n# cursor-workflows shim, written by install.sh.\nexec node --import %s %s "$@"\n' "$(sh_quote "$kit/node_modules/tsx/dist/loader.mjs")" "$(sh_quote "$kit/packages/runtime/src/cli.ts")" > "$shim.tmp"
   chmod +x "$shim.tmp"
   mv -f "$shim.tmp" "$shim"
   case ":$PATH:" in

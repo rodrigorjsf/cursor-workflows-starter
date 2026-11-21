@@ -464,8 +464,7 @@ test("exports are named: the one default export is a workflow definition, and a 
 // --- Architecture -----------------------------------------------------------------------------------------------------
 
 const BACKENDS = ["packages/runtime/src/runtime/backend.ts", "packages/runtime/src/runtime/backend-cloud.ts"];
-/** Besides the backends, the files that may load the SDK as a value: the CLI and the doctor (`Cursor.auth`, `Cursor.models`). */
-const SDK_VALUE_IMPORTERS = [...BACKENDS, "packages/runtime/src/cli.ts", "packages/runtime/src/doctor.ts"];
+const SDK_VALUE_IMPORTERS = [...BACKENDS, "packages/runtime/src/doctor.ts"];
 
 /** Lines calling `Agent.create`/`Agent.resume`, or importing `@cursor/sdk` as a value at load time, outside the files allowed to. */
 function sdkOutsideBackends(path: string, text: string): number[] {
@@ -498,7 +497,7 @@ test("the SDK check fires on Agent.create or a value import outside the backends
   assert.deepEqual(sdkOutsideBackends("packages/runtime/src/observability/queries.ts", legit), []);
 });
 
-test("only the AgentBackend adapters create or resume an agent, and only they, the CLI and the doctor load the SDK as a value", () => {
+test("only the AgentBackend adapters create or resume an agent, and only they and the doctor load the SDK as a value", () => {
   assert.deepEqual(scan(PRODUCT_CODE, sdkOutsideBackends), [], "reach an agent through AgentBackend.run; elsewhere import SDK types with `import type`");
 });
 

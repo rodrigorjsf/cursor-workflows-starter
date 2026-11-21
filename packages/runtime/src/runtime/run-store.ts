@@ -13,10 +13,11 @@ import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { EVENT_SCHEMA_VERSION, type RunStartEvent, type RunStatus, type WorkflowEvent, isContentLine } from "./events.js";
+import { errorText } from "./error-text.js";
 import { Journal, journalPruned } from "./journal.js";
 import { tryParseJson } from "./parse-json.js";
 import { isAlive } from "./pid.js";
-import { type InterruptedCloudStep, type Ledger, interruptedCloudSteps, replayLedger } from "./projection.js";
+import { type InterruptedCloudStep, type Ledger, interruptedCloudSteps, replayLedger, resumeHint } from "./projection.js";
 import { CREDENTIAL_FORMATS, type Redactor, createRedactor } from "./redaction.js";
 import { type RetentionPolicy, pruneRuns } from "./retention.js";
 import { plainName, stateDir } from "./state.js";
@@ -253,6 +254,17 @@ const openStores = new Set<RunStore>();
  */
 export function abortOpenRuns(error: (runId: string) => string, status: Exclude<RunStatus, "finished"> = "failed"): void {
   for (const store of [...openStores]) store.abort(error(store.runId), status);
+}
+
+export function installCrashHandlers(): void {
+  process.on("unhandledRejection", (reason) => {
+    process.stderr.write(`[wf] unhandledRejection ignored: ${errorText(reason)}\n`);
+  });
+  process.on("uncaughtException", (err) => {
+    abortOpenRuns((runId) => `crash: ${err.message}; ${resumeHint(runId)}`);
+    process.stderr.write(`[wf] uncaughtException: ${err.stack ?? err.message}\n`);
+    process.exit(1);
+  });
 }
 
 export interface RunStoreOptions {

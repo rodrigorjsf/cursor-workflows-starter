@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { nodeChildrenOf } from "../packages/runtime/test/wait-for.js";
 import { FAKE_SDK_TSCONFIG, MCP_TOOLS, ROOT, withMcpServer } from "./mcp-support.js";
 
 const RUNTIME_PACKAGE = "@cursor-workflows/runtime";
@@ -31,12 +32,13 @@ for (const file of [".mcp.json", ".cursor/mcp.json"]) {
     // Cursor resolves ${workspaceFolder}; Claude Code starts the command in the project root.
     const resolveVars = (s: string) => s.replaceAll("${workspaceFolder}", ROOT);
     const args = config.args.map(resolveVars);
+    const command = resolveVars(config.command);
 
-    assert.equal(owningPackage(resolve(ROOT, args[0]!)), RUNTIME_PACKAGE, "the entry point belongs to the runtime package");
+    assert.equal(owningPackage(resolve(ROOT, args.at(-1)!)), RUNTIME_PACKAGE, "the entry point belongs to the runtime package");
 
-    const tools = await withMcpServer(
+    const { tools, nodeChildren } = await withMcpServer(
       {
-        command: resolve(ROOT, resolveVars(config.command)),
+        command: command.includes("/") ? resolve(ROOT, command) : command,
         args,
         cwd: ROOT,
         env: {
@@ -45,8 +47,9 @@ for (const file of [".mcp.json", ".cursor/mcp.json"]) {
           TSX_TSCONFIG_PATH: FAKE_SDK_TSCONFIG,
         },
       },
-      async (client) => (await client.listTools()).tools.map((t) => t.name).sort(),
+      async (client, serverPid) => ({ tools: (await client.listTools()).tools.map((t) => t.name).sort(), nodeChildren: nodeChildrenOf(serverPid) }),
     );
     assert.deepEqual(tools, MCP_TOOLS);
+    assert.deepEqual(nodeChildren, [], "the configured command is the only Node process of the server");
   });
 }

@@ -101,9 +101,10 @@ export function toCsv(rows: Row[]): string {
  */
 export async function reconcile(db: Db, opts: { apiKey?: string } = {}): Promise<{ updated: number; failed: number }> {
   assertCursorEndpoints(); // `Agent.getUsage` sends the key to the address in CURSOR_BACKEND_URL; a row-by-row failure below would hide that
+  const rows = db.prepare(`SELECT attempt_id, agent_id FROM v_unreconciled`).all() as Array<{ attempt_id: string; agent_id: string }>;
+  if (rows.length === 0) return { updated: 0, failed: 0 };
   // Loaded here, not at the top of the module: `summary` is also the dashboard's, a process that stays up and has no use for the SDK (hundreds of MB).
   const { Agent } = await import("@cursor/sdk");
-  const rows = db.prepare(`SELECT attempt_id, agent_id FROM v_unreconciled`).all() as Array<{ attempt_id: string; agent_id: string }>;
   const upd = db.prepare(
     `UPDATE attempts SET raw_cents = ?, charged_cents = ?, input_tokens = ?, output_tokens = ?, cache_read_tokens = ?,
        cache_write_tokens = ?, cost_final = 1 WHERE attempt_id = ?`,
