@@ -43,8 +43,8 @@ configuração ([6.2](docs/reference/config.md)). Mais simples: peça a um agent
 
 ```bash
 installer="$(mktemp)"
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.5.0/scripts/install.sh -o "$installer"
-bash "$installer" --tag v0.5.0   # o kit na tag, o comando wf e as skills globais
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.6.0/scripts/install.sh -o "$installer"
+bash "$installer" --tag v0.6.0   # o kit na tag, o comando wf e as skills globais
 wf login                               # login no navegador; o uso fica na SUA conta
 wf init                                # no seu repositório: grava os arquivos do kit, mostra o diff e não faz commit
 wf doctor                              # confere Node, login, modelos, o CLI do forge (gh ou glab), servidor MCP, configuração, sandbox do SDK, o kit instalado e a interoperabilidade do WSL
