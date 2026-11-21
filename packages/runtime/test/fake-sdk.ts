@@ -24,6 +24,9 @@ import type {
 } from "../../../node_modules/@cursor/sdk/dist/esm/index.js";
 import { errorText } from "../src/runtime/error-text.js";
 export type * from "../../../node_modules/@cursor/sdk/dist/esm/index.js";
+// A test importing this file by path while the runtime's bare `@cursor/sdk` resolves to the real package would reach the
+// Cursor API with the user's key (tsx run without tsconfig.test.json, another runtime): refuse to load.
+if (import.meta.resolve("@cursor/sdk") !== import.meta.url) throw new Error("fake SDK: this process resolves the real @cursor/sdk; run the tests with tsconfig.test.json (npm test)");
 /** Set when this module is loaded: lets a test prove that a module graph never imports the SDK. */
 (globalThis as { __fakeSdkLoaded?: boolean }).__fakeSdkLoaded = true;
 export const calls: any[] = [];
