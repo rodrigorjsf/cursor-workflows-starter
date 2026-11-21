@@ -32,6 +32,16 @@
 
 ### Mudado
 
+- **O MCP server e o CLI carregam o SDK da Cursor só nos caminhos que chegam à API ou rodam um agente** (issues #152, #153 e #154, spec
+  #151). O MCP server responde `initialize`, `list_workflows`, `start_workflow`, `get_workflow_status`, `wait_workflow` e
+  `cancel_workflow` sem o SDK, e o `wf` carrega o SDK, o motor e o `doctor` dentro de `login`, `models`, `whoami`, `doctor` e `run`, não
+  no topo do módulo. Medido em 2026-11-21 no Node 22.23.4 (mediana de 10 execuções, [8.2 §20](docs/research/verificacoes-locais.md)): o
+  MCP server parado passou de 313,9 para 95,8 MB de RSS e o `initialize` de 917 para 328 ms; o `wf list` passou de 333,6 para 104,4 MB
+  de pico de RSS e de 1.248 para 608 ms. O `wf run`, os comandos, as flags, as saídas e os códigos de saída seguem como eram. Um teste
+  de processo (`FAKE_SDK_LOADED_MARKER` no SDK falso) falha quando um comando leve volta a carregar o SDK. A medição também deixou a
+  decisão de manter o tsx (o stripping de tipos do Node não reduz a memória) e a issue #156, que tira o segundo processo Node que o CLI
+  do tsx mantém por servidor.
+
 - **O default de `settingSources` do engine deixa de ter `team`: é `["project","mdm"]`** (issue #139, spec #137). Medido em
   2026-11-19 com `composer-2.5` e uma etapa só de leitura, numa conta sem time, `team` não acrescentou regra, hook nem skill: as
   mesmas contagens (`ruleCount` 1 e 63 skills), o hook do projeto rodou e a marca do `AGENTS.md` chegou nos dois lados
