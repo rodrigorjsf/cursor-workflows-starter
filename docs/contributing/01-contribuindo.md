@@ -94,7 +94,7 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   ├── kit-state.ts        # o estado do kit instalado pelo git: mudanças locais e tags do HEAD, que o upgrade e o doctor usam
 │       │   ├── upgrade.ts          # wf upgrade: leva o kit instalado à tag mais nova e roda o install.sh --refresh dela
 │       │   ├── unified-diff.ts     # o diff que o wf init imprime
-│       │   ├── cli.ts              # wf login | whoami | models | list | init | doctor | upgrade | config | run | start | wait | status | cancel | jobs | gc | stats | metrics
+│       │   ├── cli.ts              # wf login | whoami | models | list | init | doctor | upgrade | config | run | start | wait | status | cancel | jobs | gc | stats | metrics; carrega o SDK da Cursor só em login, models, whoami, doctor e run
 │       │   └── mcp-server.ts       # tools MCP: list_workflows, start_workflow, wait_workflow, get_workflow_status, cancel_workflow; não carrega o SDK da Cursor
 │       ├── workflows/
 │       │   ├── smoke.ts            # teste de fumaça: uma etapa estruturada, num modelo incluído, com teto de 50 mil tokens

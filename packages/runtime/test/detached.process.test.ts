@@ -321,3 +321,47 @@ test("control: wf run of a workflow with one agent step leaves the marker, so th
   assert.equal(run.status, 0, run.stderr);
   assert.deepEqual(processesThatLoadedTheSdk(marker), [run.pid], "the CLI process that ran the step loaded the SDK");
 });
+
+test("the light wf commands run without loading the Cursor SDK: only the job process that `wf start` detaches does", { timeout: 240_000 }, async () => {
+  const { marker, env: lightEnv } = sdkLoadMarker("cli");
+  const light = (args: string[], cwd = repo) => {
+    const r = spawnSync(process.execPath, [...tsx("cli.ts"), ...args, "--cwd", cwd], { env: lightEnv, encoding: "utf8" });
+    assert.ok(!processesThatLoadedTheSdk(marker).includes(r.pid), `wf ${args.join(" ")} loaded the SDK`);
+    return r;
+  };
+
+  const list = light(["list"]);
+  assert.equal(list.status, 0, list.stderr);
+  assert.ok((JSON.parse(list.stdout) as Array<{ name: string }>).some((w) => w.name === "hold"));
+
+  const started = light(["start", "hold"]);
+  assert.equal(started.status, 0, started.stderr);
+  const { jobId, runId } = JSON.parse(started.stdout) as { jobId: string; runId: string };
+  await until("the held step to start", () => stepStarted(runId));
+  assert.ok(processesThatLoadedTheSdk(marker).includes(jobRecord(jobId).pid), "the detached job process loads the SDK");
+
+  assert.equal(JSON.parse(light(["status", jobId]).stdout).status, "running");
+  assert.equal(JSON.parse(light(["wait", jobId, "--timeout", "1"]).stdout).status, "running");
+  assert.ok((JSON.parse(light(["jobs"]).stdout) as Array<{ jobId: string }>).some((j) => j.jobId === jobId));
+  assert.equal(JSON.parse(light(["cancel", jobId]).stdout).status, "cancelled");
+
+  assert.ok("workflows" in JSON.parse(light(["config", "show"]).stdout));
+  const gitRepo = join(sandbox, "git-repo");
+  mkdirSync(gitRepo);
+  assert.equal(spawnSync("git", ["init", "--quiet"], { cwd: gitRepo }).status, 0);
+  const gc = light(["gc", "--dry-run"], gitRepo);
+  assert.equal(gc.status, 0, gc.stderr);
+  const stats = light(["stats"]);
+  assert.equal(stats.status, 0, stats.stderr);
+  const exported = light(["metrics", "export", "--out", join(sandbox, "metrics-export")]);
+  assert.equal(exported.status, 0, exported.stderr);
+  assert.deepEqual(JSON.parse(light(["metrics", "reconcile"]).stdout), { updated: 0, failed: 0 });
+
+  const emptyRepo = join(sandbox, "init-repo");
+  mkdirSync(emptyRepo);
+  const init = light(["init"], emptyRepo);
+  assert.equal(init.status, 0, init.stderr);
+  const upgrade = light(["upgrade"]);
+  assert.equal(upgrade.status, 1);
+  assert.match(upgrade.stderr, /no kit is installed/);
+});
