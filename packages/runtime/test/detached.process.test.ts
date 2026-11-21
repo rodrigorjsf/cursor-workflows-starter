@@ -266,14 +266,14 @@ test("a --timeout that is not a number of seconds is an error, not a wait that r
   }
 });
 
-const withLoadedMarker = (name: string, extra: Record<string, string> = {}) => {
+const sdkLoadMarker = (name: string, extra: Record<string, string> = {}) => {
   const marker = join(sandbox, `sdk-loaded-${name}`);
   return { marker, env: { ...env, FAKE_SDK_LOADED_MARKER: marker, ...extra } };
 };
 const processesThatLoadedTheSdk = (marker: string): number[] => (existsSync(marker) ? readFileSync(marker, "utf8").split("\n").filter(Boolean).map(Number) : []);
 
 test("the MCP server answers initialize and every tool without loading the Cursor SDK: only the job processes it starts load it", { timeout: 120_000 }, async () => {
-  const { marker, env: serverEnv } = withLoadedMarker("server");
+  const { marker, env: serverEnv } = sdkLoadMarker("server");
   await withServer(async (call, serverPid) => {
     for (const tool of ["get_workflow_status", "wait_workflow", "cancel_workflow"]) assert.deepEqual(await call(tool, { jobId: "nope", ...(tool === "wait_workflow" ? { timeoutSec: 1 } : {}) }), { error: "job not found" }, tool);
     assert.ok(((await call("list_workflows", {})) as unknown as Array<{ name: string }>).some((w) => w.name === "hold"));
@@ -298,13 +298,13 @@ test("the MCP server answers initialize and every tool without loading the Curso
 });
 
 test("the nested MCP server a workflow step sees answers without loading the Cursor SDK", { timeout: 60_000 }, async () => {
-  const nested = withLoadedMarker("nested", { WF_INSIDE_WORKFLOW: "1" });
+  const nested = sdkLoadMarker("nested", { WF_INSIDE_WORKFLOW: "1" });
   await withServer(async (call) => {
     assert.deepEqual(await call("start_workflow", { name: "hold" }), { error: "workflows cannot be started from inside a workflow step" });
   }, nested.env);
   assert.equal(existsSync(nested.marker), false, "the server that runs inside a step loads no SDK");
 
-  const guard = withLoadedMarker("guard");
+  const guard = sdkLoadMarker("guard");
   const client = new Client({ name: "detached-test", version: "0.0.0" });
   try {
     await client.connect(new StdioClientTransport({ command: process.execPath, args: [join(PACKAGE, "src", "runtime", "nested-mcp-guard.mjs")], cwd: repo, env: guard.env }));
@@ -316,7 +316,7 @@ test("the nested MCP server a workflow step sees answers without loading the Cur
 });
 
 test("control: wf run of a workflow with one agent step leaves the marker, so the assertions above are not vacuous", { timeout: 60_000 }, () => {
-  const { marker, env: runEnv } = withLoadedMarker("control");
+  const { marker, env: runEnv } = sdkLoadMarker("control");
   const run = spawnSync(process.execPath, [...tsx("cli.ts"), "run", "delayed", "--args", "{}", "--cwd", repo], { env: runEnv, encoding: "utf8" });
   assert.equal(run.status, 0, run.stderr);
   assert.deepEqual(processesThatLoadedTheSdk(marker), [run.pid], "the CLI process that ran the step loaded the SDK");
