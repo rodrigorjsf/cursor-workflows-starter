@@ -106,7 +106,6 @@ function nodeChildrenOf(pid: number): string[] {
   return table.map((line) => /^\s*(\d+)\s+(\d+)\s+(\S+)(.*)$/.exec(line)).flatMap((m) => (m && Number(m[2]) === pid && basename(m[3]!) === "node" ? [`${m[3]}${m[4]}`] : []));
 }
 
-/** What the IDE does with a server entry: substitute its variables, then start the command in `cwd`. */
 async function toolsOfServer(server: McpEntry, vars: Record<string, string>, cwd: string) {
   const client = new Client({ name: "init-test", version: "0.0.0" });
   try {
