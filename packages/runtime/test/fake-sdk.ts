@@ -22,6 +22,7 @@ import type {
   SdkLoginResult,
   SendOptions,
 } from "../../../node_modules/@cursor/sdk/dist/esm/index.js";
+import { appendFileSync } from "node:fs";
 import { errorText } from "../src/runtime/error-text.js";
 export type * from "../../../node_modules/@cursor/sdk/dist/esm/index.js";
 // A test importing this file by path while the runtime's bare `@cursor/sdk` resolves to the real package would reach the
@@ -29,6 +30,7 @@ export type * from "../../../node_modules/@cursor/sdk/dist/esm/index.js";
 if (import.meta.resolve("@cursor/sdk") !== import.meta.url) throw new Error("fake SDK: this process resolves the real @cursor/sdk; run the tests with tsconfig.test.json (npm test)");
 /** Set when this module is loaded: lets a test prove that a module graph never imports the SDK. */
 (globalThis as { __fakeSdkLoaded?: boolean }).__fakeSdkLoaded = true;
+if (process.env.FAKE_SDK_LOADED_MARKER) appendFileSync(process.env.FAKE_SDK_LOADED_MARKER, `${process.pid}\n`);
 export const calls: any[] = [];
 /** Comportamento de cada send(), em ordem. Sem entrada: run "finished" com result "ok". */
 export const script: Array<(o: any, msg: string, n: number) => any> = [];

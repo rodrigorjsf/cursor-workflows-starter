@@ -64,7 +64,7 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   │   ├── cloud-cancel.ts # cancela, pela API da Cursor, os cloud agents que um run de processo morto deixou rodando
 │       │   │   ├── events.ts       # o tipo dos eventos (a referência 6.1 é gerada dele)
 │       │   │   ├── outcome.ts      # a classe de um run terminado (entregue, falhou, cancelado…): o recorder e o `wf gc` leem a mesma
-│       │   │   ├── run-store.ts    # log de eventos, journal, lock de cada run e locks nomeados do repositório (`.workflows/locks/`)
+│       │   │   ├── run-store.ts    # log de eventos, journal, lock de cada run e locks nomeados do repositório (`.workflows/locks/`), e os handlers de crash do processo (`installCrashHandlers`)
 │       │   │   ├── structured.ts   # saída estruturada via custom tool submit_result + Ajv
 │       │   │   ├── journal.ts      # resume sem repetir etapas concluídas
 │       │   │   ├── jobs.ts         # jobs: o que roda um job (heartbeat, `startJob`, os sinais de cancelamento); reexporta o job-spawn.ts
@@ -95,7 +95,7 @@ decisão por trás do desenho está no [ADR-0004](../adr/0004-workspaces-and-cla
 │       │   ├── upgrade.ts          # wf upgrade: leva o kit instalado à tag mais nova e roda o install.sh --refresh dela
 │       │   ├── unified-diff.ts     # o diff que o wf init imprime
 │       │   ├── cli.ts              # wf login | whoami | models | list | init | doctor | upgrade | config | run | start | wait | status | cancel | jobs | gc | stats | metrics
-│       │   └── mcp-server.ts       # tools MCP: list_workflows, start_workflow, wait_workflow, get_workflow_status, cancel_workflow
+│       │   └── mcp-server.ts       # tools MCP: list_workflows, start_workflow, wait_workflow, get_workflow_status, cancel_workflow; não carrega o SDK da Cursor
 │       ├── workflows/
 │       │   ├── smoke.ts            # teste de fumaça: uma etapa estruturada, num modelo incluído, com teto de 50 mil tokens
 │       │   ├── implement-issue.ts  # exemplo: TDD fatia a fatia conferido pelo código → review em 3 eixos → PR com evidência

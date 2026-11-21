@@ -18,26 +18,9 @@ import { HEARTBEAT_MS, type JobRecord, type JobState, fromEnv, jobsDir, readJob,
 import { resumeHint } from "./projection.js";
 import { abortOpenRuns } from "./run-store.js";
 import type { WorkflowDefinition } from "./workflow.js";
-import { errorText } from "./error-text.js";
 
+export { installCrashHandlers } from "./run-store.js";
 export { JobRefusedError, type NewJob, type SpawnJobOptions, createJob, spawnJob } from "./job-spawn.js";
-
-/**
- * Process handlers for the MCP server and the CLI. The official cookbook (dag-task-runner) warns that the SDK fires
- * unawaited promises while the agent starts; without a handler a rejection takes the process down and the jobs stay
- * "running" forever.
- */
-export function installCrashHandlers(): void {
-  process.on("unhandledRejection", (reason) => {
-    process.stderr.write(`[wf] unhandledRejection ignored: ${errorText(reason)}\n`);
-  });
-  process.on("uncaughtException", (err) => {
-    // A job's state comes from the run's log: end this process's runs in it, with the reason and how to resume.
-    abortOpenRuns((runId) => `crash: ${err.message}; ${resumeHint(runId)}`);
-    process.stderr.write(`[wf] uncaughtException: ${err.stack ?? err.message}\n`);
-    process.exit(1);
-  });
-}
 
 /**
  * Keeps the job's heartbeat fresh until `stop()`. The beat is written by a worker thread, so a main thread blocked in a

@@ -54,9 +54,10 @@ import { assertKitCompatible, readKitPackage } from "./kit-version.js";
 import { argsError } from "./runtime/args-schema.js";
 import { dashboardFields, ensureDashboard } from "./runtime/dashboard-instance.js";
 import { insideWorkflow } from "./runtime/inside-workflow.js";
-import { installCrashHandlers, spawnJob } from "./runtime/jobs.js";
+import { spawnJob } from "./runtime/job-spawn.js";
 import { cancelJob, readJob, waitJob, waitSeconds } from "./runtime/job-state.js";
 import { type BrokenWorkflow, discoverWorkflows } from "./runtime/registry.js";
+import { installCrashHandlers } from "./runtime/run-store.js";
 import { plainName } from "./runtime/state.js";
 
 installCrashHandlers();
