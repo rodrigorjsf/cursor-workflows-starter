@@ -195,7 +195,7 @@ Os campos abaixo são os ajustes do `implement-issue`, validados pelo esquema. U
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.5.0/packages/runtime/schema/config.schema.json",
+  "$schema": "https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.6.0/packages/runtime/schema/config.schema.json",
   "caps": {
     "maxTokens": 3000000,
     "maxTokensPerStep": 600000,

@@ -33,7 +33,7 @@ usa recebe depois os próprios arquivos, do `wf init` ([2.3](03-invocacao-no-cur
 ### Pelo agente (recomendado)
 
 Aponte qualquer agente de código para o guia, fixado numa tag:
-`https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.5.0/INSTALL-AGENT.md`. Ele checa a máquina,
+`https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.6.0/INSTALL-AGENT.md`. Ele checa a máquina,
 instala o kit, confere o login, pede que você confirme que o Privacy Mode está ligado (veja [§4](#4-login-e-modelos)), roda o
 `wf init` no repositório atual, pergunta se os runs trabalham num worktree e se abrem um PR por padrão (grava as respostas no
 arquivo global com `wf config set`, e mostra o `wf config set --repo` que muda cada padrão num repositório) e termina no
@@ -45,8 +45,8 @@ pacote: o `npm test` reprova se os dois divergirem, então uma versão nova só 
 
 ```bash
 installer="$(mktemp)"
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.5.0/scripts/install.sh -o "$installer"
-bash "$installer" --tag v0.5.0
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.6.0/scripts/install.sh -o "$installer"
+bash "$installer" --tag v0.6.0
 ```
 
 Baixar o script para um arquivo, em vez de passá-lo direto ao `bash`, deixa você lê-lo antes de rodar. O `--proto '=https'` e o
@@ -123,8 +123,8 @@ um `npm` ou uma etapa sem sandbox: leia a lista antes de apagar qualquer coisa, 
 ```bash
 mv ~/.cursor-workflows/kit ~/.cursor-workflows/kit.com-mudancas  # guarda o que mudou, para você ler
 installer="$(mktemp)"                                             # o instalador de novo, como em "Pelo instalador"
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.5.0/scripts/install.sh -o "$installer"
-bash "$installer" --tag v0.5.0
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/rodrigorjsf/cursor-workflows-starter/v0.6.0/scripts/install.sh -o "$installer"
+bash "$installer" --tag v0.6.0
 wf doctor                                                         # a verificação `kit` deve passar
 ```
 

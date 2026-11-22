@@ -1,6 +1,6 @@
 {
   "name": "@cursor-workflows/dashboard",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "description": "The kit's local dashboard: a local web server over the runs and the metrics of every repo; it reads, and it has four actions: starting a workflow in a repository it knows, resuming a stopped run, approving or replacing the seams an implement-issue run proposed, and cancelling a run.",
   "license": "MIT",
