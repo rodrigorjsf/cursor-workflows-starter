@@ -229,7 +229,7 @@ async function main(): Promise<number> {
       out(result);
       process.stderr.write(
         result.upgraded
-          ? `wf upgrade: kit ${result.from} -> ${result.to} (${result.tag}). Run \`wf doctor\` in each repository that uses the kit.\n`
+          ? `wf upgrade: kit ${result.from} -> ${result.to} (${result.tag}). In each repository that uses the kit, run \`wf init\` (it rewrites the MCP server entry for the new version), then \`wf doctor\`.\n`
           : `wf upgrade: kit ${result.from} is already the newest version (${result.tag}).\n`,
       );
       return 0;

@@ -99,8 +99,9 @@ Busca as tags do repositório de origem, escolhe a mais nova (só versões `vX.Y
 checkout dela e roda o `install.sh --refresh` **dessa tag**, que reinstala as dependências e refaz o comando, os links
 das skills (uma skill nova ganha link, e o link de uma skill que saiu é removido) e a configuração padrão, sem tocar em
 arquivo seu. O stdout é `{ "upgraded", "from", "to", "tag" }`; o andamento vai para o stderr. Já na versão mais nova, ele
-só diz isso. Depois de atualizar, rode `wf doctor` em cada repositório: um kit fora da faixa `kit` do repositório é recusado
-([2.3](03-invocacao-no-cursor-ide.md#conferindo-o-ambiente-wf-doctor)).
+só diz isso. Depois de atualizar, rode `wf init` e depois `wf doctor` em cada repositório. O `wf init` reescreve a entrada do
+servidor MCP na forma que a versão nova escreve (revise o diff e faça o commit). O `wf doctor` recusa um kit fora da faixa `kit`
+do repositório ([2.3](03-invocacao-no-cursor-ide.md#conferindo-o-ambiente-wf-doctor)).
 
 Ele recusa o que não é um kit instalado: um kit em modo de desenvolvimento (abaixo), um `wf` que roda de outra pasta, a
 falta de rede (o kit continua na versão em que estava), uma tag que se moveu e uma release que não é imutável

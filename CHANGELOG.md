@@ -1,5 +1,13 @@
 # Changelog
 
+## Não lançado
+
+### Mudado
+
+- **O `wf upgrade` manda rodar o `wf init` antes do `wf doctor` em cada repositório.** Só o `wf init` reescreve a entrada do
+  servidor MCP do repositório na forma da versão nova (na 0.6.0, `node --import <loader do tsx>`); a mensagem final do upgrade,
+  a seção "Atualizar" do capítulo 2.1 e a skill `cursor-workflows-setup` agora dizem isso.
+
 ## 0.6.0 (pré-release, 2026-11-21)
 
 ### Adicionado

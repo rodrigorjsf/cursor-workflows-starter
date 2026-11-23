@@ -136,8 +136,10 @@ settings, and the user picks the global default of each.
      the kit stays where it was. Show the user the list; with their ok, reinstall as the `kit` check above says.
    - A failure after the checkout leaves the kit on the new tag: fix the error shown, then run the same
      `install.sh --refresh`.
-2. Run `wf doctor` in each repo the user names. Its `kit-version` check compares the kit with the `kit` range in
-   `.agents/workflows/config.json`. Done when every named repo passes, or the user has the failures.
+2. In each repo the user names, run `wf init`, then `wf doctor`. `wf init` rewrites the repo's MCP server entry in the
+   form the new kit writes; show the user its diff, as in "Init a repo". The doctor's `kit-version` check compares the
+   kit with the `kit` range in `.agents/workflows/config.json`. Done when every named repo passes, or the user has the
+   failures.
    - A kit newer than the range is the user's decision: they widen `kit` in the repo config once they have checked
      the repo with the new kit.
 
