@@ -19,7 +19,8 @@ A runtime for **deterministic workflows** on the Cursor SDK (`@cursor/sdk`), as 
   (`templates/global-config.json`) that the installer copies for the user.
 - Install: `scripts/install.sh` (clones a tag into `~/.cursor-workflows/kit`, `--dev` links a working copy) and
   `wf upgrade` (`packages/runtime/src/upgrade.ts`). `INSTALL-AGENT.md` is the public guide, pinned to the tag of the
-  package version: bump it with the version (`npm test` fails otherwise).
+  package version: bump it with the version (`npm test` fails otherwise). To release a version, follow the release
+  section of chapter 9.4 (`docs/contributing/04-scripts-do-mantenedor.md`).
 - The repo root is the dev space: this guide, the dogfood MCP config (`.mcp.json`, `.cursor/mcp.json`), `docs/`,
   `scripts/`, repo-level tests (`test/`).
 
