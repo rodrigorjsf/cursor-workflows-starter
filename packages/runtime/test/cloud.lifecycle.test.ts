@@ -497,10 +497,15 @@ const holdLock = (runId: string, pid: number) =>
 /**
  * After `crashWhileTheAgentRuns`, the job of the run as a frozen process leaves it: alive (SIGSTOP) with its job id on its
  * command line, holding the run's lock as a real one does, and a heartbeat older than `WF_HEARTBEAT_STALE_MS`, so `cancelJob`
- * kills it with SIGKILL.
+ * kills it with SIGKILL. It resolves once the process runs its script: until then its command line may not be there yet, even
+ * after `spawn` returned, and a SIGSTOP would freeze it without one.
  */
-function frozenJob(runId: string, jobId: string) {
-  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", jobId], { stdio: "ignore" });
+async function frozenJob(runId: string, jobId: string) {
+  const child = spawn(process.execPath, ["-e", "process.stdout.write('up'); setInterval(() => {}, 1000)", jobId], { stdio: ["ignore", "pipe", "ignore"] });
+  await new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.stdout!.once("data", () => resolve());
+  });
   const restore = staleAfter50ms();
   writeJob(cwd, { jobId, runId, pid: child.pid!, heartbeat: new Date(Date.now() - 60_000).toISOString() });
   holdLock(runId, child.pid!);
@@ -591,9 +596,8 @@ for (const heartbeat of ["stale", "fresh"] as const) {
 
 test("cancel_workflow of a frozen job kills its process and cancels the cloud agent its run left: nothing keeps spending after the user stops, and a resume pays for a new agent", async () => {
   const crashed = await crashWhileTheAgentRuns("life-frozen");
-  const job = frozenJob("life-frozen", "frozen-job");
+  const job = await frozenJob("life-frozen", "frozen-job");
   try {
-    await until(() => isAlive(job.pid), "the job's process to start");
     job.freeze();
 
     const killed = await cancelJob(cwd, "frozen-job", 3000);
@@ -621,9 +625,8 @@ test("cancel_workflow of a frozen job kills its process and cancels the cloud ag
 
 test("a second cancel_workflow on a frozen job that was killed finds nothing left to cancel: the first one already stopped its cloud agents", async () => {
   const crashed = await crashWhileTheAgentRuns("life-frozen-stop");
-  const job = frozenJob("life-frozen-stop", "frozen-stop");
+  const job = await frozenJob("life-frozen-stop", "frozen-stop");
   try {
-    await until(() => isAlive(job.pid), "the job's process to start");
     job.freeze();
     await cancelJob(cwd, "frozen-stop", 3000);
 
@@ -642,9 +645,8 @@ test("a second cancel_workflow on a frozen job that was killed finds nothing lef
 test("a frozen run is failed in the run view with wf status's error, and cancelling it there kills its process and cancels the cloud agent it left", async () => {
   const runId = "life-frozen-view";
   const crashed = await crashWhileTheAgentRuns(runId, reviewStep(), "frozen-view");
-  const job = frozenJob(runId, "frozen-view");
+  const job = await frozenJob(runId, "frozen-view");
   try {
-    await until(() => isAlive(job.pid), "the job's process to start");
     job.freeze();
 
     const noHeartbeat = new RegExp(`^no heartbeat for \\d+s \\(process ${job.pid}\\); relaunch with resumeRunId="${runId}"$`);
