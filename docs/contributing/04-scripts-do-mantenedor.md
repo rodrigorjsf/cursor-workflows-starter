@@ -41,6 +41,36 @@ O `npm test` confere os dois (`test/scripts-conventions.test.ts`): um script sem
 Os seis `verify-*` custam tokens: rode sempre com `--max-tokens` e `--max-cents`, e veja a
 política de custo em [9.1](01-contribuindo.md#testes-contra-a-api-real-política-de-custo).
 
+## Lançar uma versão
+
+Uma versão é uma tag `vX.Y.Z` com uma **release imutável** do GitHub: o instalador e o `wf upgrade` recusam uma tag sem release
+ou com release mutável. A `main` não aceita push direto, então o bump passa por PR. Cada passo termina no que está entre
+parênteses.
+
+1. **Bump numa branch `release/vX.Y.Z`, a partir da `main` atualizada.** Troque a versão nos três `package.json` (raiz,
+   `packages/runtime`, `packages/dashboard`) e nas quatro entradas deles no `package-lock.json`, e a tag fixada
+   (`vA.B.C` → `vX.Y.Z`) em `INSTALL-AGENT.md`, `README.md`, `README.en.md`, `docs/usage/01-instalacao.md`,
+   `docs/reference/config.md`, `packages/runtime/schema/config.schema.json`, `templates/agents-md-block.md` e
+   `templates/global-config.json`. No `CHANGELOG.md`, o título `## Não lançado` vira `## X.Y.Z (pré-release, AAAA-MM-DD)`.
+   O commit `572effd` (v0.5.0) é o modelo: os mesmos 13 arquivos.
+   (`grep -rn 'vA\.B\.C'` fora do `CHANGELOG.md` e de `docs/research/` não acha nada, e `mise exec -- npm run check` passa.)
+2. **Commit `chore(release): vX.Y.Z`, push da branch e PR para a `main`.** (As quatro checks obrigatórias ficam verdes. Uma
+   falha que a `main` não tem no mesmo código é instabilidade: rode de novo só o job que falhou.)
+3. **Merge do PR com merge commit.** (O PR está `MERGED` e o merge commit está na `main`.)
+4. **Release no GitHub, que cria a tag no merge commit.** As notas são uma linha de aviso de pré-release, com o link para o
+   `SECURITY.md` da tag, e depois o corpo da seção `X.Y.Z` do `CHANGELOG.md`:
+
+   ```bash
+   gh release create vX.Y.Z --target <merge commit> --prerelease --title "vX.Y.Z (pré-release)" --notes-file <notas>
+   ```
+
+   A imutabilidade é uma configuração do repositório (`gh api repos/<dono>/<nome>/immutable-releases` responde
+   `"enabled": true`), e vale para a release no momento em que ela é publicada.
+   (`curl -fsS https://api.github.com/repos/<dono>/<nome>/releases/tags/vX.Y.Z` responde `"immutable": true`.)
+5. **Apague a branch `release/vX.Y.Z`, local e remota, e atualize o kit desta máquina com `wf upgrade`.** Em cada repositório
+   que usa o kit, rode `wf init` e `wf doctor` ([2.1 §Atualizar](../usage/01-instalacao.md#atualizar-wf-upgrade)). (O
+   `wf doctor` passa: um repositório cuja faixa `kit` não cobre a versão nova precisa que o dono amplie a faixa.)
+
 ## Conta do mantenedor
 
 A conta do GitHub que é dona dos releases é a raiz de confiança de toda instalação: o kit se instala de uma tag, e quem controla

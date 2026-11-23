@@ -43,10 +43,17 @@ const jobFiles = (repo: string): string[] => {
   }
 };
 
-/** A process that stays until the test ends, standing in for the one that executes a run: it holds the run's lock where a fixture says so. `jobId` goes on its command line, as the runtime's job process has it (it checks that before it takes a pid for the job's). */
-function liveProcess(...args: string[]): ChildProcess {
-  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", ...args], { stdio: "ignore" });
+/**
+ * A process that stays until the test ends, standing in for the one that executes a run: it holds the run's lock where a fixture says so. `jobId` goes on its command line, as the runtime's job process has it (it checks that before it takes a pid for the job's).
+ * It resolves once the process runs its script: until then its command line may not be there yet, even after `spawn` returned.
+ */
+async function liveProcess(...args: string[]): Promise<ChildProcess> {
+  const child = spawn(process.execPath, ["-e", "process.stdout.write('up'); setInterval(() => {}, 1000)", ...args], { stdio: ["ignore", "pipe", "ignore"] });
   children.push(child);
+  await new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.stdout!.once("data", () => resolve());
+  });
   return child;
 }
 
@@ -90,7 +97,7 @@ test("a run the runs index does not know is not found", async () => {
 
 test("a run that is running, finished or unreadable is refused with its status: there is nothing to resume", async () => {
   const repo = knownRepo();
-  writeRun(box.home, repo, { runId: "echo-aaaa0002", workflow: "echo", startedAt: START, lockedBy: liveProcess().pid }); // a process holds it: it runs
+  writeRun(box.home, repo, { runId: "echo-aaaa0002", workflow: "echo", startedAt: START, lockedBy: (await liveProcess()).pid }); // a process holds it: it runs
   stoppedRun(repo, "echo-aaaa0003", { workflow: "echo", args: { issue: 7 }, ...CAPS }, [{ type: "run-end", status: "finished" }]);
   writeRun(box.home, repo, { runId: "echo-aaaa0004", workflow: "echo", startedAt: START, withoutLog: true });
   const before = jobFiles(repo);
@@ -120,7 +127,7 @@ test("a run that no job started, or whose job record says nothing of how, is ref
 
 test("a frozen run, whose process stopped beating but still holds it, is refused until it is cancelled", async () => {
   const repo = knownRepo();
-  const frozen = liveProcess("job-0001"); // alive and holding the run, while its job record's heartbeat is long past
+  const frozen = await liveProcess("job-0001"); // alive and holding the run, while its job record's heartbeat is long past
   writeRun(box.home, repo, { runId: "echo-aaaa0007", workflow: "echo", startedAt: START, jobId: "job-0001", lockedBy: frozen.pid });
   writeJobRecord(repo, { jobId: "job-0001", runId: "echo-aaaa0007", start: { workflow: "echo", args: { issue: 7 }, ...CAPS }, pid: frozen.pid });
   const shown = await runOf("echo-aaaa0007");

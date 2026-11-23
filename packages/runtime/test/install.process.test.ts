@@ -553,6 +553,7 @@ test("wf upgrade checks out the newest release tag, reinstalls dependencies and 
   assert.equal(git(kit, "describe", "--tags", "--exact-match"), "v0.4.0");
   assert.deepEqual(npmCalls().slice(before), [`${kit} ci --ignore-scripts --no-audit --no-fund`]);
   assert.ok(r.stderr.includes("installer 0.4.0"), `the new tag's installer must run: ${r.stderr}`);
+  assert.ok(r.stderr.includes("In each repository that uses the kit, run `wf init`"), `the upgrade names wf init before wf doctor: ${r.stderr}`);
 
   const skills = join(home, ".claude", "skills");
   assert.equal(readlinkSync(join(skills, "extra-skill")), join(kit, "skills", "extra-skill"), "a skill the new tag adds is linked");

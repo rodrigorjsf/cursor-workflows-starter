@@ -165,12 +165,16 @@ cmd_down() {
     kill -TERM "$shell_pid" 2>/dev/null || true
   fi
   if [[ -f "$STATE_DIR/browser.json" ]]; then
-    local browser_pid
+    local browser_pid browser_sock
     browser_pid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("pid",""))' "$STATE_DIR/browser.json")"
+    browser_sock="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("sock",""))' "$STATE_DIR/browser.json")"
     if [[ -n "$browser_pid" && -r "/proc/$browser_pid/cmdline" ]] && tr '\0' ' ' <"/proc/$browser_pid/cmdline" | grep -q 'drive.py --serve'; then
       kill -TERM "$browser_pid" 2>/dev/null || true
     fi
-    rm -f "$STATE_DIR/browser.json" "$STATE_DIR/browser.sock"
+    rm -f "$STATE_DIR/browser.json"
+    case "$browser_sock" in
+      /tmp/verify-dashboard-*.sock) rm -f "$browser_sock" ;;
+    esac
   fi
   if [[ -d "$home" ]]; then
     case "$home" in

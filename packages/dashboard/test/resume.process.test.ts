@@ -52,6 +52,16 @@ async function cancelOnceHanging(repo: string, run: { jobId: string; runId: stri
   await waitFor("the cancelled job's process to be gone", () => !processAlive(jobPidOf(repo, run.jobId)), JOB_WAIT);
 }
 
+/** Waits until the resumed execution runs again the second step, which hangs, and returns the run's detail and its log as they stood then: every event the resumed execution writes before that step is in `events`. */
+async function resumedToHang(repo: string, runId: string) {
+  return waitFor("the resumed execution to reach its hanging step", async () => {
+    const detail = await runOf(runId);
+    const events = eventsOfRun(repo, runId);
+    const hanging = events.filter((e) => e.type === "step-start" && e.label === "two").length === 2;
+    return detail.status === "running" && detail.executions === 2 && hanging ? { detail, events } : undefined;
+  }, JOB_WAIT);
+}
+
 test("resuming a cancelled run that was started as a job starts a job over the same run with the recorded args and caps, and the run goes back to running", async () => {
   const repo = knownRepo();
   const first = await startThroughDashboard(repo, { hang: true });
@@ -64,17 +74,14 @@ test("resuming a cancelled run that was started as a job starts a job over the s
   assert.equal(runId, first.runId, "the same run, not a new one");
   assert.notEqual(jobId, first.jobId, "a resume is a new job");
 
-  const resumed = await waitFor("the resumed run to be running", async () => {
-    const detail = await runOf(first.runId);
-    return detail.status === "running" && detail.executions === 2 ? detail : undefined;
-  }, JOB_WAIT);
+  const resumed = await resumedToHang(repo, first.runId);
   const recorded = { workflow: "resumable", args: { hang: true }, ...CAPS };
   assert.deepEqual(jobRecordOf(repo, jobId).start, recorded, "the new job's record keeps the start it repeated");
-  assert.deepEqual(resumed.start, recorded, "the run's latest start is the resume's");
+  assert.deepEqual(resumed.detail.start, recorded, "the run's latest start is the resume's");
 
-  const [, secondStart] = eventsOfRun(repo, first.runId).filter((e) => e.type === "run-start");
+  const [, secondStart] = resumed.events.filter((e) => e.type === "run-start");
   assert.deepEqual([secondStart!.config.limits.maxTokens, secondStart!.config.limits.maxCents], [CAPS.maxTokens, CAPS.maxCents], "the resumed execution runs under the recorded caps");
-  const stepOnes = eventsOfRun(repo, first.runId).filter((e) => e.type === "step-start" && e.label === "one");
+  const stepOnes = resumed.events.filter((e) => e.type === "step-start" && e.label === "one");
   assert.deepEqual(stepOnes.map((e) => Boolean(e.cached)), [false, true], "the step that finished before the cancel is replayed from the journal, not run again");
 });
 
@@ -91,12 +98,9 @@ test("a failed run, whose job process was killed, is resumed the same way: the r
   assert.ok(resumed.ok, resumed.ok ? "" : resumed.error);
   jobs.track(repo, resumed.jobId);
 
-  const again = await waitFor("the resumed run to be running", async () => {
-    const detail = await runOf(first.runId);
-    return detail.status === "running" && detail.executions === 2 ? detail : undefined;
-  }, JOB_WAIT);
-  assert.deepEqual(again.start, { workflow: "resumable", args: { hang: true }, ...CAPS });
-  const [, secondStart] = eventsOfRun(repo, first.runId).filter((e) => e.type === "run-start");
+  const again = await resumedToHang(repo, first.runId);
+  assert.deepEqual(again.detail.start, { workflow: "resumable", args: { hang: true }, ...CAPS });
+  const [, secondStart] = again.events.filter((e) => e.type === "run-start");
   assert.deepEqual([secondStart!.config.limits.maxTokens, secondStart!.config.limits.maxCents], [CAPS.maxTokens, CAPS.maxCents], "the resumed execution runs under the recorded caps");
 });
 
@@ -118,12 +122,9 @@ test("a run started from a terminal with caps and overrides resumes with all thr
   const { jobId } = reply.json as { jobId: string };
   jobs.track(repo, jobId);
 
-  await waitFor("the resumed run to be running", async () => {
-    const detail = await runOf(first.runId);
-    return detail.status === "running" && detail.executions === 2;
-  }, JOB_WAIT);
+  const resumed = await resumedToHang(repo, first.runId);
   const recorded = { workflow: "resumable", args: { hang: true }, maxCents: 300, maxTokens: 600_000, overrides: { maxCents: 100 } };
   assert.deepEqual(jobRecordOf(repo, jobId).start, recorded);
-  const [, secondStart] = eventsOfRun(repo, first.runId).filter((e) => e.type === "run-start");
+  const [, secondStart] = resumed.events.filter((e) => e.type === "run-start");
   assert.deepEqual([secondStart!.config.limits.maxTokens, secondStart!.config.limits.maxCents], [600_000, 100], "the override still tightens the cap the flag gave");
 });

@@ -13,6 +13,7 @@ Invocation (from the repo root):
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import socket
@@ -23,7 +24,7 @@ from pathlib import Path
 
 STATE_DIR = Path(os.environ.get("VERIFY_DASH_STATE_DIR", Path(__file__).resolve().parent / "state"))
 STATE = STATE_DIR / "current.json"
-SOCK = STATE_DIR / "browser.sock"
+SOCK = Path("/tmp") / f"verify-dashboard-{hashlib.sha256(str(STATE_DIR.resolve()).encode()).hexdigest()[:16]}.sock"
 META = STATE_DIR / "browser.json"
 
 
@@ -103,7 +104,7 @@ def serve() -> None:
             server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             server.bind(str(SOCK))
             server.listen(8)
-            META.write_text(json.dumps({"pid": os.getpid(), "url": base}) + "\n")
+            META.write_text(json.dumps({"pid": os.getpid(), "url": base, "sock": str(SOCK)}) + "\n")
             try:
                 while True:
                     conn, _ = server.accept()
